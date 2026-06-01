@@ -1,4 +1,5 @@
 <div align="center">
+<img width="1536" height="1024" alt="karmyogi-features" src="https://github.com/user-attachments/assets/3af56b57-4ea8-4ffd-8893-c7a2193e84b3" />
 
 # karmyogi
 
