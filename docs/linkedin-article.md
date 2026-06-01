@@ -111,7 +111,8 @@ So the desktop Qt app stays a private reference, and the web version goes to eve
 
 If you've got a 3018 or any 3-axis GRBL machine, plug it in, open Chrome, and connect. If you don't have hardware handy, the mock device lets you drive the entire app and watch the 3D visualizer right now.
 
-> [PLACE IMAGE 4 HERE — closing visual / call to action: reuse hero or a clean logo lockup]
+![karmyogi — run your CNC from the browser](linkedin-images/karmyogi-cta.png)
+> [IMAGE 4 — closing CTA / logo lockup: `docs/linkedin-images/karmyogi-cta.png`]
 
 - Open the live app: **https://karmyogi.hjlabs.in**
 - Star / fork / contribute on GitHub: **https://github.com/hemangjoshi37a/karmyogi**
