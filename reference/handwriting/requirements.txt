@@ -1,0 +1,17 @@
+# Python dependencies for the Candle (hjLabs.in fork) handwriting-font pipeline.
+# Target interpreter: python3.13
+#
+# Everything here is OPTIONAL: the scripts run with graceful fallbacks when a
+# package is missing (SVG instead of PDF, PIL+numpy instead of OpenCV, a
+# built-in Zhang-Suen thinner instead of scikit-image). For best quality and
+# the smoothest workflow, install them all:
+#
+#     python3.13 -m pip install --user -r requirements.txt
+#
+# numpy is the only hard requirement for vectorize.py / selftest.py.
+
+numpy>=1.24          # required by vectorize.py and selftest.py
+pillow>=9.0          # PNG template render + image loading fallback + selftest synthesis
+opencv-python>=4.5   # best image load, adaptive threshold, fiducial deskew (homography)
+scikit-image>=0.19   # high-quality skeletonize() (else built-in Zhang-Suen is used)
+reportlab>=3.6       # multi-page PDF template (else SVG + PNG are emitted)

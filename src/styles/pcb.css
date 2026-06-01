@@ -1,0 +1,490 @@
+/* PCB workbench panel (W10). Co-located styles; uses theme CSS variables only. */
+
+.pcb-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+/* Vertical-only scroll — content reflows so it never scrolls sideways. */
+.pcb-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* --- sections --- */
+.pcb-section {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.pcb-section > h3 {
+  margin: 0;
+  padding: 5px 8px;
+  font-size: 10px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+.pcb-section-body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* --- file drop / import --- */
+.pcb-drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  justify-content: center;
+}
+.pcb-drop.pcb-dragover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.pcb-drop-hint {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.pcb-load-input {
+  display: none;
+}
+.pcb-load-btn {
+  min-height: 36px;
+}
+
+/* Primary ZIP upload — make it the obvious first action. */
+.pcb-drop-primary {
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 12px;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.pcb-load-zip {
+  min-height: 42px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pcb-intro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+.pcb-kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.pcb-info {
+  font-size: 12px;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.pcb-error {
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  font-size: 12px;
+}
+.pcb-warnings {
+  color: var(--warn);
+  font-size: 12px;
+  max-height: 110px;
+  overflow: auto;
+  margin: 0;
+  padding-left: 18px;
+}
+.pcb-status {
+  font-size: 12px;
+  color: var(--ok);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- stage selector (segmented) --- */
+.pcb-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pcb-stage-btn {
+  flex: 1 1 auto;
+  min-height: 36px;
+  min-width: 84px;
+}
+.pcb-stage-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.pcb-stage-missing {
+  color: var(--warn);
+}
+.pcb-stage-btn.active .pcb-stage-missing {
+  color: var(--accent-fg);
+}
+
+/* --- z-mode toggle --- */
+.pcb-zmode {
+  display: flex;
+  gap: 6px;
+}
+.pcb-zmode button {
+  flex: 1 1 auto;
+  min-height: 36px;
+}
+.pcb-zmode button.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* --- parameter grid --- */
+.pcb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px 12px;
+}
+.pcb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pcb-field > span {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.pcb-field input {
+  min-height: 36px;
+  width: 100%;
+}
+
+/* --- generate / output --- */
+.pcb-generate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.pcb-generate .primary {
+  min-height: 38px;
+}
+.pcb-hint {
+  color: var(--fg-muted);
+  font-size: 12px;
+  flex: 1 1 160px;
+}
+
+/* --- inline package warning --- */
+.pcb-warnings-inline {
+  color: var(--warn);
+  font-size: 12px;
+  border: 1px solid var(--warn);
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+/* --- layer mapping table --- */
+.pcb-layer-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.pcb-layer-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pcb-layer-table thead th {
+  text-align: left;
+  padding: 4px 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  position: sticky;
+  top: 0;
+}
+.pcb-layer-table tbody td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+/* Fixed column widths so the table fills its box without sideways scroll, even
+   in the narrow (~270px) default column. The RUN column must be wide enough for
+   the two icon buttons (Preview + Play) so neither gets clipped. */
+.pcb-layer-table th:nth-child(1),
+.pcb-layer-table td:nth-child(1) { width: 30%; }
+.pcb-layer-table th:nth-child(2),
+.pcb-layer-table td:nth-child(2) { width: 31%; }
+.pcb-layer-table th:nth-child(3),
+.pcb-layer-table td:nth-child(3) { width: 14%; }
+.pcb-col-run,
+.pcb-cell-run {
+  width: 25%;
+  white-space: nowrap;
+  text-align: center;
+}
+.pcb-layer-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.pcb-cell-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.pcb-cell-role {
+  white-space: nowrap;
+}
+.pcb-role-select {
+  min-height: 30px;
+  width: 100%;
+  min-width: 0;
+}
+.pcb-row-actions {
+  display: inline-flex;
+  gap: 3px;
+  justify-content: center;
+}
+.pcb-icon-btn {
+  min-width: 27px;
+  min-height: 28px;
+  padding: 0 3px;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.pcb-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pcb-icon-play:not(:disabled) {
+  color: var(--ok, #3fb950);
+  border-color: color-mix(in srgb, var(--ok, #3fb950) 50%, var(--border));
+}
+.pcb-icon-play:not(:disabled):hover {
+  background: color-mix(in srgb, var(--ok, #3fb950) 16%, transparent);
+}
+
+/* --- collapsible raw G-code preview --- */
+.pcb-gcode {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+}
+.pcb-gcode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 12px;
+  min-height: 32px;
+  padding: 4px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.pcb-gcode-toggle:hover {
+  color: var(--fg);
+}
+.pcb-gcode-meta {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  opacity: 0.8;
+}
+.pcb-gcode-text {
+  margin: 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre;
+  color: var(--fg);
+}
+.pcb-cell-summary {
+  color: var(--fg-muted);
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcb-cell-summary.pcb-cell-bad {
+  color: var(--danger);
+}
+.pcb-row-unknown {
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+.pcb-row-error {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+/* --- single-file fallback disclosure --- */
+.pcb-toggle-single {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 12px;
+  min-height: 36px;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+.pcb-toggle-single:hover {
+  color: var(--fg);
+}
+.pcb-single {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+/* --- per-layer legend under the table --- */
+.pcb-legend {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+/* --- Advanced disclosure --- */
+.pcb-advanced-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-height: 36px;
+  padding: 5px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.pcb-advanced-toggle:hover {
+  color: var(--fg);
+}
+.pcb-advanced-toggle[aria-expanded='true'] {
+  border-bottom: 1px solid var(--border);
+}
+
+/* sub-group label inside a section body */
+.pcb-subhead {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  margin-top: 2px;
+}
+.pcb-subhead:first-child {
+  margin-top: 0;
+}
+
+@media (max-width: 768px) {
+  .pcb-grid {
+    grid-template-columns: repeat(auto-fit, minmax(46%, 1fr));
+  }
+  .pcb-stage-btn {
+    flex: 1 1 40%;
+  }
+  /* On narrow screens, reflow the layer table into stacked cards. */
+  .pcb-layer-table,
+  .pcb-layer-table thead,
+  .pcb-layer-table tbody,
+  .pcb-layer-table tr,
+  .pcb-layer-table td,
+  .pcb-layer-table td:nth-child(1),
+  .pcb-layer-table td:nth-child(2),
+  .pcb-layer-table td:nth-child(3) {
+    display: block;
+    width: 100%;
+  }
+  .pcb-layer-table thead {
+    display: none;
+  }
+  .pcb-layer-table tbody tr {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    margin-bottom: 6px;
+    padding: 4px;
+  }
+  .pcb-layer-table tbody td {
+    border-bottom: none;
+    padding: 4px 6px;
+    max-width: none;
+  }
+  .pcb-cell-name {
+    width: auto;
+    font-weight: 600;
+    white-space: normal;
+    word-break: break-all;
+  }
+  .pcb-cell-role {
+    width: auto;
+  }
+  .pcb-cell-summary {
+    white-space: normal;
+  }
+  .pcb-cell-run {
+    width: auto;
+    text-align: left;
+  }
+  /* Keep touch targets comfortable on phones (slim defaults are desktop). */
+  .pcb-role-select {
+    min-height: 36px;
+  }
+  .pcb-icon-btn {
+    min-width: 40px;
+    min-height: 40px;
+    font-size: 16px;
+    flex: 1 1 auto;
+  }
+  .pcb-row-actions {
+    display: flex;
+    width: 100%;
+  }
+}

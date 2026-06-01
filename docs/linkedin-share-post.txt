@@ -1,0 +1,22 @@
+If you own a CNC 3018, you already know the pain: the machine costs less than a phone, but the software is four clunky desktop apps that don't talk to each other — and none of them open on your phone.
+
+So I rebuilt the whole thing in the browser.
+
+Meet karmyogi: an open-source, browser-based CAD/CAM + control workbench for 3-axis GRBL machines. It talks to your controller over USB via the Web Serial API, visualizes toolpaths in live 3D, and runs entirely in a Chrome tab. No install. Desktop and mobile.
+
+What's inside:
+- 3D carving — DXF/STL to engrave / profile / pocket with live preview
+- Pen-plotter writing with single-stroke fonts (load your own handwriting)
+- PCB isolation routing + drilling straight from a Gerber ZIP — the FlatCAM workflow, no Python hell
+- Auto-soldering with a Free-Z / Touch-Z points table + solder-wire feeder
+- Jog/DRO controller, full GRBL settings manager, WhatsApp-style console, live 3D visualizer
+- Plus an experimental bench: glue dispensing, pick & place, timelapse camera, and more
+
+Built with Vite + React 19 + TypeScript, three.js, dockview, and zustand. Static SPA on Cloudflare. Works great on affordable 3018-class machines.
+
+Open it: https://karmyogi.hjlabs.in
+Star it: https://github.com/hemangjoshi37a/karmyogi
+
+Full article in the first comment.
+
+#CNC #GRBL #CADCAM #WebSerial #OpenSource #Maker #3DPrinting

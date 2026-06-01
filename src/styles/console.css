@@ -1,0 +1,302 @@
+/* Console panel — raw GRBL console, styled as a WhatsApp-style chat (W4).
+   Owned by the Console panel. Theme CSS vars only.
+
+   Layout: a search bar pinned at the top, a chat composer pinned at the bottom,
+   and a message thread that scrolls VERTICALLY only in between (long text wraps,
+   never a horizontal scrollbar). Sent commands are accent bubbles on the right,
+   machine replies neutral bubbles on the left, info/error are centered system
+   notices. Touch targets grow to ≥36px on phones. */
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-panel);
+  color: var(--fg);
+  /* Reflow off the PANEL's own width, not the window — so a docked-narrow
+     console (center-bottom region) tightens even on a wide screen. The
+     @container consolepanel rules below measure this box. */
+  container-type: inline-size;
+  container-name: consolepanel;
+}
+
+/* ---- search bar (pinned top) ---- */
+.chat-search {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-input);
+}
+.chat-search-icon {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--fg-muted);
+  user-select: none;
+}
+.chat-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+.chat-search-input::placeholder { color: var(--fg-muted); }
+.chat-search-input::-webkit-search-cancel-button { display: none; }
+.chat-search-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* small icon buttons used in the search bar (clear / macro toggle / clear log) */
+.chat-icon-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-icon-btn:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--border);
+}
+.chat-icon-btn[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.chat-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.chat-search .mc-grow { flex: 1 1 auto; }
+
+/* ---- message thread (main area, scrolls vertically only) ---- */
+.chat-thread {
+  flex: 1 1 auto;
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--viewport-bg);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.chat-msg {
+  display: flex;
+  width: 100%;
+}
+.chat-msg.right { justify-content: flex-end; }
+.chat-msg.left { justify-content: flex-start; }
+.chat-msg.center { justify-content: center; }
+
+/* ---- bubbles ---- */
+.chat-bubble {
+  position: relative;
+  max-width: 82%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: 9px;
+  /* Wrap aggressively so even long unbroken tokens never force a sideways scroll. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.chat-bubble .chat-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.chat-bubble .chat-time {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* sent commands → right, accent-tinted "your messages" */
+.chat-bubble.dir-send {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-bottom-right-radius: 3px;
+}
+/* machine replies → left, neutral */
+.chat-bubble.dir-recv {
+  background: var(--bg-input);
+  color: var(--fg);
+  border-bottom-left-radius: 3px;
+}
+/* info/error → small centered system notices */
+.chat-bubble.dir-info,
+.chat-bubble.dir-error {
+  max-width: 92%;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-input) 60%, transparent);
+  border: 1px solid var(--border);
+}
+.chat-bubble.dir-info .chat-text { color: var(--fg-muted); font-size: 11px; }
+.chat-bubble.dir-error {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.chat-bubble.dir-error .chat-text { color: var(--danger); font-size: 11px; }
+.chat-bubble.dir-info .chat-time,
+.chat-bubble.dir-error .chat-time { font-size: 9px; }
+
+.chat-empty {
+  margin: auto;
+  color: var(--fg-muted);
+  font-style: italic;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ---- advisory note ---- */
+.chat-note {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--fg-muted);
+}
+
+/* ---- quick-macro chips (toggleable) ---- */
+.chat-macros {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.chat-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--fg);
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.chat-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---- composer (pinned bottom) ---- */
+.chat-composer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--fg);
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: 12px;
+  outline: none;
+}
+.chat-input::placeholder { color: var(--fg-muted); }
+.chat-input:focus { border-color: var(--accent); }
+.chat-input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.chat-send-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-send-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---- narrow-PANEL reflow (container query — measures the console panel's
+   own width, not the window, so it fires when docked narrow on a wide screen).
+   Bubbles widen toward full width and the note shrinks so more thread shows;
+   wrapping (overflow-wrap/word-break above) keeps long tokens from causing any
+   horizontal scroll down to ~270px and below. */
+@container consolepanel (max-width: 360px) {
+  .chat-bubble { max-width: 90%; }
+  .chat-bubble.dir-info,
+  .chat-bubble.dir-error { max-width: 96%; }
+  .chat-note { font-size: 9px; }
+  .chat-macros { gap: 2px; }
+  .chat-chip { padding: 2px 7px; }
+}
+@container consolepanel (max-width: 270px) {
+  /* At the tightest dock, let bubbles use essentially the full row. */
+  .chat-bubble { max-width: 96%; }
+}
+
+/* ---- touch sizing on phones — ≥36px tap targets (genuinely a viewport/input
+   concern, so it keys off the window). */
+@media (max-width: 768px) {
+  .chat-panel { gap: 6px; }
+  .chat-search-input { min-height: 36px; }
+  .chat-icon-btn { min-width: 36px; min-height: 36px; }
+  .chat-chip { min-height: 36px; padding: 6px 12px; }
+  .chat-input { min-height: 40px; }
+  .chat-send-btn { width: 40px; height: 40px; font-size: 16px; }
+}
+
+/* Fallback for browsers without container-query support: key the narrow-panel
+   reflow off the window so phone-width viewports still widen the bubbles. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 360px) {
+    .chat-bubble { max-width: 92%; }
+    .chat-bubble.dir-info,
+    .chat-bubble.dir-error { max-width: 96%; }
+    .chat-note { font-size: 9px; }
+  }
+}

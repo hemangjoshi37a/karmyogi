@@ -1,0 +1,219 @@
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Theme-aware custom scrollbars — applies to the whole app (html/body and
+   every overflow container/panel). All colors come from theme tokens
+   (defined per theme in theme.css) so the bars recolor automatically when the
+   [data-theme] toggles dark↔light. WebKit is primary (Chromium-only app);
+   the scrollbar-* shorthand is a Firefox fallback (harmless elsewhere). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  /* inset border carved from the track keeps the thumb slim and floating */
+  border: 2px solid var(--scrollbar-track);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--accent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
+button {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  min-height: 28px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button:active { transform: translateY(1px); }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+input, select, textarea {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  min-height: 28px;
+}
+textarea { min-height: auto; }
+
+/* App shell */
+.app-shell { display: flex; flex-direction: column; height: 100%; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.topbar .brand { font-weight: 700; letter-spacing: 0.5px; }
+.topbar .brand .accent { color: var(--accent); }
+.topbar .spacer { flex: 1; }
+
+.zoom-group { display: inline-flex; align-items: center; gap: 2px; }
+.zoom-group button { padding: 4px 8px; min-width: 30px; }
+.zoom-group button:nth-child(2) { min-width: 48px; font-variant-numeric: tabular-nums; }
+
+.dock-host { flex: 1 1 auto; position: relative; min-height: 0; }
+
+/* Generic panel body */
+.panel-body { padding: 7px; height: 100%; overflow: auto; color: var(--fg); background: var(--bg-panel); }
+.panel-body h3 { margin: 0 0 6px; font-size: 12px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Viewer overlay toolbar (fit / iso / top / front) */
+.viewer-toolbar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.viewer-toolbar button {
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+/* Mobile / narrow layout: stacked panel with a tab strip (same panels) */
+.mobile-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.mobile-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mobile-tab {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 6px 14px;
+  border-radius: 18px;
+  white-space: nowrap;
+  background: var(--bg-input);
+}
+.mobile-tab.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.mobile-panel { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
+.mobile-panel > * { height: 100%; }
+
+/* Touch-friendly controls on small screens — restore ≥36px tap targets */
+@media (max-width: 768px) {
+  button, input, select { min-height: 38px; }
+  textarea { min-height: auto; }
+  .topbar { gap: 8px; padding: 6px 8px; }
+  .topbar .brand { font-size: 15px; }
+}
+
+/* Bind dockview theme vars to our tokens */
+.dockview-theme-karmyogi {
+  --dv-background-color: var(--bg-panel);
+  --dv-group-view-background-color: var(--bg-panel);
+  --dv-paneview-active-outline-color: var(--accent);
+  /* Strip is recessed (--bg) so the active tab (--bg-panel, raised/white in
+     light) clearly stands out; background tabs blend into the strip. This works
+     in BOTH themes because --bg, --bg-panel and --bg-elev are distinct shades in
+     each (in light --bg-elev == --bg-panel == #fff, which is why the strip must
+     use --bg, not --bg-elev, or the selected tab would be invisible). */
+  --dv-tabs-and-actions-container-background-color: var(--bg);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg-panel);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--bg);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--bg-panel);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--bg);
+  --dv-tab-divider-color: var(--border);
+  --dv-separator-border: var(--border);
+  --dv-activegroup-visiblepanel-tab-color: var(--fg);
+  --dv-activegroup-hiddenpanel-tab-color: var(--fg-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--fg);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--fg-muted);
+  --dv-tabs-container-scrollbar-color: var(--border);
+  /* density: slim tab strip */
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tab-close-icon-size: 12px;
+  --dv-icon-hover-background-color: color-mix(in srgb, var(--fg) 12%, transparent);
+  --dv-tab-font-size: 12px;
+  height: 100%;
+}
+
+/* Tighten the space around the tab title and the close icon. The real
+   padding lives on `.dv-tab` (default 4px 8px) and the gap before the close
+   button is `.dv-default-tab-content`'s 4px right margin — slim both so the
+   label and ✕ read compactly. */
+/* NOTE: dockview.css is imported AFTER this file, so for rules that tie on
+   specificity with the library defaults we add an extra class hop
+   (`.dv-tab .dv-default-tab …`) to win on specificity rather than order. */
+.dockview-theme-karmyogi .dv-tab {
+  padding: 0 6px;
+  font-size: 12px;
+}
+/* The selected tab gets an accent underline + bold readable title, so it is
+   clearly marked even where the active-tab background equals the strip (e.g.
+   light theme, where --bg-panel and --bg-elev are both white). */
+.dockview-theme-karmyogi .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 var(--accent);
+  font-weight: 600;
+}
+.dockview-theme-karmyogi .dv-tab.dv-active-tab .dv-default-tab-content {
+  color: var(--fg);
+}
+.dockview-theme-karmyogi .dv-tab .dv-default-tab .dv-default-tab-content {
+  margin-right: 2px;
+}
+/* close ✕ snug to the title */
+.dockview-theme-karmyogi .dv-tab .dv-default-tab .dv-default-tab-action {
+  padding: 2px;
+}
+
+/* Mobile dock tabs — roomier for touch. Placed AFTER the desktop base block
+   so the 40px container height wins over the 28px default at narrow widths. */
+@media (max-width: 768px) {
+  .dockview-theme-karmyogi {
+    --dv-tabs-and-actions-container-height: 40px;
+  }
+  .dockview-theme-karmyogi .dv-tab { padding: 0 10px; }
+  .dockview-theme-karmyogi .dv-tab .dv-default-tab .dv-default-tab-action { padding: 6px; }
+}

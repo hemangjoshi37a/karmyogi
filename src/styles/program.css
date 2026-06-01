@@ -1,0 +1,236 @@
+/* Program panel (W5). Co-located styles; uses theme CSS variables only. */
+
+/* The panel is a VERTICAL-only scroller so cards stack down (never sideways)
+   when the panel narrows; controls are always reachable. The panel is its own
+   query container so the reflow rules below key off the PANEL's width (it can be
+   docked narrow on a wide window), not the viewport. */
+.pp-panel {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px;
+  background: var(--bg-panel);
+  color: var(--fg);
+  container-type: inline-size;
+  container-name: programpanel;
+}
+
+/* Masonry via CSS columns on an auto-height inner wrapper (mirrors the
+   Controller/Coordinates tabs): cards pack tightly with no wasted gaps, and the
+   column COUNT shrinks as the panel narrows — single column at narrow widths. */
+.pp-cols {
+  columns: 230px;
+  column-gap: 6px;
+}
+
+/* --- card --- */
+.pp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  break-inside: avoid;
+  margin: 0 0 6px;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+}
+
+.pp-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.4;
+}
+
+/* The Run card is the only card in the masonry wrapper now, so make it span
+   the full panel width regardless of the column count. */
+.pp-run-card { column-span: all; }
+
+/* --- file name + actions (now live in the Program-text header) --- */
+.pp-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.pp-meta { color: var(--fg-muted); font-size: 12px; }
+.pp-file-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+
+.pp-load-input { display: none; }
+
+/* --- button rows --- */
+.pp-btnrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.pp-btnrow button { min-height: 30px; padding: 4px 9px; }
+
+/* Primary stream action — big and obvious. */
+.pp-stream {
+  flex: 1 1 auto;
+  min-width: 110px;
+  min-height: 36px;
+  font-weight: 700;
+  font-size: 14px;
+}
+.pp-icon-btn {
+  min-width: 36px;
+  min-height: 36px;
+  font-size: 15px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pp-btn-abort:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+.pp-btn-abort:not(:disabled):hover { background: var(--danger); color: var(--bg); }
+.pp-btn-clear:not(:disabled):hover { border-color: var(--danger); }
+
+/* --- progress + ETA --- */
+.pp-progress-eta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.pp-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pp-progress-track {
+  flex: 1 1 auto;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.pp-progress-fill {
+  height: 100%;
+  transition: width 0.15s linear;
+}
+.pp-progress-label {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.pp-eta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.pp-eta-icon { font-size: 13px; opacity: 0.8; }
+
+/* --- Program text header: disclosure title + filename + Load/Clear (right) --- */
+.pp-text-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.pp-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.pp-disclosure:hover { color: var(--fg); }
+.pp-disclosure-caret { font-size: 10px; width: 12px; flex: 0 0 auto; }
+.pp-text-count { text-transform: none; letter-spacing: 0; font-weight: 400; }
+/* Push the Load/Clear actions to the right edge of the header row. */
+.pp-text-header .pp-file-actions { margin-left: auto; }
+
+/* Compact start/current-line field at the LEFT of the Run card's button row. */
+.pp-line-input {
+  flex: 0 0 auto;
+  width: 56px;
+  min-height: 36px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- editable program text ---
+   The editor lives in its own card BELOW the Run card and its Load/Clear header,
+   so it can never cover the Stream/transport or Load/Clear controls. It is
+   user-resizable (drag grip) with a small font and ALWAYS scrolls internally
+   (overflow:auto) — it never pushes the panel sideways and stays capped so it
+   can't dominate a short panel. */
+.pp-text-card { margin-top: 0; }
+.pp-editor {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  max-height: 70vh;
+  resize: vertical;
+  overflow: auto;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--fg);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.4;
+  tab-size: 2;
+  white-space: pre;
+}
+.pp-editor:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.pp-editor[readonly] {
+  opacity: 0.75;
+  cursor: default;
+}
+
+/* --- drag-over hint --- */
+.pp-panel.pp-dragover { outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+/* ---- narrow PANEL (≤360px): let the transport buttons grow to fill the row
+   and keep the start-line field compact. This is LAYOUT only — button SIZES
+   stay at the normal desktop scale (a merely-narrow docked panel must NOT blow
+   the buttons up to touch size; that was making them look oversized). */
+@container programpanel (max-width: 360px) {
+  .pp-btnrow button { flex: 1 1 auto; }
+  .pp-icon-btn { flex: 0 0 auto; }
+  .pp-file-actions .pp-icon-btn { flex: 0 0 auto; }
+  .pp-line-input { flex: 0 0 auto; width: 64px; }
+}
+
+/* Touch devices only: enlarge tap targets to ≥44px regardless of panel/window
+   width. Keyed off the POINTER type (not width) so a desktop mouse keeps the
+   normal compact sizing even when the panel is docked narrow. */
+@media (pointer: coarse) {
+  .pp-btnrow button { min-height: 44px; }
+  .pp-stream { min-height: 44px; }
+  .pp-icon-btn { min-width: 44px; min-height: 44px; }
+  .pp-disclosure { min-height: 38px; }
+  .pp-line-input { min-height: 44px; }
+}

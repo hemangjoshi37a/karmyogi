@@ -1,0 +1,169 @@
+/* Top-bar additions: icon-only buttons, notification bell, panel launcher.
+   Owned by the app-shell agent; do not put density tokens here. */
+
+/* Slim top bar: tighten gaps so the icon buttons cluster tightly on the right. */
+.topbar .topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Icon-only button: square-ish, glyph centered, native title tooltip. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 4px 6px;
+  line-height: 1;
+  position: relative;
+}
+.icon-btn-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-size: 15px;
+}
+
+/* The zoom group sits tight; −/+ are icon-only, the % readout stays. */
+.topbar .zoom-group { gap: 1px; }
+
+/* ---- Notification bell ---- */
+.notif { position: relative; display: inline-flex; }
+
+.notif-badge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1.5px var(--bg-elev);
+}
+
+.notif-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: min(340px, 92vw);
+  max-height: min(60vh, 420px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.notif-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.notif-clear { padding: 2px 8px; font-size: 11px; }
+.notif-list { overflow: auto; flex: 1 1 auto; }
+.notif-empty { padding: 18px 12px; text-align: center; color: var(--fg-muted); font-size: 12px; }
+
+.notif-item {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  font-size: 12px;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-glyph { font-size: 12px; line-height: 1.4; }
+.notif-text { color: var(--fg); word-break: break-word; white-space: pre-wrap; }
+.notif-time { color: var(--fg-muted); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.notif-item.level-error { border-left-color: var(--danger); }
+.notif-item.level-error .notif-glyph { color: var(--danger); }
+.notif-item.level-warn { border-left-color: var(--warn); }
+.notif-item.level-warn .notif-glyph { color: var(--warn); }
+.notif-item.level-success { border-left-color: var(--ok); }
+.notif-item.level-success .notif-glyph { color: var(--ok); }
+.notif-item.level-info { border-left-color: var(--accent); }
+.notif-item.level-info .notif-glyph { color: var(--accent); }
+
+/* ---- Panel launcher ---- */
+.launcher { position: relative; display: inline-flex; }
+.launcher-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: min(220px, 92vw);
+  max-height: min(60vh, 420px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.launcher-head {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.launcher-list { overflow: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+.launcher-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+.launcher-item:hover { background: var(--bg-input); }
+.launcher-item-title { font-size: 13px; }
+.launcher-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.launcher-dot.open { background: var(--ok); border-color: var(--ok); }
+
+/* Touch-friendly on small screens: keep icon buttons + menu items >= 36px. */
+@media (max-width: 768px) {
+  .icon-btn { min-width: 38px; min-height: 38px; }
+  .launcher-item { min-height: 38px; }
+  .notif-clear { min-height: 32px; }
+  .topbar .topbar-actions { gap: 4px; }
+}

@@ -1,0 +1,262 @@
+/* 3D Printing workbench panel. Co-located styles; theme CSS variables only. */
+
+.print-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+/* Vertical-only scroll — content reflows so it never scrolls sideways. */
+.print-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* --- sections --- */
+.print-section {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.print-section > h3 {
+  margin: 0;
+  padding: 5px 8px;
+  font-size: 10px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+.print-section-body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* --- buttons --- */
+.print-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+}
+.print-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.print-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.print-btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.print-send {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+}
+
+/* --- file drop / import --- */
+.print-drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 12px;
+  border: 2px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 6px;
+  background: var(--bg-input);
+}
+.print-drop.print-dragover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.print-drop-hint {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.print-file-input {
+  display: none;
+}
+
+/* --- 3D viewport --- */
+.print-viewport {
+  width: 100%;
+  height: clamp(200px, 38vh, 360px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #15181c;
+}
+
+/* --- size / fit readout --- */
+.print-size {
+  font-size: 12px;
+  color: var(--fg);
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--bg-input);
+}
+.print-size-bad {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.print-fit-ok {
+  color: var(--ok);
+}
+.print-fit-bad {
+  color: var(--danger);
+}
+
+/* --- arrange controls --- */
+.print-arrange {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+/* --- fields / grid --- */
+.print-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.print-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.print-field-inline {
+  flex-direction: column;
+  min-width: 90px;
+}
+.print-field input {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.print-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.print-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg);
+  min-height: 36px;
+}
+.print-check input {
+  width: 18px;
+  height: 18px;
+}
+
+/* --- advanced toggle --- */
+.print-advanced-toggle,
+.print-gcode-toggle {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 8px;
+  font-size: 12px;
+}
+.print-advanced-toggle:hover,
+.print-gcode-toggle:hover {
+  color: var(--fg);
+}
+
+/* --- actions --- */
+.print-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* --- progress --- */
+.print-progress {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.print-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s ease;
+}
+
+/* --- status / info / errors --- */
+.print-status,
+.print-info {
+  font-size: 12px;
+  color: var(--fg);
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--bg-input);
+}
+.print-error {
+  font-size: 12px;
+  color: var(--danger);
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.print-hint,
+.print-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+.print-note {
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+
+/* --- raw g-code view --- */
+.print-gcode-meta {
+  margin-left: 8px;
+  opacity: 0.7;
+}
+.print-gcode-text {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  background: var(--bg-input);
+  border-radius: 4px;
+  white-space: pre;
+}

@@ -1,0 +1,45 @@
+/* Theme tokens — light/dark via [data-theme] on <html>. */
+:root,
+:root[data-theme='dark'] {
+  --bg: #1a1d21;
+  --bg-elev: #23272e;
+  --bg-panel: #1e2227;
+  --bg-input: #2a2f37;
+  --fg: #e6e9ee;
+  --fg-muted: #9aa3af;
+  --border: #333a44;
+  --accent: #2dd4bf;
+  --accent-fg: #042f2a;
+  --danger: #f87171;
+  --warn: #fbbf24;
+  --ok: #34d399;
+  --grid: #3a4250;
+  --grid-major: #515c6e;
+  --viewport-bg: #15181c;
+  /* Scrollbar tokens (derived from theme colors via color-mix). */
+  --scrollbar-track: color-mix(in srgb, var(--bg) 60%, var(--bg-panel) 40%);
+  --scrollbar-thumb: color-mix(in srgb, var(--border) 70%, var(--fg-muted) 30%);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--fg-muted) 55%, var(--accent) 45%);
+}
+
+:root[data-theme='light'] {
+  --bg: #f4f6f8;
+  --bg-elev: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-input: #eef1f4;
+  --fg: #1c2128;
+  --fg-muted: #5b6675;
+  --border: #d4dae1;
+  --accent: #0e7c66;
+  --accent-fg: #ffffff;
+  --danger: #dc2626;
+  --warn: #d97706;
+  --ok: #059669;
+  --grid: #d4dae1;
+  --grid-major: #aab4c0;
+  --viewport-bg: #e7ecf1;
+  /* Scrollbar tokens (derived from theme colors via color-mix). */
+  --scrollbar-track: color-mix(in srgb, var(--bg) 55%, var(--bg-panel) 45%);
+  --scrollbar-thumb: color-mix(in srgb, var(--border) 60%, var(--fg-muted) 40%);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--fg-muted) 50%, var(--accent) 50%);
+}

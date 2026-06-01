@@ -1,0 +1,448 @@
+/* Glue-dispense panel. Co-located styles; uses theme CSS variables only. */
+
+.gp-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow: hidden; /* the controls column scrolls, not the whole panel */
+  /* This panel is usually a narrow docked column on a WIDE window, so window
+     media queries never fire. Drive all layout reflow off the panel's OWN
+     width via container queries (named so the rules are unambiguous). */
+  container-type: inline-size;
+  container-name: gluepanel;
+}
+
+/* --- one-line intro --- */
+.gp-intro {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+}
+.gp-intro b {
+  color: var(--fg);
+}
+
+/* --- body: canvas stage + controls column --- */
+.gp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+}
+
+/* The canvas is the centerpiece: it takes the lion's share of the width. */
+.gp-stage {
+  flex: 1 1 60%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+
+/* The controls scroll vertically only; never horizontally. */
+.gp-controls {
+  flex: 0 0 clamp(232px, 32%, 330px);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 7px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* --- shape-tool icon toolbar ---
+   Buttons pack as equal-flex cells so they fill the row tidily and wrap to a
+   second line only when the panel is genuinely narrow. */
+.gp-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--border);
+}
+.gp-spacer {
+  flex: 1 1 auto;
+}
+.gp-tool {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.gp-tool-glyph {
+  font-size: 15px;
+  line-height: 1;
+}
+.gp-tool-label {
+  font-size: 12px;
+}
+.gp-tool.gp-tool-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--fg);
+}
+.gp-clear {
+  flex: 0 0 auto;
+  min-height: 36px;
+}
+
+/* --- drawing canvas (the bed) --- */
+.gp-canvas-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px;
+}
+.gp-canvas {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  touch-action: none; /* let pointer-drag draw instead of panning on touch */
+}
+.gp-canvas.gp-tool-select {
+  cursor: default;
+}
+.gp-canvas:not(.gp-tool-select) {
+  cursor: crosshair;
+}
+
+.gp-bed {
+  fill: transparent;
+  stroke: var(--border);
+  stroke-width: 0.6;
+}
+.gp-grid {
+  stroke: var(--border);
+  stroke-width: 0.3;
+  opacity: 0.5;
+}
+.gp-origin {
+  fill: var(--accent);
+}
+
+/* Shapes (rendered in SVG mm units, so use non-scaling stroke widths). */
+.gp-shape {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.gp-shape-sel {
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+.gp-shape-draft {
+  stroke-dasharray: 4 3;
+  opacity: 0.8;
+}
+
+.gp-hint {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.gp-hint .gp-meta {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* --- cards in the controls column --- */
+.gp-card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 7px 9px;
+  min-width: 0; /* allow children to shrink rather than force horizontal scroll */
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.gp-card-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+}
+.gp-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.gp-meta {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.gp-meta b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- shape list --- */
+.gp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.gp-list-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0; /* lets the pick button shrink so the row never overflows */
+}
+.gp-list-pick {
+  flex: 1 1 auto;
+  min-width: 0; /* required for the label's text-overflow to engage */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--fg);
+  font-size: 12px;
+  /* Long summaries are clipped with an ellipsis rather than widening the row. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gp-list-pick:hover {
+  border-color: var(--border);
+}
+.gp-list-sel .gp-list-pick {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.gp-list-glyph {
+  flex: 0 0 auto;
+  font-size: 14px;
+  color: var(--accent);
+  width: 16px;
+  text-align: center;
+}
+
+/* --- delete button (shared by list + editor) --- */
+.gp-del {
+  flex: 0 0 auto;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 6px;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  background: transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.gp-del:hover {
+  background: var(--danger);
+  color: var(--bg);
+}
+
+/* --- selected-shape editor + params labelled inputs --- */
+.gp-tri-pt {
+  display: contents;
+}
+.gp-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.gp-edit-label {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.gp-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gp-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex: 1 1 68px;
+  min-width: 64px;
+}
+.gp-fields input {
+  min-height: 36px;
+  width: 100%;
+  min-width: 0; /* never let a number input force the field wider than its cell */
+}
+
+/* --- advanced section --- */
+.gp-adv {
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.gp-adv-toggle {
+  align-self: flex-start;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.gp-adv-toggle:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+/* --- generate / send card --- */
+.gp-send {
+  position: sticky;
+  bottom: 0;
+}
+.gp-play {
+  min-height: 40px;
+  font-weight: 600;
+}
+.gp-send-note {
+  margin: 0;
+}
+
+/* --- raw preview (collapsible) --- */
+.gp-raw-toggle {
+  align-self: flex-start;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.gp-raw-toggle:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.gp-preview {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 200px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  white-space: pre;
+}
+
+/* --- narrow panel: stack canvas on top, controls below (single column) ---
+   Driven by the PANEL's own width (named container query) so it reflows when
+   docked into a narrow column on a wide window, not only at phone viewport. */
+@container gluepanel (max-width: 560px) {
+  .gp-body {
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .gp-stage {
+    flex: 0 0 auto;
+    /* Keep the bed compact in stacked mode — near its 3:2 ratio, capped so it
+       never eats the whole column and pushes the controls off-screen. */
+    min-height: clamp(180px, 50cqw, 240px);
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .gp-controls {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  .gp-send {
+    position: static;
+  }
+}
+
+/* --- very narrow column (~≤340px, e.g. the default ~290px dock width): give
+   fields two-up sizing and ≥40px touch targets, again off the PANEL width. --- */
+@container gluepanel (max-width: 340px) {
+  .gp-fields label {
+    flex: 1 1 calc(50% - 3px);
+  }
+  .gp-play,
+  .gp-raw-toggle,
+  .gp-adv-toggle {
+    min-height: 40px;
+  }
+}
+
+/* Fallback for browsers without container-query support: key off the window so
+   phone-width viewports still stack and get the touch-friendly field/button
+   sizing. (Chromium — the only supported target — has container queries.) */
+@supports not (container-type: inline-size) {
+  @media (max-width: 560px) {
+    .gp-body {
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .gp-stage {
+      flex: 0 0 auto;
+      min-height: 220px;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .gp-controls {
+      flex: 0 0 auto;
+      overflow: visible;
+    }
+    .gp-send {
+      position: static;
+    }
+  }
+  @media (max-width: 768px) {
+    .gp-fields label {
+      flex: 1 1 calc(50% - 3px);
+    }
+    .gp-play,
+    .gp-raw-toggle,
+    .gp-adv-toggle {
+      min-height: 40px;
+    }
+  }
+}

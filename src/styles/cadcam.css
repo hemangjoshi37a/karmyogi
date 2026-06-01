@@ -1,0 +1,401 @@
+/* 3D Carving panel (W7). Co-located styles; uses theme CSS variables only.
+   Handles both 3D (STL relief) and 2D (DXF / EPS / AI) modes in one layout. */
+
+.cc-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  /* Vertical-only scroller — never horizontal. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* This panel is usually a narrow docked column on a WIDE window, so window
+     media queries never fire. Drive all layout reflow off the panel's OWN
+     width via container queries instead (see @container cadcampanel below). */
+  container-type: inline-size;
+  container-name: cadcampanel;
+}
+
+.cc-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* --- intro + flow stepper --- */
+.cc-intro {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+.cc-intro b { color: var(--fg); }
+
+.cc-flow {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+}
+.cc-flow li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 auto;
+  justify-content: center;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.cc-flow li.done {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.cc-flow-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+}
+.cc-flow li.done .cc-flow-n { background: var(--accent); color: var(--accent-fg); }
+
+/* --- masonry card pack --- */
+/* CSS multi-column packs cards densely with no vertical gaps; the panel itself
+   scrolls vertically. `break-inside: avoid` keeps each card whole. Collapses to
+   a single column at narrow widths via the @container query below. */
+.cc-cards {
+  column-width: 250px;
+  column-gap: 7px;
+}
+
+/* --- sections (cards) --- */
+.cc-section {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  margin: 0 0 7px;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+  overflow: hidden;
+}
+.cc-section > h3 {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+.cc-section-body {
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* the Send card reads as the primary action — subtle accent edge */
+.cc-send { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+
+/* --- DXF drop / import --- */
+.cc-drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  padding: 9px 10px;
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  text-align: center;
+  justify-content: center;
+}
+.cc-drop.cc-dragover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.cc-drop-icon { font-size: 18px; color: var(--accent); flex: 0 0 auto; }
+.cc-drop-hint { color: var(--fg-muted); font-size: 11px; flex: 1 1 100%; }
+.cc-load-input { display: none; }
+.cc-load-btn { min-height: 36px; }
+
+.cc-import-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  align-items: center;
+  font-size: 11.5px;
+}
+.cc-stat { color: var(--fg-muted); }
+.cc-stat b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.cc-stat-warn { color: var(--warn); }
+.cc-stat-warn b { color: var(--warn); }
+.cc-error {
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  font-size: 12px;
+}
+.cc-warnings {
+  color: var(--warn);
+  font-size: 12px;
+  max-height: 96px;
+  overflow: auto;
+  margin: 0;
+  padding-left: 18px;
+}
+.cc-file-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.cc-file-name.empty { color: var(--fg-muted); font-weight: 400; }
+
+/* --- mode badge (3D / 2D / STEP) --- */
+.cc-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  background: var(--bg-input);
+}
+.cc-mode-badge[data-mode='3d'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.cc-mode-badge[data-mode='2d'] {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.cc-mode-badge[data-mode='step'] {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+/* --- operation selector (segmented) --- */
+.cc-ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cc-op-btn {
+  flex: 1 1 auto;
+  min-height: 36px;
+  min-width: 72px;
+}
+.cc-op-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.cc-subops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cc-subop-btn {
+  flex: 1 1 auto;
+  min-height: 36px;
+  min-width: 64px;
+  font-size: 12px;
+}
+.cc-subop-btn.active {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.cc-warn-line {
+  color: var(--warn);
+  font-size: 12px;
+}
+
+/* --- parameter grid --- */
+.cc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 7px 8px;
+}
+.cc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.cc-field label {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.cc-field input,
+.cc-field select {
+  min-height: 36px;
+  width: 100%;
+}
+.cc-field input:invalid { border-color: var(--danger); }
+
+/* --- z-mode toggle --- */
+.cc-zmode {
+  display: flex;
+  gap: 6px;
+}
+.cc-zmode button {
+  flex: 1 1 auto;
+  min-height: 36px;
+}
+.cc-zmode button.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* --- advanced (collapsible) --- */
+.cc-advanced .cc-section-body { border-top: 1px solid var(--border); }
+.cc-adv-toggle {
+  width: 100%;
+  text-align: left;
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+.cc-adv-toggle:hover { color: var(--fg); border-color: transparent; }
+.cc-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg);
+  min-height: 36px;
+  cursor: pointer;
+}
+.cc-check input { min-height: auto; width: 16px; height: 16px; flex: 0 0 auto; }
+
+/* --- generate / output --- */
+.cc-generate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.cc-play {
+  min-height: 40px;
+  flex: 1 1 auto;
+  font-weight: 600;
+}
+.cc-regen {
+  min-height: 40px;
+  min-width: 40px;
+  flex: 0 0 auto;
+}
+.cc-gen-meta {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.cc-gen-meta b { color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* --- collapsible raw G-code --- */
+.cc-raw-toggle {
+  align-self: flex-start;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.cc-raw-toggle:hover { border-color: var(--accent); color: var(--fg); }
+.cc-raw {
+  width: 100%;
+  min-height: 130px;
+  max-height: 280px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+
+.cc-hint { color: var(--fg-muted); font-size: 12px; }
+
+/* Narrow column / mobile reflow. These key off the PANEL's own width
+   (container query), not the window — the panel is normally a narrow docked
+   column on a wide window, so window media queries would never fire. */
+
+/* ≤560px panel: force a single card column (column-width can still try to make
+   two thin columns just above this). */
+@container cadcampanel (max-width: 560px) {
+  .cc-cards { column-width: auto; columns: 1; }
+}
+
+/* ≤480px panel: bigger touch targets for phone/narrow use. */
+@container cadcampanel (max-width: 480px) {
+  .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
+  .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; }
+  .cc-play, .cc-regen, .cc-raw-toggle { min-height: 42px; }
+  .cc-raw-toggle { min-width: 40px; }
+  .cc-adv-toggle, .cc-check { min-height: 42px; }
+}
+
+/* ≤300px panel (very narrow dock): stack fields & operation buttons full-width
+   so nothing squeezes below readable or overflows horizontally. Listed AFTER
+   the 480px block so it wins the cascade at the narrowest widths. */
+@container cadcampanel (max-width: 300px) {
+  .cc-grid { grid-template-columns: 1fr; }
+  .cc-op-btn, .cc-subop-btn { flex: 1 1 100%; min-width: 0; }
+}
+
+/* Fallback for browsers without container-query support: key off the window so
+   phone-width viewports still get the single-column + touch-friendly sizing. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 560px) {
+    .cc-cards { column-width: auto; columns: 1; }
+  }
+  @media (max-width: 480px) {
+    .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
+    .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; }
+    .cc-play, .cc-regen, .cc-raw-toggle { min-height: 42px; }
+    .cc-raw-toggle { min-width: 40px; }
+    .cc-adv-toggle, .cc-check { min-height: 42px; }
+  }
+}

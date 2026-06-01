@@ -1,0 +1,468 @@
+/* W4 machine-control panels (Controller / Console / CoordSystem).
+   Owned by W4. Imported by the panel components; uses theme CSS vars only. */
+
+/* ---- shared section scaffolding ---- */
+/* The panel is a VERTICAL scroller (never horizontal). */
+.mc-panel {
+  padding: 8px;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  color: var(--fg);
+  background: var(--bg-panel);
+}
+/* Masonry via CSS columns on an auto-height inner wrapper: cards pack tightly
+   (no wasted gaps) and the column COUNT shrinks as the panel narrows — at narrow
+   widths it's a single column that stacks vertically, so content scrolls down,
+   never sideways. */
+.mc-cols {
+  columns: 230px;
+  column-gap: 8px;
+}
+/* Each section is a tidy card so controls group cleanly. */
+.mc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  break-inside: avoid;
+  margin: 0 0 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+}
+.mc-section > h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+/* ---- Controller-only "bare" sections (Position / Machine) ----
+   Strip the card chrome (border/background/title) from JUST these two sections
+   while preserving the SAME outer spacing as a normal .mc-section so the masonry
+   layout doesn't shift. Scoped via this modifier so the Coordinates panel and the
+   Controller's own Spindle/Jog/Overrides cards keep their bordered look. */
+.mc-section--bare {
+  /* Position & Machine are the SAME visible card as Jog/Spindle/Overrides
+     (identical border, background, radius, padding and outer margin) — only the
+     section title is omitted (handled in the JSX by not rendering an <h4>). This
+     makes all five sections visually symmetric: same box, same spacing, same
+     left edge, uniform 8px gaps. (Inherits the card chrome from .mc-section; the
+     values are restated explicitly so the modifier never accidentally strips it.) */
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  padding: 8px 9px;
+}
+.mc-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.mc-row.tight { gap: 3px; }
+.mc-grow { flex: 1 1 auto; }
+.mc-label {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.mc-btn {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 3px 8px;
+}
+.mc-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---- type-icon buttons ----
+   Stacked (icon ABOVE label) for the Machine card — easy to recognise at a
+   glance and touch-friendly. The icons inherit the button's text color
+   (currentColor) so they are theme-correct in both dark and light. */
+.mc-btn-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  /* Share the row evenly so the five Machine buttons wrap neatly. */
+  flex: 1 1 0;
+  min-width: 52px;
+  min-height: 44px;
+  padding: 5px 6px;
+  line-height: 1.1;
+}
+.mc-btn-stack > svg { flex: 0 0 auto; }
+.mc-btn-stack .mc-btn-label { font-size: inherit; }
+/* Keep the corner key-hint clear of the stacked icon (badge is top-right). */
+.mc-btn-stack.has-kbd { padding-top: 7px; }
+/* A tiny muted monospace hint of the underlying GRBL command, on its own line
+   under the label so a beginner learns what each Machine button sends. It flows
+   as the third stacked child (it does NOT affect the absolutely-positioned
+   .kbd-hint badge). */
+.mc-btn-cmd {
+  flex: 0 0 auto;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--fg-muted);
+  opacity: 0.7;
+}
+
+/* Leading icon (icon LEFT of label) for the Coordinates Zero / Go-to-zero
+   buttons. */
+.mc-btn-lead {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.mc-btn-lead > svg { flex: 0 0 auto; }
+.mc-input {
+  min-height: 28px;
+  width: 80px;
+}
+.mc-select {
+  min-height: 28px;
+}
+
+/* ---- field rows / segmented controls / readouts (Spindle, Jog) ---- */
+.mc-field { display: flex; align-items: center; gap: 6px; }
+.mc-field > .mc-label { flex: 0 0 auto; min-width: 40px; }
+.mc-input-grow { width: auto; flex: 1 1 auto; min-width: 56px; }
+.mc-unit { font-size: 10px; color: var(--fg-muted); flex: 0 0 auto; }
+
+.mc-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.mc-seg button {
+  border: none;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg);
+  min-height: 28px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mc-seg button:last-child { border-right: none; }
+.mc-seg button:hover:not(:disabled):not(.active) { background: var(--border); }
+.mc-seg button.active { background: var(--accent); color: var(--accent-fg); }
+.mc-seg button:disabled { opacity: 0.45; cursor: not-allowed; }
+.mc-seg.mc-grow { display: flex; }
+.mc-seg.mc-grow button { flex: 1 1 0; }
+
+.mc-readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+.mc-readout-val {
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.mc-hint { font-size: 10px; color: var(--fg-muted); line-height: 1.3; }
+
+/* ---- tiny key-hint badges ----
+   A "barely see it" corner superscript showing each button's keyboard shortcut.
+   Very faint by default; nudged up slightly on hover/focus of its button. They
+   are absolutely positioned so they never affect the card/button layout. */
+.has-kbd { position: relative; }
+.kbd-hint {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0.18;
+  color: var(--fg-muted);
+  transition: opacity 120ms ease;
+}
+.has-kbd:hover .kbd-hint,
+.has-kbd:focus-visible .kbd-hint,
+.mc-panel:focus-within .has-kbd .kbd-hint {
+  opacity: 0.5;
+}
+/* Inside a segmented control the badge sits flush in the cell corner. */
+.mc-seg button.has-kbd { position: relative; }
+.mc-seg button .kbd-hint { top: 1px; right: 2px; }
+
+/* center the jog pad within its card */
+.jogpad { justify-content: center; }
+
+/* ---- connection / state badge ---- */
+.mc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+}
+.mc-badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+}
+.mc-badge[data-state='Idle'] .dot,
+.mc-badge[data-conn='connected'] .dot { background: var(--ok); }
+.mc-badge[data-state='Run'] .dot,
+.mc-badge[data-state='Jog'] .dot,
+.mc-badge[data-state='Home'] .dot { background: var(--accent); }
+.mc-badge[data-state='Hold'] .dot,
+.mc-badge[data-state='Door'] .dot { background: var(--warn); }
+.mc-badge[data-state='Alarm'] .dot { background: var(--danger); }
+.mc-badge[data-conn='connecting'] .dot { background: var(--warn); }
+
+.mc-error {
+  color: var(--danger);
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  word-break: break-word;
+}
+
+/* ---- DRO ---- */
+.dro {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 3px 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+}
+.dro .dro-head {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  text-align: right;
+}
+.dro .dro-head.axis-head { text-align: left; }
+.dro .dro-axis {
+  font-weight: 700;
+  color: var(--accent);
+}
+.dro .dro-val {
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: clamp(15px, 4vw, 20px);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dro .dro-val.work { color: var(--fg); }
+.dro .dro-val.machine { color: var(--fg-muted); }
+
+/* ---- Controller Position DRO (.mc-dro--xl wrapper) ----
+   Scoped to the .mc-dro--xl wrapper so ONLY the Controller's Position read-out is
+   affected; the Coordinates panel's plain .dro is untouched. The value font is
+   left at the STANDARD .dro size (clamp(15px,4vw,20px)) — it reads clearly as the
+   primary read-out without being oversized. A slightly roomier inner gap keeps the
+   work/machine columns tabular and legible; padding matches the base .dro so the
+   box lines up with the bordered cards. */
+.mc-dro--xl .dro {
+  gap: 4px 14px;
+}
+
+/* ---- Spindle card header (toggle switch + title + direction icons) ---- */
+.mc-spindle-head { flex-wrap: nowrap; }
+.mc-spindle-title {
+  /* Same look as a normal .mc-section > h4 title, but inline in the header row. */
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.mc-spindle-dir { flex: 0 0 auto; }
+
+/* Icon-only segmented buttons (CW / CCW direction). */
+.mc-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  min-width: 32px;
+  padding: 2px 8px;
+}
+
+/* ---- iOS/Android-style toggle switch (spindle on/off) ----
+   A button with role="switch". The button is a ≥36px transparent touch target;
+   the visible pill is drawn by the ::before track + the .mc-switch-knob that
+   slides across it (both vertically centered in the taller hit area). ON =
+   accent track, knob slid right. */
+.mc-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 46px;
+  min-width: 46px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0 4px 0 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* The visible track (pill), centered in the 36px-tall hit area. */
+.mc-switch::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 46px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-input);
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.mc-switch .mc-switch-knob {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  margin-top: -10px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: transform 140ms ease, background 140ms ease;
+}
+.mc-switch.on::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.mc-switch.on .mc-switch-knob {
+  transform: translateX(20px);
+  background: var(--accent-fg);
+}
+.mc-switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* The key-hint badge on the switch sits just inside the top-right corner. */
+.mc-switch.has-kbd .kbd-hint { top: 3px; right: 2px; }
+
+/* ---- jog pad ---- */
+.jogpad {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.jog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(34px, 48px));
+  grid-template-rows: repeat(3, minmax(34px, 48px));
+  gap: 4px;
+}
+.jog-grid .jog-btn { font-size: 15px; font-weight: 700; }
+.jog-z {
+  display: grid;
+  grid-template-columns: minmax(34px, 48px);
+  grid-template-rows: repeat(3, minmax(34px, 48px));
+  gap: 4px;
+}
+.jog-btn {
+  min-height: 34px;
+  min-width: 34px;
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.jog-btn.cancel { color: var(--danger); }
+.jog-spacer { visibility: hidden; }
+
+/* ---- override controls ---- */
+.ov-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  gap: 6px 8px;
+  align-items: center;
+}
+.ov-grid .ov-name { font-size: 11px; color: var(--fg-muted); }
+.ov-grid .ov-val {
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 44px;
+}
+
+/* ---- console ---- */
+.console-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
+  height: 100%;
+  background: var(--bg-panel);
+  color: var(--fg);
+}
+.console-log {
+  flex: 1 1 auto;
+  min-height: 80px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--viewport-bg);
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  -webkit-overflow-scrolling: touch;
+}
+.console-line { white-space: pre-wrap; word-break: break-word; }
+.console-line .arrow { opacity: 0.6; margin-right: 6px; user-select: none; }
+.console-line.dir-send { color: var(--accent); }
+.console-line.dir-recv { color: var(--fg); }
+.console-line.dir-info { color: var(--fg-muted); }
+.console-line.dir-error { color: var(--danger); }
+.console-empty { color: var(--fg-muted); font-style: italic; }
+
+.console-macros { display: flex; flex-wrap: wrap; gap: 4px; }
+.console-input-row { display: flex; gap: 6px; }
+.console-input-row input { flex: 1 1 auto; min-height: 28px; }
+
+/* Touch sizing on phones — restore ≥36px tap targets */
+@media (max-width: 480px) {
+  .mc-btn, .mc-input, .mc-select { min-height: 38px; }
+  .jog-grid {
+    grid-template-columns: repeat(3, 1fr);
+    grid-auto-rows: minmax(44px, 1fr);
+  }
+  .jog-z {
+    grid-template-columns: 1fr;
+    grid-auto-rows: minmax(44px, 1fr);
+  }
+  .jog-btn { min-height: 44px; min-width: 44px; }
+  .jogpad { gap: 8px; }
+  .console-input-row input { min-height: 38px; }
+  .dro .dro-val { font-size: clamp(14px, 6vw, 18px); }
+}

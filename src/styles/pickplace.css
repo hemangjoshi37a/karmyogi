@@ -1,0 +1,434 @@
+/* Pick & Place panel. Co-located styles; uses theme CSS variables only. */
+
+.pp-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+}
+
+/* The only scroll container. Vertical only — never horizontal. It is also a
+   size-query container so the op table can reflow based on the PANEL width
+   (not the window) — the panel is often a narrow docked column on a wide
+   screen, where a window media query would never fire. */
+.pp-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  container-type: inline-size;
+  container-name: ppscroll;
+}
+
+.pp-intro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+.pp-intro b {
+  color: var(--fg);
+}
+
+/* --- bordered card sections --- */
+.pp-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pp-card > h3 {
+  margin: 0;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+.pp-card-body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Subtle accent edge marks the primary action card. */
+.pp-send-card {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/* --- generic inline rows --- */
+.pp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.pp-row button {
+  min-height: 36px;
+}
+.pp-spacer {
+  flex: 1 1 auto;
+}
+.pp-meta {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-meta b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- head-type selector --- */
+.pp-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.pp-head select {
+  min-height: 36px;
+}
+
+/* --- fluid field grid; collapses to one column when narrow --- */
+.pp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+  gap: 8px 12px;
+}
+.pp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  min-width: 0;
+}
+.pp-field input,
+.pp-field select {
+  min-height: 36px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* --- checkbox row --- */
+.pp-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.pp-check input {
+  width: auto;
+  min-height: 20px;
+  min-width: 20px;
+}
+
+/* --- op table --- */
+.pp-table-wrap {
+  overflow-x: hidden;
+}
+.pp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  table-layout: fixed;
+}
+.pp-table th {
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  text-align: left;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.pp-table td {
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.pp-table tr.pp-row-selected td {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.pp-idx {
+  width: 26px;
+  text-align: right;
+  color: var(--fg-muted);
+}
+.pp-table input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  box-sizing: border-box;
+}
+.pp-empty {
+  padding: 16px 8px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.pp-actions-col {
+  width: 92px;
+}
+.pp-actions {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+  justify-content: flex-end;
+}
+.pp-actions button {
+  min-width: 28px;
+  min-height: 36px;
+  padding: 2px 4px;
+}
+.pp-actions .pp-del:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.pp-actions .pp-del:not(:disabled):hover {
+  background: var(--danger);
+  color: var(--bg);
+}
+
+.pp-op-tools {
+  margin-top: 2px;
+}
+
+/* --- 2D bed preview --- */
+.pp-preview2d-body {
+  padding: 8px;
+}
+.pp-preview2d {
+  width: 100%;
+  height: 160px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.pp-bed {
+  fill: transparent;
+  stroke: var(--border);
+  stroke-width: 0.6;
+}
+.pp-grid {
+  stroke: var(--border);
+  stroke-width: 0.3;
+  opacity: 0.5;
+}
+.pp-origin {
+  fill: var(--accent);
+}
+.pp-move {
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke;
+}
+.pp-arrow-head {
+  fill: var(--fg-muted);
+}
+.pp-pick {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+.pp-place {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.pp-op {
+  cursor: pointer;
+}
+.pp-op-sel .pp-pick,
+.pp-op-sel .pp-place {
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+.pp-op-sel .pp-move {
+  stroke: var(--fg);
+}
+
+/* --- advanced collapsible --- */
+.pp-collapsible > h3 {
+  padding: 0;
+  border-bottom: none;
+}
+.pp-collapsible.is-open > h3 {
+  border-bottom: 1px solid var(--border);
+}
+.pp-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.pp-toggle:hover {
+  color: var(--fg);
+}
+.pp-toggle .pp-toggle-note {
+  margin-left: auto;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.pp-rot-table {
+  max-width: 220px;
+}
+
+/* --- hint --- */
+.pp-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+.pp-hint b {
+  color: var(--fg);
+}
+
+/* --- generate / send --- */
+.pp-generate {
+  gap: 8px;
+}
+.pp-play {
+  flex: 1 1 auto;
+  min-height: 40px;
+  font-weight: 600;
+}
+
+/* --- raw G-code (collapsible) --- */
+.pp-raw-toggle {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.pp-raw-toggle:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.pp-preview {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  white-space: pre;
+}
+
+/* --- narrow panel: reflow the op table into stacked label/value rows ---
+   Container query on .pp-scroll so this fires whenever the PANEL is narrow
+   (docked column or mobile), independent of the window width. --- */
+@container ppscroll (max-width: 400px) {
+  .pp-table,
+  .pp-table thead,
+  .pp-table tbody,
+  .pp-table tr,
+  .pp-table td {
+    display: block;
+    width: 100%;
+  }
+  .pp-table {
+    table-layout: auto;
+  }
+  /* hide the header row; each cell carries its own label instead */
+  .pp-table thead {
+    display: none;
+  }
+  .pp-table tr {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    padding: 4px 6px;
+    background: var(--bg-elev);
+  }
+  .pp-table tr.pp-row-selected {
+    border-color: var(--accent);
+  }
+  .pp-table tr.pp-row-selected td {
+    background: transparent;
+  }
+  .pp-table td {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: none;
+    padding: 3px 0;
+  }
+  .pp-table td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 64px;
+    font-size: 11px;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .pp-idx {
+    width: 100%;
+    text-align: left;
+    font-size: 11px;
+  }
+  .pp-idx::before {
+    content: 'Op ';
+  }
+  .pp-actions {
+    justify-content: flex-start;
+    padding-top: 4px;
+  }
+  .pp-actions button {
+    flex: 1 1 auto;
+    min-height: 40px;
+  }
+  .pp-rot-table {
+    max-width: none;
+  }
+  .pp-play,
+  .pp-raw-toggle {
+    min-height: 44px;
+  }
+}

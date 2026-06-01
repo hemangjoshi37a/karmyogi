@@ -1,0 +1,17 @@
+{
+  "name": "karmyogi — GRBL CAD/CAM workbench",
+  "short_name": "karmyogi",
+  "description": "Browser-based control + CAD/CAM workbench for 3-axis GRBL machines",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1d21",
+  "theme_color": "#0e7c66",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

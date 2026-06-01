@@ -1,0 +1,312 @@
+/* W8 Writing / Pen-plotter panel. Theme CSS vars only — no global edits. */
+
+.wr-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--fg);
+  background: var(--bg-panel);
+}
+
+/* The only scroll container. Vertical only — never horizontal.
+   This panel is usually a narrow docked column on a WIDE window, so window
+   media queries never fire. Drive all layout reflow off the panel's OWN width
+   via container queries (see @container writingpanel below). */
+.wr-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  container-type: inline-size;
+  container-name: writingpanel;
+}
+
+.wr-intro {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+/* --- bordered card sections --- */
+.wr-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.wr-card > h3 {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+.wr-card-body {
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* Card that should expand to fill remaining height (raw G-code when open). */
+.wr-grow {
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+.wr-grow .wr-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Fluid two-column field grid; auto-collapses to one column when the column
+   is too narrow for two ≥130px fields. minmax(min(100%,…)) keeps it from ever
+   overflowing horizontally even at ~270px. */
+.wr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+  gap: 7px 10px;
+}
+
+.wr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  min-width: 0;
+}
+.wr-field > span:first-child {
+  color: var(--fg-muted);
+}
+
+/* number input + unit suffix */
+.wr-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wr-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  min-height: 36px;
+}
+.wr-input em {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.wr-field select,
+.wr-field input {
+  min-height: 36px;
+  min-width: 0;
+  width: 100%;
+}
+
+.wr-text {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 76px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.wr-font-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.wr-font-name {
+  font-size: 12px;
+  color: var(--fg-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wr-font-name strong {
+  color: var(--fg);
+}
+/* hidden native file input — triggered via the styled button */
+.wr-file {
+  display: none;
+}
+
+.wr-btn {
+  min-height: 36px;
+  padding: 6px 14px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.wr-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.wr-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.wr-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.wr-btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.wr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.wr-play {
+  flex: 1 1 auto;
+  min-width: 140px;
+  font-weight: 600;
+}
+.wr-regen {
+  flex: 0 0 auto;
+  min-width: 40px;
+  padding: 6px 10px;
+}
+
+/* collapsible toggle (Advanced + Raw G-code) */
+.wr-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.wr-toggle:hover {
+  color: var(--fg);
+}
+.wr-toggle .wr-caret {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+.wr-toggle .wr-toggle-note {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Advanced/raw card collapses to just the toggle header */
+.wr-collapsible > h3 {
+  padding: 0;
+  border-bottom: none;
+}
+.wr-collapsible.is-open > h3 {
+  border-bottom: 1px solid var(--border);
+}
+
+.wr-info {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+.wr-warn {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warn);
+}
+
+.wr-preview {
+  width: 100%;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 120px;
+  resize: vertical;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+
+/* ---- narrow docked column (≤300px panel width): force a single field column
+   and let the Send button + font-row buttons span the full width so nothing is
+   squeezed. Driven by the PANEL's OWN width (container query), so it fires when
+   docked narrow on a wide window — not just at phone viewport widths. */
+@container writingpanel (max-width: 300px) {
+  .wr-grid {
+    grid-template-columns: 1fr;
+  }
+  .wr-play {
+    min-width: 100%;
+  }
+  .wr-font-row .wr-btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* ---- mobile / touch (≤480px panel width): bigger tap targets. Also a
+   container query — measures the panel, not the window. */
+@container writingpanel (max-width: 480px) {
+  .wr-btn,
+  .wr-input input,
+  .wr-field select,
+  .wr-field input,
+  .wr-toggle {
+    min-height: 40px;
+  }
+}
+
+/* Fallback for browsers without container-query support: key off the window so
+   phone-width viewports still get the single-column + touch-friendly sizing. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 768px) {
+    .wr-grid {
+      grid-template-columns: 1fr;
+    }
+    .wr-play {
+      min-width: 100%;
+    }
+    .wr-btn,
+    .wr-input input,
+    .wr-field select,
+    .wr-field input,
+    .wr-toggle {
+      min-height: 40px;
+    }
+  }
+}
