@@ -229,8 +229,9 @@ the real browser with Playwright → screenshot → judge → iterate. There are
 
 ## 📣 Featured / Story
 
-Read the story behind karmyogi and follow along on
-**[LinkedIn → hemangjoshi37a](https://www.linkedin.com/in/hemangjoshi37a/)**.
+Read the launch story — **[_I rebuilt my desktop CNC software in the browser — meet karmyogi_](https://www.linkedin.com/pulse/i-rebuilt-my-desktop-cnc-software-browser-meet-karmyogi-hemang-joshi-ceuif/)** on LinkedIn.
+
+[![Read the launch story on LinkedIn](https://img.shields.io/badge/Read_the_story-on_LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/pulse/i-rebuilt-my-desktop-cnc-software-browser-meet-karmyogi-hemang-joshi-ceuif/)
 
 ---
 
