@@ -37,6 +37,71 @@ const intNum = (v: string, fallback: number): number => {
 }
 
 /**
+ * A slim square icon button for the header toolbar. Its `title`/`body` are
+ * combined into a native hover tooltip explainer (one that never intercepts the
+ * action click), keeping the toolbar compact while every button stays
+ * self-documenting.
+ */
+function ToolButton(props: {
+  glyph: string
+  title: string
+  body: string
+  onClick: () => void
+  className?: string
+  disabled?: boolean
+  ariaExpanded?: boolean
+}) {
+  const { glyph, title, body, onClick, className = '', disabled, ariaExpanded } = props
+  return (
+    <button
+      type="button"
+      className={`sp-ico${className ? ' ' + className : ''}`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={title}
+      aria-expanded={ariaExpanded}
+      title={`${title} — ${body}`}
+    >
+      <span aria-hidden="true">{glyph}</span>
+    </button>
+  )
+}
+
+/** A slim number field with an inline unit suffix, matching the dense theme. */
+function NumField(props: {
+  label: string
+  value: number
+  unit?: string
+  step?: string
+  min?: string
+  max?: string
+  onChange: (n: number) => void
+  parse?: (v: string, fallback: number) => number
+  info?: { title: string; body: string }
+}) {
+  const { label, value, unit, step = '0.1', min, max, onChange, parse = num, info } = props
+  return (
+    <label className="sp-field">
+      <span className="sp-field-label">
+        {label}
+        {info && <InfoTip topic="solderField" title={info.title} body={info.body} />}
+      </span>
+      <span className={`sp-input${unit ? ' has-unit' : ''}`}>
+        <input
+          type="number"
+          step={step}
+          min={min}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(parse(e.target.value, value))}
+        />
+        {unit && <i>{unit}</i>}
+      </span>
+    </label>
+  )
+}
+
+/**
  * Auto-soldering panel (W9). An editable table of soldering points drives the
  * pure `generateSoldering` core, which emits a safe program where the spindle
  * output is repurposed as a solder-wire feeder (M3/G4/M5). "Record position"
@@ -140,7 +205,7 @@ export function SolderingPanel() {
       {/* Slim header: title + live line-count badge + icon toolbar. */}
       <header className="sp-head">
         <div className="sp-head-title">
-          {t('solder.title', 'Auto-solder')}
+          <span className="sp-head-name">{t('solder.title', 'Auto-solder')}</span>
           <InfoTip
             topic="solderMode"
             title={t('solder.title', 'Auto-solder')}
@@ -150,69 +215,60 @@ export function SolderingPanel() {
             )}
           />
         </div>
-        <span className="sp-badge" title={t('solder.live.title', 'Lines auto-synced to the Program tab')}>
-          <b>{lineCount}</b> {t('solder.live.lines', 'lines')} → {t('solder.live.program', 'Program')}
-        </span>
         <div className="sp-tools">
-          <button
-            className="sp-ico primary"
+          <ToolButton
+            className="sp-ico-primary"
+            glyph="+"
             onClick={addRow}
-            aria-label={t('solder.toolbar.add', 'Add point')}
-          >
-            <span aria-hidden="true">+</span>
-            <InfoTip
-              topic="solderAdd"
-              title={t('solder.toolbar.add', 'Add point')}
-              body={t('solder.toolbar.add.body', 'Append a soldering point prefilled from the defaults in Settings.')}
-            />
-          </button>
-          <button
-            className="sp-ico"
+            title={t('solder.toolbar.add', 'Add point')}
+            body={t('solder.toolbar.add.body', 'Append a soldering point prefilled from the defaults in Settings.')}
+          />
+          <ToolButton
+            glyph="⌖"
             onClick={recordPosition}
             disabled={!connected}
-            aria-label={t('solder.toolbar.record', 'Record position')}
-          >
-            <span aria-hidden="true">⌖</span>
-            <InfoTip
-              topic="solderRecord"
-              title={t('solder.toolbar.record', 'Record position')}
-              body={
-                connected
-                  ? selected >= 0
-                    ? t('solder.toolbar.record.body.fill', 'Fills the selected row X/Y from the live machine position.')
-                    : t('solder.toolbar.record.body.append', 'Appends a point at the current machine position.')
-                  : t('solder.toolbar.record.body.connect', 'Connect to a machine to capture its live position.')
-              }
-            />
-          </button>
-          <button
-            className="sp-ico"
+            title={t('solder.toolbar.record', 'Record position')}
+            body={
+              connected
+                ? selected >= 0
+                  ? t('solder.toolbar.record.body.fill', 'Fills the selected row X/Y from the live machine position.')
+                  : t('solder.toolbar.record.body.append', 'Appends a point at the current machine position.')
+                : t('solder.toolbar.record.body.connect', 'Connect to a machine to capture its live position.')
+            }
+          />
+          <ToolButton
+            className="sp-ico-danger"
+            glyph="🗑"
             onClick={() => setPoints([])}
             disabled={points.length === 0}
-            aria-label={t('solder.toolbar.clear', 'Clear all')}
-          >
-            <span aria-hidden="true">🗑</span>
-            <InfoTip
-              topic="solderClear"
-              title={t('solder.toolbar.clear', 'Clear all')}
-              body={t('solder.toolbar.clear.body', 'Remove every soldering point and start over.')}
-            />
-          </button>
-          <button
-            className={`sp-ico${showSettings ? ' is-active' : ''}`}
+            title={t('solder.toolbar.clear', 'Clear all')}
+            body={t('solder.toolbar.clear.body', 'Remove every soldering point and start over.')}
+          />
+          <span className="sp-tools-sep" aria-hidden="true" />
+          <ToolButton
+            className={showSettings ? 'is-active' : ''}
+            glyph="⚙"
             onClick={() => setShowSettings((v) => !v)}
-            aria-expanded={showSettings}
-            aria-label={t('solder.toolbar.settings', 'Settings')}
-          >
-            <span aria-hidden="true">⚙</span>
-            <InfoTip
-              topic="solderSettings"
-              title={t('solder.toolbar.settings', 'Settings')}
-              body={t('solder.toolbar.settings.body', 'New-point defaults plus feeder and motion parameters (Safe-Z, feeder S, plunge feed, dwell).')}
-            />
-          </button>
+            ariaExpanded={showSettings}
+            title={t('solder.toolbar.settings', 'Settings')}
+            body={t('solder.toolbar.settings.body', 'New-point defaults plus feeder and motion parameters (Safe-Z, feeder S, plunge feed, dwell).')}
+          />
         </div>
       </header>
+
+      {/* Live status strip: point + line counts, auto-synced to the Program tab. */}
+      <div className="sp-status">
+        <span className="sp-status-pill">
+          <b>{points.length}</b> {t('solder.status.points', 'points')}
+        </span>
+        <span className="sp-status-sep" aria-hidden="true">·</span>
+        <span className="sp-status-pill">
+          <b>{lineCount}</b> {t('solder.status.lines', 'G-code lines')}
+        </span>
+        <span className="sp-status-sync" title={t('solder.live.title', 'Lines auto-synced to the Program tab')}>
+          → {t('solder.status.program', 'Program')}
+        </span>
+      </div>
 
       {!connected && points.length > 0 && (
         <p className="sp-warn">
@@ -220,60 +276,59 @@ export function SolderingPanel() {
         </p>
       )}
 
-      {/* Collapsible Settings: new-point defaults + feeder/motion, dense grid. */}
+      {/* Collapsible Settings: new-point defaults + feeder/motion, dense cards. */}
       {showSettings && (
         <section className="sp-settings">
-          <div className="sp-group">
-            <span className="sp-group-label">
-              {t('solder.defaults.title', 'New-point defaults')}
+          <div className="sp-card">
+            <div className="sp-card-head">
+              <h4>{t('solder.defaults.title', 'New-point defaults')}</h4>
               <InfoTip
                 topic="solderDefaults"
                 title={t('solder.defaults.title', 'New-point defaults')}
                 body={t('solder.defaults.body', 'Values used to prefill each newly added point. Free-Z is the travel height; Touch-Z is where the tip touches down.')}
               />
-            </span>
+            </div>
             <div className="sp-fields">
-              <label>
-                {t('solder.field.freeZ', 'Free-Z')}
-                <span className="sp-input">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={defaults.freeZ}
-                    onChange={(e) => setDefaults((d) => ({ ...d, freeZ: num(e.target.value, d.freeZ) }))}
+              <NumField
+                label={t('solder.field.freeZ', 'Free-Z')}
+                unit="mm"
+                value={defaults.freeZ}
+                onChange={(n) => setDefaults((d) => ({ ...d, freeZ: n }))}
+                info={{
+                  title: t('solder.field.freeZ', 'Free-Z'),
+                  body: t('solder.field.freeZ.body', 'Travel height the tip lifts to between points.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.touchZ', 'Touch-Z')}
+                unit="mm"
+                value={defaults.touchZ}
+                onChange={(n) => setDefaults((d) => ({ ...d, touchZ: n }))}
+                info={{
+                  title: t('solder.field.touchZ', 'Touch-Z'),
+                  body: t('solder.field.touchZ.body', 'Depth the tip touches down to at each point.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.feed', 'Feed')}
+                unit="s"
+                min="0"
+                value={defaults.feedSeconds}
+                onChange={(n) => setDefaults((d) => ({ ...d, feedSeconds: n }))}
+                info={{
+                  title: t('solder.field.feed', 'Feed'),
+                  body: t('solder.field.feed.body', 'How long the wire feeder runs at each point (seconds).'),
+                }}
+              />
+              <label className="sp-field">
+                <span className="sp-field-label">
+                  {t('solder.field.feedType', 'Feed type')}
+                  <InfoTip
+                    topic="solderFeedType"
+                    title={t('solder.field.feedType', 'Feed type')}
+                    body={t('solder.field.feedType.body', 'Pre-solder feeds wire before touch-down; touch-down feeds while the tip is down.')}
                   />
-                  <i>mm</i>
                 </span>
-              </label>
-              <label>
-                {t('solder.field.touchZ', 'Touch-Z')}
-                <span className="sp-input">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={defaults.touchZ}
-                    onChange={(e) => setDefaults((d) => ({ ...d, touchZ: num(e.target.value, d.touchZ) }))}
-                  />
-                  <i>mm</i>
-                </span>
-              </label>
-              <label>
-                {t('solder.field.feed', 'Feed')}
-                <span className="sp-input">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={defaults.feedSeconds}
-                    onChange={(e) =>
-                      setDefaults((d) => ({ ...d, feedSeconds: num(e.target.value, d.feedSeconds) }))
-                    }
-                  />
-                  <i>s</i>
-                </span>
-              </label>
-              <label>
-                {t('solder.field.feedType', 'Feed type')}
                 <select
                   value={defaults.type}
                   onChange={(e) => setDefaults((d) => ({ ...d, type: e.target.value as SolderFeedType }))}
@@ -285,229 +340,225 @@ export function SolderingPanel() {
             </div>
           </div>
 
-          <div className="sp-group">
-            <span className="sp-group-label">
-              {t('solder.feeder.title', 'Feeder & motion')}
+          <div className="sp-card">
+            <div className="sp-card-head">
+              <h4>{t('solder.feeder.title', 'Feeder & motion')}</h4>
               <InfoTip
                 topic="solderFeeder"
                 title={t('solder.feeder.title', 'Feeder & motion')}
                 body={t('solder.feeder.body', 'Safe-Z retract height, feeder spindle speed (S), plunge feed rate, and the settle dwell after each touch-down.')}
               />
-            </span>
+            </div>
             <div className="sp-fields">
-              <label>
-                {t('solder.field.safeZ', 'Safe-Z')}
-                <span className="sp-input">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={params.safeZ}
-                    onChange={(e) => setParams((p) => ({ ...p, safeZ: num(e.target.value, p.safeZ) }))}
-                  />
-                  <i>mm</i>
-                </span>
-              </label>
-              <label>
-                {t('solder.field.feederS', 'Feeder')}
-                <span className="sp-input">
-                  <input
-                    type="number"
-                    step="100"
-                    min="0"
-                    value={params.feederRPM}
-                    onChange={(e) => setParams((p) => ({ ...p, feederRPM: num(e.target.value, p.feederRPM) }))}
-                  />
-                  <i>S</i>
-                </span>
-              </label>
-              <label>
-                {t('solder.field.plungeF', 'Plunge')}
-                <span className="sp-input">
-                  <input
-                    type="number"
-                    step="10"
-                    min="0"
-                    value={params.plungeFeed}
-                    onChange={(e) =>
-                      setParams((p) => ({ ...p, plungeFeed: num(e.target.value, p.plungeFeed) }))
-                    }
-                  />
-                  <i>mm/min</i>
-                </span>
-              </label>
-              <label>
-                {t('solder.field.settle', 'Settle')}
-                <span className="sp-input">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={params.settleSeconds}
-                    onChange={(e) =>
-                      setParams((p) => ({ ...p, settleSeconds: num(e.target.value, p.settleSeconds) }))
-                    }
-                  />
-                  <i>s</i>
-                </span>
-              </label>
-              <label>
-                {t('solder.field.decimals', 'Decimals')}
-                <span className="sp-input">
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    max="6"
-                    value={params.decimals}
-                    onChange={(e) =>
-                      setParams((p) => ({ ...p, decimals: intNum(e.target.value, p.decimals) }))
-                    }
-                  />
-                </span>
-              </label>
+              <NumField
+                label={t('solder.field.safeZ', 'Safe-Z')}
+                unit="mm"
+                value={params.safeZ}
+                onChange={(n) => setParams((p) => ({ ...p, safeZ: n }))}
+                info={{
+                  title: t('solder.field.safeZ', 'Safe-Z'),
+                  body: t('solder.field.safeZ.body', 'Guaranteed retract height before any XY travel and at program end.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.feederS', 'Feeder')}
+                unit="S"
+                step="100"
+                min="0"
+                value={params.feederRPM}
+                onChange={(n) => setParams((p) => ({ ...p, feederRPM: n }))}
+                info={{
+                  title: t('solder.field.feederS', 'Feeder'),
+                  body: t('solder.field.feederS.body', 'Spindle speed word (S) that drives the solder-wire feeder.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.plungeF', 'Plunge')}
+                unit="mm/min"
+                step="10"
+                min="0"
+                value={params.plungeFeed}
+                onChange={(n) => setParams((p) => ({ ...p, plungeFeed: n }))}
+                info={{
+                  title: t('solder.field.plungeF', 'Plunge'),
+                  body: t('solder.field.plungeF.body', 'Feed rate used to lower the tip from Free-Z to Touch-Z.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.settle', 'Settle')}
+                unit="s"
+                min="0"
+                value={params.settleSeconds}
+                onChange={(n) => setParams((p) => ({ ...p, settleSeconds: n }))}
+                info={{
+                  title: t('solder.field.settle', 'Settle'),
+                  body: t('solder.field.settle.body', 'Dwell after each touch-down so the joint settles before lifting.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.decimals', 'Decimals')}
+                step="1"
+                min="0"
+                max="6"
+                value={params.decimals}
+                parse={intNum}
+                onChange={(n) => setParams((p) => ({ ...p, decimals: n }))}
+                info={{
+                  title: t('solder.field.decimals', 'Decimals'),
+                  body: t('solder.field.decimals.body', 'Number of decimal places in the emitted coordinates.'),
+                }}
+              />
             </div>
           </div>
         </section>
       )}
 
       {/* Points — compact editable table (reflows to stacked cards when narrow). */}
-      <div className="sp-table-wrap">
-        <table className="sp-table">
-          <thead>
-            <tr>
-              <th className="sp-idx">#</th>
-              <th>X</th>
-              <th>Y</th>
-              <th>{t('solder.table.freeZ', 'Free-Z')}</th>
-              <th>{t('solder.table.touchZ', 'Touch-Z')}</th>
-              <th>{t('solder.table.feedType', 'Type')}</th>
-              <th>{t('solder.table.feedS', 'Feed s')}</th>
-              <th className="sp-actions-col" />
-            </tr>
-          </thead>
-          <tbody>
-            {points.length === 0 && (
+      <div className="sp-card sp-points">
+        <div className="sp-card-head">
+          <h4>{t('solder.points.title', 'Solder points')}</h4>
+          <span className="sp-card-count">{points.length}</span>
+        </div>
+        <div className="sp-table-wrap">
+          <table className="sp-table">
+            <thead>
               <tr>
-                <td colSpan={8} className="sp-empty">
-                  {t(
-                    'solder.table.empty',
-                    'No points yet. Press + to add one, or ⌖ to record the machine position.',
-                  )}
-                </td>
+                <th className="sp-idx">#</th>
+                <th>X</th>
+                <th>Y</th>
+                <th>{t('solder.table.freeZ', 'Free-Z')}</th>
+                <th>{t('solder.table.touchZ', 'Touch-Z')}</th>
+                <th>{t('solder.table.feedType', 'Type')}</th>
+                <th>{t('solder.table.feedS', 'Feed s')}</th>
+                <th className="sp-actions-col" aria-label={t('solder.table.actions', 'Actions')} />
               </tr>
-            )}
-            {points.map((pt, i) => (
-              <tr
-                key={i}
-                className={i === selected ? 'sp-row-selected' : undefined}
-                onClick={() => setSelected(i)}
-              >
-                <td className="sp-idx">{i + 1}</td>
-                <td data-label="X">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={pt.x}
-                    onChange={(e) => updatePoint(i, { x: num(e.target.value, pt.x) })}
-                  />
-                </td>
-                <td data-label="Y">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={pt.y}
-                    onChange={(e) => updatePoint(i, { y: num(e.target.value, pt.y) })}
-                  />
-                </td>
-                <td data-label={t('solder.table.freeZ', 'Free-Z')}>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={pt.freeZ}
-                    onChange={(e) => updatePoint(i, { freeZ: num(e.target.value, pt.freeZ) })}
-                  />
-                </td>
-                <td data-label={t('solder.table.touchZ', 'Touch-Z')}>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={pt.touchZ}
-                    onChange={(e) => updatePoint(i, { touchZ: num(e.target.value, pt.touchZ) })}
-                  />
-                </td>
-                <td data-label={t('solder.table.feedType', 'Type')}>
-                  <select
-                    value={pt.type}
-                    onChange={(e) => updatePoint(i, { type: e.target.value as SolderFeedType })}
-                  >
-                    <option value={SolderFeedType.PreSolder}>{t('solder.feedType.preSolder', 'pre-solder')}</option>
-                    <option value={SolderFeedType.TouchDown}>{t('solder.feedType.touchDown', 'touch-down')}</option>
-                  </select>
-                </td>
-                <td data-label={t('solder.table.feedS', 'Feed s')}>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={pt.feedSeconds}
-                    onChange={(e) =>
-                      updatePoint(i, { feedSeconds: num(e.target.value, pt.feedSeconds) })
-                    }
-                  />
-                </td>
-                <td className="sp-actions">
-                  <button
-                    className="sp-row-ico"
-                    title={t('solder.row.moveUp', 'Move up')}
-                    aria-label={t('solder.row.moveUp', 'Move up')}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      moveRow(i, -1)
-                    }}
-                    disabled={i === 0}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    className="sp-row-ico"
-                    title={t('solder.row.moveDown', 'Move down')}
-                    aria-label={t('solder.row.moveDown', 'Move down')}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      moveRow(i, 1)
-                    }}
-                    disabled={i === points.length - 1}
-                  >
-                    ↓
-                  </button>
-                  <button
-                    className="sp-row-ico sp-del"
-                    title={t('solder.row.delete', 'Delete point')}
-                    aria-label={t('solder.row.delete', 'Delete point')}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      deleteRow(i)
-                    }}
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {points.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="sp-empty">
+                    {t(
+                      'solder.table.empty',
+                      'No points yet. Press + to add one, or ⌖ to record the machine position.',
+                    )}
+                  </td>
+                </tr>
+              )}
+              {points.map((pt, i) => (
+                <tr
+                  key={i}
+                  className={i === selected ? 'sp-row-selected' : undefined}
+                  onClick={() => setSelected(i)}
+                >
+                  <td className="sp-idx">{i + 1}</td>
+                  <td data-label="X">
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={pt.x}
+                      onChange={(e) => updatePoint(i, { x: num(e.target.value, pt.x) })}
+                    />
+                  </td>
+                  <td data-label="Y">
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={pt.y}
+                      onChange={(e) => updatePoint(i, { y: num(e.target.value, pt.y) })}
+                    />
+                  </td>
+                  <td data-label={t('solder.table.freeZ', 'Free-Z')}>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={pt.freeZ}
+                      onChange={(e) => updatePoint(i, { freeZ: num(e.target.value, pt.freeZ) })}
+                    />
+                  </td>
+                  <td data-label={t('solder.table.touchZ', 'Touch-Z')}>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={pt.touchZ}
+                      onChange={(e) => updatePoint(i, { touchZ: num(e.target.value, pt.touchZ) })}
+                    />
+                  </td>
+                  <td data-label={t('solder.table.feedType', 'Type')}>
+                    <select
+                      value={pt.type}
+                      onChange={(e) => updatePoint(i, { type: e.target.value as SolderFeedType })}
+                    >
+                      <option value={SolderFeedType.PreSolder}>{t('solder.feedType.preSolder', 'pre-solder')}</option>
+                      <option value={SolderFeedType.TouchDown}>{t('solder.feedType.touchDown', 'touch-down')}</option>
+                    </select>
+                  </td>
+                  <td data-label={t('solder.table.feedS', 'Feed s')}>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={pt.feedSeconds}
+                      onChange={(e) =>
+                        updatePoint(i, { feedSeconds: num(e.target.value, pt.feedSeconds) })
+                      }
+                    />
+                  </td>
+                  <td className="sp-actions">
+                    <button
+                      className="sp-row-ico"
+                      title={t('solder.row.moveUp', 'Move up')}
+                      aria-label={t('solder.row.moveUp', 'Move up')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        moveRow(i, -1)
+                      }}
+                      disabled={i === 0}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      className="sp-row-ico"
+                      title={t('solder.row.moveDown', 'Move down')}
+                      aria-label={t('solder.row.moveDown', 'Move down')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        moveRow(i, 1)
+                      }}
+                      disabled={i === points.length - 1}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      className="sp-row-ico sp-del"
+                      title={t('solder.row.delete', 'Delete point')}
+                      aria-label={t('solder.row.delete', 'Delete point')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteRow(i)
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Raw G-code (collapsible, slim). */}
-      <button
-        className="sp-raw-toggle"
-        onClick={() => setShowRaw((v) => !v)}
-        aria-expanded={showRaw}
-      >
-        {showRaw ? '▾' : '▸'}{' '}
-        {t('solder.raw', 'Raw G-code ({count} lines)', { count: lineCount })}
-      </button>
-      {showRaw && <pre className="sp-preview">{gcode}</pre>}
+      <div className="sp-raw">
+        <button
+          className="sp-raw-toggle"
+          onClick={() => setShowRaw((v) => !v)}
+          aria-expanded={showRaw}
+        >
+          <span className="sp-raw-caret" aria-hidden="true">{showRaw ? '▾' : '▸'}</span>
+          {t('solder.raw', 'Raw G-code ({count} lines)', { count: lineCount })}
+        </button>
+        {showRaw && <pre className="sp-preview">{gcode}</pre>}
+      </div>
     </div>
   )
 }

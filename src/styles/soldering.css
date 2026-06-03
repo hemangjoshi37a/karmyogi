@@ -1,14 +1,17 @@
 /* Auto-soldering panel (W9). Co-located styles; uses theme CSS variables only.
-   Card-based layout matching the Controller / CAD-CAM panels: the panel is a
-   vertical-only scroller of bordered card sections; field rows pair label +
-   input cleanly in a fluid grid; tables scroll/reflow inside their card. */
+   Dense, card-based layout matching the Controller / CAD-CAM panels:
+   - a slim header (title + icon toolbar) and a live status strip,
+   - collapsible Settings of bordered cards with label/input field grids,
+   - a compact, fixed-layout point table that reflows to stacked cards when the
+     PANEL (not the window) is narrow,
+   - a collapsible raw-G-code block.
+   The whole panel is the only scroll container — vertical only, never sideways. */
 
 .sp-panel {
   height: 100%;
   min-height: 0;
   background: var(--bg-panel);
   color: var(--fg);
-  /* The only scroll container — vertical only, never horizontal. */
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px;
@@ -22,21 +25,137 @@
   container-name: solderpanel;
 }
 
-/* --- one-line intro --- */
-.sp-intro {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--fg-muted);
+/* ───────────────────────── header ───────────────────────── */
+.sp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
 }
-.sp-intro b {
-  color: var(--fg);
+.sp-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.sp-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* --- bordered card sections --- */
-.sp-card {
+/* icon toolbar pinned to the right of the header */
+.sp-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.sp-tools-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+/* square icon buttons — slim but touch-sized */
+.sp-ico {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--fg);
+  background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.sp-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sp-ico:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.sp-ico.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
+}
+.sp-ico-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-size: 18px;
+  font-weight: 600;
+}
+.sp-ico-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 85%, #fff);
+  color: var(--accent-fg);
+}
+.sp-ico-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+/* ───────────────────────── status strip ───────────────────────── */
+.sp-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.sp-status-pill b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.sp-status-sep {
+  color: var(--border);
+}
+.sp-status-sync {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sp-warn {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+/* ───────────────────────── cards ───────────────────────── */
+.sp-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sp-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--bg);
   display: flex;
   flex-direction: column;
@@ -45,8 +164,8 @@
 .sp-card-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
+  gap: 6px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
 .sp-card-head h4 {
@@ -55,239 +174,269 @@
   font-weight: 600;
   color: var(--fg-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
 }
-.sp-card-head .sp-meta {
+.sp-card-count {
   margin-left: auto;
-}
-
-/* the Send card reads as the primary action — subtle accent edge. It has no
-   header, so it carries its own padding and lays its controls out in a row. */
-.sp-card-send {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-}
-
-/* --- meta text --- */
-.sp-meta {
+  min-width: 18px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
   color: var(--fg-muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-.sp-meta b {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-.sp-warn {
-  flex-basis: 100%;
-  color: var(--warn);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
 }
 
-/* --- toolbar (points actions) --- */
-.sp-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 8px 0;
-}
-.sp-toolbar button {
-  min-height: 36px;
-  min-width: 60px;
-}
-
-/* --- fluid field grid; collapses to one column when narrow --- */
+/* ───────────────────────── field grids ───────────────────────── */
 .sp-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
-  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 116px), 1fr));
+  gap: 8px 10px;
   padding: 8px;
 }
-.sp-fields label {
+.sp-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 11px;
-  color: var(--fg-muted);
+  gap: 4px;
   min-width: 0;
 }
-.sp-fields input,
-.sp-fields select {
-  min-height: 36px;
-  width: 100%;
-  box-sizing: border-box;
-}
-/* advanced block sits below the toggle, inside the same card */
-.sp-fields.sp-adv {
-  padding-top: 0;
+.sp-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
 }
 
-/* --- point table --- */
+/* slim input with optional inline unit suffix */
+.sp-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.sp-input input {
+  width: 100%;
+  height: 30px;
+  padding: 0 7px;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.sp-input.has-unit input {
+  /* leave room for the unit suffix so digits never overlap it */
+  padding-right: 38px;
+}
+.sp-input input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.sp-input i {
+  position: absolute;
+  right: 7px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+.sp-field select {
+  width: 100%;
+  height: 30px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.sp-field select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ───────────────────────── point table ───────────────────────── */
+.sp-points {
+  /* let the table card grow to fill remaining height; its body scrolls inside */
+  flex: 1 1 auto;
+  min-height: 140px;
+}
 .sp-table-wrap {
-  padding: 8px;
-  /* Never scroll sideways: the wide-panel table is table-layout:fixed and the
-     narrow-panel view reflows to stacked cards (see @container below). */
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow-y: auto;
+  /* Never scroll sideways: wide-panel table is fixed-layout; narrow reflows. */
   overflow-x: hidden;
 }
 .sp-table {
   width: 100%;
-  /* Fixed layout so columns share the available width predictably and inputs
-     shrink instead of forcing horizontal overflow. */
   table-layout: fixed;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
-.sp-table th {
+.sp-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--bg-elev);
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
   text-align: left;
-  padding: 6px 3px;
+  padding: 5px 4px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .sp-table td {
-  padding: 3px 3px;
-  border-bottom: 1px solid var(--border);
+  padding: 3px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.sp-table tbody tr {
+  cursor: pointer;
+}
+.sp-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
 }
 .sp-table tr.sp-row-selected td {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .sp-idx {
-  width: 24px;
+  width: 26px;
   text-align: right;
   color: var(--fg-muted);
+  font-size: 11px;
 }
-.sp-table input,
-.sp-table select {
+.sp-table td input,
+.sp-table td select {
   width: 100%;
-  /* min-width:0 lets fixed-layout cells shrink the inputs rather than overflow. */
   min-width: 0;
-  min-height: 36px;
+  height: 28px;
+  padding: 0 4px;
   box-sizing: border-box;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.sp-table td input:focus,
+.sp-table td select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 .sp-empty {
-  padding: 18px 8px;
+  padding: 22px 12px;
   text-align: center;
   color: var(--fg-muted);
   font-size: 12px;
+  line-height: 1.5;
 }
 
+/* row action buttons */
 .sp-actions-col {
-  /* Reserve room for the three icon buttons under table-layout:fixed. */
-  width: 112px;
+  width: 96px;
 }
 .sp-actions {
   display: flex;
-  gap: 4px;
-  white-space: nowrap;
+  gap: 3px;
   justify-content: flex-end;
+  white-space: nowrap;
 }
-.sp-actions button {
-  /* Shrinkable but touch-sized; in fixed layout they share the 112px column. */
+.sp-row-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 1 1 0;
   min-width: 0;
-  width: 32px;
-  min-height: 36px;
-  padding: 2px 4px;
+  height: 28px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.sp-actions .sp-del:not(:disabled) {
+.sp-row-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sp-row-ico:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.sp-row-ico.sp-del:not(:disabled):hover {
   border-color: var(--danger);
   color: var(--danger);
-}
-.sp-actions .sp-del:not(:disabled):hover {
-  background: var(--danger);
-  color: var(--bg);
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-input));
 }
 
-/* --- hint under the table --- */
-.sp-hint {
-  margin: 0;
-  padding: 0 8px 8px;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--fg-muted);
+/* ───────────────────────── raw G-code ───────────────────────── */
+.sp-raw {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.sp-hint b {
-  color: var(--fg);
-}
-
-/* --- advanced toggle --- */
-.sp-adv-toggle {
-  align-self: flex-start;
-  margin: 0 8px 8px;
-  min-height: 32px;
-  padding: 4px 8px;
-  font-size: 11px;
-  color: var(--fg-muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  cursor: pointer;
-}
-.sp-adv-toggle:hover {
-  border-color: var(--accent);
-  color: var(--fg);
-}
-
-/* --- generate / send --- */
-.sp-play {
-  flex: 1 1 auto;
-  min-height: 40px;
-  font-weight: 600;
-}
-
-/* --- raw G-code (collapsible) --- */
 .sp-raw-toggle {
-  flex-basis: 100%;
   align-self: flex-start;
-  min-height: 32px;
-  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
   font-size: 11px;
   color: var(--fg-muted);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
 }
 .sp-raw-toggle:hover {
   border-color: var(--accent);
   color: var(--fg);
 }
+.sp-raw-caret {
+  font-size: 9px;
+  color: var(--fg-muted);
+}
 .sp-preview {
-  flex-basis: 100%;
   margin: 0;
-  padding: 6px 8px;
+  padding: 8px 10px;
   max-height: 240px;
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 6px;
   white-space: pre;
 }
 
-/* --- narrow PANEL: reflow the point table into stacked label/value cards ---
+/* ───────── narrow PANEL: reflow the point table into stacked cards ─────────
    Driven by the panel's own width (container query on .sp-panel), not the
    window width — so it fires in a narrow docked column on a wide monitor, which
-   is the panel's default home. Below ~420px the multi-column table can't fit,
+   is the panel's default home. Below ~430px the multi-column table can't fit,
    so each point becomes a bordered card of labelled rows. */
-@container solderpanel (max-width: 420px) {
-  .sp-fields label {
-    /* full-width fields in a narrow panel for comfortable touch */
-    min-width: 100%;
+@container solderpanel (max-width: 430px) {
+  .sp-fields {
+    grid-template-columns: 1fr 1fr;
   }
-  /* drop the fixed table layout so blocks can size to content when stacked */
   .sp-table {
     table-layout: auto;
   }
@@ -302,17 +451,18 @@
   .sp-table thead {
     display: none;
   }
-  .sp-table tr {
+  .sp-table tbody tr {
     border: 1px solid var(--border);
-    border-radius: 6px;
-    margin-bottom: 8px;
-    padding: 4px 6px;
+    border-radius: 8px;
+    margin: 8px;
+    padding: 6px 8px;
     background: var(--bg-elev);
   }
   .sp-table tr.sp-row-selected {
     border-color: var(--accent);
   }
-  .sp-table tr.sp-row-selected td {
+  .sp-table tr.sp-row-selected td,
+  .sp-table tbody tr:hover td {
     background: transparent;
   }
   .sp-table td {
@@ -322,9 +472,13 @@
     border-bottom: none;
     padding: 3px 0;
   }
+  .sp-table td input,
+  .sp-table td select {
+    height: 36px;
+  }
   .sp-table td[data-label]::before {
     content: attr(data-label);
-    flex: 0 0 64px;
+    flex: 0 0 70px;
     font-size: 11px;
     color: var(--fg-muted);
     text-transform: uppercase;
@@ -332,30 +486,26 @@
   }
   .sp-table td input,
   .sp-table td select {
-    /* fill the remaining card width beside the label */
     flex: 1 1 auto;
   }
   .sp-idx {
     width: 100%;
     text-align: left;
     font-size: 11px;
+    font-weight: 600;
+    color: var(--fg);
   }
   .sp-idx::before {
     content: 'Point ';
+    color: var(--fg-muted);
+    font-weight: 400;
   }
   .sp-actions {
-    justify-content: flex-start;
+    justify-content: stretch;
     padding-top: 4px;
   }
-  .sp-actions button {
-    flex: 1 1 auto;
-    width: auto;
-    min-height: 40px;
-  }
-  .sp-play,
-  .sp-raw-toggle,
-  .sp-adv-toggle {
-    min-height: 44px;
+  .sp-row-ico {
+    height: 36px;
   }
 }
 
@@ -363,8 +513,8 @@
    keep the window-width reflow so the table never overflows on phones. */
 @supports not (container-type: inline-size) {
   @media (max-width: 768px) {
-    .sp-fields label {
-      min-width: 100%;
+    .sp-fields {
+      grid-template-columns: 1fr 1fr;
     }
     .sp-table {
       table-layout: auto;
@@ -380,11 +530,11 @@
     .sp-table thead {
       display: none;
     }
-    .sp-table tr {
+    .sp-table tbody tr {
       border: 1px solid var(--border);
-      border-radius: 6px;
-      margin-bottom: 8px;
-      padding: 4px 6px;
+      border-radius: 8px;
+      margin: 8px;
+      padding: 6px 8px;
       background: var(--bg-elev);
     }
     .sp-table td {
@@ -396,7 +546,7 @@
     }
     .sp-table td[data-label]::before {
       content: attr(data-label);
-      flex: 0 0 64px;
+      flex: 0 0 70px;
       font-size: 11px;
       color: var(--fg-muted);
       text-transform: uppercase;
@@ -405,10 +555,8 @@
     .sp-idx::before {
       content: 'Point ';
     }
-    .sp-actions button {
-      flex: 1 1 auto;
-      width: auto;
-      min-height: 40px;
+    .sp-row-ico {
+      height: 36px;
     }
   }
 }
