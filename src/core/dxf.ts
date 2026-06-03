@@ -2,11 +2,20 @@
 // Ported from the Qt/C++ reference cadcam/dxfimporter.{h,cpp}.
 //
 // Reads a subset of the ASCII DXF format sufficient for 2.5D carving/engraving:
-//   LINE, CIRCLE, ARC, LWPOLYLINE (with bulges), POLYLINE/VERTEX/SEQEND.
-// TEXT/MTEXT/SPLINE/ELLIPSE are reported as warnings and skipped. The importer
-// is tolerant of unknown groups.
+//   LINE, CIRCLE, ARC, LWPOLYLINE (with bulges), POLYLINE/VERTEX/SEQEND,
+//   SPLINE (B-spline/NURBS, flattened via De Boor) and ELLIPSE (flattened).
+// TEXT/MTEXT are reported as warnings and skipped. The importer is tolerant of
+// unknown groups.
 
-import { Point, Polyline, appendBulgeArc, distance, kEpsilon } from './geometry';
+import {
+  Point,
+  Polyline,
+  appendBulgeArc,
+  distance,
+  kEpsilon,
+  makeBSpline,
+  makeEllipse,
+} from './geometry';
 import { Drawing, Entity } from './entity';
 
 interface Pair {
@@ -231,7 +240,71 @@ export function importDxfString(content: string): DxfImportResult {
 
       addPolyline(drawing, verts, bulges, closed, layer);
       i = j;
-    } else if (kw === 'TEXT' || kw === 'MTEXT' || kw === 'SPLINE' || kw === 'ELLIPSE') {
+    } else if (kw === 'SPLINE') {
+      // B-spline / NURBS. We collect degree, knots, weights, control points and
+      // (fallback) fit points, then flatten to a polyline. Group meanings:
+      //   70 flags (bit 0 = closed), 71 degree, 40 knot (repeated),
+      //   41 weight (repeated), 10/20 control point, 11/21 fit point.
+      let layer = '';
+      let degree = 3;
+      let flags = 0;
+      const knots: number[] = [];
+      const weights: number[] = [];
+      const ctrl: Point[] = [];
+      const fit: Point[] = [];
+      let cx = 0;
+      let haveCx = false;
+      let fx = 0;
+      let haveFx = false;
+      let j = i + 1;
+      for (; j < n && pairs[j].code !== 0; ++j) {
+        switch (pairs[j].code) {
+          case 8: layer = pairs[j].value; break;
+          case 70: flags = int(pairs[j].value); break;
+          case 71: degree = int(pairs[j].value); break;
+          case 40: knots.push(num(pairs[j].value)); break;
+          case 41: weights.push(num(pairs[j].value)); break;
+          case 10: cx = num(pairs[j].value); haveCx = true; break;
+          case 20: if (haveCx) { ctrl.push({ x: cx, y: num(pairs[j].value) }); haveCx = false; } break;
+          case 11: fx = num(pairs[j].value); haveFx = true; break;
+          case 21: if (haveFx) { fit.push({ x: fx, y: num(pairs[j].value) }); haveFx = false; } break;
+        }
+      }
+      const closed = (flags & 0x1) !== 0;
+      let pl: Polyline | null = null;
+      if (ctrl.length >= degree + 1) {
+        pl = makeBSpline(degree, ctrl, knots, weights.length === ctrl.length ? weights : null, closed);
+      } else if (fit.length >= 2) {
+        // No control points (rare) — connect the fit points directly.
+        pl = new Polyline();
+        for (const p2 of fit) pl.addUnique(p2);
+        if (closed && pl.points.length > 2) pl.closed = true;
+      }
+      if (pl && pl.points.length >= 2) drawing.add(Entity.makePolyline(pl, layer));
+      else warnings.push('Skipped SPLINE with no usable geometry');
+      i = j;
+    } else if (kw === 'ELLIPSE') {
+      // 10/20 centre, 11/21 major-axis endpoint (relative to centre),
+      // 40 minor/major ratio, 41 start param, 42 end param (radians).
+      let layer = '';
+      let cx = 0, cy = 0, mx = 0, my = 0, ratio = 1, sp = 0, ep = 2 * Math.PI;
+      let j = i + 1;
+      for (; j < n && pairs[j].code !== 0; ++j) {
+        switch (pairs[j].code) {
+          case 8: layer = pairs[j].value; break;
+          case 10: cx = num(pairs[j].value); break;
+          case 20: cy = num(pairs[j].value); break;
+          case 11: mx = num(pairs[j].value); break;
+          case 21: my = num(pairs[j].value); break;
+          case 40: ratio = num(pairs[j].value); break;
+          case 41: sp = num(pairs[j].value); break;
+          case 42: ep = num(pairs[j].value); break;
+        }
+      }
+      const pl = makeEllipse({ x: cx, y: cy }, { x: mx, y: my }, ratio, sp, ep);
+      if (pl.points.length >= 2) drawing.add(Entity.makePolyline(pl, layer));
+      i = j;
+    } else if (kw === 'TEXT' || kw === 'MTEXT') {
       warnings.push(`Skipped unsupported entity: ${kw}`);
       i = consumeToNextEntity(i + 1);
     } else {

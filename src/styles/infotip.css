@@ -1,0 +1,114 @@
+/* InfoTip — a tiny inline "ⓘ" affordance with a plain-language popover.
+   Theme CSS vars only; this file is owned solely by the InfoTip component. */
+
+.infotip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  /* Sit snugly beside its label without disturbing line height. */
+  line-height: 0;
+}
+
+/* The trigger: a slim, muted circle-i that brightens to accent on hover/focus.
+   Touch target stays ~24px while the glyph itself reads as small/unobtrusive. */
+.infotip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: help;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.infotip-btn:hover,
+.infotip-btn:focus-visible {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.infotip-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.infotip-btn[aria-expanded='true'] {
+  color: var(--accent);
+}
+
+/* The popover. Centred under the icon by default; JS supplies a horizontal
+   shift (--infotip-shift) so it never clips a panel/screen edge, and adds
+   `.above` to flip it up when there's no room below. */
+.infotip-pop {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(calc(-50% + var(--infotip-shift, 0px)));
+  z-index: 1000;
+  width: max-content;
+  max-width: min(280px, 78vw);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  text-align: left;
+  line-height: 1.42;
+  /* Let touch/keyboard scroll a long body on tiny screens without overflow. */
+  cursor: default;
+}
+.infotip-pop.above {
+  top: auto;
+  bottom: calc(100% + 7px);
+}
+
+/* Little pointer arrow toward the icon. */
+.infotip-pop::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(calc(-50% - var(--infotip-shift, 0px))) rotate(45deg);
+  width: 9px;
+  height: 9px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+.infotip-pop:not(.above)::before {
+  top: -5px;
+  border-right: none;
+  border-bottom: none;
+}
+.infotip-pop.above::before {
+  bottom: -5px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Tiny corner ⓘ for the jog pad: pins to the top-right so it never disturbs the
+   button grid. The pad is `flex-wrap` so this sits as its own full-width row. */
+.jog-info {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  order: -1;
+  margin-bottom: -2px;
+  line-height: 0;
+}
+
+.infotip-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 3px;
+}
+.infotip-body {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}

@@ -64,6 +64,8 @@ export class MockPort implements PortLike {
 
   private state: string
   private mpos = { x: 0, y: 0, z: 0 }
+  /** True while a simulated homing cycle is animating. */
+  private homing = false
   /** Live `$`-settings (number → value string); writes persist here. */
   private readonly settings = new Map<number, string>()
   private readonly opts: Required<
@@ -214,6 +216,14 @@ export class MockPort implements PortLike {
       return
     }
 
+    // Homing cycle ($H): real GRBL physically seeks the limit switches and only
+    // returns 'ok' once it finishes. Simulate a visible homing move so the DRO +
+    // 3D viewer show the axes travelling to the home corner, then 'ok'.
+    if (/^\$H$/i.test(line)) {
+      this.startHoming()
+      return
+    }
+
     // Simulate motion so the viewer shows movement.
     this.applyMotion(line)
 
@@ -225,19 +235,80 @@ export class MockPort implements PortLike {
     }
   }
 
-  /** Very small G-code interpreter: track X/Y/Z words on G0/G1 lines. */
+  /**
+   * Very small G-code interpreter so the viewer/DRO show movement: track X/Y/Z
+   * words on G0/G1 moves AND on `$J=` jog commands. Jogs (and any G91 block) are
+   * applied relative to the current position; everything else is absolute.
+   */
   private applyMotion(line: string): void {
-    if (!/\bG0?[01]\b/i.test(line)) return
+    const isJog = /^\$J=/i.test(line)
+    const body = isJog ? line.replace(/^\$J=/i, '') : line
+    if (!isJog && !/\bG0?[01]\b/i.test(body)) return
     const grab = (axis: string): number | undefined => {
-      const m = new RegExp(`${axis}(-?\\d+(?:\\.\\d+)?)`, 'i').exec(line)
+      const m = new RegExp(`${axis}(-?\\d+(?:\\.\\d+)?)`, 'i').exec(body)
       return m ? parseFloat(m[1]) : undefined
     }
+    const relative = /\bG91\b/i.test(body)
     const x = grab('X')
     const y = grab('Y')
     const z = grab('Z')
-    if (x !== undefined) this.mpos.x = x
-    if (y !== undefined) this.mpos.y = y
-    if (z !== undefined) this.mpos.z = z
+    if (relative) {
+      if (x !== undefined) this.mpos.x += x
+      if (y !== undefined) this.mpos.y += y
+      if (z !== undefined) this.mpos.z += z
+    } else {
+      if (x !== undefined) this.mpos.x = x
+      if (y !== undefined) this.mpos.y = y
+      if (z !== undefined) this.mpos.z = z
+    }
+  }
+
+  /**
+   * Simulate a GRBL homing cycle with visible motion: set state to 'Home', step
+   * the machine position along a believable path (retract Z, rush to the home
+   * corner, settle to machine zero), then return to 'Idle' and emit the single
+   * 'ok' that real GRBL only sends once homing completes.
+   */
+  private startHoming(): void {
+    if (this.homing) return
+    this.homing = true
+    this.state = 'Home'
+    // Absolute machine-mm waypoints; the negative corner stays on the bed grid.
+    const path = [
+      { x: this.mpos.x, y: this.mpos.y, z: 5 }, // lift Z clear
+      { x: -120, y: -90, z: 5 }, // seek the home corner
+      { x: -120, y: -90, z: 0 }, // touch Z
+      { x: 0, y: 0, z: 0 }, // pull off to machine zero
+    ]
+    const segSteps = 6
+    const stepMs = 55
+    let from = { ...this.mpos }
+    let seg = 0
+    let t = 0
+    const tick = () => {
+      const to = path[seg]
+      t++
+      const a = Math.min(1, t / segSteps)
+      this.mpos = {
+        x: from.x + (to.x - from.x) * a,
+        y: from.y + (to.y - from.y) * a,
+        z: from.z + (to.z - from.z) * a,
+      }
+      if (a >= 1) {
+        from = { ...to }
+        seg++
+        t = 0
+        if (seg >= path.length) {
+          this.mpos = { x: 0, y: 0, z: 0 }
+          this.state = 'Idle'
+          this.homing = false
+          this.emit('ok\r\n')
+          return
+        }
+      }
+      setTimeout(tick, stepMs)
+    }
+    setTimeout(tick, stepMs)
   }
 
   private fmt(n: number): string {

@@ -16,6 +16,9 @@ import { useMachine } from '../store/machine'
 import { useProgram } from '../store/program'
 import { useConsole } from '../store/console'
 import { useGrblSettings } from '../store/grblSettings'
+import { useMachineProfile } from '../store/machineProfile'
+import { canLiveConnect, profileFor } from '../machine/controllers'
+import type { ControllerKind } from '../machine/types'
 
 export interface JogParams {
   /** Axis deltas in mm (relative). */
@@ -33,9 +36,16 @@ const PREF_KEY = 'karmyogi.serial.preferred'
 interface PortPref {
   usbVendorId?: number
   usbProductId?: number
+  /** Controller firmware last connected with, so we can restore the selector. */
+  controllerKind?: ControllerKind
+  /** Baud rate the last successful connection used. */
+  baud?: number
 }
 
-function savePreferredPort(port: PortLike): void {
+function savePreferredPort(
+  port: PortLike,
+  extra: { controllerKind: ControllerKind; baud: number },
+): void {
   const p = port as unknown as { getInfo?: () => SerialPortInfo }
   if (typeof p.getInfo !== 'function') return // mock / non-USB — nothing to save
   try {
@@ -43,6 +53,8 @@ function savePreferredPort(port: PortLike): void {
     const pref: PortPref = {
       usbVendorId: info.usbVendorId,
       usbProductId: info.usbProductId,
+      controllerKind: extra.controllerKind,
+      baud: extra.baud,
     }
     localStorage.setItem(PREF_KEY, JSON.stringify(pref))
   } catch {
@@ -76,11 +88,25 @@ class GrblController {
    */
   async connect(port?: PortLike, opts?: { streamMode?: StreamMode }): Promise<void> {
     if (this.conn || this.connecting) return
-    this.connecting = true
     const machine = useMachine.getState()
+    // Resolve the active controller profile. The mock device (an explicit
+    // `port`) always works regardless of profile; only real hardware connections
+    // are gated by whether we can actually speak the firmware's protocol.
+    const profile = profileFor(useMachineProfile.getState().controllerKind)
+    const isMock = !!port
+    if (!isMock && !canLiveConnect(profile)) {
+      const msg = `${profile.label} uses a proprietary binary protocol; live connection isn't supported yet — use GRBL/FluidNC, or Mock.`
+      useConsole.getState().push('error', msg)
+      machine.setError(msg)
+      machine.setConnection('disconnected')
+      return
+    }
+    this.connecting = true
     machine.setConnection('connecting')
+    machine.setError(null)
     try {
       const conn = new GrblConnection({
+        baudRate: profile.baud,
         onLine: (line) => this.handleLine(line),
         onDisconnect: (err) => this.handleDisconnect(err),
       })
@@ -99,8 +125,11 @@ class GrblController {
         },
       })
       machine.setConnection('connected')
-      savePreferredPort(chosen as PortLike)
-      useConsole.getState().push('info', 'Connected.')
+      savePreferredPort(chosen as PortLike, {
+        controllerKind: profile.kind,
+        baud: profile.baud,
+      })
+      useConsole.getState().push('info', `Connected (${profile.label}).`)
       this.startStatusPolling()
     } catch (err) {
       machine.setConnection('disconnected')
@@ -131,6 +160,11 @@ class GrblController {
     const pref = readPreferredPort()
     let chosen = ports[0]
     if (pref) {
+      // Restore the last-used controller so the selector reflects it and the
+      // connection (re)opens at that firmware's baud / capability set.
+      if (pref.controllerKind) {
+        useMachineProfile.getState().setControllerKind(pref.controllerKind)
+      }
       const match = ports.find((p) => {
         const i = p.getInfo()
         return i.usbVendorId === pref.usbVendorId && i.usbProductId === pref.usbProductId

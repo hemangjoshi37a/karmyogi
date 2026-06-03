@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useT } from '../i18n'
 import { useMachine, useProgram, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
 import {
@@ -27,13 +28,17 @@ const PAD = 6
 
 type Tool = 'select' | 'line' | 'triangle' | 'circle' | 'rect'
 
-/** Tool buttons: glyph + label, in the order they appear in the toolbar. */
-const TOOLS: { id: Tool; glyph: string; label: string; hint: string }[] = [
-  { id: 'select', glyph: '↖', label: 'Select', hint: 'Select / move a shape' },
-  { id: 'line', glyph: '╱', label: 'Line', hint: 'Draw a straight bead' },
-  { id: 'triangle', glyph: '△', label: 'Triangle', hint: 'Draw a triangle outline' },
-  { id: 'circle', glyph: '◯', label: 'Circle', hint: 'Draw a circle' },
-  { id: 'rect', glyph: '▭', label: 'Rect', hint: 'Draw a rectangle' },
+/**
+ * Tool buttons: glyph + label, in the order they appear in the toolbar. The
+ * label/hint strings are the English fallbacks; `key` is the i18n key suffix so
+ * render sites can translate (this array is module-level, outside any hook).
+ */
+const TOOLS: { id: Tool; glyph: string; key: string; label: string; hint: string }[] = [
+  { id: 'select', glyph: '↖', key: 'select', label: 'Select', hint: 'Select / move a shape' },
+  { id: 'line', glyph: '╱', key: 'line', label: 'Line', hint: 'Draw a straight bead' },
+  { id: 'triangle', glyph: '△', key: 'triangle', label: 'Triangle', hint: 'Draw a triangle outline' },
+  { id: 'circle', glyph: '◯', key: 'circle', label: 'Circle', hint: 'Draw a circle' },
+  { id: 'rect', glyph: '▭', key: 'rect', label: 'Rect', hint: 'Draw a rectangle' },
 ]
 
 /** A point in machine (bed) coordinates: X right, Y up, origin bottom-left. */
@@ -106,16 +111,21 @@ function shapeFromDrag(tool: Exclude<Tool, 'select'>, a: Pt, b: Pt): GlueShape |
 }
 
 /** Short human label for a shape kind, for the shape list. */
-function shapeSummary(shape: GlueShape): string {
+function shapeSummary(shape: GlueShape, t: ReturnType<typeof useT>): string {
   switch (shape.kind) {
     case 'line':
-      return `Line · ${Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1).toFixed(0)} mm`
+      return t('glue.summary.line', 'Line · {len} mm', {
+        len: Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1).toFixed(0),
+      })
     case 'circle':
-      return `Circle · r ${shape.r.toFixed(0)} mm`
+      return t('glue.summary.circle', 'Circle · r {r} mm', { r: shape.r.toFixed(0) })
     case 'rect':
-      return `Rect · ${shape.w.toFixed(0)} × ${shape.h.toFixed(0)} mm`
+      return t('glue.summary.rect', 'Rect · {w} × {h} mm', {
+        w: shape.w.toFixed(0),
+        h: shape.h.toFixed(0),
+      })
     case 'triangle':
-      return 'Triangle'
+      return t('glue.summary.triangle', 'Triangle')
   }
 }
 
@@ -127,6 +137,7 @@ function shapeSummary(shape: GlueShape): string {
  * the shared program store so the 3D Visualizer previews the trajectories.
  */
 export function GluePanel() {
+  const t = useT()
   const connected = useMachine((s) => s.connection === 'connected')
   const setProgram = useProgram((s) => s.setProgram)
 
@@ -276,37 +287,39 @@ export function GluePanel() {
   const selectedShape = shapes.find((s) => s.id === selected) ?? null
   const hint =
     tool === 'select'
-      ? 'Tap a shape to select it · Delete removes it'
+      ? t('glue.hint.select', 'Tap a shape to select it · Delete removes it')
       : tool === 'circle'
-        ? 'Drag from the centre outwards to set the radius'
+        ? t('glue.hint.circle', 'Drag from the centre outwards to set the radius')
         : tool === 'line'
-          ? 'Drag from one end of the bead to the other'
-          : 'Drag a bounding box on the bed'
+          ? t('glue.hint.line', 'Drag from one end of the bead to the other')
+          : t('glue.hint.box', 'Drag a bounding box on the bed')
 
   return (
     <div className="gp-panel">
       {/* One-line intro / flow */}
       <p className="gp-intro">
-        Pick a shape, draw it on the bed, then <b>Send ▶</b>. The dispenser traces each outline.
+        {t('glue.intro.pre', 'Pick a shape, draw it on the bed, then')}{' '}
+        <b>{t('glue.intro.send', 'Send ▶')}</b>.{' '}
+        {t('glue.intro.post', 'The dispenser traces each outline.')}
       </p>
 
       <div className="gp-body">
         {/* === Canvas column (the centerpiece) === */}
         <div className="gp-stage">
           {/* Shape-tool icon toolbar */}
-          <div className="gp-toolbar" role="toolbar" aria-label="Drawing tools">
-            {TOOLS.map((t) => (
+          <div className="gp-toolbar" role="toolbar" aria-label={t('glue.toolbar.aria', 'Drawing tools')}>
+            {TOOLS.map((tl) => (
               <button
-                key={t.id}
-                className={tool === t.id ? 'gp-tool gp-tool-on' : 'gp-tool'}
-                onClick={() => setTool(t.id)}
-                aria-pressed={tool === t.id}
-                title={t.hint}
+                key={tl.id}
+                className={tool === tl.id ? 'gp-tool gp-tool-on' : 'gp-tool'}
+                onClick={() => setTool(tl.id)}
+                aria-pressed={tool === tl.id}
+                title={t(`glue.tool.${tl.key}.hint`, tl.hint)}
               >
                 <span className="gp-tool-glyph" aria-hidden="true">
-                  {t.glyph}
+                  {tl.glyph}
                 </span>
-                <span className="gp-tool-label">{t.label}</span>
+                <span className="gp-tool-label">{t(`glue.tool.${tl.key}.label`, tl.label)}</span>
               </button>
             ))}
             <span className="gp-spacer" />
@@ -314,9 +327,9 @@ export function GluePanel() {
               className="gp-clear"
               onClick={() => setShapes([])}
               disabled={shapes.length === 0}
-              title="Remove all shapes"
+              title={t('glue.clear.title', 'Remove all shapes')}
             >
-              Clear
+              {t('glue.clear', 'Clear')}
             </button>
           </div>
 
@@ -365,7 +378,9 @@ export function GluePanel() {
             <div className="gp-hint">
               <span>{hint}</span>
               <span className="gp-meta">
-                {shapes.length} shape{shapes.length === 1 ? '' : 's'}
+                {shapes.length === 1
+                  ? t('glue.count.one', '{n} shape', { n: shapes.length })
+                  : t('glue.count.many', '{n} shapes', { n: shapes.length })}
               </span>
             </div>
           </div>
@@ -375,9 +390,9 @@ export function GluePanel() {
         <div className="gp-controls">
           {/* Shape list */}
           <section className="gp-card">
-            <h3 className="gp-card-title">Shapes</h3>
+            <h3 className="gp-card-title">{t('glue.shapes.title', 'Shapes')}</h3>
             {shapes.length === 0 ? (
-              <p className="gp-empty">No shapes yet — draw one on the bed.</p>
+              <p className="gp-empty">{t('glue.shapes.empty', 'No shapes yet — draw one on the bed.')}</p>
             ) : (
               <ul className="gp-list">
                 {shapes.map(({ id, shape }) => (
@@ -391,16 +406,16 @@ export function GluePanel() {
                         setTool('select')
                         setSelected(id)
                       }}
-                      title="Select this shape"
+                      title={t('glue.list.pick.title', 'Select this shape')}
                     >
                       <span className="gp-list-glyph" aria-hidden="true">
-                        {TOOLS.find((t) => t.id === shape.kind)?.glyph ?? '•'}
+                        {TOOLS.find((tl) => tl.id === shape.kind)?.glyph ?? '•'}
                       </span>
-                      {shapeSummary(shape)}
+                      {shapeSummary(shape, t)}
                     </button>
                     <button
                       className="gp-del"
-                      title="Delete shape"
+                      title={t('glue.list.delete.title', 'Delete shape')}
                       onClick={() => deleteShape(id)}
                     >
                       ✕
@@ -413,7 +428,11 @@ export function GluePanel() {
             {/* Inline numeric editor for the selected shape */}
             {selectedShape && (
               <div className="gp-edit">
-                <span className="gp-edit-label">Edit · {selectedShape.shape.kind} (mm)</span>
+                <span className="gp-edit-label">
+                  {t('glue.edit.label', 'Edit · {kind} (mm)', {
+                    kind: t(`glue.kind.${selectedShape.shape.kind}`, selectedShape.shape.kind),
+                  })}
+                </span>
                 <div className="gp-fields">
                   <ShapeEditor
                     shape={selectedShape.shape}
@@ -428,10 +447,10 @@ export function GluePanel() {
 
           {/* Dispenser & motion (essentials) */}
           <section className="gp-card">
-            <h3 className="gp-card-title">Dispenser &amp; motion</h3>
+            <h3 className="gp-card-title">{t('glue.motion.title', 'Dispenser & motion')}</h3>
             <div className="gp-fields">
-              <label title="Z height (mm) at which the dispenser touches down to lay a bead">
-                Dispense Z
+              <label title={t('glue.field.dispenseZ.title', 'Z height (mm) at which the dispenser touches down to lay a bead')}>
+                {t('glue.field.dispenseZ', 'Dispense Z')}
                 <input
                   type="number"
                   step="0.1"
@@ -439,8 +458,8 @@ export function GluePanel() {
                   onChange={(e) => setParams({ ...params, dispenseZ: num(e.target.value, params.dispenseZ) })}
                 />
               </label>
-              <label title="Safe Z height (mm) for rapid travel between shapes">
-                Travel Z
+              <label title={t('glue.field.travelZ.title', 'Safe Z height (mm) for rapid travel between shapes')}>
+                {t('glue.field.travelZ', 'Travel Z')}
                 <input
                   type="number"
                   step="0.1"
@@ -448,8 +467,8 @@ export function GluePanel() {
                   onChange={(e) => setParams({ ...params, travelZ: num(e.target.value, params.travelZ) })}
                 />
               </label>
-              <label title="Trace feed rate (mm/min) while dispensing along an outline">
-                Feed
+              <label title={t('glue.field.feed.title', 'Trace feed rate (mm/min) while dispensing along an outline')}>
+                {t('glue.field.feed', 'Feed')}
                 <input
                   type="number"
                   step="10"
@@ -458,8 +477,8 @@ export function GluePanel() {
                   onChange={(e) => setParams({ ...params, feed: num(e.target.value, params.feed) })}
                 />
               </label>
-              <label title="Dispenser output rate (drives the spindle/feeder S-word)">
-                Dispense rate
+              <label title={t('glue.field.dispenseRate.title', 'Dispenser output rate (drives the spindle/feeder S-word)')}>
+                {t('glue.field.dispenseRate', 'Dispense rate')}
                 <input
                   type="number"
                   step="100"
@@ -477,14 +496,14 @@ export function GluePanel() {
               className="gp-adv-toggle"
               onClick={() => setShowAdvanced((v) => !v)}
               aria-expanded={showAdvanced}
-              title="Plunge feed, dwell times and G-code decimals"
+              title={t('glue.adv.title', 'Plunge feed, dwell times and G-code decimals')}
             >
-              {showAdvanced ? '▾' : '▸'} Advanced
+              {showAdvanced ? '▾' : '▸'} {t('glue.adv', 'Advanced')}
             </button>
             {showAdvanced && (
               <div className="gp-fields gp-adv">
                 <label>
-                  Plunge feed
+                  {t('glue.field.plungeFeed', 'Plunge feed')}
                   <input
                     type="number"
                     step="10"
@@ -496,7 +515,7 @@ export function GluePanel() {
                   />
                 </label>
                 <label>
-                  Settle (ms)
+                  {t('glue.field.settle', 'Settle (ms)')}
                   <input
                     type="number"
                     step="50"
@@ -508,7 +527,7 @@ export function GluePanel() {
                   />
                 </label>
                 <label>
-                  Post dwell (ms)
+                  {t('glue.field.postDwell', 'Post dwell (ms)')}
                   <input
                     type="number"
                     step="50"
@@ -520,7 +539,7 @@ export function GluePanel() {
                   />
                 </label>
                 <label>
-                  Decimals
+                  {t('glue.field.decimals', 'Decimals')}
                   <input
                     type="number"
                     step="1"
@@ -545,13 +564,13 @@ export function GluePanel() {
               className="primary gp-play"
               onClick={play}
               disabled={shapes.length === 0 || lineCount === 0 || !connected}
-              title={connected ? 'Stream this program to the machine' : 'Connect to a machine to send'}
+              title={connected ? t('glue.send.title.on', 'Stream this program to the machine') : t('glue.send.title.off', 'Connect to a machine to send')}
             >
-              ▶ Send to machine
+              {t('glue.send', '▶ Send to machine')}
             </button>
             <p className="gp-meta gp-send-note">
-              Live preview · <b>{lineCount}</b> lines → Visualizer
-              {!connected && shapes.length > 0 ? ' · connect to send' : ''}
+              {t('glue.send.meta', 'Live preview · {n} lines → Visualizer', { n: lineCount })}
+              {!connected && shapes.length > 0 ? t('glue.send.connect', ' · connect to send') : ''}
             </p>
 
             {/* Raw G-code (collapsed by default) */}
@@ -559,9 +578,9 @@ export function GluePanel() {
               className="gp-raw-toggle"
               onClick={() => setShowRaw((v) => !v)}
               aria-expanded={showRaw}
-              title="Show the generated G-code text"
+              title={t('glue.raw.title', 'Show the generated G-code text')}
             >
-              {showRaw ? '▾' : '▸'} Raw G-code ({lineCount} lines)
+              {showRaw ? '▾' : '▸'} {t('glue.raw', 'Raw G-code ({n} lines)', { n: lineCount })}
             </button>
             {showRaw && <pre className="gp-preview">{gcode}</pre>}
           </section>

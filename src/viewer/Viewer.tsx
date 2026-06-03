@@ -12,6 +12,9 @@ import * as THREE from 'three'
 import { Bed } from './Bed'
 import { Toolpath } from './Toolpath'
 import { ToolMarker } from './ToolMarker'
+import { StockBlock } from './StockBlock'
+import { CarvedStock } from './CarvedStock'
+import { PlacementGizmo } from './PlacementGizmo'
 import { gcodeToPolylines, type Segment, type Bounds } from './gcodeToPolylines'
 import {
   frameBounds,
@@ -37,12 +40,52 @@ export interface ViewerProps {
    * Program panel parse once and share). Optional.
    */
   segments?: Segment[]
-  /** Current tool position [x, y, z] in mm. Shows the tool marker when set. */
+  /**
+   * Live/actual machine tool position [x, y, z] in mm (from the controller).
+   * Shows the ACTUAL spindle cone (amber) when set. Independent of the sim cone.
+   */
   toolPosition?: [number, number, number] | null
+  /**
+   * Simulation tool position [x, y, z] in mm (from the playback timeline). Shows
+   * the SIMULATION spindle cone (cyan) when set — drawn alongside the actual
+   * cone, not instead of it, so a live job and a preview can be watched together.
+   */
+  simPosition?: [number, number, number] | null
+  /** Show the actual (live machine) spindle cone. Default true. */
+  showActualTool?: boolean
+  /** Show the simulation spindle cone. Default true. */
+  showSimTool?: boolean
   /** Bed size in mm [X, Y, Z]. Defaults to the bed store when omitted. */
   bedWidth?: number
   bedDepth?: number
   bedHeight?: number
+  /** Show the translucent stock/workpiece block (from the stock store). Default true. */
+  showStock?: boolean
+  /**
+   * Playback reveal: index of the segment currently being executed. When >= 0,
+   * the toolpath is split into traveled (bright) / upcoming (dim) for the
+   * simulation. Omit / pass < 0 for the static full-path look (default).
+   */
+  revealIndex?: number
+  /** Point on the active segment the tool has reached (for the reveal split). */
+  revealPoint?: [number, number, number] | null
+  /**
+   * Material-removal simulation: when true AND a reveal is active, render the
+   * stock as a heightmap surface that is progressively carved by the done cut
+   * moves (the already-machined region reveals its cut surface). Default false.
+   */
+  carveSim?: boolean
+  /** Cutter radius (mm) for the material-removal sim. Default 1.5. */
+  toolRadius?: number
+  /**
+   * Show the in-scene placement gizmo (move / rotate / scale the loaded job).
+   * The gizmo writes a placement to the program store, which bakes it into the
+   * displayed + simulated + streamed G-code — no separate visual transform.
+   * Default false (off).
+   */
+  gizmo?: boolean
+  /** Which gizmo handles to show when `gizmo` is on. Default 'translate'. */
+  gizmoMode?: 'translate' | 'rotate' | 'scale'
 }
 
 const FOV = 45
@@ -56,7 +99,24 @@ const FOV = 45
  * business logic — it only parses G-code coordinates for display.
  */
 export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
-  { gcode, segments: segmentsProp, toolPosition, bedWidth, bedDepth, bedHeight },
+  {
+    gcode,
+    segments: segmentsProp,
+    toolPosition,
+    simPosition,
+    showActualTool = true,
+    showSimTool = true,
+    bedWidth,
+    bedDepth,
+    bedHeight,
+    showStock = true,
+    revealIndex,
+    revealPoint,
+    carveSim = false,
+    toolRadius = 1.5,
+    gizmo = false,
+    gizmoMode = 'translate',
+  },
   ref,
 ) {
   const theme = useSettings((s) => s.theme)
@@ -93,6 +153,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     setView: (v) => apiRef.current.setView(v),
   }))
 
+  // Orbit controls ref so the placement gizmo can disable orbiting while it
+  // drags (drei's TransformControls and OrbitControls otherwise fight).
+  const orbitRef = useRef<OrbitControlsImpl | null>(null)
+  const onGizmoDragging = (dragging: boolean) => {
+    if (orbitRef.current) orbitRef.current.enabled = !dragging
+  }
+
   return (
     <Canvas
       style={{ height: '100%', width: '100%', background: bg }}
@@ -101,10 +168,33 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       <ambientLight intensity={0.8} />
       <directionalLight position={[100, -100, 300]} intensity={0.6} />
       <Bed width={width} depth={depth} />
-      {parsed.segments.length > 0 && <Toolpath segments={parsed.segments} />}
+      <StockBlock visible={showStock} />
+      {carveSim && revealIndex !== undefined && revealIndex >= 0 && (
+        <CarvedStock
+          segments={parsed.segments}
+          revealIndex={revealIndex}
+          revealPoint={revealPoint}
+          toolRadius={toolRadius}
+        />
+      )}
+      {parsed.segments.length > 0 && (
+        <Toolpath
+          segments={parsed.segments}
+          revealIndex={revealIndex}
+          revealPoint={revealPoint}
+        />
+      )}
       {parsed.bounds && <BoundsBox bounds={parsed.bounds} dark={theme === 'dark'} />}
-      {toolPosition && <ToolMarker position={toolPosition} />}
-      <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
+      {/* Actual (live machine) spindle cone — amber. */}
+      {showActualTool && toolPosition && <ToolMarker position={toolPosition} />}
+      {/* Simulation spindle cone — cyan, so it reads distinct from the live one. */}
+      {showSimTool && simPosition && (
+        <ToolMarker position={simPosition} color={theme === 'dark' ? '#22d3ee' : '#0891b2'} />
+      )}
+      {gizmo && (
+        <PlacementGizmo mode={gizmoMode} onDraggingChanged={onGizmoDragging} />
+      )}
+      <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.1} />
       <ViewController bounds={controlBounds} bedSize={bedSize} apiRef={apiRef} />
     </Canvas>
   )

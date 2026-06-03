@@ -8,6 +8,7 @@ import {
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
+import { useT } from '../i18n'
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
 import {
@@ -87,6 +88,7 @@ const f1 = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : '—')
  * production slicer (no supports, bridging, or adaptive layers).
  */
 export function PrintPanel() {
+  const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
   const connected = useMachine((s) => s.connection === 'connected')
 
@@ -132,7 +134,7 @@ export function PrintPanel() {
       const buf = await file.arrayBuffer()
       const mesh = parseStl(buf)
       if (mesh.triangleCount === 0) {
-        setLoadError('STL parsed but contained no triangles.')
+        setLoadError(t('print.err.noTriangles', 'STL parsed but contained no triangles.'))
         setMeshInfo(null)
         return
       }
@@ -141,7 +143,7 @@ export function PrintPanel() {
       setScalePct('100')
     } catch (err) {
       setMeshInfo(null)
-      setLoadError(`Failed to read STL: ${err instanceof Error ? err.message : String(err)}`)
+      setLoadError(t('print.err.read', 'Failed to read STL: {msg}', { msg: err instanceof Error ? err.message : String(err) }))
     }
   }
 
@@ -261,7 +263,7 @@ export function PrintPanel() {
     if (!placed) return
     setSlicing(true)
     setProgress(0)
-    setStatus('Slicing…')
+    setStatus(t('print.status.slicing', 'Slicing…'))
     setLastGcode(null)
     try {
       // Yield to the browser so the "Slicing…" state paints before heavy work.
@@ -279,7 +281,7 @@ export function PrintPanel() {
       await new Promise((r) => requestAnimationFrame(() => r(null)))
 
       if (slice.layerCount === 0) {
-        setStatus(slice.warnings.join(' ') || 'Slicing produced no layers.')
+        setStatus(slice.warnings.join(' ') || t('print.status.noLayers', 'Slicing produced no layers.'))
         setSlicing(false)
         setProgress(0)
         return
@@ -307,12 +309,18 @@ export function PrintPanel() {
       setProgram(name, gcode)
       const lines = gcode.split('\n').filter(Boolean).length
       setLastGcode({ name, text: gcode, lines })
-      const warn = slice.warnings.length ? ` (${slice.warnings.length} warning(s))` : ''
+      const warn = slice.warnings.length
+        ? t('print.status.warnings', ' ({n} warning(s))', { n: slice.warnings.length })
+        : ''
       setStatus(
-        `Sliced ${slice.layerCount} layers → ${lines} lines${warn}. Shown in Visualizer & Program.`,
+        t('print.status.sliced', 'Sliced {layers} layers → {lines} lines{warn}. Shown in Visualizer & Program.', {
+          layers: slice.layerCount,
+          lines,
+          warn,
+        }),
       )
     } catch (err) {
-      setStatus(`Slice failed: ${err instanceof Error ? err.message : String(err)}`)
+      setStatus(t('print.status.sliceFailed', 'Slice failed: {msg}', { msg: err instanceof Error ? err.message : String(err) }))
     } finally {
       setSlicing(false)
     }
@@ -321,25 +329,24 @@ export function PrintPanel() {
   function sendToMachine() {
     if (!connected || !lastGcode) return
     const ok = window.confirm(
-      `Start the print on the machine now?\n` +
-        `${lastGcode.lines} lines. Make sure the bed is clear and the printer is homed-safe.`,
+      t('print.confirm', 'Start the print on the machine now?\n{lines} lines. Make sure the bed is clear and the printer is homed-safe.', { lines: lastGcode.lines }),
     )
     if (!ok) return
     grbl.startProgram(lastGcode.text.split(/\r?\n/).filter(Boolean))
-    setStatus(`Streaming print — ${lastGcode.lines} lines.`)
+    setStatus(t('print.status.streaming', 'Streaming print — {lines} lines.', { lines: lastGcode.lines }))
   }
 
   return (
     <div className="print-panel">
       <div className="print-scroll">
         <p className="print-intro">
-          Import an <b>STL</b>, arrange it on the bed, slice to G-code, then preview &amp; stream it
-          to a GRBL printer.
+          {t('print.intro.pre', 'Import an')} <b>STL</b>,{' '}
+          {t('print.intro.post', 'arrange it on the bed, slice to G-code, then preview & stream it to a GRBL printer.')}
         </p>
 
         {/* ---- 1. Import ---- */}
         <section className="print-section">
-          <h3>1 · Import STL</h3>
+          <h3>{t('print.import.title', '1 · Import STL')}</h3>
           <div className="print-section-body">
             <div
               className={'print-drop' + (dragOver ? ' print-dragover' : '')}
@@ -356,9 +363,9 @@ export function PrintPanel() {
               }}
             >
               <button className="print-btn primary" onClick={() => fileRef.current?.click()}>
-                ⬆ Open STL…
+                {t('print.openStl', '⬆ Open STL…')}
               </button>
-              <span className="print-drop-hint">or drop a .stl file here</span>
+              <span className="print-drop-hint">{t('print.dropHint', 'or drop a .stl file here')}</span>
               <input
                 ref={fileRef}
                 className="print-file-input"
@@ -370,8 +377,11 @@ export function PrintPanel() {
             {loadError && <div className="print-error">{loadError}</div>}
             {meshInfo && (
               <div className="print-info">
-                {meshInfo.name} — {meshInfo.mesh.triangleCount.toLocaleString()} triangles ·{' '}
-                {meshInfo.format} STL
+                {t('print.meshInfo', '{name} — {tris} triangles · {format} STL', {
+                  name: meshInfo.name,
+                  tris: meshInfo.mesh.triangleCount.toLocaleString(),
+                  format: meshInfo.format,
+                })}
               </div>
             )}
           </div>
@@ -380,24 +390,24 @@ export function PrintPanel() {
         {/* ---- 2. Preview + Arrange ---- */}
         {placed && (
           <section className="print-section">
-            <h3>2 · Arrange</h3>
+            <h3>{t('print.arrange.title', '2 · Arrange')}</h3>
             <div className="print-section-body">
               <div className="print-viewport">
                 <MeshPreview triangles={placed.mesh.triangles} fits={placed.fits} />
               </div>
 
               <div className={'print-size' + (placed.fits ? '' : ' print-size-bad')}>
-                Size: {f1(placed.sizeX)} × {f1(placed.sizeY)} × {f1(placed.sizeZ)} mm
+                {t('print.size', 'Size: {x} × {y} × {z} mm', { x: f1(placed.sizeX), y: f1(placed.sizeY), z: f1(placed.sizeZ) })}
                 {placed.fits ? (
-                  <span className="print-fit-ok"> · fits bed</span>
+                  <span className="print-fit-ok"> {t('print.fits', '· fits bed')}</span>
                 ) : (
-                  <span className="print-fit-bad"> · ⚠ exceeds {BED_X}×{BED_Y}×{BED_Z} mm bed</span>
+                  <span className="print-fit-bad"> {t('print.exceeds', '· ⚠ exceeds {x}×{y}×{z} mm bed', { x: BED_X, y: BED_Y, z: BED_Z })}</span>
                 )}
               </div>
 
               <div className="print-arrange">
                 <label className="print-field print-field-inline">
-                  <span>Scale %</span>
+                  <span>{t('print.scalePct', 'Scale %')}</span>
                   <input
                     type="number"
                     inputMode="decimal"
@@ -411,11 +421,11 @@ export function PrintPanel() {
                     }}
                   />
                 </label>
-                <button className="print-btn" onClick={rotate90} title="Rotate 90° about Z">
-                  ⟳ Rotate 90°
+                <button className="print-btn" onClick={rotate90} title={t('print.rotate.title', 'Rotate 90° about Z')}>
+                  {t('print.rotate', '⟳ Rotate 90°')}
                 </button>
-                <button className="print-btn" onClick={scaleToFit} title="Scale down to fit the bed">
-                  Scale to fit
+                <button className="print-btn" onClick={scaleToFit} title={t('print.scaleFit.title', 'Scale down to fit the bed')}>
+                  {t('print.scaleFit', 'Scale to fit')}
                 </button>
                 <button
                   className="print-btn"
@@ -423,43 +433,43 @@ export function PrintPanel() {
                     setTransform({ scale: 1, rotZ: 0 })
                     setScalePct('100')
                   }}
-                  title="Reset scale/rotation, auto-centre"
+                  title={t('print.reset.title', 'Reset scale/rotation, auto-centre')}
                 >
-                  Reset
+                  {t('print.reset', 'Reset')}
                 </button>
               </div>
-              <p className="print-hint">Object is auto-centred on the bed. Rotation is in 90° steps about Z.</p>
+              <p className="print-hint">{t('print.arrange.hint', 'Object is auto-centred on the bed. Rotation is in 90° steps about Z.')}</p>
             </div>
           </section>
         )}
 
         {/* ---- 3. Print settings ---- */}
         <section className="print-section">
-          <h3>3 · Print settings</h3>
+          <h3>{t('print.settings.title', '3 · Print settings')}</h3>
           <div className="print-section-body">
             <div className="print-grid">
-              <Field label="Layer height (mm)">
+              <Field label={t('print.field.layerHeight', 'Layer height (mm)')}>
                 <input type="number" step="0.05" min="0.05" value={settings.layerHeight} onChange={num('layerHeight')} />
               </Field>
-              <Field label="Infill (%)">
+              <Field label={t('print.field.infill', 'Infill (%)')}>
                 <input type="number" step="5" min="0" max="100" value={settings.infill} onChange={num('infill')} />
               </Field>
-              <Field label="Perimeters (walls)">
+              <Field label={t('print.field.perimeters', 'Perimeters (walls)')}>
                 <input type="number" step="1" min="1" max="8" value={settings.perimeters} onChange={num('perimeters')} />
               </Field>
-              <Field label="Nozzle temp (°C)">
+              <Field label={t('print.field.nozzleTemp', 'Nozzle temp (°C)')}>
                 <input type="number" step="5" min="0" value={settings.nozzleTemp} onChange={num('nozzleTemp')} />
               </Field>
-              <Field label="Bed temp (°C)">
+              <Field label={t('print.field.bedTemp', 'Bed temp (°C)')}>
                 <input type="number" step="5" min="0" value={settings.bedTemp} onChange={num('bedTemp')} />
               </Field>
-              <Field label="Print speed (mm/min)">
+              <Field label={t('print.field.printSpeed', 'Print speed (mm/min)')}>
                 <input type="number" step="60" min="60" value={settings.printSpeed} onChange={num('printSpeed')} />
               </Field>
             </div>
             <label className="print-check">
               <input type="checkbox" checked={settings.fan} onChange={(e) => set('fan', e.target.checked)} />
-              <span>Part-cooling fan (on after first layer)</span>
+              <span>{t('print.fan', 'Part-cooling fan (on after first layer)')}</span>
             </label>
           </div>
         </section>
@@ -471,36 +481,36 @@ export function PrintPanel() {
             onClick={() => setShowAdvanced((v) => !v)}
             aria-expanded={showAdvanced}
           >
-            {showAdvanced ? '▾' : '▸'} Advanced — filament, retraction, first layer
+            {showAdvanced ? '▾' : '▸'} {t('print.advanced', 'Advanced — filament, retraction, first layer')}
           </button>
           {showAdvanced && (
             <div className="print-section-body">
               <div className="print-grid">
-                <Field label="Filament Ø (mm)">
+                <Field label={t('print.field.filamentDia', 'Filament Ø (mm)')}>
                   <input type="number" step="0.05" min="0.5" value={settings.filamentDiameter} onChange={num('filamentDiameter')} />
                 </Field>
-                <Field label="Line width (mm)">
+                <Field label={t('print.field.lineWidth', 'Line width (mm)')}>
                   <input type="number" step="0.05" min="0.1" value={settings.lineWidth} onChange={num('lineWidth')} />
                 </Field>
-                <Field label="Travel speed (mm/min)">
+                <Field label={t('print.field.travelSpeed', 'Travel speed (mm/min)')}>
                   <input type="number" step="120" min="120" value={settings.travelSpeed} onChange={num('travelSpeed')} />
                 </Field>
-                <Field label="Retract dist (mm)">
+                <Field label={t('print.field.retractDist', 'Retract dist (mm)')}>
                   <input type="number" step="0.1" min="0" value={settings.retractDistance} onChange={num('retractDistance')} />
                 </Field>
-                <Field label="Retract speed (mm/min)">
+                <Field label={t('print.field.retractSpeed', 'Retract speed (mm/min)')}>
                   <input type="number" step="120" min="60" value={settings.retractSpeed} onChange={num('retractSpeed')} />
                 </Field>
-                <Field label="First-layer temp (°C)">
+                <Field label={t('print.field.firstLayerTemp', 'First-layer temp (°C)')}>
                   <input type="number" step="5" min="0" value={settings.firstLayerTemp} onChange={num('firstLayerTemp')} />
                 </Field>
-                <Field label="First-layer speed (mm/min)">
+                <Field label={t('print.field.firstLayerSpeed', 'First-layer speed (mm/min)')}>
                   <input type="number" step="60" min="60" value={settings.firstLayerSpeed} onChange={num('firstLayerSpeed')} />
                 </Field>
               </div>
               <label className="print-check">
                 <input type="checkbox" checked={settings.skirt} onChange={(e) => set('skirt', e.target.checked)} />
-                <span>Skirt (priming loop on first layer)</span>
+                <span>{t('print.skirt', 'Skirt (priming loop on first layer)')}</span>
               </label>
             </div>
           )}
@@ -508,23 +518,23 @@ export function PrintPanel() {
 
         {/* ---- 5. Slice & send ---- */}
         <section className="print-section">
-          <h3>4 · Slice &amp; print</h3>
+          <h3>{t('print.slice.title', '4 · Slice & print')}</h3>
           <div className="print-section-body">
             <div className="print-actions">
               <button className="print-btn primary" onClick={() => void doSlice()} disabled={!placed || slicing}>
-                {slicing ? 'Slicing…' : '✂ Slice → G-code'}
+                {slicing ? t('print.status.slicing', 'Slicing…') : t('print.slice.btn', '✂ Slice → G-code')}
               </button>
               <button
                 className="print-btn print-send"
                 onClick={sendToMachine}
                 disabled={!connected || !lastGcode || slicing}
-                title={!connected ? 'Connect to the machine first' : !lastGcode ? 'Slice first' : 'Stream the print'}
+                title={!connected ? t('print.send.title.noConn', 'Connect to the machine first') : !lastGcode ? t('print.send.title.noSlice', 'Slice first') : t('print.send.title.ok', 'Stream the print')}
               >
-                ▶ Send to printer
+                {t('print.send', '▶ Send to printer')}
               </button>
             </div>
             {slicing && (
-              <div className="print-progress" aria-label="slicing progress">
+              <div className="print-progress" aria-label={t('print.progress.aria', 'slicing progress')}>
                 <div className="print-progress-bar" style={{ width: `${Math.round(progress * 100)}%` }} />
               </div>
             )}
@@ -537,11 +547,11 @@ export function PrintPanel() {
                   onClick={() => setShowGcode((v) => !v)}
                   aria-expanded={showGcode}
                 >
-                  {showGcode ? '▾' : '▸'} G-code — {lastGcode.name}
-                  <span className="print-gcode-meta">{lastGcode.lines} lines</span>
+                  {showGcode ? '▾' : '▸'} {t('print.gcode.label', 'G-code — {name}', { name: lastGcode.name })}
+                  <span className="print-gcode-meta">{t('print.gcode.lines', '{n} lines', { n: lastGcode.lines })}</span>
                 </button>
                 {showGcode && (
-                  <pre className="print-gcode-text" aria-label="generated g-code">
+                  <pre className="print-gcode-text" aria-label={t('print.gcode.aria', 'generated g-code')}>
                     {lastGcode.text}
                   </pre>
                 )}
@@ -549,10 +559,8 @@ export function PrintPanel() {
             )}
 
             <p className="print-note">
-              Note: this is a <strong>basic FDM slicer</strong> (inset perimeters + alternating
-              0/90° rectilinear infill) for hobby GRBL-based printers — not a production slicer (no
-              supports, bridging, or adaptive layers). Always sanity-check the toolpath in the
-              Visualizer before printing.
+              {t('print.note.pre', 'Note: this is a')} <strong>{t('print.note.basic', 'basic FDM slicer')}</strong>{' '}
+              {t('print.note.post', '(inset perimeters + alternating 0/90° rectilinear infill) for hobby GRBL-based printers — not a production slicer (no supports, bridging, or adaptive layers). Always sanity-check the toolpath in the Visualizer before printing.')}
             </p>
           </div>
         </section>

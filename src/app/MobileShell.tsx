@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { IDockviewPanelProps } from 'dockview'
 import { panelComponents, availablePanels } from './panelRegistry'
+import { useT } from '../i18n'
 
 /**
  * Mobile / narrow-viewport layout: the SAME panel components as the desktop
@@ -9,6 +10,7 @@ import { panelComponents, availablePanels } from './panelRegistry'
  * curve between the two form factors (see CLAUDE.md "Responsive UI").
  */
 export function MobileShell() {
+  const t = useT()
   const [activeId, setActiveId] = useState(availablePanels[0]?.id ?? '')
   const active = availablePanels.find((p) => p.id === activeId) ?? availablePanels[0]
   const Component = active ? panelComponents[active.component] : undefined
@@ -22,7 +24,7 @@ export function MobileShell() {
 
   return (
     <div className="mobile-shell">
-      <nav className="mobile-tabs" role="tablist" aria-label="Panels">
+      <nav className="mobile-tabs" role="tablist" aria-label={t('mobile.panels', 'Panels')}>
         {availablePanels.map((p) => (
           <button
             key={p.id}

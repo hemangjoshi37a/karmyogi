@@ -88,8 +88,17 @@ textarea { min-height: auto; }
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
-.topbar .brand { font-weight: 700; letter-spacing: 0.5px; }
+.topbar .brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: 0.5px; }
 .topbar .brand .accent { color: var(--accent); }
+.topbar .brand .brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  flex: 0 0 auto;
+  display: block;
+  /* crisp on retina; the source is a 64px png downscaled */
+  image-rendering: auto;
+}
 .topbar .spacer { flex: 1; }
 
 .zoom-group { display: inline-flex; align-items: center; gap: 2px; }

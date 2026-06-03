@@ -22,3 +22,7 @@ coverage
 .cloudflare/
 *.token
 secrets.*
+
+# user-provided CAD test artifacts (not part of the app)
+OM MANDALA.*
+*.cdr

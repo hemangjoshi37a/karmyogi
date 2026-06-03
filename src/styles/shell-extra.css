@@ -15,6 +15,20 @@
   border-radius: 14px;
   background: var(--bg-input);
 }
+.km-conn-select {
+  min-height: 24px;
+  max-width: 130px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.km-conn-select:disabled { opacity: 0.55; cursor: not-allowed; }
+.km-conn-select[data-experimental='true'] { border-color: var(--warn); color: var(--warn); }
 .km-conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-muted); flex: 0 0 auto; }
 .km-conn-dot[data-conn='connecting'] { background: var(--warn); }
 .km-conn-dot[data-state='Idle'], .km-conn-dot[data-conn='connected'] { background: var(--ok); }
@@ -36,6 +50,17 @@
   border-radius: 12px;
 }
 .km-conn-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+/* Thin divider between the connect/disconnect buttons and the ⌖/⚙ actions. */
+.km-conn-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--border);
+}
+/* ⌖ Probe + ⚙ settings buttons live inside the connection cluster: keep them
+   slim and the same height as the connect buttons. */
+.km-conn .km-conn-icon { min-height: 24px; min-width: 24px; padding: 2px 6px; }
 
 /* ---- modal ---- */
 .km-modal-overlay {
@@ -75,5 +100,7 @@
 
 @media (max-width: 768px) {
   .km-conn-btn { min-height: 36px; }
+  .km-conn-select { min-height: 36px; }
+  .km-conn .km-conn-icon { min-height: 36px; min-width: 36px; }
   .km-modal-overlay { padding: 3vh 6px; }
 }

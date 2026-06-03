@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "license": "MIT",
   "description": "Browser-based control + CAD/CAM workbench for 3-axis GRBL machines",
   "scripts": {
     "dev": "vite",

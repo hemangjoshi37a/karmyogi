@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useT } from '../i18n'
 import { useMachine, useProgram, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
 import {
@@ -29,8 +30,10 @@ const PAD = 6
 type PanelParams = Omit<PnpParams, 'programName' | 'metric'>
 
 /** Head-type labelling: pick/release vs grip/open. */
-function headLabels(head: PnpHeadType): { on: string; off: string } {
-  return head === 'gripper' ? { on: 'Grip', off: 'Open' } : { on: 'Vacuum', off: 'Release' }
+function headLabels(head: PnpHeadType, t: ReturnType<typeof useT>): { on: string; off: string } {
+  return head === 'gripper'
+    ? { on: t('pnp.head.grip', 'Grip'), off: t('pnp.head.open', 'Open') }
+    : { on: t('pnp.head.vacuum', 'Vacuum'), off: t('pnp.head.release', 'Release') }
 }
 
 /**
@@ -47,6 +50,7 @@ function headLabels(head: PnpHeadType): { on: string; off: string } {
  * settings behind a collapsed Advanced section), and Send + raw G-code.
  */
 export function PickPlacePanel() {
+  const t = useT()
   // Live machine work-position + connection (for "Set from machine").
   const wpos = useMachine((s) => s.wpos)
   const connected = useMachine((s) => s.connection === 'connected')
@@ -77,7 +81,7 @@ export function PickPlacePanel() {
   const [showRaw, setShowRaw] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
-  const labels = headLabels(params.headType)
+  const labels = headLabels(params.headType, t)
 
   // --- op CRUD ---
   function addRow() {
@@ -150,30 +154,33 @@ export function PickPlacePanel() {
     <div className="pp-panel">
       <div className="pp-scroll">
         <p className="pp-intro">
-          Move parts from a <b>pick</b> point to a <b>place</b> point. The head
-          grabs with the spindle output ({labels.on} on, {labels.off} off). Build
-          the operations below, then <b>Send ▶</b> to the machine.
+          {t('pnp.intro.pre', 'Move parts from a')} <b>{t('pnp.intro.pick', 'pick')}</b>{' '}
+          {t('pnp.intro.mid', 'point to a')} <b>{t('pnp.intro.place', 'place')}</b>{' '}
+          {t('pnp.intro.head', 'point. The head grabs with the spindle output ({on} on, {off} off). Build the operations below, then', { on: labels.on, off: labels.off })}{' '}
+          <b>{t('pnp.intro.send', 'Send ▶')}</b> {t('pnp.intro.tomachine', 'to the machine.')}
         </p>
 
         {/* --- Head + operations --------------------------------------- */}
         <section className="pp-card">
-          <h3>Operations</h3>
+          <h3>{t('pnp.ops.title', 'Operations')}</h3>
           <div className="pp-card-body">
             <div className="pp-row">
               <label className="pp-head">
-                Head
+                {t('pnp.head.label', 'Head')}
                 <select
                   value={params.headType}
                   onChange={(e) => setParam('headType', e.target.value as PnpHeadType)}
-                  title="What is mounted at the head"
+                  title={t('pnp.head.select.title', 'What is mounted at the head')}
                 >
-                  <option value="vacuum">Vacuum suction cup</option>
-                  <option value="gripper">Gripper</option>
+                  <option value="vacuum">{t('pnp.head.opt.vacuum', 'Vacuum suction cup')}</option>
+                  <option value="gripper">{t('pnp.head.opt.gripper', 'Gripper')}</option>
                 </select>
               </label>
               <span className="pp-spacer" />
               <span className="pp-meta">
-                {ops.length} op{ops.length === 1 ? '' : 's'}
+                {ops.length === 1
+                  ? t('pnp.ops.count.one', '{n} op', { n: ops.length })
+                  : t('pnp.ops.count.many', '{n} ops', { n: ops.length })}
               </span>
             </div>
 
@@ -182,10 +189,10 @@ export function PickPlacePanel() {
                 <thead>
                   <tr>
                     <th className="pp-idx">#</th>
-                    <th>Pick X</th>
-                    <th>Pick Y</th>
-                    <th>Place X</th>
-                    <th>Place Y</th>
+                    <th>{t('pnp.col.pickX', 'Pick X')}</th>
+                    <th>{t('pnp.col.pickY', 'Pick Y')}</th>
+                    <th>{t('pnp.col.placeX', 'Place X')}</th>
+                    <th>{t('pnp.col.placeY', 'Place Y')}</th>
                     <th className="pp-actions-col" />
                   </tr>
                 </thead>
@@ -193,8 +200,7 @@ export function PickPlacePanel() {
                   {ops.length === 0 && (
                     <tr>
                       <td colSpan={6} className="pp-empty">
-                        No operations yet. Add one below, or set pick/place from the
-                        machine position.
+                        {t('pnp.ops.empty', 'No operations yet. Add one below, or set pick/place from the machine position.')}
                       </td>
                     </tr>
                   )}
@@ -205,7 +211,7 @@ export function PickPlacePanel() {
                       onClick={() => setSelected(i)}
                     >
                       <td className="pp-idx">{i + 1}</td>
-                      <td data-label="Pick X">
+                      <td data-label={t('pnp.col.pickX', 'Pick X')}>
                         <input
                           type="number"
                           step="0.1"
@@ -213,7 +219,7 @@ export function PickPlacePanel() {
                           onChange={(e) => updateOp(i, { pickX: num(e.target.value, op.pickX) })}
                         />
                       </td>
-                      <td data-label="Pick Y">
+                      <td data-label={t('pnp.col.pickY', 'Pick Y')}>
                         <input
                           type="number"
                           step="0.1"
@@ -221,7 +227,7 @@ export function PickPlacePanel() {
                           onChange={(e) => updateOp(i, { pickY: num(e.target.value, op.pickY) })}
                         />
                       </td>
-                      <td data-label="Place X">
+                      <td data-label={t('pnp.col.placeX', 'Place X')}>
                         <input
                           type="number"
                           step="0.1"
@@ -229,7 +235,7 @@ export function PickPlacePanel() {
                           onChange={(e) => updateOp(i, { placeX: num(e.target.value, op.placeX) })}
                         />
                       </td>
-                      <td data-label="Place Y">
+                      <td data-label={t('pnp.col.placeY', 'Place Y')}>
                         <input
                           type="number"
                           step="0.1"
@@ -238,13 +244,13 @@ export function PickPlacePanel() {
                         />
                       </td>
                       <td className="pp-actions">
-                        <button title="Move up" onClick={(e) => { e.stopPropagation(); moveRow(i, -1) }} disabled={i === 0}>
+                        <button title={t('pnp.row.up', 'Move up')} onClick={(e) => { e.stopPropagation(); moveRow(i, -1) }} disabled={i === 0}>
                           ↑
                         </button>
-                        <button title="Move down" onClick={(e) => { e.stopPropagation(); moveRow(i, 1) }} disabled={i === ops.length - 1}>
+                        <button title={t('pnp.row.down', 'Move down')} onClick={(e) => { e.stopPropagation(); moveRow(i, 1) }} disabled={i === ops.length - 1}>
                           ↓
                         </button>
-                        <button className="pp-del" title="Delete op" onClick={(e) => { e.stopPropagation(); deleteRow(i) }}>
+                        <button className="pp-del" title={t('pnp.row.delete', 'Delete op')} onClick={(e) => { e.stopPropagation(); deleteRow(i) }}>
                           ✕
                         </button>
                       </td>
@@ -256,29 +262,35 @@ export function PickPlacePanel() {
 
             <div className="pp-row pp-op-tools">
               <button className="primary" onClick={addRow}>
-                + Add op
+                {t('pnp.addOp', '+ Add op')}
               </button>
               <button onClick={() => setOps([])} disabled={ops.length === 0}>
-                Clear
+                {t('pnp.clear', 'Clear')}
               </button>
               <span className="pp-spacer" />
               <button
                 onClick={() => recordInto('pick')}
                 disabled={!connected}
-                title={connected ? 'Fill the selected op pick X/Y from the live machine position' : 'Connect to set from machine'}
+                title={connected ? t('pnp.setPick.title.on', 'Fill the selected op pick X/Y from the live machine position') : t('pnp.set.title.off', 'Connect to set from machine')}
               >
-                ⌖ Set pick {hasSelection ? `#${selected + 1}` : ''} from machine
+                {hasSelection
+                  ? t('pnp.setPick.sel', '⌖ Set pick #{n} from machine', { n: selected + 1 })
+                  : t('pnp.setPick', '⌖ Set pick from machine')}
               </button>
               <button
                 onClick={() => recordInto('place')}
                 disabled={!connected}
-                title={connected ? 'Fill the selected op place X/Y from the live machine position' : 'Connect to set from machine'}
+                title={connected ? t('pnp.setPlace.title.on', 'Fill the selected op place X/Y from the live machine position') : t('pnp.set.title.off', 'Connect to set from machine')}
               >
-                ⌖ Set place {hasSelection ? `#${selected + 1}` : ''} from machine
+                {hasSelection
+                  ? t('pnp.setPlace.sel', '⌖ Set place #{n} from machine', { n: selected + 1 })
+                  : t('pnp.setPlace', '⌖ Set place from machine')}
               </button>
             </div>
             <span className="pp-meta">
-              {connected ? `Live WPos  ${wpos.x.toFixed(2)}, ${wpos.y.toFixed(2)}` : 'Not connected — set buttons disabled'}
+              {connected
+                ? t('pnp.wpos', 'Live WPos  {x}, {y}', { x: wpos.x.toFixed(2), y: wpos.y.toFixed(2) })
+                : t('pnp.notConnected', 'Not connected — set buttons disabled')}
             </span>
           </div>
         </section>
@@ -286,7 +298,7 @@ export function PickPlacePanel() {
         {/* --- 2D bed preview ------------------------------------------ */}
         {ops.length > 0 && (
           <section className="pp-card">
-            <h3>Bed preview · pick ○ → place △</h3>
+            <h3>{t('pnp.preview.title', 'Bed preview · pick ○ → place △')}</h3>
             <div className="pp-card-body pp-preview2d-body">
               <svg
                 className="pp-preview2d"
@@ -336,70 +348,70 @@ export function PickPlacePanel() {
 
         {/* --- Motion params (essentials) ------------------------------ */}
         <section className="pp-card">
-          <h3>Motion &amp; {labels.on.toLowerCase()}</h3>
+          <h3>{t('pnp.motion.title', 'Motion & {action}', { action: labels.on.toLowerCase() })}</h3>
           <div className="pp-card-body">
             <div className="pp-grid">
               <label className="pp-field">
-                Travel Z (mm)
+                {t('pnp.field.travelZ', 'Travel Z (mm)')}
                 <input
                   type="number"
                   step="0.1"
                   value={params.travelZ}
                   onChange={(e) => setParam('travelZ', num(e.target.value, params.travelZ))}
-                  title="Safe clearance height for all XY travel"
+                  title={t('pnp.field.travelZ.title', 'Safe clearance height for all XY travel')}
                 />
               </label>
               <label className="pp-field">
-                Pick Z (mm)
+                {t('pnp.field.pickZ', 'Pick Z (mm)')}
                 <input
                   type="number"
                   step="0.1"
                   value={params.pickZ}
                   onChange={(e) => setParam('pickZ', num(e.target.value, params.pickZ))}
-                  title="Height the head lowers to when picking up the part"
+                  title={t('pnp.field.pickZ.title', 'Height the head lowers to when picking up the part')}
                 />
               </label>
               <label className="pp-field">
-                Place Z (mm)
+                {t('pnp.field.placeZ', 'Place Z (mm)')}
                 <input
                   type="number"
                   step="0.1"
                   value={params.placeZ}
                   onChange={(e) => setParam('placeZ', num(e.target.value, params.placeZ))}
-                  title="Height the head lowers to when placing the part down"
+                  title={t('pnp.field.placeZ.title', 'Height the head lowers to when placing the part down')}
                 />
               </label>
               <label className="pp-field">
-                Feed XY (mm/min)
+                {t('pnp.field.feedXY', 'Feed XY (mm/min)')}
                 <input
                   type="number"
                   step="100"
                   min="0"
                   value={params.feedXY}
                   onChange={(e) => setParam('feedXY', num(e.target.value, params.feedXY))}
-                  title="Travel speed for XY moves"
+                  title={t('pnp.field.feedXY.title', 'Travel speed for XY moves')}
                 />
               </label>
               <label className="pp-field">
-                Feed Z (mm/min)
+                {t('pnp.field.feedZ', 'Feed Z (mm/min)')}
                 <input
                   type="number"
                   step="10"
                   min="0"
                   value={params.feedZ}
                   onChange={(e) => setParam('feedZ', num(e.target.value, params.feedZ))}
-                  title="Plunge speed when lowering to pick/place height"
+                  title={t('pnp.field.feedZ.title', 'Plunge speed when lowering to pick/place height')}
                 />
               </label>
               <label className="pp-field">
-                {labels.on} strength (S)
+                {t('pnp.field.strength', '{action} strength (S)', { action: labels.on })}
                 <input
                   type="number"
                   step="100"
                   min="0"
                   value={params.gripRpm}
                   onChange={(e) => setParam('gripRpm', num(e.target.value, params.gripRpm))}
-                  title="Spindle S value = vacuum / grip strength (M3 S…)"
+                  title={t('pnp.field.strength.title', 'Spindle S value = vacuum / grip strength (M3 S…)')}
                 />
               </label>
             </div>
@@ -414,37 +426,37 @@ export function PickPlacePanel() {
               onClick={() => setShowAdvanced((v) => !v)}
               aria-expanded={showAdvanced}
             >
-              {showAdvanced ? '▾' : '▸'} Advanced
-              <span className="pp-toggle-note">dwell · rotation · decimals</span>
+              {showAdvanced ? '▾' : '▸'} {t('pnp.advanced', 'Advanced')}
+              <span className="pp-toggle-note">{t('pnp.advanced.note', 'dwell · rotation · decimals')}</span>
             </button>
           </h3>
           {showAdvanced && (
             <div className="pp-card-body">
               <div className="pp-grid">
                 <label className="pp-field">
-                  Pick dwell (ms)
+                  {t('pnp.field.pickDwell', 'Pick dwell (ms)')}
                   <input
                     type="number"
                     step="50"
                     min="0"
                     value={params.pickDwellMs}
                     onChange={(e) => setParam('pickDwellMs', num(e.target.value, params.pickDwellMs))}
-                    title="Pause after gripping so the grip is secure (0 = none)"
+                    title={t('pnp.field.pickDwell.title', 'Pause after gripping so the grip is secure (0 = none)')}
                   />
                 </label>
                 <label className="pp-field">
-                  Place dwell (ms)
+                  {t('pnp.field.placeDwell', 'Place dwell (ms)')}
                   <input
                     type="number"
                     step="50"
                     min="0"
                     value={params.placeDwellMs}
                     onChange={(e) => setParam('placeDwellMs', num(e.target.value, params.placeDwellMs))}
-                    title="Pause after releasing so the part settles (0 = none)"
+                    title={t('pnp.field.placeDwell.title', 'Pause after releasing so the part settles (0 = none)')}
                   />
                 </label>
                 <label className="pp-field">
-                  Decimals
+                  {t('pnp.field.decimals', 'Decimals')}
                   <input
                     type="number"
                     step="1"
@@ -454,7 +466,7 @@ export function PickPlacePanel() {
                     onChange={(e) =>
                       setParam('decimals', Math.max(0, Math.min(6, Math.round(num(e.target.value, params.decimals)))))
                     }
-                    title="Decimal places used in emitted coordinates"
+                    title={t('pnp.field.decimals.title', 'Decimal places used in emitted coordinates')}
                   />
                 </label>
               </div>
@@ -465,7 +477,7 @@ export function PickPlacePanel() {
                   checked={params.rotaryAxis}
                   onChange={(e) => setParam('rotaryAxis', e.target.checked)}
                 />
-                Emit part rotation as a real A-axis word (G0 A…)
+                {t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)')}
               </label>
 
               <div className="pp-table-wrap pp-rot-table">
@@ -473,13 +485,13 @@ export function PickPlacePanel() {
                   <thead>
                     <tr>
                       <th className="pp-idx">#</th>
-                      <th>Rotation°</th>
+                      <th>{t('pnp.col.rotation', 'Rotation°')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {ops.length === 0 && (
                       <tr>
-                        <td colSpan={2} className="pp-empty">No operations.</td>
+                        <td colSpan={2} className="pp-empty">{t('pnp.rot.empty', 'No operations.')}</td>
                       </tr>
                     )}
                     {ops.map((op, i) => (
@@ -489,7 +501,7 @@ export function PickPlacePanel() {
                         onClick={() => setSelected(i)}
                       >
                         <td className="pp-idx">{i + 1}</td>
-                        <td data-label="Rotation°">
+                        <td data-label={t('pnp.col.rotation', 'Rotation°')}>
                           <input
                             type="number"
                             step="5"
@@ -504,9 +516,8 @@ export function PickPlacePanel() {
               </div>
 
               <p className="pp-hint">
-                Speed here is the <b>feed rate</b> only. Acceleration is a global
-                machine setting ($120–$122, set in the Motion / Probe panels) and
-                is not written here.
+                {t('pnp.hint.pre', 'Speed here is the')} <b>{t('pnp.hint.feed', 'feed rate')}</b>{' '}
+                {t('pnp.hint.post', 'only. Acceleration is a global machine setting ($120–$122, set in the Motion / Probe panels) and is not written here.')}
               </p>
             </div>
           )}
@@ -514,27 +525,27 @@ export function PickPlacePanel() {
 
         {/* --- Send + raw G-code --------------------------------------- */}
         <section className="pp-card pp-send-card">
-          <h3>Generate &amp; send</h3>
+          <h3>{t('pnp.send.title', 'Generate & send')}</h3>
           <div className="pp-card-body">
             <div className="pp-row pp-generate">
               <button
                 className="primary pp-play"
                 onClick={play}
                 disabled={ops.length === 0 || lineCount === 0 || !connected}
-                title={connected ? 'Stream this program to the machine' : 'Connect to a machine to send'}
+                title={connected ? t('pnp.send.btn.title.on', 'Stream this program to the machine') : t('pnp.send.btn.title.off', 'Connect to a machine to send')}
               >
-                ▶ Send to machine
+                {t('pnp.send.btn', '▶ Send to machine')}
               </button>
               <span className="pp-meta">
-                Live · <b>{lineCount}</b> lines → Visualizer
+                {t('pnp.send.meta', 'Live · {n} lines → Visualizer', { n: lineCount })}
               </span>
             </div>
             {!connected && ops.length > 0 && (
-              <span className="pp-meta">Not connected — preview is live; connect to send.</span>
+              <span className="pp-meta">{t('pnp.send.notConnected', 'Not connected — preview is live; connect to send.')}</span>
             )}
 
             <button className="pp-raw-toggle" onClick={() => setShowRaw((v) => !v)} aria-expanded={showRaw}>
-              {showRaw ? '▾' : '▸'} Raw G-code ({lineCount} lines)
+              {showRaw ? '▾' : '▸'} {t('pnp.raw', 'Raw G-code ({n} lines)', { n: lineCount })}
             </button>
             {showRaw && <pre className="pp-preview">{gcode}</pre>}
           </div>

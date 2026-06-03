@@ -1,0 +1,97 @@
+{
+  "version": "KMYG1",
+  "unit": "mm",
+  "page": "A4",
+  "markers": [
+    {
+      "role": "TARGET",
+      "id": "TL",
+      "sizeMm": 28,
+      "frameXmm": 0,
+      "frameYmm": 229,
+      "targetWmm": 150,
+      "targetHmm": 229,
+      "payload": "KMYG1|TARGET|TL|X=0|Y=229|S=28|W=150|H=229"
+    },
+    {
+      "role": "TARGET",
+      "id": "TR",
+      "sizeMm": 28,
+      "frameXmm": 150,
+      "frameYmm": 229,
+      "targetWmm": 150,
+      "targetHmm": 229,
+      "payload": "KMYG1|TARGET|TR|X=150|Y=229|S=28|W=150|H=229"
+    },
+    {
+      "role": "TARGET",
+      "id": "BL",
+      "sizeMm": 28,
+      "frameXmm": 0,
+      "frameYmm": 0,
+      "targetWmm": 150,
+      "targetHmm": 229,
+      "payload": "KMYG1|TARGET|BL|X=0|Y=0|S=28|W=150|H=229"
+    },
+    {
+      "role": "TARGET",
+      "id": "BR",
+      "sizeMm": 28,
+      "frameXmm": 150,
+      "frameYmm": 0,
+      "targetWmm": 150,
+      "targetHmm": 229,
+      "payload": "KMYG1|TARGET|BR|X=150|Y=0|S=28|W=150|H=229"
+    },
+    {
+      "role": "STOCK",
+      "n": 1,
+      "sizeMm": 18,
+      "payload": "KMYG1|STOCK|N=1|S=18"
+    },
+    {
+      "role": "STOCK",
+      "n": 2,
+      "sizeMm": 18,
+      "payload": "KMYG1|STOCK|N=2|S=18"
+    },
+    {
+      "role": "STOCK",
+      "n": 3,
+      "sizeMm": 18,
+      "payload": "KMYG1|STOCK|N=3|S=18"
+    },
+    {
+      "role": "STOCK",
+      "n": 4,
+      "sizeMm": 18,
+      "payload": "KMYG1|STOCK|N=4|S=18"
+    },
+    {
+      "role": "STOCK",
+      "n": 5,
+      "sizeMm": 18,
+      "payload": "KMYG1|STOCK|N=5|S=18"
+    },
+    {
+      "role": "STOCK",
+      "n": 6,
+      "sizeMm": 18,
+      "payload": "KMYG1|STOCK|N=6|S=18"
+    },
+    {
+      "role": "MAT",
+      "name": "plywood",
+      "thicknessMm": 12,
+      "sizeMm": 18,
+      "payload": "KMYG1|MAT|name=plywood|t=12|S=18"
+    },
+    {
+      "role": "MAT",
+      "name": "mdf",
+      "thicknessMm": 18,
+      "sizeMm": 18,
+      "payload": "KMYG1|MAT|name=mdf|t=18|S=18"
+    }
+  ]
+}

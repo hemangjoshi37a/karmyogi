@@ -12,9 +12,14 @@ import { MobileShell } from './MobileShell'
 import { IconButton } from '../components/IconButton'
 import { NotificationBell } from '../components/NotificationBell'
 import { PanelLauncher } from '../components/PanelLauncher'
+import { LanguageSwitcher } from '../components/LanguageSwitcher'
 import { ConnectionControl } from '../components/ConnectionControl'
 import { Modal } from '../components/Modal'
 import { MotionPanel } from '../panels/MotionPanel'
+// Probe is rendered in a modal here AND still registered as a dock tab in
+// panelRegistry.ts (the tab can be removed later — kept for now so Probe is
+// reachable both ways). Do not remove the registry entry yet.
+import { ProbePanel } from '../panels/ProbePanel'
 import '../styles/topbar.css'
 import '../styles/shell-extra.css'
 
@@ -171,6 +176,7 @@ export function Shell() {
   const saveLayout = useLayout((s) => s.save)
   const resetLayout = useLayout((s) => s.reset)
   const [showMotion, setShowMotion] = useState(false)
+  const [showProbe, setShowProbe] = useState(false)
 
   // Persist the dock layout automatically (debounced) on every change, so it
   // survives reloads AND browser close/open without a manual "save".
@@ -230,17 +236,36 @@ export function Shell() {
     <div className="app-shell">
       <header className="topbar">
         <span className="brand">
-          karm<span className="accent">yogi</span>
+          <img
+            className="brand-mark"
+            src="/icon-mark.png"
+            width={22}
+            height={22}
+            alt="karmyogi — meditating yogi mark"
+            title="karmyogi"
+          />
+          <span className="brand-word">karm<span className="accent">yogi</span></span>
         </span>
         <span style={{ color: 'var(--fg-muted)' }}>GRBL workbench</span>
         <span className="brand-by">
           by <a href="https://hjLabs.in" target="_blank" rel="noopener noreferrer">hjLabs.in</a>
+          {' · '}
+          <a
+            href={`${REPO_URL}/blob/main/LICENSE`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="karmyogi is open source under the MIT License — view LICENSE on GitHub"
+          >
+            MIT
+          </a>
         </span>
         <span className="spacer" />
-        <ConnectionControl />
+        <ConnectionControl
+          onOpenSettings={() => setShowMotion(true)}
+          onOpenProbe={() => setShowProbe(true)}
+        />
         <span className="topbar-actions">
           <PanelLauncher onOpenPanel={onOpenPanel} isPanelOpen={isPanelOpen} />
-          <IconButton icon="⚙" label="Motion / GRBL settings" onClick={() => setShowMotion(true)} />
           {!isMobile && <IconButton icon="↺" label="Reset dock layout to default" onClick={onReset} />}
           <span className="zoom-group" title="UI zoom">
             <IconButton icon="−" label="Zoom out" onClick={zoomOut} />
@@ -250,6 +275,7 @@ export function Shell() {
             <IconButton icon="+" label="Zoom in" onClick={zoomIn} />
           </span>
           <NotificationBell />
+          <LanguageSwitcher />
           <IconButton
             icon={<GitHubGlyph />}
             label="View source on GitHub"
@@ -281,6 +307,11 @@ export function Shell() {
       <Modal open={showMotion} title="Motion / GRBL Settings" onClose={() => setShowMotion(false)}>
         <div style={{ height: '72vh' }}>
           <MotionPanel />
+        </div>
+      </Modal>
+      <Modal open={showProbe} title="Probe & Limits" onClose={() => setShowProbe(false)}>
+        <div style={{ height: '72vh' }}>
+          <ProbePanel />
         </div>
       </Modal>
     </div>

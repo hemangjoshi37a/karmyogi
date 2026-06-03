@@ -1,0 +1,179 @@
+/* Playback transport bar (Premiere-Pro-style timeline).
+   Owned by the playback agent. Theme vars only. */
+
+.pt-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+/* ---- Disabled / empty state ---- */
+.pt-bar--disabled {
+  justify-content: center;
+  color: var(--fg-muted);
+  pointer-events: none;
+  opacity: 0.8;
+}
+.pt-empty {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+/* ---- Transport buttons ---- */
+.pt-transport {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.pt-btn {
+  min-width: 28px;
+  min-height: 28px;
+}
+.pt-btn--play {
+  color: var(--accent);
+}
+.pt-btn--active {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---- Scrubber: a range input painted as an accent progress bar ---- */
+.pt-scrub {
+  flex: 1 1 160px;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+}
+.pt-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--pt-pct, 0%),
+    var(--bg-input) var(--pt-pct, 0%),
+    var(--bg-input) 100%
+  );
+  cursor: pointer;
+  outline: none;
+}
+.pt-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  cursor: pointer;
+}
+.pt-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  cursor: pointer;
+}
+.pt-range::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: transparent;
+}
+.pt-range:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: 3px;
+}
+
+/* ---- Time readout ---- */
+.pt-readout {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  color: var(--fg-muted);
+  white-space: nowrap;
+  min-width: 78px;
+  text-align: right;
+}
+
+/* ---- Speed control (button group) ---- */
+.pt-speed {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pt-speed-btn {
+  border: none;
+  border-left: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 4px 7px;
+  min-height: 26px;
+  cursor: pointer;
+  line-height: 1;
+}
+.pt-speed-btn:first-child {
+  border-left: none;
+}
+.pt-speed-btn:hover {
+  color: var(--fg);
+  background: var(--bg-panel);
+}
+.pt-speed-btn--active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* ---- Narrow reflow: drop the speed labels' breathing room, allow wrap ---- */
+@media (max-width: 420px) {
+  .pt-bar {
+    gap: 6px;
+  }
+  .pt-readout {
+    min-width: 0;
+  }
+  .pt-speed-btn {
+    padding: 4px 5px;
+  }
+}
+
+/* ---- Touch targets ---- */
+@media (pointer: coarse) {
+  .pt-btn {
+    min-width: 38px;
+    min-height: 38px;
+  }
+  .pt-range {
+    height: 10px;
+  }
+  .pt-range::-webkit-slider-thumb {
+    width: 20px;
+    height: 20px;
+  }
+  .pt-range::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+  }
+  .pt-speed-btn {
+    min-height: 38px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+}

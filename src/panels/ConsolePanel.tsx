@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { grbl } from '../serial/controller'
 import { useConsole, useMachine, type ConsoleDir, type ConsoleEntry } from '../store'
+import { useT } from '../i18n'
 import '../styles/console.css'
 
 /** Quick-send macros (cncjs-style): settings, home, unlock, parser state, go to origin, status.
- *  `label` is what shows on the chip; `help` is the explanatory tooltip. */
-const MACROS: ReadonlyArray<{ cmd: string; help: string }> = [
-  { cmd: '$$', help: '$$ — view all GRBL settings' },
-  { cmd: '$H', help: '$H — run homing cycle' },
-  { cmd: '$X', help: '$X — clear alarm / unlock' },
-  { cmd: '$G', help: '$G — view G-code parser state' },
-  { cmd: 'G0 X0 Y0', help: 'G0 X0 Y0 — rapid to work origin' },
-  { cmd: '?', help: '? — query realtime status' },
+ *  `cmd` is the raw GRBL command (untranslated); `hk`/`help` resolve the explanatory
+ *  tooltip — `hk` is the translation key, `help` the English fallback. */
+const MACROS: ReadonlyArray<{ cmd: string; hk: string; help: string }> = [
+  { cmd: '$$', hk: 'console.macro.settings', help: '$$ — view all GRBL settings' },
+  { cmd: '$H', hk: 'console.macro.home', help: '$H — run homing cycle' },
+  { cmd: '$X', hk: 'console.macro.unlock', help: '$X — clear alarm / unlock' },
+  { cmd: '$G', hk: 'console.macro.parser', help: '$G — view G-code parser state' },
+  { cmd: 'G0 X0 Y0', hk: 'console.macro.origin', help: 'G0 X0 Y0 — rapid to work origin' },
+  { cmd: '?', hk: 'console.macro.status', help: '? — query realtime status' },
 ]
 
 /** Side a bubble sits on: sent commands hug the right, replies the left, notices center. */
@@ -37,6 +39,7 @@ function clock(ts: number): string {
  *   unless the user has scrolled up, and only ever scrolls vertically.
  */
 export function ConsolePanel() {
+  const t = useT()
   const entries = useConsole((s) => s.entries)
   const clear = useConsole((s) => s.clear)
   const connected = useMachine((s) => s.connection === 'connected')
@@ -87,12 +90,15 @@ export function ConsolePanel() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search messages…"
-          aria-label="Search console messages"
+          placeholder={t('console.search.placeholder', 'Search messages…')}
+          aria-label={t('console.search.aria', 'Search console messages')}
         />
         {trimmedQuery && (
           <span className="chat-search-count" aria-live="polite">
-            {matches.length} of {entries.length}
+            {t('console.search.count', '{matches} of {total}', {
+              matches: matches.length,
+              total: entries.length,
+            })}
           </span>
         )}
         {query && (
@@ -100,8 +106,8 @@ export function ConsolePanel() {
             type="button"
             className="chat-icon-btn"
             onClick={() => setQuery('')}
-            title="Clear search"
-            aria-label="Clear search"
+            title={t('console.search.clear', 'Clear search')}
+            aria-label={t('console.search.clear', 'Clear search')}
           >
             ✕
           </button>
@@ -111,8 +117,12 @@ export function ConsolePanel() {
           type="button"
           className="chat-icon-btn"
           onClick={() => setShowMacros((v) => !v)}
-          title={showMacros ? 'Hide quick commands' : 'Show quick commands'}
-          aria-label="Toggle quick commands"
+          title={
+            showMacros
+              ? t('console.macros.hide', 'Hide quick commands')
+              : t('console.macros.show', 'Show quick commands')
+          }
+          aria-label={t('console.macros.toggle', 'Toggle quick commands')}
           aria-pressed={showMacros}
         >
           ⚡
@@ -122,8 +132,8 @@ export function ConsolePanel() {
           className="chat-icon-btn"
           onClick={clear}
           disabled={entries.length === 0}
-          title="Clear the console log"
-          aria-label="Clear console"
+          title={t('console.clear.title', 'Clear the console log')}
+          aria-label={t('console.clear.aria', 'Clear console')}
         >
           🗑
         </button>
@@ -135,12 +145,16 @@ export function ConsolePanel() {
         ref={threadRef}
         onScroll={onScroll}
         aria-live="polite"
-        aria-label="Console messages"
+        aria-label={t('console.thread.aria', 'Console messages')}
       >
         {entries.length === 0 ? (
-          <div className="chat-empty">No messages yet — connect and send a command.</div>
+          <div className="chat-empty">
+            {t('console.empty.none', 'No messages yet — connect and send a command.')}
+          </div>
         ) : matches.length === 0 ? (
-          <div className="chat-empty">No messages match “{query.trim()}”.</div>
+          <div className="chat-empty">
+            {t('console.empty.noMatch', 'No messages match “{query}”.', { query: query.trim() })}
+          </div>
         ) : (
           matches.map((e) => {
             const where = side(e.dir)
@@ -158,11 +172,15 @@ export function ConsolePanel() {
         )}
       </div>
 
-      <p className="chat-note">Raw GRBL console — type any G-code or <code>$</code> command (advanced).</p>
+      <p className="chat-note">
+        {t('console.note.before', 'Raw GRBL console — type any G-code or ')}
+        <code>$</code>
+        {t('console.note.after', ' command (advanced).')}
+      </p>
 
       {/* ---- quick-macro chips (optional, toggleable) ---- */}
       {showMacros && (
-        <div className="chat-macros" role="group" aria-label="Quick commands">
+        <div className="chat-macros" role="group" aria-label={t('console.macros.group', 'Quick commands')}>
           {MACROS.map((m) => (
             <button
               key={m.cmd}
@@ -173,8 +191,8 @@ export function ConsolePanel() {
                 void grbl.send(m.cmd)
                 stickRef.current = true
               }}
-              title={m.help}
-              aria-label={m.help}
+              title={t(m.hk, m.help)}
+              aria-label={t(m.hk, m.help)}
             >
               {m.cmd}
             </button>
@@ -191,17 +209,25 @@ export function ConsolePanel() {
           onKeyDown={(e) => {
             if (e.key === 'Enter') send()
           }}
-          placeholder={connected ? 'Type a G-code / $ command…' : 'Connect to send commands'}
+          placeholder={
+            connected
+              ? t('console.composer.placeholder', 'Type a G-code / $ command…')
+              : t('console.composer.disconnected', 'Connect to send commands')
+          }
           disabled={!connected}
-          aria-label="Message the controller"
+          aria-label={t('console.composer.aria', 'Message the controller')}
         />
         <button
           type="button"
           className="chat-send-btn"
           disabled={!canSend}
           onClick={send}
-          title={connected ? 'Send command (Enter)' : 'Connect to send commands'}
-          aria-label="Send command"
+          title={
+            connected
+              ? t('console.send.title', 'Send command (Enter)')
+              : t('console.composer.disconnected', 'Connect to send commands')
+          }
+          aria-label={t('console.send.aria', 'Send command')}
         >
           <span aria-hidden="true">➤</span>
         </button>

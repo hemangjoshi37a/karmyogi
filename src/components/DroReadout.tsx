@@ -1,4 +1,6 @@
 import type { Vec3 } from '../store'
+import { InfoTip } from './InfoTip'
+import { useT } from '../i18n'
 
 const AXES: Array<keyof Vec3> = ['x', 'y', 'z']
 
@@ -24,11 +26,15 @@ export function formatDro(value: number, decimals: number): string {
  * decimals. Pure presentational component (W4-owned).
  */
 export function DroReadout({ wpos, mpos, decimals = 3, unit = 'mm' }: DroReadoutProps) {
+  const t = useT()
   return (
-    <div className="dro" role="table" aria-label="Digital read-out">
-      <span className="dro-head axis-head">Axis</span>
-      <span className="dro-head">Work ({unit})</span>
-      <span className="dro-head">Machine ({unit})</span>
+    <div className="dro" role="table" aria-label={t('ctrl.dro.aria', 'Digital read-out')}>
+      <span className="dro-head axis-head">{t('ctrl.dro.axis', 'Axis')}</span>
+      <span className="dro-head">
+        {t('ctrl.dro.work', 'Work ({unit})', { unit })}
+        <InfoTip topic="workZero" />
+      </span>
+      <span className="dro-head">{t('ctrl.dro.machine', 'Machine ({unit})', { unit })}</span>
       {AXES.map((axis) => (
         <div key={axis} style={{ display: 'contents' }}>
           <span className="dro-axis">{axis.toUpperCase()}</span>

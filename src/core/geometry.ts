@@ -205,6 +205,175 @@ export function makeRect(corner: Point, width: number, height: number): Polyline
   return pl;
 }
 
+/**
+ * Flatten a DXF ELLIPSE into a polyline. `majorEnd` is the major-axis endpoint
+ * RELATIVE to `center` (DXF group 11/21); `ratio` is minor/major (group 40);
+ * `startParam`/`endParam` are the elliptical angles in radians (groups 41/42),
+ * with a full ellipse spanning 0..2π. The minor axis is the major axis rotated
+ * +90° and scaled by `ratio`. A full sweep is returned as a closed polyline.
+ */
+export function makeEllipse(
+  center: Point,
+  majorEnd: Point,
+  ratio: number,
+  startParam: number,
+  endParam: number,
+  tol = kDefaultArcTolerance
+): Polyline {
+  const pl = new Polyline();
+  const majorLen = Math.hypot(majorEnd.x, majorEnd.y);
+  if (majorLen < kEpsilon) return pl;
+
+  // Minor-axis vector = major rotated +90°, scaled by the axis ratio.
+  const minor = { x: -majorEnd.y * ratio, y: majorEnd.x * ratio };
+
+  let sweep = endParam - startParam;
+  while (sweep <= 0) sweep += 2 * Math.PI;
+  while (sweep > 2 * Math.PI) sweep -= 2 * Math.PI;
+  const full = Math.abs(sweep - 2 * Math.PI) < 1e-6;
+
+  // Segment count from the larger semi-axis and the chord tolerance.
+  let segments = 2;
+  if (majorLen > tol && tol > 0) {
+    const maxStep = 2 * Math.acos(Math.max(0, 1 - tol / majorLen));
+    if (maxStep > kEpsilon) segments = Math.max(2, Math.ceil(sweep / maxStep));
+  }
+
+  for (let i = 0; i <= segments; ++i) {
+    const t = startParam + sweep * (i / segments);
+    const c = Math.cos(t);
+    const s = Math.sin(t);
+    pl.addUnique({
+      x: center.x + c * majorEnd.x + s * minor.x,
+      y: center.y + c * majorEnd.y + s * minor.y,
+    });
+  }
+  if (full) {
+    if (pl.points.length > 1 && distance(pl.points[0], pl.points[pl.points.length - 1]) <= 1e-6)
+      pl.points.pop();
+    pl.closed = true;
+  }
+  return pl;
+}
+
+/** Clamped uniform knot vector for `numCtrl` control points of degree `p`. */
+function clampedUniformKnots(numCtrl: number, p: number): number[] {
+  const m = numCtrl + p + 1; // total knots
+  const inner = Math.max(1, numCtrl - p);
+  const U = new Array<number>(m);
+  for (let i = 0; i < m; ++i) {
+    if (i <= p) U[i] = 0;
+    else if (i >= numCtrl) U[i] = 1;
+    else U[i] = (i - p) / inner;
+  }
+  return U;
+}
+
+/** Knot span index k with U[k] <= u < U[k+1] (clamped to the valid domain). */
+function findSpan(nLast: number, p: number, u: number, U: number[]): number {
+  if (u >= U[nLast + 1]) return nLast;
+  if (u <= U[p]) return p;
+  let low = p;
+  let high = nLast + 1;
+  let mid = (low + high) >> 1;
+  while (u < U[mid] || u >= U[mid + 1]) {
+    if (u < U[mid]) high = mid;
+    else low = mid;
+    mid = (low + high) >> 1;
+  }
+  return mid;
+}
+
+/** Evaluate a (rational) B-spline at parameter u via De Boor's algorithm. */
+function deBoorPoint(
+  nLast: number,
+  p: number,
+  U: number[],
+  ctrl: Point[],
+  weights: number[] | null,
+  u: number
+): Point {
+  const k = findSpan(nLast, p, u, U);
+  const dx = new Array<number>(p + 1);
+  const dy = new Array<number>(p + 1);
+  const dw = new Array<number>(p + 1);
+  for (let j = 0; j <= p; ++j) {
+    const idx = k - p + j;
+    const w = weights ? weights[idx] : 1;
+    dx[j] = ctrl[idx].x * w;
+    dy[j] = ctrl[idx].y * w;
+    dw[j] = w;
+  }
+  for (let r = 1; r <= p; ++r) {
+    for (let j = p; j >= r; --j) {
+      const i = k - p + j;
+      const denom = U[i + p - r + 1] - U[i];
+      const a = denom > 1e-12 ? (u - U[i]) / denom : 0;
+      dx[j] = (1 - a) * dx[j - 1] + a * dx[j];
+      dy[j] = (1 - a) * dy[j - 1] + a * dy[j];
+      dw[j] = (1 - a) * dw[j - 1] + a * dw[j];
+    }
+  }
+  const w = dw[p] || 1;
+  return { x: dx[p] / w, y: dy[p] / w };
+}
+
+/**
+ * Flatten a DXF SPLINE (B-spline / NURBS) into a polyline by sampling the curve.
+ * Supports rational splines (per-control-point weights) and synthesises a
+ * clamped uniform knot vector when the file's knots are missing/inconsistent.
+ * Sampling density scales with the control-polygon length (chord-bounded),
+ * capped so a pathological spline can't explode the point count.
+ */
+export function makeBSpline(
+  degree: number,
+  ctrl: Point[],
+  knots: number[],
+  weights: number[] | null,
+  closed: boolean,
+  tol = kDefaultArcTolerance
+): Polyline {
+  const pl = new Polyline();
+  const numCtrl = ctrl.length;
+  // Not enough control points for the stated degree → fall back to the
+  // control polygon (still better than dropping the entity entirely).
+  if (degree < 1 || numCtrl < degree + 1) {
+    for (const p of ctrl) pl.addUnique(p);
+    if (closed && pl.points.length > 2) pl.closed = true;
+    return pl;
+  }
+
+  const p = degree;
+  const nLast = numCtrl - 1;
+  const U = knots.length === numCtrl + p + 1 ? knots : clampedUniformKnots(numCtrl, p);
+  const W = weights && weights.length === numCtrl ? weights : null;
+  const lo = U[p];
+  const hi = U[nLast + 1];
+  if (!(hi > lo)) {
+    for (const pnt of ctrl) pl.addUnique(pnt);
+    if (closed && pl.points.length > 2) pl.closed = true;
+    return pl;
+  }
+
+  // Sample count from the control-polygon length, chord-bounded and capped.
+  let polyLen = 0;
+  for (let i = 1; i < numCtrl; ++i) polyLen += distance(ctrl[i - 1], ctrl[i]);
+  const chord = Math.max(tol * 10, 0.25);
+  let samples = Math.ceil(polyLen / chord);
+  samples = Math.max(degree * 8, Math.min(samples, 4000));
+
+  for (let s = 0; s <= samples; ++s) {
+    const u = lo + ((hi - lo) * s) / samples;
+    pl.addUnique(deBoorPoint(nLast, p, U, ctrl, W, u));
+  }
+  if (closed) {
+    if (pl.points.length > 1 && distance(pl.points[0], pl.points[pl.points.length - 1]) <= 1e-6)
+      pl.points.pop();
+    pl.closed = true;
+  }
+  return pl;
+}
+
 // ---- Geometric predicates / utilities -------------------------------------
 
 export function distance(a: Point, b: Point): number {

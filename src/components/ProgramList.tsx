@@ -5,6 +5,7 @@ import {
   rowOffset,
   needsScrollIntoView,
 } from './programWindow'
+import { useT } from '../i18n'
 
 const ROW_H = 18 // px; keep in sync with .pp-row in program.css
 
@@ -24,6 +25,7 @@ interface Props {
  * keep the cursor visible while streaming.
  */
 export function ProgramList({ lines, cursor, selected, onSelect }: Props) {
+  const t = useT()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportH, setViewportH] = useState(0)
@@ -69,7 +71,7 @@ export function ProgramList({ lines, cursor, selected, onSelect }: Props) {
         className={cls}
         style={{ top: rowOffset(i, ROW_H), height: ROW_H }}
         onClick={() => onSelect(i)}
-        title="Click to select (feed-from-line start)"
+        title={t('prog.rowSelect', 'Click to select (feed-from-line start)')}
       >
         <span className="pp-ln">{i + 1}</span>
         <span className="pp-code">{lines[i] || ' '}</span>
@@ -84,7 +86,9 @@ export function ProgramList({ lines, cursor, selected, onSelect }: Props) {
       onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
     >
       {total === 0 ? (
-        <div className="pp-empty">No program loaded. Load a .nc / .gcode file to begin.</div>
+        <div className="pp-empty">
+          {t('prog.empty', 'No program loaded. Load a .nc / .gcode file to begin.')}
+        </div>
       ) : (
         <div className="pp-list-inner" style={{ height: listHeight(total, ROW_H) }}>
           {rows}

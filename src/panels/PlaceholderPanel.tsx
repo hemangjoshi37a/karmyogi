@@ -1,4 +1,5 @@
 import type { IDockviewPanelProps } from 'dockview'
+import { useT } from '../i18n'
 
 interface PlaceholderParams {
   title?: string
@@ -11,12 +12,13 @@ interface PlaceholderParams {
  * corresponding workstreams land.
  */
 export function PlaceholderPanel(props: IDockviewPanelProps<PlaceholderParams>) {
+  const t = useT()
   const { title, note } = props.params ?? {}
   return (
     <div className="panel-body">
-      <h3>{title ?? props.api?.title ?? 'Panel'}</h3>
+      <h3>{title ?? props.api?.title ?? t('ph.title', 'Panel')}</h3>
       <p style={{ color: 'var(--fg-muted)' }}>
-        {note ?? 'Placeholder panel — drag the tab, drag the border to resize, or float it.'}
+        {note ?? t('ph.note', 'Placeholder panel — drag the tab, drag the border to resize, or float it.')}
       </p>
     </div>
   )

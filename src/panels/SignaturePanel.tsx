@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { useT } from '../i18n'
 import { Polyline } from '../core/geometry'
 import {
   countPoints,
@@ -92,6 +93,7 @@ function polysBounds(polys: Polyline[]): { w: number; h: number } {
  * and streaming to the machine.
  */
 export function SignaturePanel() {
+  const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
   const connected = useMachine((s) => s.connection === 'connected')
 
@@ -112,7 +114,7 @@ export function SignaturePanel() {
   const [showRaw, setShowRaw] = usePersistentState('karmyogi.sig.showRaw', false)
 
   const [raster, setRaster] = useState<Raster | null>(null)
-  const [info, setInfo] = useState('Upload a signature image to begin.')
+  const [info, setInfo] = useState(() => t('sig.info.start', 'Upload a signature image to begin.'))
   const [preview, setPreview] = useState('')
   const [previewPolys, setPreviewPolys] = useState<Polyline[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -125,7 +127,7 @@ export function SignaturePanel() {
   // tracer only ever sees the resulting pixel array (no DOM in core).
   const loadImage = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
-      setInfo('Please choose an image file.')
+      setInfo(t('sig.info.notImage', 'Please choose an image file.'))
       return
     }
     try {
@@ -133,7 +135,7 @@ export function SignaturePanel() {
       const img = new Image()
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve()
-        img.onerror = () => reject(new Error('Could not decode image'))
+        img.onerror = () => reject(new Error(t('sig.err.decode', 'Could not decode image')))
         img.src = url
       })
       // Cap the working resolution so tracing stays fast on huge photos.
@@ -145,16 +147,16 @@ export function SignaturePanel() {
       canvas.width = w
       canvas.height = h
       const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('Canvas 2D unavailable')
+      if (!ctx) throw new Error(t('sig.err.canvas', 'Canvas 2D unavailable'))
       ctx.drawImage(img, 0, 0, w, h)
       const imageData = ctx.getImageData(0, 0, w, h)
       URL.revokeObjectURL(url)
       setRaster({ data: imageData.data, width: w, height: h, name: file.name })
-      setInfo(`Loaded "${file.name}" (${w}×${h}px). Adjust threshold and size below.`)
+      setInfo(t('sig.info.loaded', 'Loaded "{name}" ({w}×{h}px). Adjust threshold and size below.', { name: file.name, w, h }))
     } catch (e) {
-      setInfo(`Failed to load image: ${(e as Error).message}`)
+      setInfo(t('sig.info.loadFailed', 'Failed to load image: {msg}', { msg: (e as Error).message }))
     }
-  }, [])
+  }, [t])
 
   // Trace + simplify + fit, then emit pen G-code and push it to the store.
   const generate = useCallback((): string => {
@@ -169,7 +171,7 @@ export function SignaturePanel() {
       invert,
     })
     if (contours.length === 0) {
-      setInfo('No ink detected — try adjusting the threshold or toggling Invert.')
+      setInfo(t('sig.info.noInk', 'No ink detected — try adjusting the threshold or toggling Invert.'))
       setPreview('')
       setPreviewPolys([])
       previewRef.current = ''
@@ -196,13 +198,17 @@ export function SignaturePanel() {
     const pts = countPoints(mm)
     const b = polysBounds(mm)
     setInfo(
-      `${mm.length} stroke(s), ${pts} point(s) — ` +
-        `${b.w.toFixed(1)}×${b.h.toFixed(1)} mm → Visualizer.`,
+      t('sig.info.result', '{strokes} stroke(s), {points} point(s) — {w}×{h} mm → Visualizer.', {
+        strokes: mm.length,
+        points: pts,
+        w: b.w.toFixed(1),
+        h: b.h.toFixed(1),
+      }),
     )
     return gcode
   }, [
     raster, threshold, invert, tolerance, targetW, targetH, lockAspect,
-    originX, originY, penUpZ, penDownZ, feed, setProgram,
+    originX, originY, penUpZ, penDownZ, feed, setProgram, t,
   ])
 
   // Live G-code: regenerate ~300ms after the last change and push to the store
@@ -278,9 +284,9 @@ export function SignaturePanel() {
       <div className="sig-preview-col">
         <section className="sig-card sig-preview-card">
           <div className="sig-card-head">
-            <h4>Traced preview</h4>
+            <h4>{t('sig.preview.title', 'Traced preview')}</h4>
             {previewPolys.length > 0 && (
-              <span className="sig-badge">{previewPolys.length} stroke(s)</span>
+              <span className="sig-badge">{t('sig.preview.strokes', '{n} stroke(s)', { n: previewPolys.length })}</span>
             )}
           </div>
           <div className="sig-preview-box">
@@ -290,7 +296,7 @@ export function SignaturePanel() {
                 viewBox={svg.viewBox}
                 preserveAspectRatio="xMidYMid meet"
                 role="img"
-                aria-label="Traced signature preview"
+                aria-label={t('sig.preview.aria', 'Traced signature preview')}
               >
                 {svg.paths.map((d, i) => (
                   <path key={i} d={d} />
@@ -299,8 +305,8 @@ export function SignaturePanel() {
             ) : (
               <span className="sig-preview-empty">
                 {raster
-                  ? 'No vectors yet — adjust the threshold.'
-                  : 'Upload an image to see the live trace here.'}
+                  ? t('sig.preview.noVectors', 'No vectors yet — adjust the threshold.')
+                  : t('sig.preview.upload', 'Upload an image to see the live trace here.')}
               </span>
             )}
           </div>
@@ -311,16 +317,15 @@ export function SignaturePanel() {
       {/* ============ Controls — bottom on narrow, left on wide ============ */}
       <div className="sig-controls-col">
         <p className="sig-intro">
-          Upload a signature image — it is traced to vector outlines live, then sent
-          as pen-plotter G-code. Best with a clean, high-contrast signature on white.
-          This traces ink <strong>outlines</strong> (the contour of each stroke),
-          not its centreline.
+          {t('sig.intro.pre', 'Upload a signature image — it is traced to vector outlines live, then sent as pen-plotter G-code. Best with a clean, high-contrast signature on white. This traces ink')}{' '}
+          <strong>{t('sig.intro.outlines', 'outlines')}</strong>{' '}
+          {t('sig.intro.post', '(the contour of each stroke), not its centreline.')}
         </p>
 
         {/* ---- Step 1: Upload ---- */}
         <section className="sig-card">
           <div className="sig-card-head">
-            <h4><span className="sig-step">1</span> Upload signature</h4>
+            <h4><span className="sig-step">1</span> {t('sig.step1', 'Upload signature')}</h4>
           </div>
           <div
             className={'sig-drop' + (dragOver ? ' over' : '')}
@@ -336,11 +341,11 @@ export function SignaturePanel() {
           >
             {raster ? (
               <span className="sig-drop-name" title={raster.name}>
-                {raster.name} — {raster.width}×{raster.height}px
+                {t('sig.drop.name', '{name} — {w}×{h}px', { name: raster.name, w: raster.width, h: raster.height })}
               </span>
             ) : (
               <span className="sig-drop-hint">
-                Click to choose an image, or drag &amp; drop here
+                {t('sig.drop.hint', 'Click to choose an image, or drag & drop here')}
               </span>
             )}
             <input
@@ -356,11 +361,11 @@ export function SignaturePanel() {
         {/* ---- Step 2: Trace + size ---- */}
         <section className="sig-card">
           <div className="sig-card-head">
-            <h4><span className="sig-step">2</span> Adjust</h4>
+            <h4><span className="sig-step">2</span> {t('sig.step2', 'Adjust')}</h4>
           </div>
           <div className="sig-grid">
             <label className="sig-field sig-field-wide">
-              <span>Threshold ({threshold})</span>
+              <span>{t('sig.threshold', 'Threshold ({n})', { n: threshold })}</span>
               <input
                 type="range"
                 min={0}
@@ -376,10 +381,10 @@ export function SignaturePanel() {
                 checked={invert}
                 onChange={(e) => setInvert(e.target.checked)}
               />
-              <span>Invert (dark background)</span>
+              <span>{t('sig.invert', 'Invert (dark background)')}</span>
             </label>
             <label className="sig-field">
-              <span>Target width</span>
+              <span>{t('sig.targetW', 'Target width')}</span>
               <span className="sig-input">
                 <input type="number" inputMode="decimal" min={1} step={1} value={targetW}
                   onChange={(e) => setTargetW(Number(e.target.value))} />
@@ -387,7 +392,7 @@ export function SignaturePanel() {
               </span>
             </label>
             <label className="sig-field">
-              <span>Target height</span>
+              <span>{t('sig.targetH', 'Target height')}</span>
               <span className="sig-input">
                 <input type="number" inputMode="decimal" min={1} step={1} value={targetH}
                   disabled={lockAspect}
@@ -401,7 +406,7 @@ export function SignaturePanel() {
                 checked={lockAspect}
                 onChange={(e) => setLockAspect(e.target.checked)}
               />
-              <span>Lock aspect (fit to width)</span>
+              <span>{t('sig.lockAspect', 'Lock aspect (fit to width)')}</span>
             </label>
           </div>
         </section>
@@ -414,12 +419,12 @@ export function SignaturePanel() {
             onClick={() => setShowAdvanced(!showAdvanced)}
             aria-expanded={showAdvanced}
           >
-            <span className="sig-caret">{showAdvanced ? '▾' : '▸'}</span> Advanced
+            <span className="sig-caret">{showAdvanced ? '▾' : '▸'}</span> {t('sig.advanced', 'Advanced')}
           </button>
           {showAdvanced && (
             <div className="sig-grid sig-advanced">
               <label className="sig-field">
-                <span>Simplify tolerance</span>
+                <span>{t('sig.tolerance', 'Simplify tolerance')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" min={0} step={0.5} value={tolerance}
                     onChange={(e) => setTolerance(Number(e.target.value))} />
@@ -427,7 +432,7 @@ export function SignaturePanel() {
                 </span>
               </label>
               <label className="sig-field">
-                <span>Origin X</span>
+                <span>{t('sig.originX', 'Origin X')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" step={1} value={originX}
                     onChange={(e) => setOriginX(Number(e.target.value))} />
@@ -435,7 +440,7 @@ export function SignaturePanel() {
                 </span>
               </label>
               <label className="sig-field">
-                <span>Origin Y</span>
+                <span>{t('sig.originY', 'Origin Y')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" step={1} value={originY}
                     onChange={(e) => setOriginY(Number(e.target.value))} />
@@ -443,7 +448,7 @@ export function SignaturePanel() {
                 </span>
               </label>
               <label className="sig-field">
-                <span>Pen up Z</span>
+                <span>{t('sig.penUpZ', 'Pen up Z')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penUpZ}
                     onChange={(e) => setPenUpZ(Number(e.target.value))} />
@@ -451,7 +456,7 @@ export function SignaturePanel() {
                 </span>
               </label>
               <label className="sig-field">
-                <span>Pen down Z</span>
+                <span>{t('sig.penDownZ', 'Pen down Z')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penDownZ}
                     onChange={(e) => setPenDownZ(Number(e.target.value))} />
@@ -459,7 +464,7 @@ export function SignaturePanel() {
                 </span>
               </label>
               <label className="sig-field">
-                <span>Feed</span>
+                <span>{t('sig.feed', 'Feed')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" min={1} step={50} value={feed}
                     onChange={(e) => setFeed(Number(e.target.value))} />
@@ -478,22 +483,22 @@ export function SignaturePanel() {
               className="sig-btn primary sig-play"
               onClick={play}
               disabled={!connected || preview.length === 0}
-              title={connected ? 'Stream this program to the machine' : 'Connect to a machine to send'}
+              title={connected ? t('sig.send.title.on', 'Stream this program to the machine') : t('sig.send.title.off', 'Connect to a machine to send')}
             >
-              ▶ Send to machine
+              {t('sig.send', '▶ Send to machine')}
             </button>
             <button
               type="button"
               className="sig-btn sig-regen"
               onClick={generate}
               disabled={!raster}
-              title="Regenerate now"
+              title={t('sig.regen.title', 'Regenerate now')}
             >
               ↻
             </button>
           </div>
           {!connected && preview.length > 0 && (
-            <p className="sig-info">Preview is live; connect a machine to send.</p>
+            <p className="sig-info">{t('sig.send.live', 'Preview is live; connect a machine to send.')}</p>
           )}
         </section>
 
@@ -505,15 +510,17 @@ export function SignaturePanel() {
             onClick={() => setShowRaw(!showRaw)}
             aria-expanded={showRaw}
           >
-            <span className="sig-caret">{showRaw ? '▾' : '▸'}</span> Raw G-code
-            {rawLineCount > 0 ? ` (${rawLineCount} lines)` : ''}
+            <span className="sig-caret">{showRaw ? '▾' : '▸'}</span>{' '}
+            {rawLineCount > 0
+              ? t('sig.raw.count', 'Raw G-code ({n} lines)', { n: rawLineCount })
+              : t('sig.raw', 'Raw G-code')}
           </button>
           {showRaw && (
             <textarea
               className="sig-preview-text"
               readOnly
               value={preview}
-              placeholder="Generated G-code will appear here."
+              placeholder={t('sig.raw.placeholder', 'Generated G-code will appear here.')}
               spellCheck={false}
             />
           )}

@@ -22,6 +22,7 @@ import { Toolpath } from './toolpath';
 import { Polyline } from './geometry';
 import type { StlMesh } from './slicer';
 import { STL_STRIDE } from './slicer';
+import type { Placement } from './transform';
 
 // ---- Hard safety caps -------------------------------------------------------
 /** Never sample a heightmap larger than this many cells (≈ 1.2k × 1.2k). */
@@ -41,8 +42,9 @@ export interface Carve3DParams {
   stepdown: number; // mm depth per roughing level
   safeZ: number; // retract height above stock top (mm)
   maxDepth: number; // max material depth to remove below the top surface (mm)
-  feedXY: number; // cutting feed (mm/min)
+  feedXY: number; // cutting feed (mm/min) — "Cut speed" in the UI
   feedZ: number; // plunge feed (mm/min)
+  travelFeed: number; // "free"/link feed for non-cutting links (mm/min)
   spindleRPM: number;
   doRoughing: boolean;
   doFinishing: boolean;
@@ -60,6 +62,7 @@ export function defaultCarve3DParams(overrides: Partial<Carve3DParams> = {}): Ca
     maxDepth: 10.0,
     feedXY: 600,
     feedZ: 200,
+    travelFeed: 1200,
     spindleRPM: 10000,
     doRoughing: true,
     doFinishing: true,
@@ -340,11 +343,29 @@ function sampleHeight(hm: Heightmap, x: number, y: number): number {
 // Toolpath generation
 // ----------------------------------------------------------------------------
 
+/** One contiguous cut span on a roughing scan-row: [a, b] in the scan axis. */
+interface Span {
+  a: number; // span start coord (in scan-walk order)
+  b: number; // span end coord
+}
+
 /**
  * Roughing: descend in stepdown layers from just under the top surface to the
- * carve floor. At each level, raster across the footprint and cut only the spans
- * whose surface height is BELOW the level (i.e. there's material to clear at this
- * Z). This bulk-removes stock above the relief in flat passes.
+ * carve floor. At each level we raster the footprint as a CONTINUOUS engaged
+ * boustrophedon — the tool stays down and links rows/spans instead of lifting to
+ * safe-Z between each one:
+ *
+ *  - Each row is cut as one move across its contiguous material span(s).
+ *  - The step-over to the next row is a CUT at the level Z (a thin connector pass
+ *    along the region boundary) whenever that row's span overlaps the previous
+ *    one in the scan axis — so the link stays inside the material being cleared.
+ *  - Within a row, separate spans (a genuine no-material gap) are bridged by a
+ *    `travel` link just above the level only if that gap is already cleared;
+ *    otherwise the tool retracts to safe-Z, repositions, and re-plunges.
+ *  - A safe-Z retract happens ONLY when no in-material link is possible (disjoint
+ *    regions / first contact), collapsing the old "forest of plunges".
+ *
+ * The result is long boustrophedon passes with very few plunges/retracts.
  */
 function buildRoughing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; levels: number } {
   const tp = new Toolpath();
@@ -352,6 +373,9 @@ function buildRoughing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; le
   const step = Math.max(params.stepover, hm.dx, 0.1);
   const floorZ = hm.zTop - Math.max(0, params.maxDepth);
   const safeZ = params.safeZ;
+  // Tiny clearance above the cut plane for in-material gap links (so the tool
+  // doesn't rub the floor while repositioning, but never lifts to safe-Z).
+  const linkClear = Math.min(0.3, Math.max(params.stepover * 0.25, 0.05));
 
   // Descending Z levels (each a flat clearing plane).
   const stepdown = params.stepdown > 0 ? params.stepdown : Math.max(params.maxDepth, 0.1);
@@ -363,58 +387,145 @@ function buildRoughing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; le
   }
   levels.push(floorZ);
 
-  // Scan rows along X, alternating direction (zig-zag) for efficiency.
   const y0 = hm.minY;
   const y1 = hm.maxY;
   const x0 = hm.minX;
   const x1 = hm.maxX;
   const sampleStep = Math.max(hm.dx, step * 0.5, 0.1);
 
-  for (const level of levels) {
-    let flip = false;
-    for (let y = y0; y <= y1 + 1e-9; y += step) {
-      // Walk this scan-row left→right (or reversed) and emit cut spans where the
-      // surface sits below `level` (material present above the relief at this Z).
-      const xs: number[] = [];
-      for (let x = x0; x <= x1 + 1e-9; x += sampleStep) xs.push(x);
-      if (xs.length === 0 || xs[xs.length - 1] < x1) xs.push(x1);
-      const ordered = flip ? xs.slice().reverse() : xs;
+  // Sample X positions for a row once (shared across levels).
+  const xsAsc: number[] = [];
+  for (let x = x0; x <= x1 + 1e-9; x += sampleStep) xsAsc.push(x);
+  if (xsAsc.length === 0 || xsAsc[xsAsc.length - 1] < x1) xsAsc.push(x1);
 
-      let inCut = false;
-      let runStart = 0;
-      const flushRun = (endX: number) => {
-        if (!inCut) return;
-        // Cut from runStart→endX at `level`.
-        tp.rapid({ x: runStart, y, z: safeZ });
-        tp.plunge({ x: runStart, y, z: level });
-        tp.feed({ x: endX, y, z: level });
-        tp.rapid({ x: endX, y, z: safeZ });
-        inCut = false;
-      };
-      let prevX = ordered[0];
-      for (const x of ordered) {
-        const surf = sampleHeight(hm, x, y);
-        const material = surf > level + 1e-6; // surface above this level → clear it
-        if (material && !inCut) {
-          inCut = true;
-          runStart = x;
-        } else if (!material && inCut) {
-          flushRun(prevX);
-        }
-        prevX = x;
+  // Build the rows (constant Y) once per level.
+  const ys: number[] = [];
+  for (let y = y0; y <= y1 + 1e-9; y += step) ys.push(y);
+  if (ys.length === 0 || ys[ys.length - 1] < y1) ys.push(y1);
+
+  for (const level of levels) {
+    const linkZ = Math.min(level + linkClear, safeZ);
+    // Track whether the tool is currently down (engaged at this level), where it
+    // is, and the scan-axis [lo,hi] extent of the span it last cut.
+    let down = false;
+    let curX = 0;
+    let curY = 0;
+    let prevLo = 0;
+    let prevHi = 0;
+    let flip = false;
+
+    /** Lift to safe-Z (only when no in-material link is possible). */
+    const retract = () => {
+      if (down) {
+        tp.rapid({ x: curX, y: curY, z: safeZ });
+        down = false;
       }
-      flushRun(ordered[ordered.length - 1]);
+    };
+    const approach = (x: number, y: number) => {
+      tp.rapid({ x, y, z: safeZ });
+      tp.plunge({ x, y, z: level });
+      down = true;
+    };
+
+    for (const y of ys) {
+      const ordered = flip ? xsAsc.slice().reverse() : xsAsc;
+      // Find contiguous material spans along this row (surface above `level`).
+      const spans: Span[] = [];
+      let runStart: number | null = null;
+      let prev = ordered[0];
+      for (const x of ordered) {
+        const material = sampleHeight(hm, x, y) > level + 1e-6;
+        if (material && runStart === null) runStart = x;
+        else if (!material && runStart !== null) {
+          spans.push({ a: runStart, b: prev });
+          runStart = null;
+        }
+        prev = x;
+      }
+      if (runStart !== null) spans.push({ a: runStart, b: ordered[ordered.length - 1] });
+
+      let firstOfRow = true;
+      for (const span of spans) {
+        const lo = Math.min(span.a, span.b);
+        const hi = Math.max(span.a, span.b);
+        if (!down) {
+          approach(span.a, y);
+        } else if (firstOfRow) {
+          // Row-to-row step-over. If this span overlaps the previous row's span
+          // in the scan axis, the connector stays inside the cleared region →
+          // link it as a CUT at the level Z (a thin boundary pass). Otherwise we
+          // can't link without gouging/air-cutting across a feature → retract.
+          const overlap = lo <= prevHi + step + 1e-6 && hi >= prevLo - step - 1e-6;
+          if (overlap) {
+            tp.feed({ x: span.a, y, z: level });
+          } else {
+            retract();
+            approach(span.a, y);
+          }
+        } else {
+          // Second+ span on the SAME row — a real no-material gap precedes it.
+          // Bridge just above the level if that gap is already cleared, else
+          // retract and re-plunge.
+          if (linkClearOfMaterial(hm, curX, curY, span.a, y, level)) {
+            tp.travel({ x: curX, y: curY, z: linkZ });
+            tp.travel({ x: span.a, y, z: linkZ });
+            tp.feed({ x: span.a, y, z: level });
+          } else {
+            retract();
+            approach(span.a, y);
+          }
+        }
+        // Cut across the engaged span.
+        tp.feed({ x: span.b, y, z: level });
+        curX = span.b;
+        curY = y;
+        prevLo = lo;
+        prevHi = hi;
+        firstOfRow = false;
+      }
       flip = !flip;
     }
+    retract();
   }
 
   return { tp, levels: levels.length };
 }
 
 /**
- * Finishing: a single parallel raster pass that rides the heightmap. The tool
- * stays down following Z = surface height across each scan line, lifting only at
- * row ends. This produces the relief surface finish.
+ * True when the straight link from (x0,y0)→(x1,y1) stays entirely in material
+ * that has already been cleared at `level` (i.e. the surface is at or below the
+ * level everywhere along it, so riding just above the level won't gouge).
+ */
+function linkClearOfMaterial(
+  hm: Heightmap,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  level: number,
+): boolean {
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const stepN = Math.max(2, Math.ceil(dist / Math.max(hm.dx, hm.dy, 0.1)));
+  for (let i = 0; i <= stepN; i++) {
+    const t = i / stepN;
+    const sx = x0 + (x1 - x0) * t;
+    const sy = y0 + (y1 - y0) * t;
+    if (sampleHeight(hm, sx, sy) > level + 1e-6) return false;
+  }
+  return true;
+}
+
+/**
+ * Finishing: a continuous serpentine raster that rides the heightmap (Z = surface
+ * height at each XY). Adjacent rows are LINKED while staying on the surface — at a
+ * row end the tool steps over to the next row's near end following the surface,
+ * instead of retract→rapid→plunge every row.
+ *
+ * The link is only along-surface safe when nothing taller pokes up between the two
+ * row ends. Rule: if the max surface height sampled along the step-over link
+ * exceeds BOTH endpoints by more than a small tolerance, a direct surface link
+ * would gouge that feature, so we retract to safe-Z, reposition, and re-plunge;
+ * otherwise we ride the surface across the link at the cut feed.
  */
 function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; lines: number } {
   const tp = new Toolpath();
@@ -427,59 +538,186 @@ function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; l
   let lineCount = 0;
 
   const clampZ = (z: number) => (z < floorZ ? floorZ : z > hm.zTop ? hm.zTop : z);
+  const alongX = params.finishDir === 'x';
 
-  if (params.finishDir === 'x') {
-    // Rows along X, stepping in Y.
+  // Build each scan line's coordinate list, serpentine-ordered.
+  const lines: { fixed: number; coords: number[] }[] = [];
+  if (alongX) {
     let flip = false;
     for (let y = hm.minY; y <= hm.maxY + 1e-9; y += step) {
       const xs: number[] = [];
       for (let x = hm.minX; x <= hm.maxX + 1e-9; x += sampleStep) xs.push(x);
       if (xs.length === 0 || xs[xs.length - 1] < hm.maxX) xs.push(hm.maxX);
-      const ordered = flip ? xs.slice().reverse() : xs;
-      emitFinishRow(tp, hm, ordered, y, true, safeZ, clampZ);
-      lineCount++;
+      lines.push({ fixed: y, coords: flip ? xs.slice().reverse() : xs });
       flip = !flip;
     }
   } else {
-    // Columns along Y, stepping in X.
     let flip = false;
     for (let x = hm.minX; x <= hm.maxX + 1e-9; x += step) {
       const ys: number[] = [];
       for (let y = hm.minY; y <= hm.maxY + 1e-9; y += sampleStep) ys.push(y);
       if (ys.length === 0 || ys[ys.length - 1] < hm.maxY) ys.push(hm.maxY);
-      const ordered = flip ? ys.slice().reverse() : ys;
-      emitFinishRow(tp, hm, ordered, x, false, safeZ, clampZ);
-      lineCount++;
+      lines.push({ fixed: x, coords: flip ? ys.slice().reverse() : ys });
       flip = !flip;
     }
   }
 
+  const at = (fixed: number, c: number) => (alongX ? { x: c, y: fixed } : { x: fixed, y: c });
+
+  let engaged = false; // tool currently riding the surface
+  let prevX = 0;
+  let prevY = 0;
+  let prevZ = 0;
+
+  for (const line of lines) {
+    if (line.coords.length < 2) continue;
+    const first = at(line.fixed, line.coords[0]);
+    const z0 = clampZ(sampleHeight(hm, first.x, first.y));
+
+    if (!engaged) {
+      // First contact: rapid over, plunge to the surface.
+      tp.rapid({ x: first.x, y: first.y, z: safeZ });
+      tp.plunge({ x: first.x, y: first.y, z: z0 });
+    } else if (surfaceLinkSafe(hm, prevX, prevY, first.x, first.y, prevZ, z0, clampZ)) {
+      // Ride the surface from the previous row end across the step-over to here.
+      tp.feed({ x: first.x, y: first.y, z: z0 });
+    } else {
+      // A feature would gouge between rows → retract, reposition, re-plunge.
+      tp.rapid({ x: prevX, y: prevY, z: safeZ });
+      tp.rapid({ x: first.x, y: first.y, z: safeZ });
+      tp.plunge({ x: first.x, y: first.y, z: z0 });
+    }
+
+    // Cut along the row, riding the surface.
+    for (let i = 1; i < line.coords.length; i++) {
+      const p = at(line.fixed, line.coords[i]);
+      const z = clampZ(sampleHeight(hm, p.x, p.y));
+      tp.feed({ x: p.x, y: p.y, z });
+      prevX = p.x;
+      prevY = p.y;
+      prevZ = z;
+    }
+    engaged = true;
+    lineCount++;
+  }
+
+  if (engaged) tp.rapid({ x: prevX, y: prevY, z: safeZ });
+
   return { tp, lines: lineCount };
 }
 
-/** Emit one finishing scan line (constant Y if `alongX`, else constant X). */
-function emitFinishRow(
-  tp: Toolpath,
+/**
+ * Decide if a straight surface-following link between two row ends is safe (won't
+ * gouge). We sample the surface along the link; if the highest point along it
+ * rises more than a small tolerance above BOTH endpoints, a feature sits between
+ * the rows and a direct link would dig into it — return false (caller retracts).
+ */
+function surfaceLinkSafe(
   hm: Heightmap,
-  coords: number[],
-  fixed: number,
-  alongX: boolean,
-  safeZ: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  z0: number,
+  z1: number,
   clampZ: (z: number) => number,
-): void {
-  if (coords.length < 2) return;
-  const at = (c: number) => (alongX ? { x: c, y: fixed } : { x: fixed, y: c });
-  const first = at(coords[0]);
-  const z0 = clampZ(sampleHeight(hm, first.x, first.y));
-  tp.rapid({ x: first.x, y: first.y, z: safeZ });
-  tp.plunge({ x: first.x, y: first.y, z: z0 });
-  for (let i = 1; i < coords.length; i++) {
-    const p = at(coords[i]);
-    const z = clampZ(sampleHeight(hm, p.x, p.y));
-    tp.feed({ x: p.x, y: p.y, z });
+): boolean {
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  // A normal step-over is short; if it's unexpectedly long (disjoint regions),
+  // don't try to ride the surface across it.
+  if (dist > Math.max(hm.dx, hm.dy) * 6 + 1e-6) return false;
+  const stepN = Math.max(2, Math.ceil(dist / Math.max(hm.dx, hm.dy, 0.05)));
+  const tol = 0.05;
+  const hi = Math.max(z0, z1) + tol;
+  for (let i = 1; i < stepN; i++) {
+    const t = i / stepN;
+    const sx = x0 + (x1 - x0) * t;
+    const sy = y0 + (y1 - y0) * t;
+    if (clampZ(sampleHeight(hm, sx, sy)) > hi) return false;
   }
-  const last = at(coords[coords.length - 1]);
-  tp.rapid({ x: last.x, y: last.y, z: safeZ });
+  return true;
+}
+
+/**
+ * The XY footprint (width × depth, mm) a mesh occupies after a uniform XY scale
+ * and a Z-rotation about its own bbox centre. Used by the auto-nester to pack
+ * several carve jobs onto the bed without overlap. Rotation is applied to the
+ * four bbox corners and a fresh axis-aligned extent is measured — so a rotated
+ * job reserves the space its turned rectangle actually needs.
+ */
+export function meshFootprint(
+  mesh: StlMesh,
+  opts: { rotDeg: number; scale: number },
+): { w: number; h: number } {
+  const minX = mesh.bbox.min[0];
+  const minY = mesh.bbox.min[1];
+  const maxX = mesh.bbox.max[0];
+  const maxY = mesh.bbox.max[1];
+  const s = Number.isFinite(opts.scale) && opts.scale > 0 ? opts.scale : 1;
+  const rad = ((opts.rotDeg || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const corners: [number, number][] = [
+    [minX, minY],
+    [maxX, minY],
+    [maxX, maxY],
+    [minX, maxY],
+  ];
+  let nMinX = Infinity;
+  let nMinY = Infinity;
+  let nMaxX = -Infinity;
+  let nMaxY = -Infinity;
+  for (const [px, py] of corners) {
+    const vx = (px - cx) * s;
+    const vy = (py - cy) * s;
+    const rx = vx * cos - vy * sin;
+    const ry = vx * sin + vy * cos;
+    if (rx < nMinX) nMinX = rx;
+    if (ry < nMinY) nMinY = ry;
+    if (rx > nMaxX) nMaxX = rx;
+    if (ry > nMaxY) nMaxY = ry;
+  }
+  return { w: nMaxX - nMinX, h: nMaxY - nMinY };
+}
+
+/**
+ * Bake a {@link Placement} (XY translate, Z-rotation about `pivot`, uniform XY
+ * scale) into a toolpath's move coordinates, returning a NEW toolpath. Z is left
+ * untouched (carve depth is independent of XY placement). The pivot is the job's
+ * own XY-bbox centre so rotation/scale spin about the model, matching the
+ * in-viewport gizmo and the G-code text transform in core/transform.ts.
+ *
+ * This lets several placed carve jobs be concatenated into ONE emitter call so
+ * the combined program has a single header / spindle start / footer.
+ */
+export function placeToolpath(
+  src: Toolpath,
+  placement: Placement,
+  pivot: { x: number; y: number },
+): Toolpath {
+  const out = new Toolpath();
+  out.name = src.name;
+  const s = Number.isFinite(placement.scale) && placement.scale > 0 ? placement.scale : 1;
+  const rad = ((placement.rotDeg || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  for (const m of src.moves) {
+    const vx = (m.target.x - pivot.x) * s;
+    const vy = (m.target.y - pivot.y) * s;
+    const rx = vx * cos - vy * sin;
+    const ry = vx * sin + vy * cos;
+    out.moves.push({
+      type: m.type,
+      target: {
+        x: rx + pivot.x + placement.dx,
+        y: ry + pivot.y + placement.dy,
+        z: m.target.z,
+      },
+    });
+  }
+  return out;
 }
 
 /**

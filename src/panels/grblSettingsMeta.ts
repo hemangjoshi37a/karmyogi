@@ -28,20 +28,22 @@ export type GrblSettingGroup =
 export interface GrblGroupInfo {
   id: GrblSettingGroup
   title: string
+  /** i18n key for `title` (English `title` stays the inline fallback). */
+  titleKey: string
   /** Order the section appears in. */
   order: number
 }
 
 /** Section definitions, in display order. */
 export const GRBL_GROUPS: GrblGroupInfo[] = [
-  { id: 'stepper', title: 'Stepper & ports', order: 0 },
-  { id: 'limits', title: 'Limits & homing', order: 1 },
-  { id: 'spindle', title: 'Spindle / laser', order: 2 },
-  { id: 'steps', title: 'Steps per mm', order: 3 },
-  { id: 'maxrate', title: 'Max rate', order: 4 },
-  { id: 'accel', title: 'Acceleration', order: 5 },
-  { id: 'maxtravel', title: 'Max travel', order: 6 },
-  { id: 'other', title: 'Other', order: 7 },
+  { id: 'stepper', title: 'Stepper & ports', titleKey: 'motion.group.stepper', order: 0 },
+  { id: 'limits', title: 'Limits & homing', titleKey: 'motion.group.limits', order: 1 },
+  { id: 'spindle', title: 'Spindle / laser', titleKey: 'motion.group.spindle', order: 2 },
+  { id: 'steps', title: 'Steps per mm', titleKey: 'motion.group.steps', order: 3 },
+  { id: 'maxrate', title: 'Max rate', titleKey: 'motion.group.maxrate', order: 4 },
+  { id: 'accel', title: 'Acceleration', titleKey: 'motion.group.accel', order: 5 },
+  { id: 'maxtravel', title: 'Max travel', titleKey: 'motion.group.maxtravel', order: 6 },
+  { id: 'other', title: 'Other', titleKey: 'motion.group.other', order: 7 },
 ]
 
 /**
@@ -53,6 +55,8 @@ export const INT32_SENTINEL = 2147483.648
 export interface GrblSettingRichMeta {
   group: GrblSettingGroup
   description: string
+  /** i18n key for `description` (English `description` stays the inline fallback). */
+  descKey: string
   /** Inclusive sane minimum, or undefined if effectively unbounded below. */
   min?: number
   /** Inclusive sane maximum, or undefined if effectively unbounded above. */
@@ -70,66 +74,77 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   0: {
     group: 'stepper',
     description: 'Step pulse width sent to the stepper drivers. Default 10 µs; most drivers want 3–10 µs.',
+    descKey: 'motion.set.0.desc',
     min: 1,
     max: 255,
   },
   1: {
     group: 'stepper',
     description: 'Idle delay before steppers are disabled. Default 25 ms; 255 keeps them always on.',
+    descKey: 'motion.set.1.desc',
     min: 0,
     max: 255,
   },
   2: {
     group: 'stepper',
     description: 'Bitmask inverting the step pulse signal per axis. Default 0 (no inversion).',
+    descKey: 'motion.set.2.desc',
     min: 0,
     max: 7,
   },
   3: {
     group: 'stepper',
     description: 'Bitmask inverting the direction signal per axis (flip an axis that runs backwards). Default 0.',
+    descKey: 'motion.set.3.desc',
     min: 0,
     max: 7,
   },
   4: {
     group: 'stepper',
     description: 'Invert the stepper-enable pin (some drivers are active-high). Default 0 (off).',
+    descKey: 'motion.set.4.desc',
     min: 0,
     max: 1,
   },
   5: {
     group: 'stepper',
     description: 'Invert the limit-switch pins (NC vs NO wiring). Default 0 (off).',
+    descKey: 'motion.set.5.desc',
     min: 0,
     max: 1,
   },
   6: {
     group: 'stepper',
     description: 'Invert the probe pin. Default 0 (off).',
+    descKey: 'motion.set.6.desc',
     min: 0,
     max: 1,
   },
   10: {
     group: 'stepper',
     description: 'Status report content bitmask (which fields `?` returns). Default 1 (MPos + buffer).',
+    descKey: 'motion.set.10.desc',
     min: 0,
     max: 255,
   },
   11: {
     group: 'stepper',
     description: 'Junction deviation — cornering aggressiveness. Default 0.010 mm; smaller = slower, smoother corners.',
+    descKey: 'motion.set.11.desc',
     min: 0,
     max: 10,
   },
   12: {
     group: 'stepper',
     description: 'Arc chord tolerance for G2/G3 segmentation. Default 0.002 mm.',
+    descKey: 'motion.set.12.desc',
     min: 0,
     max: 10,
   },
   13: {
     group: 'stepper',
     description: 'Report positions in inches instead of mm. Default 0 (mm).',
+    descKey: 'motion.set.13.desc',
     min: 0,
     max: 1,
   },
@@ -138,48 +153,56 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   20: {
     group: 'limits',
     description: 'Soft limits: refuse moves beyond max travel ($130–$132). Default 0. Needs homing enabled. Corrupt $130–$132 + this on = error:15 on every jog.',
+    descKey: 'motion.set.20.desc',
     min: 0,
     max: 1,
   },
   21: {
     group: 'limits',
     description: 'Hard limits: trip an alarm when a limit switch closes. Default 0 (off).',
+    descKey: 'motion.set.21.desc',
     min: 0,
     max: 1,
   },
   22: {
     group: 'limits',
     description: 'Enable the homing cycle ($H). Default 0 (off) on many hobby setups.',
+    descKey: 'motion.set.22.desc',
     min: 0,
     max: 1,
   },
   23: {
     group: 'limits',
     description: 'Homing direction invert bitmask (which corner to home to). Default 0.',
+    descKey: 'motion.set.23.desc',
     min: 0,
     max: 7,
   },
   24: {
     group: 'limits',
     description: 'Slow homing feed used to precisely locate switches. Default 25 mm/min.',
+    descKey: 'motion.set.24.desc',
     min: 1,
     max: 10000,
   },
   25: {
     group: 'limits',
     description: 'Fast homing seek rate to find switches initially. Default 500 mm/min.',
+    descKey: 'motion.set.25.desc',
     min: 1,
     max: 30000,
   },
   26: {
     group: 'limits',
     description: 'Homing switch debounce delay. Default 250 ms.',
+    descKey: 'motion.set.26.desc',
     min: 0,
     max: 1000,
   },
   27: {
     group: 'limits',
     description: 'Pull-off distance reversed after homing so switches release. Default 1.000 mm.',
+    descKey: 'motion.set.27.desc',
     min: 0,
     max: 100,
   },
@@ -188,18 +211,21 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   30: {
     group: 'spindle',
     description: 'Spindle RPM at maximum PWM (S value for 100%). Default 1000.',
+    descKey: 'motion.set.30.desc',
     min: 0,
     max: 100000,
   },
   31: {
     group: 'spindle',
     description: 'Spindle RPM at minimum PWM. Default 0.',
+    descKey: 'motion.set.31.desc',
     min: 0,
     max: 100000,
   },
   32: {
     group: 'spindle',
     description: 'Laser mode: dynamic power with motion (M4), no spin-up dwell. Default 0 (off). Turn ON for laser, OFF for a real spindle.',
+    descKey: 'motion.set.32.desc',
     min: 0,
     max: 1,
   },
@@ -208,6 +234,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   100: {
     group: 'steps',
     description: 'X axis resolution in steps per mm (motor steps × microstepping ÷ travel per rev). Typical 80–800. Must be > 0.',
+    descKey: 'motion.set.100.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -215,6 +242,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   101: {
     group: 'steps',
     description: 'Y axis steps per mm. Typical 80–800. Must be > 0.',
+    descKey: 'motion.set.101.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -222,6 +250,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   102: {
     group: 'steps',
     description: 'Z axis steps per mm (leadscrews are often much higher). Typical 80–4000. Must be > 0.',
+    descKey: 'motion.set.102.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -231,6 +260,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   110: {
     group: 'maxrate',
     description: 'X maximum feed rate (rapid speed cap). Typical 500–10000 mm/min. Must be > 0 or the axis never moves.',
+    descKey: 'motion.set.110.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -238,6 +268,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   111: {
     group: 'maxrate',
     description: 'Y maximum feed rate. Typical 500–10000 mm/min. Must be > 0.',
+    descKey: 'motion.set.111.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -245,6 +276,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   112: {
     group: 'maxrate',
     description: 'Z maximum feed rate (usually slower than X/Y). Typical 100–3000 mm/min. Must be > 0.',
+    descKey: 'motion.set.112.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -254,6 +286,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   120: {
     group: 'accel',
     description: 'X acceleration (linear ramp — GRBL has no S-curve). Typical 10–1000 mm/sec². Must be > 0.',
+    descKey: 'motion.set.120.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -261,6 +294,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   121: {
     group: 'accel',
     description: 'Y acceleration (linear ramp). Typical 10–1000 mm/sec². Must be > 0.',
+    descKey: 'motion.set.121.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -268,6 +302,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   122: {
     group: 'accel',
     description: 'Z acceleration (linear ramp, usually lower). Typical 10–500 mm/sec². Must be > 0.',
+    descKey: 'motion.set.122.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -277,6 +312,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   130: {
     group: 'maxtravel',
     description: 'X axis usable travel, used by soft limits. Must match your machine. Bad values (0, negative, or the int32 sentinel) trigger error:15.',
+    descKey: 'motion.set.130.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -284,6 +320,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   131: {
     group: 'maxtravel',
     description: 'Y axis usable travel for soft limits. Must be > 0 when $20=1.',
+    descKey: 'motion.set.131.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,
@@ -291,6 +328,7 @@ export const GRBL_SETTING_RICH: Record<number, GrblSettingRichMeta> = {
   132: {
     group: 'maxtravel',
     description: 'Z axis usable travel for soft limits. Must be > 0 when $20=1.',
+    descKey: 'motion.set.132.desc',
     min: 1,
     max: 100000,
     mustBePositive: true,

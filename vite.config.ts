@@ -15,9 +15,19 @@ export default defineConfig({
       manifest: false,
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,wasm}'],
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
       },
     }),
   ],
-  server: { port: 5185, strictPort: true },
+  server: {
+    port: 5185,
+    strictPort: true,
+    proxy: {
+      '/v1': {
+        target: 'https://karmyogi.hjlabs.in',
+        changeOrigin: true,
+        secure: true,
+      },
+    },
+  },
 })

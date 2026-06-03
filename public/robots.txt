@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://karmyogi.hjlabs.in/sitemap.xml

@@ -16,6 +16,7 @@ import { PickPlacePanel } from '../panels/PickPlacePanel'
 import { SignaturePanel } from '../panels/SignaturePanel'
 import { PrintPanel } from '../panels/PrintPanel'
 import { CameraPanel } from '../panels/CameraPanel'
+import { AiGcodePanel } from '../panels/AiGcodePanel'
 
 /**
  * Orchestrator-owned panel registry. Each workstream contributes ONE panel
@@ -39,6 +40,7 @@ export const panelComponents: Record<string, FunctionComponent<IDockviewPanelPro
   signature: SignaturePanel as FunctionComponent<IDockviewPanelProps>,
   print: PrintPanel as FunctionComponent<IDockviewPanelProps>,
   camera: CameraPanel as FunctionComponent<IDockviewPanelProps>,
+  aigcode: AiGcodePanel as FunctionComponent<IDockviewPanelProps>,
 }
 
 export interface PanelSpec {
@@ -65,4 +67,5 @@ export const availablePanels: PanelSpec[] = [
   { id: 'signature', component: 'signature', title: 'Signature' },
   { id: 'print', component: 'print', title: '3D Printing' },
   { id: 'camera', component: 'camera', title: 'Camera' },
+  { id: 'aigcode', component: 'aigcode', title: 'AI G-code' },
 ]

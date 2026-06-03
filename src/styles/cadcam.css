@@ -112,8 +112,8 @@
   gap: 7px;
 }
 
-/* the Send card reads as the primary action — subtle accent edge */
-.cc-send { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+/* the Output card carries the live-preview status — subtle accent edge */
+.cc-output { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 
 /* --- DXF drop / import --- */
 .cc-drop {
@@ -201,6 +201,159 @@
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
+/* --- sub-label (small caption above a picker group) --- */
+.cc-sublabel {
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* --- material / bit-type picker grid (icon + label cards) --- */
+.cc-pickgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 6px;
+}
+.cc-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 56px;
+  padding: 6px 4px;
+  text-align: center;
+  line-height: 1.15;
+  cursor: pointer;
+}
+.cc-pick-icon { font-size: 20px; line-height: 1; }
+/* Realistic material-swatch thumbnail (replaces the emoji). Slim + dense:
+   a small rounded square that reads as the material at a glance. */
+.cc-pick-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  object-fit: cover;
+  display: block;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #000 12%, transparent);
+  background: var(--bg-elev, #2a2a2a);
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.cc-pick.active .cc-pick-swatch {
+  border-color: var(--accent);
+}
+.cc-pick-label {
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.cc-pick.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent);
+}
+.cc-pick.active .cc-pick-label { color: var(--fg); }
+
+/* The thumbnail doubles as a button: click it to open the material-info modal.
+   A subtle hover lift + focus ring signals it's interactive without clutter. */
+.cc-pick-swatch-btn { cursor: zoom-in; transition: transform 90ms ease, box-shadow 90ms ease; }
+.cc-pick-swatch-btn:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.cc-pick-swatch-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- material-info modal ------------------------------------------------- */
+.cc-matinfo { display: flex; flex-direction: column; gap: 12px; }
+.cc-matinfo-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elev, #1c1c1c);
+  border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  border-radius: 10px;
+  overflow: hidden;
+  min-height: 180px;
+}
+.cc-matinfo-img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  display: block;
+}
+.cc-matinfo-emoji { font-size: 96px; line-height: 1; padding: 24px; }
+.cc-matinfo-notes { margin: 0; color: var(--fg); font-size: 14px; line-height: 1.45; }
+.cc-matinfo-props {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+.cc-matinfo-props > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 9%, transparent);
+}
+.cc-matinfo-props dt { color: var(--fg-muted); font-size: 12px; }
+.cc-matinfo-props dd { margin: 0; color: var(--fg); font-size: 13px; font-weight: 600; }
+.cc-matinfo-hint { margin: 0; color: var(--fg-muted); font-size: 12px; line-height: 1.4; }
+
+/* --- bit-size chips (wrapping pill buttons) --- */
+.cc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cc-chip.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* --- recommended safe passes --- */
+.cc-recommend { border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.cc-recgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  font-size: 12px;
+}
+.cc-recitem { color: var(--fg-muted); }
+.cc-recitem b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.cc-use-rec {
+  min-height: 40px;
+  font-weight: 600;
+  background: var(--ok);
+  color: var(--accent-fg);
+  border-color: var(--ok);
+}
+.cc-use-rec:hover { filter: brightness(1.08); }
+/* subtle per-input recommendation hint next to a manual field */
+.cc-rechint {
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- operation selector (segmented) --- */
 .cc-ops {
   display: flex;
@@ -261,6 +414,27 @@
 }
 .cc-field input:invalid { border-color: var(--danger); }
 
+/* --- nudge row (numeric input flanked by +/- buttons) --- */
+.cc-nudge {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+.cc-nudge input {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+}
+.cc-nudge button {
+  flex: 0 0 auto;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+
 /* --- z-mode toggle --- */
 .cc-zmode {
   display: flex;
@@ -311,11 +485,6 @@
   align-items: center;
   gap: 6px;
 }
-.cc-play {
-  min-height: 40px;
-  flex: 1 1 auto;
-  font-weight: 600;
-}
 .cc-regen {
   min-height: 40px;
   min-width: 40px;
@@ -324,6 +493,7 @@
 .cc-gen-meta {
   color: var(--fg-muted);
   font-size: 12px;
+  flex: 1 1 auto;
 }
 .cc-gen-meta b { color: var(--fg); font-variant-numeric: tabular-nums; }
 
@@ -358,6 +528,256 @@
 
 .cc-hint { color: var(--fg-muted); font-size: 12px; }
 
+/* ============================================================================
+   Multi-model carving: tool strip, jobs list, selected-job card.
+   Slim/dense by design — fit as much on one screen as possible.
+   ============================================================================ */
+
+/* --- shared small icon button (used in job rows + section headers) --- */
+.cc-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0 5px;
+  font-size: 13px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.cc-iconbtn:hover { color: var(--fg); border-color: var(--accent); }
+.cc-iconbtn:disabled { opacity: 0.4; cursor: default; }
+.cc-iconbtn.danger:hover { color: var(--danger); border-color: var(--danger); }
+
+/* --- header inline actions (e.g. re-nest button on the Jobs card) --- */
+.cc-section > h3 { display: flex; align-items: center; gap: 6px; }
+.cc-h3-actions { margin-left: auto; display: inline-flex; gap: 4px; }
+.cc-h3-actions .cc-iconbtn { min-height: 22px; min-width: 22px; font-size: 12px; }
+
+/* --- global tool strip --- */
+.cc-toolstrip { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+
+/* ============================================================================
+   PRIMARY bit+material section + ADVANCED (auto) panel.
+   The primary section is the ONLY place a beginner makes choices; everything
+   else is auto-computed and shown read-only with an "auto" badge.
+   ============================================================================ */
+
+/* The primary card carries a stronger accent edge — it's the focal point. */
+.cc-primary { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+
+/* Bit type / width / length on one tidy auto-fit row. */
+.cc-prim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px 8px;
+}
+.cc-prim-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.cc-prim-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.cc-prim-select,
+.cc-prim-input {
+  min-height: 36px;
+  width: 100%;
+  min-width: 0;
+}
+.cc-prim-matlbl { margin-top: 1px; }
+
+/* --- Advanced (auto) read-only rows --- */
+.cc-autoadv { border-color: color-mix(in srgb, var(--ok) 30%, var(--border)); }
+.cc-autogrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 5px 12px;
+}
+.cc-autorow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+  min-height: 30px;
+}
+.cc-autorow-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  min-width: 0;
+}
+.cc-autorow-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.cc-autorow-val b { color: var(--fg); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+/* small "auto" pill on each computed value */
+.cc-auto-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+}
+
+/* the two editable fields (Plunge-Z, Safe-Z) span the auto grid full width and
+   sit slightly apart from the read-only rows */
+.cc-autofield {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+.cc-autofield input { min-height: 36px; }
+.cc-strip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: stretch;
+}
+.cc-strip-select {
+  flex: 1 1 120px;
+  min-width: 0;
+  min-height: 32px;
+}
+.cc-strip-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 96px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.cc-strip-field > span { flex: 0 0 auto; }
+.cc-strip-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 30px;
+  text-align: right;
+}
+.cc-strip-field > i { flex: 0 0 auto; font-style: normal; color: var(--fg-muted); font-size: 10px; }
+
+/* --- jobs list --- */
+.cc-joblist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cc-jobrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+}
+.cc-jobrow.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.cc-job-en { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.cc-job-name {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 2px 4px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  overflow: hidden;
+}
+.cc-job-name:hover { border-color: transparent; }
+.cc-job-ico { flex: 0 0 auto; font-size: 14px; }
+.cc-job-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.cc-jobrow .cc-iconbtn { flex: 0 0 auto; min-width: 24px; min-height: 24px; }
+
+/* --- selected-job card --- */
+.cc-jobcard { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.cc-jobcard-name { color: var(--fg); text-transform: none; letter-spacing: 0; font-weight: 600; }
+/* tighter rows inside the dense job card */
+.cc-jobcard .cc-section-body { gap: 6px; }
+.cc-jobcard .cc-check { min-height: 28px; font-size: 11.5px; }
+
+/* sub-section label inside a card, with an optional apply-all button */
+.cc-rowlabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+}
+
+/* "apply to all jobs" mini-button (appears next to a setting label) */
+.cc-applyall {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.cc-applyall:hover { color: var(--accent); border-color: var(--accent); }
+/* labels that host an apply-all sit on one line */
+.cc-field label { display: flex; align-items: center; gap: 5px; }
+
+/* touch sizing for the new slim controls on phone widths */
+@container cadcampanel (max-width: 480px) {
+  .cc-iconbtn { min-width: 36px; min-height: 36px; }
+  .cc-job-en { width: 20px; height: 20px; }
+  .cc-strip-select { min-height: 38px; }
+  .cc-strip-field input { min-height: 36px; }
+}
+
 /* Narrow column / mobile reflow. These key off the PANEL's own width
    (container query), not the window — the panel is normally a narrow docked
    column on a wide window, so window media queries would never fire. */
@@ -372,9 +792,13 @@
 @container cadcampanel (max-width: 480px) {
   .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
   .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; }
-  .cc-play, .cc-regen, .cc-raw-toggle { min-height: 42px; }
+  .cc-regen, .cc-raw-toggle { min-height: 42px; }
   .cc-raw-toggle { min-width: 40px; }
   .cc-adv-toggle, .cc-check { min-height: 42px; }
+  /* keep pickers/chips comfortably touch-sized */
+  .cc-pickgrid { grid-template-columns: repeat(auto-fit, minmax(40%, 1fr)); }
+  .cc-pick { min-height: 60px; }
+  .cc-chip, .cc-use-rec { min-height: 44px; }
 }
 
 /* ≤300px panel (very narrow dock): stack fields & operation buttons full-width
@@ -383,6 +807,8 @@
 @container cadcampanel (max-width: 300px) {
   .cc-grid { grid-template-columns: 1fr; }
   .cc-op-btn, .cc-subop-btn { flex: 1 1 100%; min-width: 0; }
+  .cc-pickgrid { grid-template-columns: 1fr; }
+  .cc-chip { flex: 1 1 100%; justify-content: center; }
 }
 
 /* Fallback for browsers without container-query support: key off the window so
@@ -394,7 +820,7 @@
   @media (max-width: 480px) {
     .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
     .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; }
-    .cc-play, .cc-regen, .cc-raw-toggle { min-height: 42px; }
+    .cc-regen, .cc-raw-toggle { min-height: 42px; }
     .cc-raw-toggle { min-width: 40px; }
     .cc-adv-toggle, .cc-check { min-height: 42px; }
   }

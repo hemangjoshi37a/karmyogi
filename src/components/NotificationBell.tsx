@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useConsole, type ConsoleEntry } from '../store'
 import { useNotifications, type NotificationLevel } from '../store/notifications'
 import { IconButton } from './IconButton'
+import { useT } from '../i18n'
 
 /**
  * Bridge the existing console store into the notification store. Mirrors console
@@ -43,6 +44,7 @@ function formatTime(ts: number): string {
 }
 
 export function NotificationBell() {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const entries = useNotifications((s) => s.entries)
   const unreadCount = useNotifications((s) => s.unreadCount)
@@ -88,21 +90,25 @@ export function NotificationBell() {
             )}
           </>
         }
-        label={unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'}
+        label={
+          unreadCount > 0
+            ? t('notif.label.unread', 'Notifications ({count} unread)', { count: unreadCount })
+            : t('notif.label', 'Notifications')
+        }
         aria-expanded={open}
         onClick={toggle}
       />
       {open && (
-        <div className="notif-popover" role="dialog" aria-label="Notifications">
+        <div className="notif-popover" role="dialog" aria-label={t('notif.label', 'Notifications')}>
           <div className="notif-head">
-            <span>Notifications</span>
+            <span>{t('notif.label', 'Notifications')}</span>
             <button className="notif-clear" onClick={clear} disabled={entries.length === 0}>
-              Clear
+              {t('notif.clear', 'Clear')}
             </button>
           </div>
           <div className="notif-list">
             {entries.length === 0 ? (
-              <div className="notif-empty">No notifications</div>
+              <div className="notif-empty">{t('notif.empty', 'No notifications')}</div>
             ) : (
               entries.map((e) => (
                 <div key={e.id} className={`notif-item level-${e.level}`}>

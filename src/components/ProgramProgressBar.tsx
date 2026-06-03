@@ -1,4 +1,5 @@
 import type { Progress } from './programWindow'
+import { useT } from '../i18n'
 
 interface Props {
   progress: Progress
@@ -11,9 +12,10 @@ interface Props {
  * Pure presentational; styling via program.css + theme CSS variables.
  */
 export function ProgramProgressBar({ progress, color }: Props) {
+  const t = useT()
   const { done, total, percent } = progress
   return (
-    <div className="pp-progress" aria-label="Program progress">
+    <div className="pp-progress" aria-label={t('prog.progress', 'Program progress')}>
       <div className="pp-progress-track">
         <div
           className="pp-progress-fill"
@@ -25,7 +27,11 @@ export function ProgramProgressBar({ progress, color }: Props) {
         />
       </div>
       <span className="pp-progress-label">
-        {done} / {total} ({percent}%)
+        {t('prog.progressLabel', '{done} / {total} ({percent}%)', {
+          done,
+          total,
+          percent,
+        })}
       </span>
     </div>
   )

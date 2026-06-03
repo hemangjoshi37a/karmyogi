@@ -26,6 +26,7 @@ export interface EmitterOptions {
   safeZ: number; // guaranteed retract height (mm)
   feedXY: number; // cutting feed (mm/min)
   feedZ: number; // plunge feed (mm/min)
+  travelFeed: number; // "free"/link feed for Travel moves (mm/min); <=0 → use feedXY
 
   useSpindle: boolean; // emit M3/M5 with spindleRPM
   spindleRPM: number;
@@ -49,6 +50,7 @@ export function defaultEmitterOptions(overrides: Partial<EmitterOptions> = {}): 
     safeZ: 5.0,
     feedXY: 600.0,
     feedZ: 200.0,
+    travelFeed: 0.0,
     useSpindle: true,
     spindleRPM: 10000.0,
     spindleDwell: 0.0,
@@ -93,7 +95,9 @@ export class GcodeEmitter {
 
   private mapZ(move: ToolpathMove): number {
     if (this.m_opt.zMode === ZMode.Pen)
-      return move.type === MoveType.Rapid ? this.m_opt.penUpZ : this.m_opt.penDownZ;
+      return move.type === MoveType.Rapid || move.type === MoveType.Travel
+        ? this.m_opt.penUpZ
+        : this.m_opt.penDownZ;
     return move.target.z;
   }
 
@@ -130,8 +134,16 @@ export class GcodeEmitter {
 
     const target: Vec3 = { x: move.target.x, y: move.target.y, z: this.mapZ(move) };
 
+    // Rapid → G0; everything else (Feed/Plunge/Travel) is a controlled G1 move.
     const g = move.type === MoveType.Rapid ? 0 : 1;
-    const feed = move.type === MoveType.Plunge ? this.m_opt.feedZ : this.m_opt.feedXY;
+    const travelFeed =
+      this.m_opt.travelFeed > 0 ? this.m_opt.travelFeed : this.m_opt.feedXY;
+    const feed =
+      move.type === MoveType.Plunge
+        ? this.m_opt.feedZ
+        : move.type === MoveType.Travel
+          ? travelFeed
+          : this.m_opt.feedXY;
 
     const tol = 0.5 * Math.pow(10, -this.m_opt.decimals);
 
@@ -186,7 +198,8 @@ export class GcodeEmitter {
       penDown: boolean;
     }
   ): void {
-    const wantDown = move.type !== MoveType.Rapid; // Feed/Plunge draw, Rapid travels
+    // Feed/Plunge draw (pen down); Rapid/Travel travel with the pen up.
+    const wantDown = move.type !== MoveType.Rapid && move.type !== MoveType.Travel;
     const tol = 0.5 * Math.pow(10, -this.m_opt.decimals);
 
     // Step 1: if the pen state must change, emit a Z-only move at the CURRENT

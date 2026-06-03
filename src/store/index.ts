@@ -16,7 +16,11 @@ export type { ConsoleEntry, ConsoleDir } from './console'
 
 export { useGrblSettings } from './grblSettings'
 
+export { useMachineProfile } from './machineProfile'
+
 export { useNotifications } from './notifications'
 export type { NotificationLevel, NotificationEntry } from './notifications'
 
 export { usePersistentState } from './persist'
+
+export { useAiGcode } from './aiGcode'

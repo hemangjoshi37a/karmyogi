@@ -53,6 +53,7 @@ export enum MoveType {
   Rapid = 'Rapid', // G0 — non-cutting positioning at travel height
   Feed = 'Feed', // G1 — cutting move in XY (and Z)
   Plunge = 'Plunge', // G1 — vertical entry into material (feedZ)
+  Travel = 'Travel', // G1 at travel/"free" feed — controlled non-cutting link
 }
 
 export interface ToolpathMove {
@@ -91,6 +92,10 @@ export class Toolpath {
   plunge(p: Vec3): void {
     this.moves.push({ target: { ...p }, type: MoveType.Plunge });
   }
+  /** Controlled non-cutting link move, emitted as G1 at the travel ("free") feed. */
+  travel(p: Vec3): void {
+    this.moves.push({ target: { ...p }, type: MoveType.Travel });
+  }
   append(m: ToolpathMove): void {
     this.moves.push(m);
   }
@@ -125,11 +130,11 @@ export class Toolpath {
     return total;
   }
 
-  /** Total rapid distance. */
+  /** Total rapid + travel (non-cutting) distance. */
   rapidLength(): number {
     let total = 0;
     for (let i = 1; i < this.moves.length; ++i) {
-      if (this.moves[i].type === MoveType.Rapid)
+      if (this.moves[i].type === MoveType.Rapid || this.moves[i].type === MoveType.Travel)
         total += vlen(this.moves[i].target, this.moves[i - 1].target);
     }
     return total;

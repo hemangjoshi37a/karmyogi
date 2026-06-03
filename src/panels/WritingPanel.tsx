@@ -5,6 +5,7 @@ import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
 import { StrokeFont, TextAlign } from '../core/strokeFont'
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
+import { useT } from '../i18n'
 import '../styles/writing.css'
 
 /** Split G-code into non-empty lines for streaming to the controller. */
@@ -12,10 +13,10 @@ function gcodeLines(gcode: string): string[] {
   return gcode.split(/\r?\n/).filter((l) => l.trim().length > 0)
 }
 
-const ALIGN_OPTIONS: { value: TextAlign; label: string }[] = [
-  { value: TextAlign.Left, label: 'Left' },
-  { value: TextAlign.Center, label: 'Center' },
-  { value: TextAlign.Right, label: 'Right' },
+const ALIGN_OPTIONS: { value: TextAlign; key: string; label: string }[] = [
+  { value: TextAlign.Left, key: 'writing.align.left', label: 'Left' },
+  { value: TextAlign.Center, key: 'writing.align.center', label: 'Center' },
+  { value: TextAlign.Right, key: 'writing.align.right', label: 'Right' },
 ]
 
 /**
@@ -60,6 +61,7 @@ function strokesToGcode(
  * pushed to the program store for 3D preview + streaming.
  */
 export function WritingPanel() {
+  const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
   const connected = useMachine((s) => s.connection === 'connected')
 
@@ -79,7 +81,9 @@ export function WritingPanel() {
   // The active font lives in component state; default is the built-in font.
   const [font, setFont] = useState<StrokeFont>(() => StrokeFont.builtin())
   const [fontName, setFontName] = useState('Built-in')
-  const [info, setInfo] = useState('Type text — G-code regenerates automatically.')
+  const [info, setInfo] = useState(() =>
+    t('writing.info.autoRegen', 'Type text — G-code regenerates automatically.'),
+  )
   const [preview, setPreview] = useState('')
   const previewRef = useRef('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -90,7 +94,7 @@ export function WritingPanel() {
 
   const generate = useCallback((): string => {
     if (text.trim().length === 0) {
-      setInfo('Enter some text first.')
+      setInfo(t('writing.info.enterText', 'Enter some text first.'))
       setPreview('')
       previewRef.current = ''
       return ''
@@ -102,7 +106,7 @@ export function WritingPanel() {
       align,
     })
     if (strokes.length === 0) {
-      setInfo('Nothing to draw (no renderable glyphs).')
+      setInfo(t('writing.info.nothingToDraw', 'Nothing to draw (no renderable glyphs).'))
       setPreview('')
       previewRef.current = ''
       return ''
@@ -118,12 +122,22 @@ export function WritingPanel() {
     previewRef.current = gcode
 
     const lineCount = text.split('\n').length
-    let msg = `${strokes.length} pen stroke(s), ${lineCount} line(s) → Visualizer.`
-    if (missing.length > 0) msg += ` ${missing.length} character(s) missing from "${fontName}".`
+    let msg = t(
+      'writing.info.generated',
+      '{strokes} pen stroke(s), {lines} line(s) → Visualizer.',
+      { strokes: strokes.length, lines: lineCount },
+    )
+    if (missing.length > 0)
+      msg +=
+        ' ' +
+        t('writing.info.missingChars', '{count} character(s) missing from "{font}".', {
+          count: missing.length,
+          font: fontName,
+        })
     setInfo(msg)
     return gcode
   }, [
-    text, font, charHeight, lineSpacing, letterSpacing, align,
+    t, text, font, charHeight, lineSpacing, letterSpacing, align,
     originX, originY, penUpZ, penDownZ, feed, missing, fontName, setProgram,
   ])
 
@@ -152,37 +166,48 @@ export function WritingPanel() {
       const loaded = StrokeFont.fromJson(json)
       setFont(loaded)
       setFontName(loaded.name())
-      setInfo(`Loaded custom font "${loaded.name()}" (${loaded.glyphCount()} glyphs).`)
+      setInfo(
+        t('writing.info.fontLoaded', 'Loaded custom font "{name}" ({count} glyphs).', {
+          name: loaded.name(),
+          count: loaded.glyphCount(),
+        }),
+      )
     } catch (e) {
-      setInfo(`Failed to load font: ${(e as Error).message}`)
+      setInfo(
+        t('writing.info.fontFailed', 'Failed to load font: {error}', {
+          error: (e as Error).message,
+        }),
+      )
     }
-  }, [])
+  }, [t])
 
   const useBuiltin = useCallback(() => {
     setFont(StrokeFont.builtin())
     setFontName('Built-in')
-    setInfo('Using built-in font.')
+    setInfo(t('writing.info.usingBuiltin', 'Using built-in font.'))
     if (fileRef.current) fileRef.current.value = ''
-  }, [])
+  }, [t])
 
   return (
     <div className="wr-panel">
       <div className="wr-scroll">
         <p className="wr-intro">
-          Type text → it previews live in the Visualizer → press Send ▶. Rendered as a
-          single-stroke vector font in pen-plotter G-code (Z = pen up / down).
+          {t(
+            'writing.intro',
+            'Type text → it previews live in the Visualizer → press Send ▶. Rendered as a single-stroke vector font in pen-plotter G-code (Z = pen up / down).',
+          )}
         </p>
 
         {/* ---- Text ---- */}
         <section className="wr-card">
-          <h3>Text</h3>
+          <h3>{t('writing.text.title', 'Text')}</h3>
           <div className="wr-card-body">
             <textarea
               className="wr-text"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Type here. Use Enter for a new line."
-              title="Text to plot. Press Enter for a new line."
+              placeholder={t('writing.text.placeholder', 'Type here. Use Enter for a new line.')}
+              title={t('writing.text.title.tip', 'Text to plot. Press Enter for a new line.')}
               rows={3}
               spellCheck={false}
             />
@@ -191,43 +216,43 @@ export function WritingPanel() {
 
         {/* ---- Essentials: size, alignment, pen Z, feed ---- */}
         <section className="wr-card">
-          <h3>Pen &amp; Layout</h3>
+          <h3>{t('writing.penLayout.title', 'Pen & Layout')}</h3>
           <div className="wr-card-body">
             <div className="wr-grid">
-              <label className="wr-field" title="Cap height of the text in millimetres.">
-                <span>Char height</span>
+              <label className="wr-field" title={t('writing.charHeight.tip', 'Cap height of the text in millimetres.')}>
+                <span>{t('writing.charHeight', 'Char height')}</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" min={0.5} step={0.5} value={charHeight}
                     onChange={(e) => setCharHeight(Number(e.target.value))} />
                   <em>mm</em>
                 </span>
               </label>
-              <label className="wr-field" title="Horizontal alignment of each line of text.">
-                <span>Alignment</span>
+              <label className="wr-field" title={t('writing.alignment.tip', 'Horizontal alignment of each line of text.')}>
+                <span>{t('writing.alignment', 'Alignment')}</span>
                 <select value={align} onChange={(e) => setAlign(Number(e.target.value) as TextAlign)}>
                   {ALIGN_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
+                    <option key={o.value} value={o.value}>{t(o.key, o.label)}</option>
                   ))}
                 </select>
               </label>
-              <label className="wr-field" title="Z height when the pen is lifted for travel moves (safe-Z).">
-                <span>Pen up Z</span>
+              <label className="wr-field" title={t('writing.penUpZ.tip', 'Z height when the pen is lifted for travel moves (safe-Z).')}>
+                <span>{t('writing.penUpZ', 'Pen up Z')}</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penUpZ}
                     onChange={(e) => setPenUpZ(Number(e.target.value))} />
                   <em>mm</em>
                 </span>
               </label>
-              <label className="wr-field" title="Z height when the pen is down and drawing.">
-                <span>Pen down Z</span>
+              <label className="wr-field" title={t('writing.penDownZ.tip', 'Z height when the pen is down and drawing.')}>
+                <span>{t('writing.penDownZ', 'Pen down Z')}</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penDownZ}
                     onChange={(e) => setPenDownZ(Number(e.target.value))} />
                   <em>mm</em>
                 </span>
               </label>
-              <label className="wr-field" title="Drawing (pen-down) feed rate in mm per minute.">
-                <span>Feed</span>
+              <label className="wr-field" title={t('writing.feed.tip', 'Drawing (pen-down) feed rate in mm per minute.')}>
+                <span>{t('writing.feed', 'Feed')}</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" min={1} step={50} value={feed}
                     onChange={(e) => setFeed(Number(e.target.value))} />
@@ -248,39 +273,39 @@ export function WritingPanel() {
               aria-expanded={showAdvanced}
             >
               <span className="wr-caret">{showAdvanced ? '▾' : '▸'}</span>
-              Advanced
-              <span className="wr-toggle-note">spacing &amp; origin</span>
+              {t('writing.advanced', 'Advanced')}
+              <span className="wr-toggle-note">{t('writing.advanced.note', 'spacing & origin')}</span>
             </button>
           </h3>
           {showAdvanced && (
             <div className="wr-card-body">
               <div className="wr-grid">
-                <label className="wr-field" title="Baseline-to-baseline distance as a multiple of char height.">
-                  <span>Line spacing</span>
+                <label className="wr-field" title={t('writing.lineSpacing.tip', 'Baseline-to-baseline distance as a multiple of char height.')}>
+                  <span>{t('writing.lineSpacing', 'Line spacing')}</span>
                   <span className="wr-input">
                     <input type="number" inputMode="decimal" min={0.5} step={0.1} value={lineSpacing}
                       onChange={(e) => setLineSpacing(Number(e.target.value))} />
                     <em>×</em>
                   </span>
                 </label>
-                <label className="wr-field" title="Extra gap added after each character, in millimetres.">
-                  <span>Letter spacing</span>
+                <label className="wr-field" title={t('writing.letterSpacing.tip', 'Extra gap added after each character, in millimetres.')}>
+                  <span>{t('writing.letterSpacing', 'Letter spacing')}</span>
                   <span className="wr-input">
                     <input type="number" inputMode="decimal" min={0} step={0.5} value={letterSpacing}
                       onChange={(e) => setLetterSpacing(Number(e.target.value))} />
                     <em>mm</em>
                   </span>
                 </label>
-                <label className="wr-field" title="Shift the whole text block along X, in millimetres.">
-                  <span>Origin X</span>
+                <label className="wr-field" title={t('writing.originX.tip', 'Shift the whole text block along X, in millimetres.')}>
+                  <span>{t('writing.originX', 'Origin X')}</span>
                   <span className="wr-input">
                     <input type="number" inputMode="decimal" step={1} value={originX}
                       onChange={(e) => setOriginX(Number(e.target.value))} />
                     <em>mm</em>
                   </span>
                 </label>
-                <label className="wr-field" title="Shift the whole text block along Y, in millimetres.">
-                  <span>Origin Y</span>
+                <label className="wr-field" title={t('writing.originY.tip', 'Shift the whole text block along Y, in millimetres.')}>
+                  <span>{t('writing.originY', 'Origin Y')}</span>
                   <span className="wr-input">
                     <input type="number" inputMode="decimal" step={1} value={originY}
                       onChange={(e) => setOriginY(Number(e.target.value))} />
@@ -294,19 +319,19 @@ export function WritingPanel() {
 
         {/* ---- Font ---- */}
         <section className="wr-card">
-          <h3>Font</h3>
+          <h3>{t('writing.font.title', 'Font')}</h3>
           <div className="wr-card-body">
             <div className="wr-font-row">
               <button type="button" className="wr-btn" onClick={() => fileRef.current?.click()}
-                title="Load a custom single-stroke font JSON (from the handwriting pipeline).">
-                Load font JSON…
+                title={t('writing.font.loadTip', 'Load a custom single-stroke font JSON (from the handwriting pipeline).')}>
+                {t('writing.font.load', 'Load font JSON…')}
               </button>
               <button type="button" className="wr-btn" onClick={useBuiltin} disabled={fontName === 'Built-in'}
-                title="Switch back to the built-in Hershey simplex font.">
-                Use built-in
+                title={t('writing.font.builtinTip', 'Switch back to the built-in Hershey simplex font.')}>
+                {t('writing.font.useBuiltin', 'Use built-in')}
               </button>
-              <span className="wr-font-name" title={`Active font: ${fontName}`}>
-                Active: <strong>{fontName}</strong>
+              <span className="wr-font-name" title={t('writing.font.active', 'Active font: {name}', { name: fontName })}>
+                {t('writing.font.activeLabel', 'Active:')} <strong>{fontName}</strong>
               </span>
               <input
                 ref={fileRef}
@@ -321,8 +346,9 @@ export function WritingPanel() {
             </div>
             {missing.length > 0 && (
               <p className="wr-warn" role="status">
-                Missing glyph{missing.length > 1 ? 's' : ''}: {missing.map((c) => (c === ' ' ? '␣' : c)).join(' ')}
-                {' '}— rendered as blank space.
+                {t('writing.missingGlyphs', 'Missing glyph(s): {glyphs} — rendered as blank space.', {
+                  glyphs: missing.map((c) => (c === ' ' ? '␣' : c)).join(' '),
+                })}
               </p>
             )}
           </div>
@@ -330,7 +356,7 @@ export function WritingPanel() {
 
         {/* ---- Send ---- */}
         <section className="wr-card">
-          <h3>Send</h3>
+          <h3>{t('writing.send.title', 'Send')}</h3>
           <div className="wr-card-body">
             <div className="wr-actions">
               <button
@@ -338,21 +364,23 @@ export function WritingPanel() {
                 className="wr-btn primary wr-play"
                 onClick={play}
                 disabled={!connected || preview.length === 0}
-                title={connected ? 'Stream this program to the machine' : 'Connect to a machine to send'}
+                title={connected
+                  ? t('writing.send.streamTip', 'Stream this program to the machine')
+                  : t('writing.send.connectTip', 'Connect to a machine to send')}
               >
-                ▶ Send to machine
+                {t('writing.send.btn', '▶ Send to machine')}
               </button>
               <button
                 type="button"
                 className="wr-btn wr-regen"
                 onClick={generate}
-                title="Regenerate G-code now"
+                title={t('writing.send.regenTip', 'Regenerate G-code now')}
               >
                 ↻
               </button>
             </div>
             {!connected && preview.length > 0 && (
-              <p className="wr-info">Preview is live; connect to a machine to send.</p>
+              <p className="wr-info">{t('writing.send.previewLive', 'Preview is live; connect to a machine to send.')}</p>
             )}
             <p className="wr-info">{info}</p>
           </div>
@@ -368,9 +396,11 @@ export function WritingPanel() {
               aria-expanded={showRaw}
             >
               <span className="wr-caret">{showRaw ? '▾' : '▸'}</span>
-              Raw G-code
+              {t('writing.raw.title', 'Raw G-code')}
               {preview.length > 0 && (
-                <span className="wr-toggle-note">{gcodeLines(preview).length} lines</span>
+                <span className="wr-toggle-note">
+                  {t('writing.raw.lines', '{count} lines', { count: gcodeLines(preview).length })}
+                </span>
               )}
             </button>
           </h3>
@@ -380,7 +410,7 @@ export function WritingPanel() {
                 className="wr-preview"
                 readOnly
                 value={preview}
-                placeholder="Generated G-code preview will appear here."
+                placeholder={t('writing.raw.placeholder', 'Generated G-code preview will appear here.')}
                 spellCheck={false}
               />
             </div>

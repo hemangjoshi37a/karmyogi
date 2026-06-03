@@ -305,6 +305,72 @@
   border-top: 1px solid var(--border);
 }
 
+/* ---- auto-detect workspace: status chips + confirm + result ---- */
+.pr-detect-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.pr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  max-width: 100%;
+}
+.pr-chip.mono {
+  font-family: ui-monospace, monospace;
+  white-space: normal;
+  word-break: break-word;
+}
+.pr-chip b { color: var(--fg); }
+/* Lit (enabled / present) and unlit (disabled) states. */
+.pr-chip[data-on='true'] {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.pr-chip[data-on='true'] b { color: var(--ok); }
+.pr-chip[data-on='false'] {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+}
+.pr-chip[data-on='false'] b { color: var(--warn); }
+
+/* Inline are-you-sure row before the (machine-moving) homing cycle. */
+.pr-confirm {
+  padding: 6px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.pr-confirm-q {
+  flex: 1 1 100%;
+  font-size: 11.5px;
+  color: var(--fg);
+}
+
+/* Detected-size success readout. */
+.pr-detect-result {
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--fg);
+  font-size: 11.5px;
+}
+.pr-detect-result .pr-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--fg-muted);
+}
+
 /* ---- narrow column (≤340px): stack each field so label + input never
    collide, full-width inputs, ≥36px tap targets. Driven by the PANEL's own
    width (container query), so it fires when docked narrow on a wide window. */

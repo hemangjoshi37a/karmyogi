@@ -14,6 +14,7 @@ import {
   estimateProgramSeconds,
   formatDuration,
 } from '../components/programWindow'
+import { useT } from '../i18n'
 import '../styles/program.css'
 
 const ACCEPT = '.nc,.gcode,.tap,.txt,.cnc,.ngc'
@@ -28,6 +29,7 @@ const ACCEPT = '.nc,.gcode,.tap,.txt,.cnc,.ngc'
  * with Load + Clear in its header).
  */
 export function ProgramPanel() {
+  const t = useT()
   const name = useProgram((s) => s.name)
   const lines = useProgram((s) => s.lines)
   const cursor = useProgram((s) => s.cursor)
@@ -157,11 +159,14 @@ export function ProgramPanel() {
               onChange={(e) => setStartLine(e.target.value)}
               disabled={!hasProgram}
               readOnly={streaming}
-              aria-label="Start line / current line"
+              aria-label={t('prog.startLineLabel', 'Start line / current line')}
               title={
                 streaming
-                  ? 'Current line being streamed'
-                  : 'Start line: Stream begins from this line (1-based)'
+                  ? t('prog.currentLineHint', 'Current line being streamed')
+                  : t(
+                      'prog.startLineHint',
+                      'Start line: Stream begins from this line (1-based)',
+                    )
               }
             />
             <button
@@ -170,20 +175,23 @@ export function ProgramPanel() {
               disabled={!canStream}
               title={
                 !connected
-                  ? 'Connect to the machine first'
+                  ? t('prog.streamHintConnect', 'Connect to the machine first')
                   : !hasProgram
-                    ? 'Load a program first'
-                    : 'Start streaming the program from the start line'
+                    ? t('prog.streamHintLoad', 'Load a program first')
+                    : t(
+                        'prog.streamHint',
+                        'Start streaming the program from the start line',
+                      )
               }
             >
-              ▶ Stream
+              ▶ {t('prog.stream', 'Stream')}
             </button>
             <button
               className="pp-icon-btn"
               onClick={() => grbl.feedHold()}
               disabled={!streaming || held}
-              title="Pause (feed hold)"
-              aria-label="Pause"
+              title={t('prog.pause', 'Pause (feed hold)')}
+              aria-label={t('prog.pauseAria', 'Pause')}
             >
               ⏸
             </button>
@@ -191,8 +199,8 @@ export function ProgramPanel() {
               className="pp-icon-btn"
               onClick={() => grbl.resume()}
               disabled={!streaming || !held}
-              title="Resume"
-              aria-label="Resume"
+              title={t('prog.resume', 'Resume')}
+              aria-label={t('prog.resume', 'Resume')}
             >
               ⏵
             </button>
@@ -200,8 +208,8 @@ export function ProgramPanel() {
               className="pp-icon-btn pp-btn-abort"
               onClick={() => grbl.abortProgram()}
               disabled={!streaming}
-              title="Abort (soft reset)"
-              aria-label="Abort"
+              title={t('prog.abort', 'Abort (soft reset)')}
+              aria-label={t('prog.abortAria', 'Abort')}
             >
               ⏹
             </button>
@@ -217,8 +225,8 @@ export function ProgramPanel() {
                 className="pp-eta"
                 title={
                   streaming
-                    ? 'Estimated time remaining'
-                    : 'Estimated total run time'
+                    ? t('prog.etaRemaining', 'Estimated time remaining')
+                    : t('prog.etaTotal', 'Estimated total run time')
                 }
               >
                 <span className="pp-eta-icon" aria-hidden="true">
@@ -241,12 +249,20 @@ export function ProgramPanel() {
             className="pp-disclosure"
             aria-expanded={textOpen}
             onClick={() => setTextOpen((v) => !v)}
-            title={textOpen ? 'Hide program text editor' : 'Show program text editor'}
+            title={
+              textOpen
+                ? t('prog.hideEditor', 'Hide program text editor')
+                : t('prog.showEditor', 'Show program text editor')
+            }
           >
             <span className="pp-disclosure-caret">{textOpen ? '▾' : '▸'}</span>
-            Program text
+            {t('prog.programText', 'Program text')}
             <span className="pp-meta pp-text-count">
-              ({lines.length} {lines.length === 1 ? 'line' : 'lines'})
+              (
+              {lines.length === 1
+                ? t('prog.lineCountOne', '{count} line', { count: lines.length })
+                : t('prog.lineCount', '{count} lines', { count: lines.length })}
+              )
             </span>
           </button>
           {name && (
@@ -259,8 +275,11 @@ export function ProgramPanel() {
               className="pp-icon-btn"
               onClick={() => fileRef.current?.click()}
               disabled={streaming}
-              title="Load a .nc / .gcode / .tap / .ngc file (or drag &amp; drop)"
-              aria-label="Load file"
+              title={t(
+                'prog.loadHint',
+                'Load a .nc / .gcode / .tap / .ngc file (or drag & drop)',
+              )}
+              aria-label={t('prog.loadFile', 'Load file')}
             >
               ⬆
             </button>
@@ -269,8 +288,8 @@ export function ProgramPanel() {
                 className="pp-icon-btn pp-btn-clear"
                 onClick={() => clear()}
                 disabled={streaming}
-                title="Clear / unload program"
-                aria-label="Clear program"
+                title={t('prog.clear', 'Clear / unload program')}
+                aria-label={t('prog.clearAria', 'Clear program')}
               >
                 🗑
               </button>
@@ -289,17 +308,25 @@ export function ProgramPanel() {
             readOnly={streaming}
             spellCheck={false}
             wrap="off"
-            placeholder="No program loaded. Drag &amp; drop or ⬆ a .nc / .gcode file, or type / paste G-code here."
-            aria-label="Editable G-code program text"
+            placeholder={t(
+              'prog.editorPlaceholder',
+              'No program loaded. Drag & drop or ⬆ a .nc / .gcode file, or type / paste G-code here.',
+            )}
+            aria-label={t('prog.editorAria', 'Editable G-code program text')}
             title={
               streaming
-                ? 'Editing is disabled while streaming'
-                : 'Edit G-code; changes apply when you click away'
+                ? t('prog.editorDisabled', 'Editing is disabled while streaming')
+                : t(
+                    'prog.editorHint',
+                    'Edit G-code; changes apply when you click away',
+                  )
             }
           />
         )}
         {streaming && textOpen && (
-          <span className="pp-hint">Read-only while streaming.</span>
+          <span className="pp-hint">
+            {t('prog.readOnlyStreaming', 'Read-only while streaming.')}
+          </span>
         )}
         <input
           ref={fileRef}

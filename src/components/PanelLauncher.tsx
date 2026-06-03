@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { availablePanels, type PanelSpec } from '../app/panelRegistry'
 import { IconButton } from './IconButton'
+import { useT } from '../i18n'
 
 interface PanelLauncherProps {
   /**
@@ -19,6 +20,7 @@ interface PanelLauncherProps {
  * dockview API handlers — this is how a user brings back a panel they closed.
  */
 export function PanelLauncher({ onOpenPanel, isPanelOpen }: PanelLauncherProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
 
@@ -42,13 +44,13 @@ export function PanelLauncher({ onOpenPanel, isPanelOpen }: PanelLauncherProps) 
     <div className="launcher" ref={wrapRef}>
       <IconButton
         icon="▦"
-        label="Open / reopen panels"
+        label={t('launch.label', 'Open / reopen panels')}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       />
       {open && (
-        <div className="launcher-popover" role="menu" aria-label="Panels">
-          <div className="launcher-head">Panels</div>
+        <div className="launcher-popover" role="menu" aria-label={t('launch.title', 'Panels')}>
+          <div className="launcher-head">{t('launch.title', 'Panels')}</div>
           <div className="launcher-list">
             {availablePanels.map((p) => {
               const isOpen = isPanelOpen(p.id)
@@ -61,7 +63,11 @@ export function PanelLauncher({ onOpenPanel, isPanelOpen }: PanelLauncherProps) 
                     onOpenPanel(p)
                     setOpen(false)
                   }}
-                  title={isOpen ? `Focus ${p.title}` : `Open ${p.title}`}
+                  title={
+                    isOpen
+                      ? t('launch.focus', 'Focus {title}', { title: p.title })
+                      : t('launch.open', 'Open {title}', { title: p.title })
+                  }
                 >
                   <span className="launcher-item-title">{p.title}</span>
                   <span className={isOpen ? 'launcher-dot open' : 'launcher-dot'} aria-hidden="true" />

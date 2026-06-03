@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useT } from '../i18n'
 import '../styles/camera.css'
 
 /**
@@ -79,6 +80,7 @@ function downloadUrl(url: string, filename: string): void {
 }
 
 export function CameraPanel() {
+  const t = useT()
   const supported =
     typeof navigator !== 'undefined' &&
     !!navigator.mediaDevices &&
@@ -183,11 +185,14 @@ export function CameraPanel() {
         } else if (e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError')) {
           setStatus({ kind: 'nocamera' })
         } else {
-          setStatus({ kind: 'error', message: e?.message || 'Could not start the camera.' })
+          setStatus({
+            kind: 'error',
+            message: e?.message || t('cam.err.couldNotStart', 'Could not start the camera.'),
+          })
         }
       }
     },
-    [supported, stopStream, enumerate],
+    [supported, stopStream, enumerate, t],
   )
 
   // ---- recording ----
@@ -447,27 +452,42 @@ export function CameraPanel() {
     switch (status.kind) {
       case 'unsupported':
         return {
-          title: 'Camera not supported',
-          body: 'This browser has no getUserMedia. Use a Chromium browser over HTTPS or localhost.',
+          title: t('cam.empty.unsupported.title', 'Camera not supported'),
+          body: t(
+            'cam.empty.unsupported.body',
+            'This browser has no getUserMedia. Use a Chromium browser over HTTPS or localhost.',
+          ),
         }
       case 'denied':
         return {
-          title: 'Permission denied',
-          body: 'Camera access was blocked. Allow it in the address-bar site permissions, then press the power button again. (getUserMedia needs HTTPS or localhost.)',
+          title: t('cam.empty.denied.title', 'Permission denied'),
+          body: t(
+            'cam.empty.denied.body',
+            'Camera access was blocked. Allow it in the address-bar site permissions, then press the power button again. (getUserMedia needs HTTPS or localhost.)',
+          ),
         }
       case 'nocamera':
         return {
-          title: 'No camera found',
-          body: 'No video input device is available. Plug in a webcam and it will appear here.',
+          title: t('cam.empty.nocamera.title', 'No camera found'),
+          body: t(
+            'cam.empty.nocamera.body',
+            'No video input device is available. Plug in a webcam and it will appear here.',
+          ),
         }
       case 'error':
-        return { title: 'Camera error', body: status.message }
+        return { title: t('cam.empty.error.title', 'Camera error'), body: status.message }
       case 'starting':
-        return { title: 'Starting camera…', body: 'Grant permission if your browser asks.' }
+        return {
+          title: t('cam.empty.starting.title', 'Starting camera…'),
+          body: t('cam.empty.starting.body', 'Grant permission if your browser asks.'),
+        }
       default:
         return {
-          title: 'Camera off',
-          body: 'Press the power button to start the live feed. getUserMedia needs HTTPS or localhost.',
+          title: t('cam.empty.off.title', 'Camera off'),
+          body: t(
+            'cam.empty.off.body',
+            'Press the power button to start the live feed. getUserMedia needs HTTPS or localhost.',
+          ),
         }
     }
   })()
@@ -475,18 +495,57 @@ export function CameraPanel() {
   const canCapture = live && !!streamRef.current
 
   return (
-    <div className="cam-panel" aria-label="Camera">
+    <div className="cam-panel" aria-label={t('cam.aria.panel', 'Camera')}>
       <p className="cam-intro">
-        Live webcam feed — record clips, grab PNG snapshots, or capture a sped-up
-        timelapse. Everything stays in your browser.
+        {t(
+          'cam.intro',
+          'Live webcam feed — record clips, grab PNG snapshots, or capture a sped-up timelapse. Everything stays in your browser.',
+        )}
       </p>
+
+      {/* ---- calibration sheet (printable QR fiducials) ---- */}
+      <section className="cam-card">
+        <header className="cam-card-head">
+          <h4>{t('cam.calib.title', 'Calibration sheet')}</h4>
+          <span className="cam-raw">{t('cam.calib.badge', 'A4 · QR')}</span>
+        </header>
+        <p className="cam-hint">
+          {t(
+            'cam.calib.hint',
+            'Print this QR fiducial sheet at 100% scale and lay it flat on the bed. The camera reads the codes to learn mm-per-pixel + perspective, then measures bed and stock size automatically. Cut out the S# stickers for the workpiece.',
+          )}
+        </p>
+        <div className="cam-row">
+          <a
+            className="cam-btn cam-grow"
+            href="/calibration/karmyogi-calibration-sheet.pdf"
+            download="karmyogi-calibration-sheet.pdf"
+            title={t('cam.calib.downloadTip', 'Download the printable A4 calibration sheet (PDF)')}
+          >
+            {t('cam.calib.download', '⬇ Download calibration sheet (PDF)')}
+          </a>
+          <a
+            className="cam-btn"
+            href="/calibration/karmyogi-calibration-sheet.pdf"
+            target="_blank"
+            rel="noreferrer"
+            title={t('cam.calib.openTip', 'Open the calibration sheet in a new tab to print')}
+          >
+            {t('cam.calib.open', '⎙ Print')}
+          </a>
+        </div>
+      </section>
 
       {/* ---- camera selection + power ---- */}
       <section className="cam-card">
         <header className="cam-card-head">
-          <h4>Camera</h4>
+          <h4>{t('cam.camera.title', 'Camera')}</h4>
           <span className="cam-raw" data-on={live}>
-            {live ? 'live' : status.kind === 'starting' ? 'starting…' : 'off'}
+            {live
+              ? t('cam.status.live', 'live')
+              : status.kind === 'starting'
+                ? t('cam.status.starting', 'starting…')
+                : t('cam.status.off', 'off')}
           </span>
         </header>
         <div className="cam-row">
@@ -495,13 +554,13 @@ export function CameraPanel() {
             value={deviceId}
             disabled={!supported || devices.length === 0}
             onChange={(e) => onSelectDevice(e.target.value)}
-            title="Choose which camera to use"
-            aria-label="Camera device"
+            title={t('cam.device.tip', 'Choose which camera to use')}
+            aria-label={t('cam.device.aria', 'Camera device')}
           >
-            {devices.length === 0 && <option value="">No cameras found</option>}
+            {devices.length === 0 && <option value="">{t('cam.device.none', 'No cameras found')}</option>}
             {devices.map((d, i) => (
               <option key={d.deviceId || i} value={d.deviceId}>
-                {d.label || `Camera ${i + 1}`}
+                {d.label || t('cam.device.fallback', 'Camera {n}', { n: i + 1 })}
               </option>
             ))}
           </select>
@@ -510,11 +569,11 @@ export function CameraPanel() {
             className={`cam-btn cam-power${live ? ' on' : ''}`}
             disabled={!supported}
             onClick={toggleLive}
-            title={live ? 'Stop the camera' : 'Start the camera'}
+            title={live ? t('cam.power.stopTip', 'Stop the camera') : t('cam.power.startTip', 'Start the camera')}
             aria-pressed={live}
           >
             <span className="cam-power-dot" aria-hidden="true" />
-            {live ? 'Stop' : 'Start'}
+            {live ? t('cam.power.stop', 'Stop') : t('cam.power.start', 'Start')}
           </button>
         </div>
       </section>
@@ -522,11 +581,11 @@ export function CameraPanel() {
       {/* ---- live feed ---- */}
       <section className="cam-card">
         <header className="cam-card-head">
-          <h4>Feed</h4>
+          <h4>{t('cam.feed.title', 'Feed')}</h4>
           {recording && (
-            <span className="cam-rec" title="Recording in progress">
+            <span className="cam-rec" title={t('cam.feed.recTip', 'Recording in progress')}>
               <span className="cam-rec-dot" aria-hidden="true" />
-              REC {fmtElapsed(recElapsed)}
+              {t('cam.feed.rec', 'REC')} {fmtElapsed(recElapsed)}
             </span>
           )}
         </header>
@@ -551,7 +610,7 @@ export function CameraPanel() {
       {/* ---- capture controls ---- */}
       <section className="cam-card">
         <header className="cam-card-head">
-          <h4>Capture</h4>
+          <h4>{t('cam.capture.title', 'Capture')}</h4>
         </header>
         <div className="cam-row">
           {!recording ? (
@@ -560,18 +619,18 @@ export function CameraPanel() {
               className="cam-btn cam-grow"
               disabled={!canCapture}
               onClick={startRecording}
-              title="Start recording the live feed to a WebM clip"
+              title={t('cam.capture.recordTip', 'Start recording the live feed to a WebM clip')}
             >
-              ● Record
+              {t('cam.capture.record', '● Record')}
             </button>
           ) : (
             <button
               type="button"
               className="cam-btn danger cam-grow"
               onClick={stopRecording}
-              title="Stop recording and download the clip"
+              title={t('cam.capture.stopRecTip', 'Stop recording and download the clip')}
             >
-              ■ Stop ({fmtElapsed(recElapsed)})
+              {t('cam.capture.stopRec', '■ Stop ({elapsed})', { elapsed: fmtElapsed(recElapsed) })}
             </button>
           )}
           <button
@@ -579,9 +638,9 @@ export function CameraPanel() {
             className="cam-btn cam-grow"
             disabled={!canCapture}
             onClick={snapshot}
-            title="Capture the current frame as a PNG and download it"
+            title={t('cam.capture.snapshotTip', 'Capture the current frame as a PNG and download it')}
           >
-            ⧉ Snapshot
+            {t('cam.capture.snapshot', '⧉ Snapshot')}
           </button>
         </div>
       </section>
@@ -589,20 +648,20 @@ export function CameraPanel() {
       {/* ---- timelapse ---- */}
       <section className="cam-card">
         <header className="cam-card-head">
-          <h4>Timelapse</h4>
+          <h4>{t('cam.timelapse.title', 'Timelapse')}</h4>
           {tlActive && (
             <span className="cam-raw" data-on={true}>
-              {tlCount} frame{tlCount === 1 ? '' : 's'}
+              {t('cam.timelapse.frames', '{count} frame(s)', { count: tlCount })}
             </span>
           )}
         </header>
         <p className="cam-hint">
-          Grab a frame every interval, play them back fast into one webm.
+          {t('cam.timelapse.hint', 'Grab a frame every interval, play them back fast into one webm.')}
         </p>
         <div className="cam-field">
           <label htmlFor="cam-tl-interval">
-            Interval
-            <span className="cam-sub">seconds between captured frames</span>
+            {t('cam.timelapse.interval', 'Interval')}
+            <span className="cam-sub">{t('cam.timelapse.intervalSub', 'seconds between captured frames')}</span>
           </label>
           <input
             id="cam-tl-interval"
@@ -612,14 +671,14 @@ export function CameraPanel() {
             value={tlInterval}
             disabled={tlActive}
             onChange={(e) => setTlInterval(e.target.value)}
-            aria-label="Timelapse interval (seconds)"
+            aria-label={t('cam.timelapse.intervalAria', 'Timelapse interval (seconds)')}
           />
           <span className="cam-units">s</span>
         </div>
         <div className="cam-field">
           <label htmlFor="cam-tl-fps">
-            Playback FPS
-            <span className="cam-sub">frames per second in the output video</span>
+            {t('cam.timelapse.fps', 'Playback FPS')}
+            <span className="cam-sub">{t('cam.timelapse.fpsSub', 'frames per second in the output video')}</span>
           </label>
           <input
             id="cam-tl-fps"
@@ -629,7 +688,7 @@ export function CameraPanel() {
             value={tlFps}
             disabled={tlActive}
             onChange={(e) => setTlFps(e.target.value)}
-            aria-label="Timelapse playback FPS"
+            aria-label={t('cam.timelapse.fpsAria', 'Timelapse playback FPS')}
           />
           <span className="cam-units">fps</span>
         </div>
@@ -640,18 +699,18 @@ export function CameraPanel() {
               className="cam-btn cam-grow"
               disabled={!canCapture}
               onClick={startTimelapse}
-              title="Start capturing a timelapse"
+              title={t('cam.timelapse.startTip', 'Start capturing a timelapse')}
             >
-              ◷ Start timelapse
+              {t('cam.timelapse.start', '◷ Start timelapse')}
             </button>
           ) : (
             <button
               type="button"
               className="cam-btn danger cam-grow"
               onClick={stopTimelapse}
-              title="Stop the timelapse, assemble the webm and download it"
+              title={t('cam.timelapse.stopTip', 'Stop the timelapse, assemble the webm and download it')}
             >
-              ■ Stop &amp; save ({tlCount})
+              {t('cam.timelapse.stop', '■ Stop & save ({count})', { count: tlCount })}
             </button>
           )}
         </div>
@@ -660,17 +719,17 @@ export function CameraPanel() {
       {/* ---- recorded clips ---- */}
       <section className="cam-card">
         <header className="cam-card-head">
-          <h4>Clips</h4>
+          <h4>{t('cam.clips.title', 'Clips')}</h4>
           <span className="cam-raw">{clips.length}</span>
         </header>
         {clips.length === 0 ? (
-          <p className="cam-hint">Recordings and timelapses you save show up here.</p>
+          <p className="cam-hint">{t('cam.clips.empty', 'Recordings and timelapses you save show up here.')}</p>
         ) : (
           <ul className="cam-clips">
             {clips.map((c) => (
               <li key={c.id} className="cam-clip">
                 <span className={`cam-clip-tag ${c.kind}`}>
-                  {c.kind === 'rec' ? 'REC' : 'TL'}
+                  {c.kind === 'rec' ? t('cam.clips.tagRec', 'REC') : t('cam.clips.tagTl', 'TL')}
                 </span>
                 <span className="cam-clip-name" title={c.name}>
                   {c.name}
@@ -680,7 +739,7 @@ export function CameraPanel() {
                   className="cam-btn cam-mini"
                   href={c.url}
                   download={c.name}
-                  title={`Download ${c.name}`}
+                  title={t('cam.clips.download', 'Download {name}', { name: c.name })}
                 >
                   ↓
                 </a>
@@ -688,7 +747,7 @@ export function CameraPanel() {
                   type="button"
                   className="cam-btn cam-mini"
                   onClick={() => removeClip(c.id)}
-                  title="Remove from this list (does not delete a downloaded file)"
+                  title={t('cam.clips.remove', 'Remove from this list (does not delete a downloaded file)')}
                 >
                   ✕
                 </button>

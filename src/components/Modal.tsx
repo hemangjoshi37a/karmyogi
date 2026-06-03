@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { useT } from '../i18n'
 
 interface ModalProps {
   open: boolean
@@ -11,6 +12,7 @@ interface ModalProps {
 
 /** Generic centered modal/dialog with overlay + Esc-to-close. */
 export function Modal({ open, title, onClose, children, width = 780 }: ModalProps) {
+  const t = useT()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -32,7 +34,12 @@ export function Modal({ open, title, onClose, children, width = 780 }: ModalProp
       <div className="km-modal" style={{ maxWidth: width }} onClick={(e) => e.stopPropagation()}>
         <header className="km-modal-head">
           <span className="km-modal-title">{title}</span>
-          <button className="km-modal-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
+          <button
+            className="km-modal-close"
+            onClick={onClose}
+            aria-label={t('ui.close', 'Close')}
+            title={t('ui.close.esc', 'Close (Esc)')}
+          >
             ✕
           </button>
         </header>
