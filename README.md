@@ -258,4 +258,8 @@ Built by **[hjLabs.in](https://hjLabs.in)**
 
 [🚀 Live App](https://karmyogi.hjlabs.in) · [💻 GitHub](https://github.com/hemangjoshi37a/karmyogi) · [🐞 Issues](https://github.com/hemangjoshi37a/karmyogi/issues) · [🌐 hjLabs.in](https://hjLabs.in)
 
+
+
+<img width="1536" height="1024" alt="karmyogi-cta" src="https://github.com/user-attachments/assets/9428b88c-50e4-4d91-8959-85d0deeeae30" />
+
 </div>
