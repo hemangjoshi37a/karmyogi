@@ -26,3 +26,8 @@ secrets.*
 # user-provided CAD test artifacts (not part of the app)
 OM MANDALA.*
 *.cdr
+
+# dev scratch (camera frames sent from the browser, UI screenshots)
+.camera-frames/
+.ui-shots/
+.machine-bridge/

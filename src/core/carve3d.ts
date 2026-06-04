@@ -23,6 +23,8 @@ import { Polyline } from './geometry';
 import type { StlMesh } from './slicer';
 import { STL_STRIDE } from './slicer';
 import type { Placement } from './transform';
+import { GcodeEmitter, ZMode } from './gcodeEmitter';
+import { buildCutout, type CutoutParams } from './cutout';
 
 // ---- Hard safety caps -------------------------------------------------------
 /** Never sample a heightmap larger than this many cells (≈ 1.2k × 1.2k). */
@@ -38,7 +40,13 @@ export type ToolType = 'ball' | 'flat';
 export interface Carve3DParams {
   toolDiameter: number; // mm
   toolType: ToolType; // ball-nose or flat-end
-  stepover: number; // mm between adjacent raster lines (XY)
+  stepover: number; // mm between adjacent raster lines (XY) — FINISHING surface quality
+  /**
+   * Optional coarser stepover (mm) for the ROUGHING bulk-clearing raster. When
+   * omitted, roughing reuses {@link stepover}. A larger roughing stepover clears
+   * stock far faster while finishing keeps the fine stepover for surface finish.
+   */
+  roughStepover?: number;
   stepdown: number; // mm depth per roughing level
   safeZ: number; // retract height above stock top (mm)
   maxDepth: number; // max material depth to remove below the top surface (mm)
@@ -71,10 +79,97 @@ export function defaultCarve3DParams(overrides: Partial<Carve3DParams> = {}): Ca
   };
 }
 
+/** Derived, ready-to-use carving parameters from a tool + material. */
+export interface AutoCarveParams {
+  /** Fine stepover for the FINISHING raster (mm) — surface quality. */
+  finishStepover: number;
+  /** Coarse stepover for the ROUGHING bulk clearing (mm) — faster removal. */
+  roughStepover: number;
+  /** Depth removed per roughing level (mm). */
+  stepdown: number;
+  /**
+   * Whether a separate roughing phase is worth it. Roughing only pays off when
+   * the relief is deeper than a single stepdown; for shallow reliefs the finish
+   * pass alone removes everything, so we skip roughing for a faster job.
+   */
+  doRoughing: boolean;
+}
+
+/**
+ * Derive good default carving parameters from the tool + material + (optional)
+ * relief depth. Pure (no DOM/React), callable from the panel and the worker.
+ *
+ *  - FINISHING stepover comes from the desired surface scallop: for a ball-nose
+ *    bit the stepover that leaves a scallop height `h` is 2·√(2·r·h − h²),
+ *    clamped to a sane fraction of the diameter. A flat bit can't smoothly blend
+ *    a relief, so its finishing stepover is a small fraction of the diameter.
+ *  - ROUGHING stepover is a LARGE fraction of the diameter (bulk removal); it is
+ *    always ≥ the finishing stepover.
+ *  - STEPDOWN is the material's depth-of-cut fraction × diameter (clamped).
+ *  - doRoughing is false when the whole relief fits in one stepdown (finishing
+ *    alone clears it — skipping roughing roughly halves the program).
+ *
+ * @param toolDiameter   cutter diameter (mm)
+ * @param toolType       'ball' | 'flat'
+ * @param stepdownFrac   material depth-of-cut as a fraction of diameter (0..1)
+ * @param reliefDepth    total relief depth below the stock top (mm); when known,
+ *                       lets us decide whether roughing is worthwhile
+ * @param scallopMm      desired finishing scallop height (mm); default 0.05mm
+ */
+export function autoCarveParams(
+  toolDiameter: number,
+  toolType: ToolType,
+  stepdownFrac: number,
+  reliefDepth?: number,
+  scallopMm = 0.05,
+): AutoCarveParams {
+  const dia = toolDiameter > 0 ? toolDiameter : 3.175;
+  const r = dia / 2;
+  const MIN_STEP = 0.05;
+
+  // Finishing stepover from the scallop-height relation for a ball-nose tip.
+  let finishStepover: number;
+  if (toolType === 'ball') {
+    const h = Math.min(Math.max(scallopMm, 0.005), r * 0.9);
+    finishStepover = 2 * Math.sqrt(Math.max(0, 2 * r * h - h * h));
+    // Keep it within a practical 5%–35% of the diameter so it never collapses to
+    // a hair-thin pass nor blows out coarse.
+    finishStepover = Math.min(Math.max(finishStepover, dia * 0.05), dia * 0.35);
+  } else {
+    // A flat bit leaves a faceted relief regardless of stepover; use a modest
+    // fraction of the diameter for a reasonable finish without crawling.
+    finishStepover = dia * 0.25;
+  }
+  finishStepover = Math.max(MIN_STEP, Math.round(finishStepover * 100) / 100);
+
+  // Roughing clears bulk: a large fraction of the diameter, always ≥ finishing.
+  const roughStepover = Math.max(
+    finishStepover,
+    Math.round(dia * 0.6 * 100) / 100,
+  );
+
+  // Stepdown from the material's depth-of-cut fraction, clamped to a sane band.
+  const frac = stepdownFrac > 0 ? stepdownFrac : 0.5;
+  let stepdown = frac * dia;
+  stepdown = Math.min(Math.max(stepdown, 0.1), dia * 1.0);
+  stepdown = Math.round(stepdown * 100) / 100;
+
+  // Skip roughing when the entire relief fits in one finishing pass depth.
+  const doRoughing = reliefDepth == null ? true : reliefDepth > stepdown + 1e-6;
+
+  return { finishStepover, roughStepover, stepdown, doRoughing };
+}
+
 /**
  * A sampled top-surface heightmap over the mesh XY footprint. `z[iy*nx + ix]` is
- * the highest reachable surface Z at the centre of cell (ix, iy); cells with no
- * surface over them carry `floorZ` (the carve floor) so the tool can clear them.
+ * the highest reachable UP-FACING surface Z at the centre of cell (ix, iy),
+ * referenced so the stock top is Z=0 and the surface dips into negative Z.
+ *
+ * Only the Z-axis-facing TOP surface drives the heightmap — down-facing facets
+ * (the model underside) are ignored. Cells with no up-facing surface over them
+ * are "air / background": they keep Z = `zTop` (the stock top) AND their
+ * `covered` flag is 0, so downstream passes know there is nothing to carve there
+ * and must leave the stock untouched (never flatten the background).
  */
 export interface Heightmap {
   nx: number;
@@ -84,8 +179,30 @@ export interface Heightmap {
   y0: number;
   dx: number;
   dy: number;
-  /** Top surface Z per cell (mm). Length nx*ny. */
+  /** Top surface Z per cell (mm). Length nx*ny. Uncovered cells hold `zTop`. */
   z: Float32Array;
+  /**
+   * Coverage mask (length nx*ny). 1 = an up-facing surface was rasterized into
+   * this cell (real material to follow/carve); 0 = air/background (no up-facing
+   * surface here — treat as the stock top and DO NOT mill it).
+   */
+  covered: Uint8Array;
+  /**
+   * Model SILHOUETTE / footprint mask (length nx*ny). 1 = the model occupies this
+   * cell in XY (ANY triangle — up-, down- or side-facing — projects onto it);
+   * 0 = outside the model's XY shadow. Unlike {@link covered}, this is independent
+   * of how the surface faces or how deep anything is carved, so a flat-top part
+   * (nothing to mill) still has a complete footprint to cut around. The cutout
+   * pass derives the part outline from THIS mask.
+   */
+  footprint: Uint8Array;
+  /**
+   * True when the model's up-facing top surface is essentially flat at the stock
+   * top — there is no relief to carve (every covered cell sits at z≈0). The UI
+   * uses this to show a clear "top is flat — nothing to carve" hint instead of a
+   * scary "no toolpaths produced".
+   */
+  flatTop: boolean;
   /** Mesh Z extents (mm). */
   zTop: number;
   zBottom: number;
@@ -127,9 +244,17 @@ export function buildHeightmap(mesh: StlMesh, params: Carve3DParams): Heightmap 
   const minY = mesh.bbox.min[1];
   const maxX = mesh.bbox.max[0];
   const maxY = mesh.bbox.max[1];
-  const zTop = mesh.bbox.max[2];
-  const zBottom = mesh.bbox.min[2];
-  const floorZ = zTop - Math.max(0, params.maxDepth);
+  // CNC relief convention: the TOP of the relief is the stock surface = work Z 0,
+  // and the tool cuts DOWNWARD into negative Z. The mesh lives in its own
+  // (absolute) Z space, so we reference every height to the mesh's highest point:
+  // `zRef` is the mesh top, which maps to Z 0. The heightmap then stores surface
+  // depth-below-top (<= 0), roughing/finishing cut at <= 0, and the safe-Z
+  // retract (> 0) is genuinely above all cutting — never the old bug where cuts
+  // happened at +Z above the work zero and "safe-Z" sat below the material.
+  const zRef = mesh.bbox.max[2];
+  const zTop = 0; // mesh top after referencing to the stock surface
+  const zBottom = mesh.bbox.min[2] - zRef; // <= 0
+  const floorZ = zTop - Math.max(0, params.maxDepth); // = -maxDepth (<= 0)
 
   if (mesh.triangleCount > MAX_CARVE_TRIANGLES) {
     warnings.push(
@@ -161,10 +286,18 @@ export function buildHeightmap(mesh: StlMesh, params: Carve3DParams): Heightmap 
   const dx = spanX / (nx - 1);
   const dy = spanY / (ny - 1);
   const z = new Float32Array(nx * ny);
-  z.fill(floorZ);
+  // Uncovered (air/background) cells default to the STOCK TOP (Z=0), NOT the carve
+  // floor — there is nothing to carve there, so the surface "is" the stock top and
+  // no downward cut may happen. The `covered` mask records where a real up-facing
+  // surface actually exists so passes can distinguish "surface at top" from "air".
+  z.fill(zTop);
+  const covered = new Uint8Array(nx * ny);
+  // Model XY silhouette — every cell ANY triangle projects onto, regardless of
+  // facing. Drives the cutout outline so a flat-top part still has a footprint.
+  const footprint = new Uint8Array(nx * ny);
 
   if (mesh.triangleCount > 0 && mesh.triangleCount <= MAX_CARVE_TRIANGLES) {
-    rasterizeTriangles(mesh, z, nx, ny, minX, minY, dx, dy, floorZ);
+    rasterizeTriangles(mesh, z, covered, footprint, nx, ny, minX, minY, dx, dy, floorZ, zRef);
   }
 
   const hm: Heightmap = {
@@ -175,6 +308,9 @@ export function buildHeightmap(mesh: StlMesh, params: Carve3DParams): Heightmap 
     dx,
     dy,
     z,
+    covered,
+    footprint,
+    flatTop: false,
     zTop,
     zBottom,
     minX,
@@ -186,16 +322,40 @@ export function buildHeightmap(mesh: StlMesh, params: Carve3DParams): Heightmap 
 
   // Compensate for the finite tool: a peak narrower than the tool can't be
   // reached at full height, so dilate the height field by the tool footprint.
+  // (Only covered cells participate; air stays at the stock top.)
   dilateForTool(hm, params);
-  // Clamp everything to the carve floor (never go below maxDepth).
-  for (let i = 0; i < z.length; i++) if (z[i] < floorZ) z[i] = floorZ;
+  // Clamp covered cells to the carve floor (never go below maxDepth). Uncovered
+  // cells are left at the stock top (zTop) — they must never be cut. Track the
+  // deepest covered surface so we can tell a flat top (nothing to carve) apart
+  // from a real relief.
+  const FLAT_TOL = 1e-3; // mm below the stock top before it counts as "relief"
+  let deepest = 0; // most-negative covered surface Z (0 = at the stock top)
+  let anyCovered = false;
+  for (let i = 0; i < z.length; i++) {
+    if (!covered[i]) continue;
+    anyCovered = true;
+    if (z[i] < floorZ) z[i] = floorZ;
+    if (z[i] < deepest) deepest = z[i];
+  }
+  // Flat top = there IS a model surface but it never dips below the stock top by
+  // more than the tolerance (so roughing/finishing have nothing to remove).
+  hm.flatTop = anyCovered && deepest > -FLAT_TOL;
   return hm;
 }
 
-/** Z-buffer rasterize: for each triangle, set covered cells to max(z). */
+/**
+ * Z-buffer rasterize the UP-FACING top surface only. For each triangle whose
+ * normal points up (normal.z > eps), set every covered cell to max(z) and flag
+ * it in the `covered` mask. Down-facing facets (the model underside) and
+ * vertical/side facets are ignored so the underside can never drive a cut and
+ * the background stays at the stock top. STL stores a per-facet normal; when it
+ * is zero/degenerate we recompute it from the vertices (consistent winding).
+ */
 function rasterizeTriangles(
   mesh: StlMesh,
   z: Float32Array,
+  covered: Uint8Array,
+  footprint: Uint8Array,
   nx: number,
   ny: number,
   minX: number,
@@ -203,19 +363,20 @@ function rasterizeTriangles(
   dx: number,
   dy: number,
   floorZ: number,
+  zRef: number,
 ): void {
   const tris = mesh.triangles;
   const stride3 = STL_STRIDE * 3;
+  // An up-facing facet has a positive Z normal component. Use a small epsilon so
+  // near-vertical walls (n.z ~ 0) are excluded as "not a top surface".
+  const NZ_EPS = 1e-4;
   for (let o = 0; o < tris.length; o += stride3) {
-    const ax = tris[o], ay = tris[o + 1], az = tris[o + 2];
-    const bx = tris[o + STL_STRIDE], by = tris[o + STL_STRIDE + 1], bz = tris[o + STL_STRIDE + 2];
-    const cx = tris[o + STL_STRIDE * 2], cy = tris[o + STL_STRIDE * 2 + 1], cz = tris[o + STL_STRIDE * 2 + 2];
+    // Reference every Z to the stock top (zRef -> 0); the tool cuts into <= 0.
+    const ax = tris[o], ay = tris[o + 1], az = tris[o + 2] - zRef;
+    const bx = tris[o + STL_STRIDE], by = tris[o + STL_STRIDE + 1], bz = tris[o + STL_STRIDE + 2] - zRef;
+    const cx = tris[o + STL_STRIDE * 2], cy = tris[o + STL_STRIDE * 2 + 1], cz = tris[o + STL_STRIDE * 2 + 2] - zRef;
 
-    // Skip degenerate/below-floor triangles where it can't raise the surface.
-    const triMaxZ = Math.max(az, bz, cz);
-    if (triMaxZ <= floorZ) continue;
-
-    // Triangle XY bounds → cell index range.
+    // Triangle XY bounds → cell index range (shared by footprint + surface).
     const tMinX = Math.min(ax, bx, cx);
     const tMaxX = Math.max(ax, bx, cx);
     const tMinY = Math.min(ay, by, cy);
@@ -237,15 +398,33 @@ function rasterizeTriangles(
     const denom = d00x * d01y - d01x * d00y;
     const flat = Math.abs(denom) < 1e-12; // vertical/degenerate triangle in XY
 
+    // Up-facing test. Prefer the stored facet normal's Z; if the stored normal is
+    // degenerate, derive the facet normal's Z sign from the vertex winding. Only
+    // up-facing facets drive the surface heightmap (`z`/`covered`); EVERY facet
+    // contributes to the model footprint silhouette.
+    let nz = tris[o + 5]; // normal.z of vertex 0 (per-facet, shared across verts)
+    const nLen = Math.hypot(tris[o + 3], tris[o + 4], tris[o + 5]);
+    if (!(nLen > 0.5)) {
+      // Recompute from vertices: nz = (B-A) x (C-A) .z (winding-consistent).
+      nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    }
+    const upFacing = nz > NZ_EPS;
+    const triMaxZ = Math.max(az, bz, cz);
+    // The surface heightmap only takes up-facing facets that can raise it above
+    // the floor; the footprint takes them all.
+    const surfaceFacet = upFacing && triMaxZ > floorZ;
+
     for (let iy = iy0; iy <= iy1; iy++) {
       const py = minY + iy * dy;
       const rowBase = iy * nx;
       for (let ix = ix0; ix <= ix1; ix++) {
         const px = minX + ix * dx;
-        let zHere: number;
+        let inside: boolean;
+        let zHere = triMaxZ;
         if (flat) {
-          // Degenerate XY projection — just use the triangle's max Z.
-          zHere = triMaxZ;
+          // Degenerate XY projection (vertical wall) — its shadow is the bbox
+          // band; treat every cell in range as inside for the footprint.
+          inside = true;
         } else {
           const vpx = px - ax, vpy = py - ay;
           const u = (vpx * d01y - d01x * vpy) / denom;
@@ -253,11 +432,22 @@ function rasterizeTriangles(
           // Point-in-triangle with a small tolerance to avoid seams between
           // adjacent triangles dropping cells.
           const tol = 1e-6;
-          if (u < -tol || v < -tol || u + v > 1 + tol) continue;
-          zHere = az + u * (bz - az) + v * (cz - az);
+          inside = !(u < -tol || v < -tol || u + v > 1 + tol);
+          if (inside) zHere = az + u * (bz - az) + v * (cz - az);
         }
+        if (!inside) continue;
         const cell = rowBase + ix;
-        if (zHere > z[cell]) z[cell] = zHere;
+        // EVERY facet's XY shadow marks the footprint silhouette.
+        footprint[cell] = 1;
+        if (!surfaceFacet) continue;
+        // First up-facing surface to touch this cell sets it (the array was
+        // pre-filled with zTop for air); later ones keep the TOPMOST surface Z.
+        if (!covered[cell]) {
+          covered[cell] = 1;
+          z[cell] = zHere;
+        } else if (zHere > z[cell]) {
+          z[cell] = zHere;
+        }
       }
     }
   }
@@ -273,7 +463,7 @@ function rasterizeTriangles(
 function dilateForTool(hm: Heightmap, params: Carve3DParams): void {
   const r = Math.max(0, params.toolDiameter / 2);
   if (r <= 1e-6) return;
-  const { nx, ny, dx, dy, z } = hm;
+  const { nx, ny, dx, dy, z, covered } = hm;
   const rxCells = Math.min(Math.ceil(r / dx), 64);
   const ryCells = Math.min(Math.ceil(r / dy), 64);
   if (rxCells === 0 && ryCells === 0) return;
@@ -300,17 +490,24 @@ function dilateForTool(hm: Heightmap, params: Carve3DParams): void {
   const src = z.slice();
   for (let iy = 0; iy < ny; iy++) {
     for (let ix = 0; ix < nx; ix++) {
-      let best = src[iy * nx + ix];
+      const cell = iy * nx + ix;
+      // Only adjust real (covered) cells — air/background stays at the stock top.
+      if (!covered[cell]) continue;
+      let best = src[cell];
       for (const { ox, oy, lift } of offsets) {
         const jx = ix + ox;
         const jy = iy + oy;
         if (jx < 0 || jy < 0 || jx >= nx || jy >= ny) continue;
+        const ncell = jy * nx + jx;
+        // Only let real surface neighbours raise this cell; air carries no
+        // surface to fit the tool against.
+        if (!covered[ncell]) continue;
         // The tool tip resting so it clears neighbour height (src) requires the
         // tip Z >= neighbourZ - lift (ball) i.e. tip raised by neighbourZ-lift.
-        const need = src[jy * nx + jx] - lift;
+        const need = src[ncell] - lift;
         if (need > best) best = need;
       }
-      z[iy * nx + ix] = best;
+      z[cell] = best;
     }
   }
 }
@@ -337,6 +534,22 @@ function sampleHeight(hm: Heightmap, x: number, y: number): number {
   const a = z00 + (z10 - z00) * tx;
   const b = z01 + (z11 - z01) * tx;
   return a + (b - a) * ty;
+}
+
+/**
+ * Nearest-cell coverage test at world (x, y). True when the cell under the point
+ * holds a real up-facing surface (material to carve); false over air/background.
+ * Roughing/finishing use this to refuse cuts where there is nothing to carve.
+ */
+function sampleCovered(hm: Heightmap, x: number, y: number): boolean {
+  const { nx, ny, dx, dy, x0, y0, covered } = hm;
+  let ix = Math.round((x - x0) / dx);
+  let iy = Math.round((y - y0) / dy);
+  if (ix < 0) ix = 0;
+  else if (ix > nx - 1) ix = nx - 1;
+  if (iy < 0) iy = 0;
+  else if (iy > ny - 1) iy = ny - 1;
+  return covered[iy * nx + ix] !== 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -370,9 +583,15 @@ interface Span {
 function buildRoughing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; levels: number } {
   const tp = new Toolpath();
   tp.name = '3D Roughing';
-  const step = Math.max(params.stepover, hm.dx, 0.1);
+  // Roughing clears bulk stock, so it may use a coarser stepover than finishing.
+  const roughStep =
+    params.roughStepover && params.roughStepover > 0 ? params.roughStepover : params.stepover;
+  const step = Math.max(roughStep, hm.dx, 0.1);
   const floorZ = hm.zTop - Math.max(0, params.maxDepth);
   const safeZ = params.safeZ;
+  // Only material whose surface sits below the stock top by more than this is
+  // worth cutting; at-top (z ~ 0) and air/background cells are left untouched.
+  const cutTol = 1e-3;
   // Tiny clearance above the cut plane for in-material gap links (so the tool
   // doesn't rub the floor while repositioning, but never lifts to safe-Z).
   const linkClear = Math.min(0.3, Math.max(params.stepover * 0.25, 0.05));
@@ -434,7 +653,15 @@ function buildRoughing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; le
       let runStart: number | null = null;
       let prev = ordered[0];
       for (const x of ordered) {
-        const material = sampleHeight(hm, x, y) > level + 1e-6;
+        // Bulk to clear at this level only if (a) a real up-facing surface covers
+        // this cell (never air/background), (b) that final surface is BELOW the
+        // stock top (z < -cutTol — never carve the background/at-top), and (c) the
+        // final surface lies BELOW this clearing level, so there is still material
+        // between the level and the surface to remove. Where the surface is at or
+        // above the level we'd gouge the relief, so we don't cut it.
+        const surf = sampleHeight(hm, x, y);
+        const material =
+          sampleCovered(hm, x, y) && surf < -cutTol && surf < level - 1e-6;
         if (material && runStart === null) runStart = x;
         else if (!material && runStart !== null) {
           spans.push({ a: runStart, b: prev });
@@ -533,6 +760,9 @@ function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; l
   const step = Math.max(params.stepover, 0.05);
   const safeZ = params.safeZ;
   const floorZ = hm.zTop - Math.max(0, params.maxDepth);
+  // Only ride/cut the surface where it dips below the stock top by more than this;
+  // at-top (z ~ 0) and uncovered air cells are background and must be left alone.
+  const cutTol = 1e-3;
 
   const sampleStep = Math.max(hm.dx, hm.dy, step * 0.5, 0.05);
   let lineCount = 0;
@@ -563,45 +793,61 @@ function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; l
   }
 
   const at = (fixed: number, c: number) => (alongX ? { x: c, y: fixed } : { x: fixed, y: c });
+  // A point is carveable when a real up-facing surface covers it AND that surface
+  // sits below the stock top. Everywhere else (air / at-top) the tool stays up.
+  const carveable = (x: number, y: number): boolean =>
+    sampleCovered(hm, x, y) && sampleHeight(hm, x, y) < -cutTol;
 
-  let engaged = false; // tool currently riding the surface
+  let engaged = false; // tool currently riding the surface (down, cutting)
   let prevX = 0;
   let prevY = 0;
   let prevZ = 0;
 
+  /** Lift to safe-Z over the current point (only when engaged). */
+  const lift = () => {
+    if (engaged) {
+      tp.rapid({ x: prevX, y: prevY, z: safeZ });
+      engaged = false;
+    }
+  };
+
   for (const line of lines) {
     if (line.coords.length < 2) continue;
-    const first = at(line.fixed, line.coords[0]);
-    const z0 = clampZ(sampleHeight(hm, first.x, first.y));
-
-    if (!engaged) {
-      // First contact: rapid over, plunge to the surface.
-      tp.rapid({ x: first.x, y: first.y, z: safeZ });
-      tp.plunge({ x: first.x, y: first.y, z: z0 });
-    } else if (surfaceLinkSafe(hm, prevX, prevY, first.x, first.y, prevZ, z0, clampZ)) {
-      // Ride the surface from the previous row end across the step-over to here.
-      tp.feed({ x: first.x, y: first.y, z: z0 });
-    } else {
-      // A feature would gouge between rows → retract, reposition, re-plunge.
-      tp.rapid({ x: prevX, y: prevY, z: safeZ });
-      tp.rapid({ x: first.x, y: first.y, z: safeZ });
-      tp.plunge({ x: first.x, y: first.y, z: z0 });
-    }
-
-    // Cut along the row, riding the surface.
-    for (let i = 1; i < line.coords.length; i++) {
+    let rowCut = false;
+    for (let i = 0; i < line.coords.length; i++) {
       const p = at(line.fixed, line.coords[i]);
+      if (!carveable(p.x, p.y)) {
+        // Background / at-top: never cut here. Lift away and travel over it.
+        lift();
+        continue;
+      }
       const z = clampZ(sampleHeight(hm, p.x, p.y));
-      tp.feed({ x: p.x, y: p.y, z });
+      if (!engaged) {
+        // (Re)enter the surface: rapid over at safe-Z, then plunge to the surface.
+        tp.rapid({ x: p.x, y: p.y, z: safeZ });
+        tp.plunge({ x: p.x, y: p.y, z });
+        engaged = true;
+      } else if (surfaceLinkSafe(hm, prevX, prevY, p.x, p.y, prevZ, z, clampZ)) {
+        // Ride the surface across to the next sample.
+        tp.feed({ x: p.x, y: p.y, z });
+      } else {
+        // A taller feature sits between the samples → retract, reposition, plunge.
+        tp.rapid({ x: prevX, y: prevY, z: safeZ });
+        tp.rapid({ x: p.x, y: p.y, z: safeZ });
+        tp.plunge({ x: p.x, y: p.y, z });
+      }
       prevX = p.x;
       prevY = p.y;
       prevZ = z;
+      rowCut = true;
     }
-    engaged = true;
-    lineCount++;
+    // End each scan line lifted so the serpentine step-over to the next row never
+    // drags a cut across the background between disjoint relief regions.
+    lift();
+    if (rowCut) lineCount++;
   }
 
-  if (engaged) tp.rapid({ x: prevX, y: prevY, z: safeZ });
+  lift();
 
   return { tp, lines: lineCount };
 }
@@ -773,10 +1019,245 @@ export function carveMesh(mesh: StlMesh, params: Carve3DParams): CarveResult {
   }
 
   if (result.toolpaths.length === 0) {
-    warnings.push('No toolpaths produced — enable Roughing and/or Finishing.');
+    if (hm.flatTop) {
+      // The top surface is flush with the stock top — there is genuinely nothing
+      // to carve. This is not an error; point the operator at the cutout instead.
+      warnings.push(
+        'Top surface is flat — nothing to carve; enable Cut-part-from-stock to cut it out.',
+      );
+    } else if (params.doRoughing || params.doFinishing) {
+      warnings.push('No toolpaths produced — the model has no relief below the stock top.');
+    } else {
+      warnings.push('No toolpaths produced — enable Roughing and/or Finishing.');
+    }
   }
   return result;
 }
+
+// ----------------------------------------------------------------------------
+// Combined multi-job program builder + Web Worker protocol
+// ----------------------------------------------------------------------------
+//
+// The heavy 3D-carve compute (heightmap raster + roughing + finishing + optional
+// cutout + G-code emission for one OR MANY jobs) is identical whether it runs on
+// the main thread or inside a Web Worker. `buildCarveProgram` is that single pure
+// implementation; the worker (`carve3d.worker.ts`) is a thin adapter that
+// reconstructs the meshes from transferred buffers and calls it.
+
+/** One job to carve, fully described so it can be structured-cloned to a worker. */
+export interface CarveJobSpec {
+  name: string;
+  /** Per-job carving parameters (tool/feeds/depth/strategy). */
+  params: Carve3DParams;
+  /** Placement baked into the toolpath (XY move / Z-rotate / uniform scale). */
+  placement: Placement;
+  /** Pivot for the placement (the mesh XY-bbox centre). */
+  pivot: { x: number; y: number };
+  /** Stock thickness for this job's cutout pass (mm). */
+  stockThicknessMm: number;
+}
+
+/** Shared global settings for the combined program. */
+export interface CarveProgramGlobals {
+  safeZ: number;
+  spindleRPM: number;
+  feedZ: number;
+  toolDiameter: number;
+}
+
+export interface CarveProgramResult {
+  gcode: string;
+  lineCount: number;
+  /** Number of jobs that actually contributed cutting moves. */
+  jobsCarved: number;
+  /** Number of jobs whose heightmap built (grid produced). */
+  grids: number;
+  warnings: string[];
+}
+
+/**
+ * Strip the standard {@link GcodeEmitter} header/footer from a single-job
+ * program, returning just the cutting body so several jobs can be stitched under
+ * ONE shared header (units/plane), spindle start, and footer. A safe-Z retract
+ * is prepended so each stitched job begins above the stock before its first XY
+ * travel. (Ported from the panel so the worker can stitch identically.)
+ */
+function extractEmitterBody(program: string, safeZ: number): string[] {
+  const raw = program.split(/\r?\n/);
+  const isHeaderLine = (l: string): boolean => {
+    const s = l.trim();
+    if (s === '') return true;
+    if (/^G21$|^G20$|^G90$|^G91$|^G94$|^G17$/.test(s)) return true;
+    if (/^M3\b/.test(s) || /^M4\b/.test(s) || /^G4\b/.test(s)) return true;
+    if (/^G0\s+Z/i.test(s)) return true;
+    if (/^\(Generated by /i.test(s)) return true;
+    return false;
+  };
+  let start = 0;
+  while (start < raw.length && isHeaderLine(raw[start])) start++;
+  let end = raw.length;
+  while (end > start) {
+    const s = raw[end - 1].trim();
+    if (s === '' || /^M30\b/.test(s) || /^M5\b/.test(s) || /^G0\s+Z/i.test(s)) {
+      end--;
+      continue;
+    }
+    break;
+  }
+  const body = raw.slice(start, end).filter((l) => l.trim().length > 0);
+  if (body.length === 0) return [];
+  return [`G0 Z${safeZ.toFixed(3)}`, ...body];
+}
+
+/**
+ * Build the SINGLE combined G-code program for a set of carve jobs: for each job
+ * build the heightmap, roughing/finishing toolpaths and (optionally) the cutout
+ * pass, bake its placement, emit its body with its own feeds, and stitch all
+ * bodies under one safe header / M3 / footer. Pure — no DOM/React; safe to call
+ * from a worker or the main thread.
+ *
+ * `onProgress` (optional) is invoked as `(done, total)` after each job so a
+ * worker can post progress; returning `false` requests cooperative cancellation
+ * (the build stops and returns what it has).
+ */
+export function buildCarveProgram(
+  jobs: CarveJobSpec[],
+  meshes: StlMesh[],
+  globals: CarveProgramGlobals,
+  cutout: CutoutParams | null,
+  onProgress?: (done: number, total: number) => boolean,
+): CarveProgramResult {
+  const warnings: string[] = [];
+  const bodies: string[] = [];
+  let grids = 0;
+  let carved = 0;
+  const total = jobs.length;
+
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i];
+    const mesh = meshes[i];
+    const result = carveMesh(mesh, job.params);
+    for (const w of result.warnings) warnings.push(`${job.name}: ${w}`);
+    if (result.gridX > 0) grids += 1;
+
+    const carveTps = [...result.toolpaths];
+    if (cutout && cutout.enabled && result.heightmap) {
+      const co = buildCutout(
+        result.heightmap,
+        { ...cutout, stockThicknessMm: job.stockThicknessMm },
+        globals.toolDiameter / 2,
+      );
+      for (const w of co.warnings) warnings.push(`${job.name}: ${w}`);
+      if (co.toolpath) carveTps.push(co.toolpath);
+    }
+
+    if (carveTps.length > 0) {
+      const placed = carveTps.map((tp) => {
+        const p = placeToolpath(tp, job.placement, job.pivot);
+        p.name = `${job.name} — ${tp.name}`;
+        return p;
+      });
+      const jobEmitter = new GcodeEmitter({
+        programName: '',
+        comments: true,
+        safeZ: globals.safeZ,
+        feedXY: job.params.feedXY,
+        feedZ: globals.feedZ,
+        travelFeed: job.params.travelFeed,
+        zMode: ZMode.Spindle,
+        useSpindle: false, // spindle handled once in the shared header
+        spindleRPM: globals.spindleRPM,
+      });
+      const body = extractEmitterBody(jobEmitter.emitProgram(placed), globals.safeZ);
+      if (body.length > 0) {
+        bodies.push(`(${job.name})`, ...body);
+        carved += 1;
+      }
+    }
+
+    if (onProgress && onProgress(i + 1, total) === false) break;
+  }
+
+  if (bodies.length === 0) {
+    return { gcode: '', lineCount: 0, jobsCarved: carved, grids, warnings };
+  }
+
+  const name =
+    jobs.length === 1 ? `${jobs[0].name} — 3D Carving` : `${jobs.length} jobs — 3D Carving`;
+  const safe = globals.safeZ.toFixed(3);
+  const lines: string[] = [
+    `(${name})`,
+    '(Generated by karmyogi 3D Carving — multi-model)',
+    'G21',
+    'G90',
+    'G94',
+    'G17',
+    `G0 Z${safe}`,
+    `M3 S${globals.spindleRPM.toFixed(3)}`,
+    ...bodies,
+    `G0 Z${safe}`,
+    'M5',
+    'M30',
+  ];
+  const gcode = lines.join('\n') + '\n';
+  let lineCount = 0;
+  for (let i = 0, n = gcode.length; i < n; i++) if (gcode.charCodeAt(i) === 10) lineCount++;
+  return { gcode, lineCount, jobsCarved: carved, grids, warnings };
+}
+
+// ---- Worker message protocol (shared by carve3d.worker.ts and CadCamPanel) ---
+
+/** One job's serializable payload: raw mesh buffer + bbox + the job spec. */
+export interface CarveWorkerJob {
+  spec: CarveJobSpec;
+  triangles: Float32Array;
+  triangleCount: number;
+  vertexCount: number;
+  bbox: { min: [number, number, number]; max: [number, number, number] };
+  format: 'binary' | 'ascii';
+}
+
+/** Request posted to the carve worker. */
+export interface CarveWorkerRequest {
+  type: 'carve';
+  /** Monotonic id so the panel can ignore results from a superseded request. */
+  jobId: number;
+  jobs: CarveWorkerJob[];
+  globals: CarveProgramGlobals;
+  cutout: CutoutParams | null;
+}
+
+export interface CarveWorkerCancel {
+  type: 'cancel';
+}
+
+export type CarveWorkerInbound = CarveWorkerRequest | CarveWorkerCancel;
+
+export interface CarveWorkerProgress {
+  type: 'progress';
+  jobId: number;
+  done: number;
+  total: number;
+}
+
+export interface CarveWorkerDone {
+  type: 'done';
+  jobId: number;
+  gcode: string;
+  lineCount: number;
+  jobsCarved: number;
+  grids: number;
+  warnings: string[];
+}
+
+export interface CarveWorkerError {
+  type: 'error';
+  jobId: number;
+  message: string;
+  cancelled?: boolean;
+}
+
+export type CarveWorkerOutbound = CarveWorkerProgress | CarveWorkerDone | CarveWorkerError;
 
 // ----------------------------------------------------------------------------
 // EPS / AI best-effort vector path extraction

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from '../i18n'
-import { useMachine, useProgram, usePersistentState } from '../store'
-import { grbl } from '../serial/controller'
+import { useProgram, usePersistentState } from '../store'
+import { IconButton } from '../components/IconButton'
+import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import {
   defaultGlueParams,
   generateGlue,
@@ -52,6 +53,17 @@ interface Drag {
   tool: Exclude<Tool, 'select'>
   start: Pt
   current: Pt
+}
+
+/**
+ * In-progress move of an existing shape (Select tool). We snapshot the shape as
+ * it was at pointer-down (`orig`) so deltas are always applied to the original
+ * geometry, never to already-moved (stale) state.
+ */
+interface MoveDrag {
+  id: string
+  start: Pt
+  orig: GlueShape
 }
 
 /** The defaults used when a shape has zero drag distance (a plain click). */
@@ -110,6 +122,131 @@ function shapeFromDrag(tool: Exclude<Tool, 'select'>, a: Pt, b: Pt): GlueShape |
   }
 }
 
+/** Return a copy of `shape` translated by (dx, dy) in machine mm. */
+function translateShape(shape: GlueShape, dx: number, dy: number): GlueShape {
+  switch (shape.kind) {
+    case 'line':
+      return { ...shape, x1: shape.x1 + dx, y1: shape.y1 + dy, x2: shape.x2 + dx, y2: shape.y2 + dy }
+    case 'circle':
+      return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
+    case 'rect':
+      return { ...shape, x: shape.x + dx, y: shape.y + dy }
+    case 'triangle':
+      return {
+        ...shape,
+        points: shape.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) as [Pt, Pt, Pt],
+      }
+  }
+}
+
+/** Round-to-int mm string used by the tiny in-canvas dimension labels. */
+const mm = (v: number): string => Math.round(v).toString()
+
+/**
+ * Tiny in-canvas dimension annotation for a shape: a short text plus the anchor
+ * point (machine coords) at which to draw it. Mirrors the shape-list summary but
+ * lives on the bed near the shape so the geometry reads at a glance.
+ *   line → `L 53`, circle → `r 12`, rect → `40 × 25`, triangle → `△ 40`.
+ */
+interface DimLabel {
+  text: string
+  /** Anchor in machine coords (X right, Y up). */
+  x: number
+  y: number
+}
+
+function shapeDim(shape: GlueShape): DimLabel {
+  switch (shape.kind) {
+    case 'line': {
+      const len = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1)
+      return { text: `L ${mm(len)}`, x: (shape.x1 + shape.x2) / 2, y: (shape.y1 + shape.y2) / 2 }
+    }
+    case 'circle':
+      return { text: `r ${mm(shape.r)}`, x: shape.cx, y: shape.cy + shape.r }
+    case 'rect':
+      return { text: `${mm(shape.w)} × ${mm(shape.h)}`, x: shape.x + shape.w / 2, y: shape.y + shape.h }
+    case 'triangle': {
+      const xs = shape.points.map((p) => p.x)
+      const ys = shape.points.map((p) => p.y)
+      const minX = Math.min(...xs)
+      const maxX = Math.max(...xs)
+      const maxY = Math.max(...ys)
+      return { text: `△ ${mm(maxX - minX)}`, x: (minX + maxX) / 2, y: maxY }
+    }
+  }
+}
+
+/** Bottom-left (X,Y) origin of a shape, for the selected-shape readout. */
+function shapeOrigin(shape: GlueShape): Pt {
+  switch (shape.kind) {
+    case 'line':
+      return { x: Math.min(shape.x1, shape.x2), y: Math.min(shape.y1, shape.y2) }
+    case 'circle':
+      return { x: shape.cx - shape.r, y: shape.cy - shape.r }
+    case 'rect':
+      return { x: shape.x, y: shape.y }
+    case 'triangle':
+      return { x: Math.min(...shape.points.map((p) => p.x)), y: Math.min(...shape.points.map((p) => p.y)) }
+  }
+}
+
+type GlueDocParams = Partial<Omit<GlueParams, 'programName' | 'metric'>>
+
+/**
+ * The serializable Glue document saved to / loaded from a `.kglue` file (plain
+ * JSON): the drawn shapes plus the dispenser/motion params.
+ */
+interface GlueDoc {
+  shapes: IdShape[]
+  params: GlueDocParams
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/** Validate one stored point ({x,y} numbers). */
+function isPt(v: unknown): v is Pt {
+  return isObj(v) && isNum(v.x) && isNum(v.y)
+}
+
+/** Narrow an arbitrary value to a valid GlueShape, or null if malformed. */
+function parseShape(v: unknown): GlueShape | null {
+  if (!isObj(v)) return null
+  switch (v.kind) {
+    case 'line':
+      return isNum(v.x1) && isNum(v.y1) && isNum(v.x2) && isNum(v.y2)
+        ? { kind: 'line', x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2 }
+        : null
+    case 'circle':
+      return isNum(v.cx) && isNum(v.cy) && isNum(v.r)
+        ? { kind: 'circle', cx: v.cx, cy: v.cy, r: v.r }
+        : null
+    case 'rect':
+      return isNum(v.x) && isNum(v.y) && isNum(v.w) && isNum(v.h)
+        ? { kind: 'rect', x: v.x, y: v.y, w: v.w, h: v.h }
+        : null
+    case 'triangle':
+      return Array.isArray(v.points) && v.points.length === 3 && v.points.every(isPt)
+        ? { kind: 'triangle', points: [v.points[0], v.points[1], v.points[2]] as [Pt, Pt, Pt] }
+        : null
+    default:
+      return null
+  }
+}
+
+/** Validate the params object, keeping only finite numeric known fields. */
+function parseGlueParams(v: unknown): GlueDocParams {
+  const out: GlueDocParams = {}
+  if (!isObj(v)) return out
+  const keys = [
+    'travelZ', 'dispenseZ', 'feed', 'plungeFeed', 'dispenseRate', 'settleMs',
+    'postDwellMs', 'decimals',
+  ] as const
+  for (const k of keys) if (isNum(v[k])) out[k] = v[k]
+  return out
+}
+
 /** Short human label for a shape kind, for the shape list. */
 function shapeSummary(shape: GlueShape, t: ReturnType<typeof useT>): string {
   switch (shape.kind) {
@@ -138,7 +275,6 @@ function shapeSummary(shape: GlueShape, t: ReturnType<typeof useT>): string {
  */
 export function GluePanel() {
   const t = useT()
-  const connected = useMachine((s) => s.connection === 'connected')
   const setProgram = useProgram((s) => s.setProgram)
 
   const [shapes, setShapes] = usePersistentState<IdShape[]>('karmyogi.glue.shapes', [])
@@ -176,8 +312,10 @@ export function GluePanel() {
   const [tool, setTool] = useState<Tool>('rect')
   const [selected, setSelected] = useState<string | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
+  const [moveDrag, setMoveDrag] = useState<MoveDrag | null>(null)
   const [showRaw, setShowRaw] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
   // --- coordinate conversion (screen px ⇄ machine mm) ---
@@ -212,27 +350,51 @@ export function GluePanel() {
     setShapes((prev) => prev.map((s) => (s.id === id ? { ...s, shape } : s)))
   }
 
-  // --- pointer drawing ---
+  // --- pointer interaction ---
+  // All pointer events for both drawing and moving are captured on the SVG so
+  // the gesture keeps tracking even when the cursor leaves the shape/canvas.
   function onPointerDown(e: React.PointerEvent<SVGSVGElement>) {
-    // Only react to the drawing surface, not the shape hit-targets (which
-    // stopPropagation for selection in select mode).
     const p = screenToBed(e.clientX, e.clientY)
+    svgRef.current?.setPointerCapture?.(e.pointerId)
     if (tool === 'select') {
-      setSelected(null) // click on empty canvas clears selection
+      // A down on empty canvas (not on a shape, which begins a move via
+      // beginMove + stopPropagation) clears the current selection.
+      setSelected(null)
       return
     }
-    ;(e.target as Element).setPointerCapture?.(e.pointerId)
     setDrag({ tool, start: p, current: p })
   }
   function onPointerMove(e: React.PointerEvent<SVGSVGElement>) {
-    if (!drag) return
-    setDrag({ ...drag, current: screenToBed(e.clientX, e.clientY) })
+    const p = screenToBed(e.clientX, e.clientY)
+    if (moveDrag) {
+      const dx = p.x - moveDrag.start.x
+      const dy = p.y - moveDrag.start.y
+      // Apply the delta to the snapshot taken at pointer-down, never to the
+      // (already-translated) live shape — avoids drift/stale-state bugs.
+      updateShape(moveDrag.id, translateShape(moveDrag.orig, dx, dy))
+      return
+    }
+    if (drag) setDrag({ ...drag, current: p })
   }
   function onPointerUp(e: React.PointerEvent<SVGSVGElement>) {
+    svgRef.current?.releasePointerCapture?.(e.pointerId)
+    if (moveDrag) {
+      setMoveDrag(null)
+      return
+    }
     if (!drag) return
     const s = shapeFromDrag(drag.tool, drag.start, screenToBed(e.clientX, e.clientY))
     setDrag(null)
     if (s) addShape(s)
+  }
+  // Begin moving an existing shape (select tool). Snapshots the shape so move
+  // deltas are applied to its original geometry.
+  function beginMove(e: React.PointerEvent<SVGPathElement>, id: string, shape: GlueShape) {
+    e.stopPropagation()
+    setSelected(id)
+    setTool('select')
+    svgRef.current?.setPointerCapture?.(e.pointerId)
+    setMoveDrag({ id, start: screenToBed(e.clientX, e.clientY), orig: shape })
   }
 
   // --- render helpers: a shape's SVG path (in screen coords) ---
@@ -262,13 +424,6 @@ export function GluePanel() {
     return () => window.clearTimeout(id)
   }, [gcode, shapes.length, setProgram])
 
-  function play() {
-    const lines = gcodeLines(gcode)
-    if (lines.length === 0 || !connected) return
-    setProgram('glue', gcode)
-    grbl.startProgram(lines)
-  }
-
   // Keyboard delete for the selected shape.
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
@@ -285,9 +440,32 @@ export function GluePanel() {
   }, [selected])
 
   const selectedShape = shapes.find((s) => s.id === selected) ?? null
+
+  // Current state as a save document (.kglue).
+  const doc: GlueDoc = { shapes, params }
+
+  // Apply a loaded document. `data` is untrusted: validate the shapes array and
+  // params, dropping anything malformed. Fresh ids are assigned so keys stay
+  // unique regardless of what the file contained.
+  function loadDoc(data: unknown) {
+    if (!isObj(data) || !Array.isArray(data.shapes)) {
+      setLoadError(t('glue.load.invalid', 'Could not load — file is not a valid glue document.'))
+      return
+    }
+    const loaded: IdShape[] = []
+    for (const raw of data.shapes) {
+      const shape = parseShape(isObj(raw) && 'shape' in raw ? raw.shape : raw)
+      if (shape) loaded.push({ id: nextId(), shape })
+    }
+    setShapes(loaded)
+    setParams(parseGlueParams(data.params))
+    setSelected(null)
+    setLoadError(null)
+  }
+
   const hint =
     tool === 'select'
-      ? t('glue.hint.select', 'Tap a shape to select it · Delete removes it')
+      ? t('glue.hint.select', 'Drag a shape to move it · Delete removes the selected one')
       : tool === 'circle'
         ? t('glue.hint.circle', 'Drag from the centre outwards to set the radius')
         : tool === 'line'
@@ -298,39 +476,56 @@ export function GluePanel() {
     <div className="gp-panel">
       {/* One-line intro / flow */}
       <p className="gp-intro">
-        {t('glue.intro.pre', 'Pick a shape, draw it on the bed, then')}{' '}
-        <b>{t('glue.intro.send', 'Send ▶')}</b>.{' '}
-        {t('glue.intro.post', 'The dispenser traces each outline.')}
+        {t('glue.intro.pre', 'Pick a shape and draw it on the bed.')}{' '}
+        {t('glue.intro.post', 'The G-code updates live in the Program tab — run it from there.')}
       </p>
+      {loadError && (
+        <p className="gp-intro" role="alert">
+          {loadError}
+        </p>
+      )}
 
       <div className="gp-body">
         {/* === Canvas column (the centerpiece) === */}
         <div className="gp-stage">
           {/* Shape-tool icon toolbar */}
           <div className="gp-toolbar" role="toolbar" aria-label={t('glue.toolbar.aria', 'Drawing tools')}>
-            {TOOLS.map((tl) => (
-              <button
-                key={tl.id}
-                className={tool === tl.id ? 'gp-tool gp-tool-on' : 'gp-tool'}
-                onClick={() => setTool(tl.id)}
-                aria-pressed={tool === tl.id}
-                title={t(`glue.tool.${tl.key}.hint`, tl.hint)}
-              >
-                <span className="gp-tool-glyph" aria-hidden="true">
-                  {tl.glyph}
-                </span>
-                <span className="gp-tool-label">{t(`glue.tool.${tl.key}.label`, tl.label)}</span>
-              </button>
-            ))}
+            {TOOLS.map((tl) => {
+              const label = t(`glue.tool.${tl.key}.label`, tl.label)
+              const hint = t(`glue.tool.${tl.key}.hint`, tl.hint)
+              return (
+                <button
+                  key={tl.id}
+                  className={tool === tl.id ? 'gp-tool gp-tool-on' : 'gp-tool'}
+                  onClick={() => setTool(tl.id)}
+                  aria-pressed={tool === tl.id}
+                  aria-label={label}
+                  title={`${label} · ${hint}`}
+                >
+                  <span className="gp-tool-glyph" aria-hidden="true">
+                    {tl.glyph}
+                  </span>
+                </button>
+              )
+            })}
             <span className="gp-spacer" />
-            <button
+            <IconButton
               className="gp-clear"
+              icon="🗑"
+              label={`${t('glue.clear', 'Clear')} · ${t('glue.clear.title', 'Remove all shapes')}`}
               onClick={() => setShapes([])}
               disabled={shapes.length === 0}
-              title={t('glue.clear.title', 'Remove all shapes')}
-            >
-              {t('glue.clear', 'Clear')}
-            </button>
+            />
+            <SaveLoadButtons
+              value={doc}
+              onLoad={loadDoc}
+              fileBase="karmyogi-glue"
+              ext="kglue"
+              saveDisabled={shapes.length === 0}
+              saveTitle={t('glue.save', 'Save glue drawing')}
+              loadTitle={t('glue.load', 'Load glue drawing')}
+              onError={setLoadError}
+            />
           </div>
 
           {/* Drawing canvas (the bed) */}
@@ -343,7 +538,10 @@ export function GluePanel() {
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              onPointerCancel={() => setDrag(null)}
+              onPointerCancel={() => {
+                setDrag(null)
+                setMoveDrag(null)
+              }}
             >
               {/* Bed border */}
               <rect className="gp-bed" x={0} y={0} width={BED.w} height={BED.h} />
@@ -357,23 +555,54 @@ export function GluePanel() {
               {/* Origin marker (bottom-left = machine [0,0]) */}
               <circle className="gp-origin" cx={0} cy={sy(0)} r={2.5} />
 
-              {/* Existing shapes */}
-              {shapes.map(({ id, shape }) => (
-                <path
-                  key={id}
-                  className={id === selected ? 'gp-shape gp-shape-sel' : 'gp-shape'}
-                  d={shapePath(shape)}
-                  onPointerDown={(e) => {
-                    if (tool === 'select') {
-                      e.stopPropagation()
-                      setSelected(id)
-                    }
-                  }}
-                />
-              ))}
+              {/* Existing shapes. In select mode the path itself starts a
+                  move-drag (and is a fat invisible hit-target for easy grabbing). */}
+              {shapes.map(({ id, shape }) => {
+                const isSel = id === selected
+                const dim = shapeDim(shape)
+                return (
+                  <g key={id}>
+                    {/* Wide transparent hit area so thin lines are easy to grab. */}
+                    <path
+                      className={tool === 'select' ? 'gp-hit gp-hit-grab' : 'gp-hit'}
+                      d={shapePath(shape)}
+                      onPointerDown={(e) => {
+                        if (tool === 'select') beginMove(e, id, shape)
+                      }}
+                    />
+                    <path
+                      className={isSel ? 'gp-shape gp-shape-sel' : 'gp-shape'}
+                      d={shapePath(shape)}
+                      pointerEvents="none"
+                    />
+                    {/* Tiny live size annotation (brighter for the selected shape). */}
+                    <text
+                      className={isSel ? 'gp-dim gp-dim-sel' : 'gp-dim'}
+                      x={dim.x}
+                      y={sy(dim.y) - 2}
+                      textAnchor="middle"
+                      pointerEvents="none"
+                    >
+                      {dim.text}
+                    </text>
+                  </g>
+                )
+              })}
 
               {/* In-progress drag preview */}
-              {dragShape && <path className="gp-shape gp-shape-draft" d={shapePath(dragShape)} />}
+              {dragShape && (
+                <>
+                  <path className="gp-shape gp-shape-draft" d={shapePath(dragShape)} />
+                  {(() => {
+                    const dim = shapeDim(dragShape)
+                    return (
+                      <text className="gp-dim gp-dim-sel" x={dim.x} y={sy(dim.y) - 2} textAnchor="middle">
+                        {dim.text}
+                      </text>
+                    )
+                  })()}
+                </>
+              )}
             </svg>
             <div className="gp-hint">
               <span>{hint}</span>
@@ -388,8 +617,11 @@ export function GluePanel() {
 
         {/* === Controls column (vertical scroll only) === */}
         <div className="gp-controls">
+          {/* Control / param cards tile to fill width at wide container sizes,
+             collapsing to a single column when the panel is narrow. */}
+          <div className="gp-cards">
           {/* Shape list */}
-          <section className="gp-card">
+          <section className="gp-card gp-card-wide">
             <h3 className="gp-card-title">{t('glue.shapes.title', 'Shapes')}</h3>
             {shapes.length === 0 ? (
               <p className="gp-empty">{t('glue.shapes.empty', 'No shapes yet — draw one on the bed.')}</p>
@@ -413,13 +645,12 @@ export function GluePanel() {
                       </span>
                       {shapeSummary(shape, t)}
                     </button>
-                    <button
+                    <IconButton
                       className="gp-del"
-                      title={t('glue.list.delete.title', 'Delete shape')}
+                      icon="✕"
+                      label={t('glue.list.delete.title', 'Delete shape')}
                       onClick={() => deleteShape(id)}
-                    >
-                      ✕
-                    </button>
+                    />
                   </li>
                 ))}
               </ul>
@@ -433,6 +664,17 @@ export function GluePanel() {
                     kind: t(`glue.kind.${selectedShape.shape.kind}`, selectedShape.shape.kind),
                   })}
                 </span>
+                {/* Compact dimension readout for the selected shape. */}
+                {(() => {
+                  const o = shapeOrigin(selectedShape.shape)
+                  const dim = shapeDim(selectedShape.shape)
+                  return (
+                    <span className="gp-dim-readout">
+                      <span className="gp-dim-xy">X {mm(o.x)} · Y {mm(o.y)}</span>
+                      <span className="gp-dim-size">{dim.text}</span>
+                    </span>
+                  )
+                })()}
                 <div className="gp-fields">
                   <ShapeEditor
                     shape={selectedShape.shape}
@@ -558,19 +800,11 @@ export function GluePanel() {
             )}
           </section>
 
-          {/* Generate / send */}
-          <section className="gp-card gp-send">
-            <button
-              className="primary gp-play"
-              onClick={play}
-              disabled={shapes.length === 0 || lineCount === 0 || !connected}
-              title={connected ? t('glue.send.title.on', 'Stream this program to the machine') : t('glue.send.title.off', 'Connect to a machine to send')}
-            >
-              {t('glue.send', '▶ Send to machine')}
-            </button>
+          {/* Generated program — auto-synced live to the Program tab / Visualizer.
+              Streaming to the machine happens from the Program tab, not here. */}
+          <section className="gp-card gp-card-wide gp-send">
             <p className="gp-meta gp-send-note">
               {t('glue.send.meta', 'Live preview · {n} lines → Visualizer', { n: lineCount })}
-              {!connected && shapes.length > 0 ? t('glue.send.connect', ' · connect to send') : ''}
             </p>
 
             {/* Raw G-code (collapsed by default) */}
@@ -584,6 +818,7 @@ export function GluePanel() {
             </button>
             {showRaw && <pre className="gp-preview">{gcode}</pre>}
           </section>
+          </div>
         </div>
       </div>
     </div>

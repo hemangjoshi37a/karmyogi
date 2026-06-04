@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -9,16 +10,17 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
 import { useT } from '../i18n'
+import { IconButton } from '../components/IconButton'
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
 import {
   parseStl,
-  sliceMesh,
-  sliceToGcode,
   STL_STRIDE,
   type StlMesh,
   type SliceParams,
   type GcodeParams,
+  type SliceWorkerRequest,
+  type SliceWorkerOutbound,
 } from '../core/slicer'
 import '../styles/print.css'
 
@@ -109,7 +111,11 @@ export function PrintPanel() {
 
   const [slicing, setSlicing] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [progressPhase, setProgressPhase] = useState('')
   const [status, setStatus] = useState('')
+  // The active slicing worker (null when idle). Held in a ref so cancel/cleanup
+  // can terminate it without re-rendering.
+  const workerRef = useRef<Worker | null>(null)
   const [lastGcode, setLastGcode] = useState<{ name: string; text: string; lines: number } | null>(
     null,
   )
@@ -258,72 +264,152 @@ export function PrintPanel() {
     setTransform((t) => ({ ...t, rotZ: (t.rotZ + 90) % 360 }))
   }
 
-  // ---- Slice (chunked so the UI doesn't freeze) ----------------------------
-  async function doSlice() {
-    if (!placed) return
+  // ---- Slice (off the main thread in a Web Worker, paced + cancellable) ----
+  // A dedicated Web Worker runs the heavy slice + G-code emission so the UI
+  // thread stays fully responsive. It posts paced `progress` messages and a
+  // final `done`/`error`. Cancel terminates the worker outright (instant).
+
+  // Terminate any live worker on unmount so a backgrounded slice can't leak.
+  useEffect(() => {
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate()
+        workerRef.current = null
+      }
+    }
+  }, [])
+
+  function teardownWorker() {
+    if (workerRef.current) {
+      workerRef.current.terminate()
+      workerRef.current = null
+    }
+  }
+
+  function cancelSlice() {
+    if (!workerRef.current) return
+    teardownWorker()
+    setSlicing(false)
+    setProgress(0)
+    setProgressPhase('')
+    setStatus(t('print.status.cancelled', 'Slicing cancelled.'))
+  }
+
+  function doSlice() {
+    if (!placed || slicing) return
+    // Guard against overlapping slices: tear down any prior worker first.
+    teardownWorker()
+
     setSlicing(true)
     setProgress(0)
+    setProgressPhase(t('print.phase.start', 'Preparing…'))
     setStatus(t('print.status.slicing', 'Slicing…'))
     setLastGcode(null)
+
+    const sliceParams: SliceParams = {
+      layerHeight: settings.layerHeight,
+      lineWidth: settings.lineWidth,
+      perimeters: settings.perimeters,
+      infillDensity: settings.infill,
+    }
+    const gcodeParams: GcodeParams = {
+      layerHeight: settings.layerHeight,
+      lineWidth: settings.lineWidth,
+      filamentDiameter: settings.filamentDiameter,
+      nozzleTemp: settings.nozzleTemp,
+      bedTemp: settings.bedTemp,
+      firstLayerNozzleTemp: settings.firstLayerTemp,
+      printSpeed: settings.printSpeed,
+      travelSpeed: settings.travelSpeed,
+      firstLayerSpeed: settings.firstLayerSpeed,
+      retractDistance: settings.retractDistance,
+      retractSpeed: settings.retractSpeed,
+      fanEnabled: settings.fan,
+      skirt: settings.skirt,
+    }
+
+    let worker: Worker
     try {
-      // Yield to the browser so the "Slicing…" state paints before heavy work.
-      await new Promise((r) => requestAnimationFrame(() => r(null)))
-      setProgress(0.3)
+      worker = new Worker(new URL('../core/slicer.worker.ts', import.meta.url), { type: 'module' })
+    } catch (err) {
+      setSlicing(false)
+      setProgress(0)
+      setProgressPhase('')
+      setStatus(t('print.status.sliceFailed', 'Slice failed: {msg}', { msg: err instanceof Error ? err.message : String(err) }))
+      return
+    }
+    workerRef.current = worker
 
-      const sliceParams: SliceParams = {
-        layerHeight: settings.layerHeight,
-        lineWidth: settings.lineWidth,
-        perimeters: settings.perimeters,
-        infillDensity: settings.infill,
-      }
-      const slice = sliceMesh(placed.mesh, sliceParams)
-      setProgress(0.7)
-      await new Promise((r) => requestAnimationFrame(() => r(null)))
-
-      if (slice.layerCount === 0) {
-        setStatus(slice.warnings.join(' ') || t('print.status.noLayers', 'Slicing produced no layers.'))
-        setSlicing(false)
-        setProgress(0)
+    worker.onmessage = (e: MessageEvent<SliceWorkerOutbound>) => {
+      const msg = e.data
+      if (msg.type === 'progress') {
+        setProgress(msg.fraction)
+        const label =
+          msg.phase === 'gcode'
+            ? t('print.phase.gcode', 'Generating G-code…')
+            : t('print.phase.slice', 'Slicing layer {n}/{total}…', { n: msg.current + 1, total: msg.total })
+        setProgressPhase(label)
         return
       }
-
-      const gParams: GcodeParams = {
-        layerHeight: settings.layerHeight,
-        lineWidth: settings.lineWidth,
-        filamentDiameter: settings.filamentDiameter,
-        nozzleTemp: settings.nozzleTemp,
-        bedTemp: settings.bedTemp,
-        firstLayerNozzleTemp: settings.firstLayerTemp,
-        printSpeed: settings.printSpeed,
-        travelSpeed: settings.travelSpeed,
-        firstLayerSpeed: settings.firstLayerSpeed,
-        retractDistance: settings.retractDistance,
-        retractSpeed: settings.retractSpeed,
-        fanEnabled: settings.fan,
-        skirt: settings.skirt,
+      if (msg.type === 'done') {
+        teardownWorker()
+        setSlicing(false)
+        setProgress(0)
+        setProgressPhase('')
+        if (msg.layers === 0) {
+          setStatus(msg.warnings.join(' ') || t('print.status.noLayers', 'Slicing produced no layers.'))
+          return
+        }
+        const name = `print.gcode`
+        setProgram(name, msg.gcode)
+        setLastGcode({ name, text: msg.gcode, lines: msg.lines })
+        const warn = msg.warnings.length
+          ? t('print.status.warnings', ' ({n} warning(s))', { n: msg.warnings.length })
+          : ''
+        setStatus(
+          t('print.status.sliced', 'Sliced {layers} layers → {lines} lines{warn}. Shown in Visualizer & Program.', {
+            layers: msg.layers,
+            lines: msg.lines,
+            warn,
+          }),
+        )
+        return
       }
-      const gcode = sliceToGcode(slice, gParams)
-      setProgress(1)
-
-      const name = `print.gcode`
-      setProgram(name, gcode)
-      const lines = gcode.split('\n').filter(Boolean).length
-      setLastGcode({ name, text: gcode, lines })
-      const warn = slice.warnings.length
-        ? t('print.status.warnings', ' ({n} warning(s))', { n: slice.warnings.length })
-        : ''
-      setStatus(
-        t('print.status.sliced', 'Sliced {layers} layers → {lines} lines{warn}. Shown in Visualizer & Program.', {
-          layers: slice.layerCount,
-          lines,
-          warn,
-        }),
-      )
-    } catch (err) {
-      setStatus(t('print.status.sliceFailed', 'Slice failed: {msg}', { msg: err instanceof Error ? err.message : String(err) }))
-    } finally {
+      // error
+      teardownWorker()
       setSlicing(false)
+      setProgress(0)
+      setProgressPhase('')
+      if (msg.cancelled) {
+        setStatus(t('print.status.cancelled', 'Slicing cancelled.'))
+      } else {
+        setStatus(t('print.status.sliceFailed', 'Slice failed: {msg}', { msg: msg.message }))
+      }
     }
+
+    worker.onerror = (e: ErrorEvent) => {
+      teardownWorker()
+      setSlicing(false)
+      setProgress(0)
+      setProgressPhase('')
+      setStatus(t('print.status.sliceFailed', 'Slice failed: {msg}', { msg: e.message || 'worker error' }))
+    }
+
+    // Copy the triangle buffer and TRANSFER the copy (zero-copy post) so the UI
+    // never stalls serializing it — while leaving the memo's original buffer
+    // intact for the 3D preview (transferring detaches the source ArrayBuffer).
+    const tris = placed.mesh.triangles.slice()
+    const req: SliceWorkerRequest = {
+      type: 'slice',
+      triangles: tris,
+      triangleCount: placed.mesh.triangleCount,
+      vertexCount: placed.mesh.vertexCount,
+      bbox: placed.mesh.bbox,
+      format: placed.mesh.format,
+      sliceParams,
+      gcodeParams,
+    }
+    worker.postMessage(req, [tris.buffer])
   }
 
   function sendToMachine() {
@@ -344,6 +430,7 @@ export function PrintPanel() {
           {t('print.intro.post', 'arrange it on the bed, slice to G-code, then preview & stream it to a GRBL printer.')}
         </p>
 
+        <div className="print-cards">
         {/* ---- 1. Import ---- */}
         <section className="print-section">
           <h3>{t('print.import.title', '1 · Import STL')}</h3>
@@ -387,9 +474,9 @@ export function PrintPanel() {
           </div>
         </section>
 
-        {/* ---- 2. Preview + Arrange ---- */}
+        {/* ---- 2. Preview + Arrange (full-width: holds the primary 3D preview) ---- */}
         {placed && (
-          <section className="print-section">
+          <section className="print-section print-card-wide">
             <h3>{t('print.arrange.title', '2 · Arrange')}</h3>
             <div className="print-section-body">
               <div className="print-viewport">
@@ -421,22 +508,29 @@ export function PrintPanel() {
                     }}
                   />
                 </label>
-                <button className="print-btn" onClick={rotate90} title={t('print.rotate.title', 'Rotate 90° about Z')}>
-                  {t('print.rotate', '⟳ Rotate 90°')}
-                </button>
-                <button className="print-btn" onClick={scaleToFit} title={t('print.scaleFit.title', 'Scale down to fit the bed')}>
-                  {t('print.scaleFit', 'Scale to fit')}
-                </button>
-                <button
-                  className="print-btn"
-                  onClick={() => {
-                    setTransform({ scale: 1, rotZ: 0 })
-                    setScalePct('100')
-                  }}
-                  title={t('print.reset.title', 'Reset scale/rotation, auto-centre')}
-                >
-                  {t('print.reset', 'Reset')}
-                </button>
+                <div className="print-arrange-tools">
+                  <IconButton
+                    className="print-icon-btn"
+                    icon="⟳"
+                    label={t('print.rotate.title', 'Rotate 90° about Z')}
+                    onClick={rotate90}
+                  />
+                  <IconButton
+                    className="print-icon-btn"
+                    icon="⤢"
+                    label={t('print.scaleFit.title', 'Scale down to fit the bed')}
+                    onClick={scaleToFit}
+                  />
+                  <IconButton
+                    className="print-icon-btn"
+                    icon="↺"
+                    label={t('print.reset.title', 'Reset scale/rotation, auto-centre')}
+                    onClick={() => {
+                      setTransform({ scale: 1, rotZ: 0 })
+                      setScalePct('100')
+                    }}
+                  />
+                </div>
               </div>
               <p className="print-hint">{t('print.arrange.hint', 'Object is auto-centred on the bed. Rotation is in 90° steps about Z.')}</p>
             </div>
@@ -516,14 +610,19 @@ export function PrintPanel() {
           )}
         </section>
 
-        {/* ---- 5. Slice & send ---- */}
-        <section className="print-section">
+        {/* ---- 5. Slice & send (full-width: primary action bar + g-code) ---- */}
+        <section className="print-section print-card-wide">
           <h3>{t('print.slice.title', '4 · Slice & print')}</h3>
           <div className="print-section-body">
             <div className="print-actions">
-              <button className="print-btn primary" onClick={() => void doSlice()} disabled={!placed || slicing}>
+              <button className="print-btn primary" onClick={doSlice} disabled={!placed || slicing}>
                 {slicing ? t('print.status.slicing', 'Slicing…') : t('print.slice.btn', '✂ Slice → G-code')}
               </button>
+              {slicing && (
+                <button className="print-btn print-cancel" onClick={cancelSlice}>
+                  {t('print.cancel', '✕ Cancel')}
+                </button>
+              )}
               <button
                 className="print-btn print-send"
                 onClick={sendToMachine}
@@ -534,8 +633,21 @@ export function PrintPanel() {
               </button>
             </div>
             {slicing && (
-              <div className="print-progress" aria-label={t('print.progress.aria', 'slicing progress')}>
-                <div className="print-progress-bar" style={{ width: `${Math.round(progress * 100)}%` }} />
+              <div className="print-progress-wrap">
+                <div
+                  className="print-progress"
+                  role="progressbar"
+                  aria-label={t('print.progress.aria', 'slicing progress')}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progress * 100)}
+                >
+                  <div className="print-progress-bar" style={{ width: `${Math.round(progress * 100)}%` }} />
+                </div>
+                <div className="print-progress-label">
+                  <span>{progressPhase}</span>
+                  <span className="print-progress-pct">{Math.round(progress * 100)}%</span>
+                </div>
               </div>
             )}
             {status && <div className="print-status">{status}</div>}
@@ -564,6 +676,7 @@ export function PrintPanel() {
             </p>
           </div>
         </section>
+        </div>
       </div>
     </div>
   )

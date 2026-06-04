@@ -79,7 +79,9 @@ export function ControllerPanel() {
       if (delta.x) big.x = Math.sign(delta.x) * CONTINUOUS_JOG_MM
       if (delta.y) big.y = Math.sign(delta.y) * CONTINUOUS_JOG_MM
       if (delta.z) big.z = Math.sign(delta.z) * CONTINUOUS_JOG_MM
-      void grbl.jog(jogParamsFromDelta(big, jogFeed))
+      // The continuous hold is a single intentional move that stops on release
+      // (0x85); force it past the discrete-jog flood cap.
+      void grbl.jog(jogParamsFromDelta(big, jogFeed), { force: true })
     },
     [jogFeed],
   )
@@ -186,6 +188,12 @@ export function ControllerPanel() {
           e.preventDefault()
           spindleToggle()
           return
+        // Zero all work axes at the current position (G10 L20 P0).
+        case 'z':
+        case 'Z':
+          e.preventDefault()
+          void grbl.send('G10 L20 P0 X0 Y0 Z0')
+          return
         // Feed override −/+ 10%.
         case '[':
           e.preventDefault()
@@ -240,7 +248,7 @@ export function ControllerPanel() {
 
       {/* Machine commands — no card chrome / no title; spacing preserved. */}
       <section className="mc-section mc-section--bare">
-        <div className="mc-row">
+        <div className="mc-row mc-row--6">
           <button
             type="button"
             className="mc-btn mc-btn-stack has-kbd"
@@ -306,6 +314,19 @@ export function ControllerPanel() {
             <span className="mc-btn-cmd" aria-hidden="true">~</span>
             <Kbd k="~" />
           </button>
+          <button
+            type="button"
+            className="mc-btn mc-btn-stack has-kbd"
+            disabled={!connected}
+            onClick={() => void grbl.send('G10 L20 P0 X0 Y0 Z0')}
+            title={t('ctrl.zero.title', 'Zero — set the current position as work zero for X, Y and Z (G10 L20 P0)')}
+            aria-label={t('ctrl.zero', 'Zero')}
+          >
+            <span className="mc-btn-glyph" aria-hidden="true">⌖</span>
+            <span className="mc-btn-label">{t('ctrl.zero', 'Zero')}</span>
+            <span className="mc-btn-cmd" aria-hidden="true">G10</span>
+            <Kbd k="z" />
+          </button>
         </div>
       </section>
 
@@ -313,7 +334,14 @@ export function ControllerPanel() {
       <section className="mc-section">
         <h4>{t('ctrl.jog', 'Jog')}</h4>
         <div className="mc-field">
-          <span className="mc-label">{t('ctrl.step', 'Step')}<InfoTip topic="jogStep" /></span>
+          <span className="mc-label">{t('ctrl.step', 'Step')}<InfoTip
+            topic="jogStep"
+            title={t('ctrl.explain.jogStep.title', 'Jog step')}
+            body={t(
+              'ctrl.explain.jogStep.body',
+              'How far the machine moves each time you tap a jog (arrow) button — for example 0.1, 1, or 10 mm. Big steps move quickly across the table; small steps let you nudge precisely. Use small steps near the workpiece.',
+            )}
+          /></span>
           <span className="mc-seg mc-grow" role="group" aria-label={t('ctrl.step.aria', 'Jog step (mm)')}>
             {STEP_SIZES.map((s, i) => (
               <button
@@ -333,7 +361,14 @@ export function ControllerPanel() {
         </div>
         <div className="mc-field">
           <label className="mc-label" htmlFor="jog-feed">{t('ctrl.feed', 'Feed')}</label>
-          <InfoTip topic="feedRate" />
+          <InfoTip
+            topic="feedRate"
+            title={t('ctrl.explain.feedRate.title', 'Feed rate')}
+            body={t(
+              'ctrl.explain.feedRate.body',
+              'The speed the tool moves through the material while cutting, in mm per minute. Higher is faster but harder on the bit; lower is slower and cleaner. Start conservative and increase only if the cut stays smooth.',
+            )}
+          />
           <input
             id="jog-feed"
             className="mc-input mc-input-grow"
@@ -351,7 +386,7 @@ export function ControllerPanel() {
         <span className="mc-hint">
           {t(
             'ctrl.kbd.hint',
-            'Fully keyboard-operable when focused: arrows jog XY · PgUp/PgDn jog Z · Esc cancels · 1–4 step size · h Home · u Unlock · r Reset · ! Hold · ~ Resume · s Spindle · [ ] feed ∓ · \\ feed 100%',
+            'Fully keyboard-operable when focused: arrows jog XY · PgUp/PgDn jog Z · Esc cancels · 1–4 step size · h Home · u Unlock · r Reset · ! Hold · ~ Resume · s Spindle · z Zero · [ ] feed ∓ · \\ feed 100%',
           )}
         </span>
       </section>
@@ -408,7 +443,14 @@ export function ControllerPanel() {
         </div>
         <div className="mc-field">
           <label className="mc-label" htmlFor="spindle-rpm">{t('ctrl.speed', 'Speed')}</label>
-          <InfoTip topic="spindleRpm" />
+          <InfoTip
+            topic="spindleRpm"
+            title={t('ctrl.explain.spindleRpm.title', 'Spindle speed (RPM)')}
+            body={t(
+              'ctrl.explain.spindleRpm.body',
+              'How fast the cutting tool spins, in turns per minute. Higher speeds suit small bits and soft material; too fast can burn wood or melt plastic, too slow can chip the bit. Follow the bit/material chart, or start moderate.',
+            )}
+          />
           <input
             id="spindle-rpm"
             className="mc-input mc-input-grow"
@@ -429,19 +471,40 @@ export function ControllerPanel() {
       <section className="mc-section">
         <h4>{t('ctrl.overrides', 'Overrides')}</h4>
         <div className="ov-grid">
-          <span className="ov-name">{t('ctrl.feed', 'Feed')}<InfoTip topic="feedOverride" /></span>
+          <span className="ov-name">{t('ctrl.feed', 'Feed')}<InfoTip
+            topic="feedOverride"
+            title={t('ctrl.explain.feedOverride.title', 'Feed override')}
+            body={t(
+              'ctrl.explain.feedOverride.body',
+              'A live dial to speed up or slow down the running job without editing it, shown as a percent of the programmed feed. Turn it down if the cut sounds harsh or struggles; 100% runs at the planned speed. Safe to adjust mid-cut.',
+            )}
+          /></span>
           <span className="ov-val">{overrides.feed}%</span>
           <button type="button" className="mc-btn has-kbd" disabled={!connected} onClick={ov(RealtimeByte.FeedOvMinus10)} aria-label={t('ctrl.ov.feed.minus', 'Feed override minus 10')} title={t('ctrl.ov.feed.minus.title', 'Feed override −10% (key [)')}>−<Kbd k="[" /></button>
           <button type="button" className="mc-btn has-kbd" disabled={!connected} onClick={ov(RealtimeByte.FeedOvReset)} aria-label={t('ctrl.ov.feed.reset', 'Feed override reset')} title={t('ctrl.ov.feed.reset.title', 'Feed override reset to 100% (key \\)')}>100<Kbd k="\" /></button>
           <button type="button" className="mc-btn has-kbd" disabled={!connected} onClick={ov(RealtimeByte.FeedOvPlus10)} aria-label={t('ctrl.ov.feed.plus', 'Feed override plus 10')} title={t('ctrl.ov.feed.plus.title', 'Feed override +10% (key ])')}>+<Kbd k="]" /></button>
 
-          <span className="ov-name">{t('ctrl.rapid', 'Rapid')}<InfoTip topic="rapidOverride" /></span>
+          <span className="ov-name">{t('ctrl.rapid', 'Rapid')}<InfoTip
+            topic="rapidOverride"
+            title={t('ctrl.explain.rapidOverride.title', 'Rapid override')}
+            body={t(
+              'ctrl.explain.rapidOverride.body',
+              'A live control for how fast the NON-cutting (travel) moves go, as a percent of full speed. Lower it (25% or 50%) when testing a new job so fast moves are easy to watch and stop. 100% is full travel speed.',
+            )}
+          /></span>
           <span className="ov-val">{overrides.rapid}%</span>
           <button type="button" className="mc-btn" disabled={!connected} onClick={ov(RealtimeByte.RapidOv25)} aria-label={t('ctrl.ov.rapid.25', 'Rapid override 25 percent')} title={t('ctrl.ov.rapid.25.title', 'Rapid override 25%')}>25</button>
           <button type="button" className="mc-btn" disabled={!connected} onClick={ov(RealtimeByte.RapidOv50)} aria-label={t('ctrl.ov.rapid.50', 'Rapid override 50 percent')} title={t('ctrl.ov.rapid.50.title', 'Rapid override 50%')}>50</button>
           <button type="button" className="mc-btn" disabled={!connected} onClick={ov(RealtimeByte.RapidOvReset)} aria-label={t('ctrl.ov.rapid.100', 'Rapid override 100 percent')} title={t('ctrl.ov.rapid.100.title', 'Rapid override 100% (full speed)')}>100</button>
 
-          <span className="ov-name">{t('ctrl.spindle', 'Spindle')}<InfoTip topic="spindleOverride" /></span>
+          <span className="ov-name">{t('ctrl.spindle', 'Spindle')}<InfoTip
+            topic="spindleOverride"
+            title={t('ctrl.explain.spindleOverride.title', 'Spindle override')}
+            body={t(
+              'ctrl.explain.spindleOverride.body',
+              'A live dial to raise or lower the spinning speed while the job runs, as a percent of the programmed RPM. Nudge it down if the material burns, up if the bit bogs down. 100% runs at the planned speed.',
+            )}
+          /></span>
           <span className="ov-val">{overrides.spindle}%</span>
           <button type="button" className="mc-btn" disabled={!connected} onClick={ov(RealtimeByte.SpindleOvMinus10)} aria-label={t('ctrl.ov.spindle.minus', 'Spindle override minus 10')} title={t('ctrl.ov.spindle.minus.title', 'Spindle override −10%')}>−</button>
           <button type="button" className="mc-btn" disabled={!connected} onClick={ov(RealtimeByte.SpindleOvReset)} aria-label={t('ctrl.ov.spindle.reset', 'Spindle override reset')} title={t('ctrl.ov.spindle.reset.title', 'Spindle override reset to 100%')}>100</button>

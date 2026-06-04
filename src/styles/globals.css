@@ -154,8 +154,14 @@ textarea { min-height: auto; }
 @media (max-width: 768px) {
   button, input, select { min-height: 38px; }
   textarea { min-height: auto; }
-  .topbar { gap: 8px; padding: 6px 8px; }
+  /* Let the bar wrap to multiple rows instead of overflowing horizontally —
+     the connection cluster (firmware/Connect/Mock/Machines/bridge…) is wide. */
+  .topbar { gap: 8px; padding: 6px 8px; flex-wrap: wrap; }
   .topbar .brand { font-size: 15px; }
+  .km-conn { flex-wrap: wrap; }
+  /* The "by hjLabs · MIT" credit is in the About modal too — drop it on phones
+     to reclaim top-bar width. */
+  .topbar .brand-by { display: none; }
 }
 
 /* Bind dockview theme vars to our tokens */

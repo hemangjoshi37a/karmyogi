@@ -19,8 +19,8 @@
 .gp-intro {
   flex: 0 0 auto;
   margin: 0;
-  padding: 5px 10px;
-  font-size: 11.5px;
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-body);
   line-height: 1.4;
   color: var(--fg-muted);
   border-bottom: 1px solid var(--border);
@@ -49,57 +49,79 @@
 
 /* The controls scroll vertically only; never horizontally. */
 .gp-controls {
-  flex: 0 0 clamp(232px, 32%, 330px);
+  flex: 0 0 clamp(232px, 34%, 380px);
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 7px;
+  padding: var(--sp-2);
   overflow-y: auto;
   overflow-x: hidden;
 }
 
+/* Control / param cards tile into a responsive grid: 2–3 columns at wide
+   container widths, collapsing to one column when the panel is narrow. */
+.gp-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+/* Wide cards (shape list, primary send bar) span all columns. */
+.gp-card-wide {
+  grid-column: 1 / -1;
+}
+
 /* --- shape-tool icon toolbar ---
-   Buttons pack as equal-flex cells so they fill the row tidily and wrap to a
-   second line only when the panel is genuinely narrow. */
+   A tight segmented row of mutually-exclusive drawing tools; buttons share a
+   row and wrap to a second line only when the panel is genuinely narrow. */
 .gp-toolbar {
   flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  padding: 5px 7px;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border);
 }
 .gp-spacer {
   flex: 1 1 auto;
 }
+/* Icon-only CAD-style tool buttons: square, glyph only, tooltip on hover. */
 .gp-tool {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-height: 36px;
-  padding: 4px 8px;
-  white-space: nowrap;
+  width: var(--ctl-h-lg);
+  min-width: var(--ctl-h-lg);
+  height: var(--ctl-h-lg);
+  min-height: var(--ctl-h-lg);
+  padding: 0;
 }
 .gp-tool-glyph {
   font-size: 15px;
   line-height: 1;
-}
-.gp-tool-label {
-  font-size: 12px;
 }
 .gp-tool.gp-tool-on {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--fg);
 }
-.gp-clear {
+/* Clear is a compact icon button in the toolbar. */
+.gp-clear.icon-btn {
   flex: 0 0 auto;
-  min-height: 36px;
+  min-width: var(--ctl-h-lg);
+  min-height: var(--ctl-h-lg);
+  color: var(--fg-muted);
+}
+.gp-clear.icon-btn:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.gp-clear.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* --- drawing canvas (the bed) --- */
@@ -108,8 +130,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 7px;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
 }
 .gp-canvas {
   flex: 1 1 auto;
@@ -117,11 +139,11 @@
   min-height: 0;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   touch-action: none; /* let pointer-drag draw instead of panning on touch */
 }
 .gp-canvas.gp-tool-select {
-  cursor: default;
+  cursor: default; /* shape hit-targets show grab/grabbing cursors themselves */
 }
 .gp-canvas:not(.gp-tool-select) {
   cursor: crosshair;
@@ -159,12 +181,41 @@
   opacity: 0.8;
 }
 
+/* Wide, invisible hit-target so thin shapes are easy to grab and drag. */
+.gp-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 10;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+}
+.gp-hit-grab {
+  cursor: grab;
+}
+.gp-hit-grab:active {
+  cursor: grabbing;
+}
+
+/* Tiny live dimension annotation drawn near each shape. */
+.gp-dim {
+  font-size: 7px; /* mm units in the viewBox — reads tiny, like a CAD tag */
+  fill: var(--fg-muted);
+  opacity: 0.65;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  user-select: none;
+}
+.gp-dim-sel {
+  fill: var(--fg);
+  opacity: 1;
+  font-weight: 600;
+}
+
 .gp-hint {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  gap: var(--sp-3);
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 .gp-hint .gp-meta {
@@ -177,16 +228,16 @@
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 7px 9px;
+  gap: var(--sp-2);
+  padding: var(--pad-card-y) var(--pad-card-x);
   min-width: 0; /* allow children to shrink rather than force horizontal scroll */
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .gp-card-title {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-section);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -194,12 +245,12 @@
 }
 .gp-empty {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--fg-muted);
 }
 .gp-meta {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 .gp-meta b {
   color: var(--fg);
@@ -213,12 +264,12 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--sp-1);
 }
 .gp-list-item {
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0; /* lets the pick button shrink so the row never overflows */
 }
 .gp-list-pick {
@@ -226,15 +277,15 @@
   min-width: 0; /* required for the label's text-overflow to engage */
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 4px 8px;
+  gap: var(--sp-3);
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   /* Long summaries are clipped with an ellipsis rather than widening the row. */
   white-space: nowrap;
   overflow: hidden;
@@ -255,19 +306,17 @@
   text-align: center;
 }
 
-/* --- delete button (shared by list + editor) --- */
-.gp-del {
+/* --- delete button (compact icon button in the list) --- */
+.gp-del.icon-btn {
   flex: 0 0 auto;
-  min-width: 36px;
-  min-height: 36px;
-  padding: 0 6px;
+  min-width: var(--icon-btn);
+  min-height: var(--icon-btn);
+  padding: 0;
   border: 1px solid var(--danger);
   color: var(--danger);
   background: transparent;
-  border-radius: 5px;
-  cursor: pointer;
 }
-.gp-del:hover {
+.gp-del.icon-btn:hover {
   background: var(--danger);
   color: var(--bg);
 }
@@ -279,48 +328,67 @@
 .gp-edit {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 6px;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
   border-top: 1px solid var(--border);
 }
 .gp-edit-label {
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
-.gp-fields {
+/* Compact X,Y + size readout for the selected shape. */
+.gp-dim-readout {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+}
+.gp-dim-readout .gp-dim-xy {
+  color: var(--fg-muted);
+}
+.gp-dim-readout .gp-dim-size {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* Compact field grid: fields pack left tightly and wrap naturally, never
+   stretching one-per-huge-column across the card. */
+.gp-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
 }
 .gp-fields label {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 11px;
+  gap: 2px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
-  flex: 1 1 68px;
-  min-width: 64px;
+  min-width: 0;
 }
 .gp-fields input {
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
   width: 100%;
   min-width: 0; /* never let a number input force the field wider than its cell */
 }
 
 /* --- advanced section --- */
 .gp-adv {
-  padding-top: 6px;
+  padding-top: var(--sp-2);
   border-top: 1px dashed var(--border);
 }
 .gp-adv-toggle {
   align-self: flex-start;
-  min-height: 30px;
-  padding: 4px 8px;
-  font-size: 11px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .gp-adv-toggle:hover {
@@ -328,14 +396,10 @@
   color: var(--fg);
 }
 
-/* --- generate / send card --- */
+/* --- generated-program card (no send button; G-code auto-syncs live) --- */
 .gp-send {
   position: sticky;
   bottom: 0;
-}
-.gp-play {
-  min-height: 40px;
-  font-weight: 600;
 }
 .gp-send-note {
   margin: 0;
@@ -344,13 +408,13 @@
 /* --- raw preview (collapsible) --- */
 .gp-raw-toggle {
   align-self: flex-start;
-  min-height: 30px;
-  padding: 4px 8px;
-  font-size: 11px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .gp-raw-toggle:hover {
@@ -359,16 +423,16 @@
 }
 .gp-preview {
   margin: 0;
-  padding: 6px 8px;
+  padding: var(--sp-2) var(--sp-3);
   max-height: 200px;
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-mono);
   line-height: 1.45;
   color: var(--fg);
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   white-space: pre;
 }
 
@@ -393,21 +457,39 @@
     flex: 0 0 auto;
     overflow: visible;
   }
+  /* Single column of cards once the panel is this narrow. */
+  .gp-cards {
+    grid-template-columns: 1fr;
+  }
   .gp-send {
     position: static;
   }
 }
 
-/* --- very narrow column (~≤340px, e.g. the default ~290px dock width): give
-   fields two-up sizing and ≥40px touch targets, again off the PANEL width. --- */
-@container gluepanel (max-width: 340px) {
-  .gp-fields label {
-    flex: 1 1 calc(50% - 3px);
-  }
-  .gp-play,
+/* --- very narrow column (~≤360px, e.g. the default ~290px dock width): grow
+   controls back to ≥36px touch targets and keep fields two-up, off PANEL width. */
+@container gluepanel (max-width: 360px) {
+  .gp-tool,
+  .gp-clear.icon-btn,
   .gp-raw-toggle,
-  .gp-adv-toggle {
-    min-height: 40px;
+  .gp-adv-toggle,
+  .gp-list-pick {
+    min-height: var(--ctl-h-touch);
+  }
+  .gp-tool {
+    width: var(--ctl-h-touch);
+    min-width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+  .gp-clear.icon-btn {
+    min-width: var(--ctl-h-touch);
+  }
+  .gp-del.icon-btn {
+    min-width: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
+  }
+  .gp-fields input {
+    height: var(--ctl-h-touch);
   }
 }
 
@@ -431,18 +513,35 @@
       flex: 0 0 auto;
       overflow: visible;
     }
+    .gp-cards {
+      grid-template-columns: 1fr;
+    }
     .gp-send {
       position: static;
     }
   }
   @media (max-width: 768px) {
-    .gp-fields label {
-      flex: 1 1 calc(50% - 3px);
-    }
-    .gp-play,
+    .gp-tool,
+    .gp-clear.icon-btn,
     .gp-raw-toggle,
-    .gp-adv-toggle {
-      min-height: 40px;
+    .gp-adv-toggle,
+    .gp-list-pick {
+      min-height: var(--ctl-h-touch);
+    }
+    .gp-tool {
+      width: var(--ctl-h-touch);
+      min-width: var(--ctl-h-touch);
+      height: var(--ctl-h-touch);
+    }
+    .gp-clear.icon-btn {
+      min-width: var(--ctl-h-touch);
+    }
+    .gp-del.icon-btn {
+      min-width: var(--ctl-h-touch);
+      min-height: var(--ctl-h-touch);
+    }
+    .gp-fields input {
+      height: var(--ctl-h-touch);
     }
   }
 }

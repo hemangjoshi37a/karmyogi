@@ -2,24 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0e7c66" />
-    <title>karmyogi — GRBL CAD/CAM workbench</title>
+    <meta name="color-scheme" content="dark light" />
+    <title>karmyogi — Web GRBL CNC Controller & CAD/CAM (Candle alternative)</title>
 
     <!-- SEO -->
     <meta
       name="description"
-      content="karmyogi is a browser-based CAD/CAM + control workbench for hobby/desktop 3-axis GRBL machines — CNC carving, engraving, pen-plotting, auto-soldering and PCB isolation routing. Runs entirely in the browser over Web Serial with 3D toolpath visualization, a dockable panel UI, and 50+ languages."
+      content="Free browser-based GRBL CNC controller, G-code sender and CAD/CAM workbench. Web Serial control, 3D toolpath view, CNC carving, laser cutting, PCB isolation routing, pen plotter & auto-solder."
     />
     <meta
       name="keywords"
-      content="GRBL, CNC, CAD/CAM, G-code sender, Web Serial, PCB isolation routing, pen plotter, engraving, carving, gcode"
+      content="GRBL controller, web G-code sender, browser CNC control, Web Serial CNC, CAD/CAM, Candle alternative, CNC carving, engraving, pen plotter, laser cutting, PCB isolation routing, gcode, 3-axis CNC, DXF to G-code, Gerber to G-code"
     />
     <meta name="author" content="hjLabs" />
+    <meta name="robots" content="index,follow" />
+    <meta name="googlebot" content="index,follow" />
     <link rel="canonical" href="https://karmyogi.hjlabs.in/" />
+
+    <!-- PWA / mobile web app -->
+    <meta name="application-name" content="karmyogi" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="karmyogi" />
 
     <!-- Icons -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icon-16.png" />
     <link rel="apple-touch-icon" href="/icon-180.png" />
@@ -28,29 +39,94 @@
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="karmyogi" />
-    <meta property="og:title" content="karmyogi — CAD/CAM + control for GRBL machines" />
+    <meta property="og:title" content="karmyogi — Web GRBL CNC Controller & CAD/CAM" />
     <meta
       property="og:description"
-      content="Browser-based CAD/CAM + control workbench for 3-axis GRBL machines — CNC carving, engraving, pen-plotting, auto-soldering and PCB isolation routing, with 3D toolpath visualization and a dockable panel UI."
+      content="Free browser-based GRBL CNC controller, G-code sender and CAD/CAM workbench. Web Serial control, 3D toolpath view, CNC carving, laser cutting, PCB isolation routing, pen plotter & auto-solder."
     />
     <meta property="og:url" content="https://karmyogi.hjlabs.in/" />
     <meta property="og:image" content="https://karmyogi.hjlabs.in/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="karmyogi — browser-based CAD/CAM + control workbench for 3-axis GRBL machines"
+      content="karmyogi — browser-based GRBL CNC controller and CAD/CAM workbench with 3D toolpath visualization"
     />
     <meta property="og:locale" content="en_US" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="karmyogi — CAD/CAM + control for GRBL machines" />
+    <meta name="twitter:title" content="karmyogi — Web GRBL CNC Controller & CAD/CAM" />
     <meta
       name="twitter:description"
-      content="Browser-based CAD/CAM + control workbench for 3-axis GRBL machines — CNC carving, engraving, pen-plotting, auto-soldering and PCB isolation routing, with 3D toolpath visualization and a dockable panel UI."
+      content="Free browser-based GRBL CNC controller, G-code sender and CAD/CAM workbench. Web Serial control, 3D toolpath view, CNC carving, laser cutting, PCB isolation routing, pen plotter & auto-solder."
     />
     <meta name="twitter:image" content="https://karmyogi.hjlabs.in/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="karmyogi — browser-based GRBL CNC controller and CAD/CAM workbench with 3D toolpath visualization"
+    />
+
+    <!-- Structured data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://karmyogi.hjlabs.in/#app",
+            "name": "karmyogi",
+            "alternateName": "karmyogi GRBL CAD/CAM workbench",
+            "url": "https://karmyogi.hjlabs.in/",
+            "image": "https://karmyogi.hjlabs.in/og-image.png",
+            "description": "karmyogi is a free, browser-based GRBL CNC controller, G-code sender and CAD/CAM workbench. It talks to 3-axis GRBL machines over the Web Serial API and supports CNC carving and engraving, pen plotting, auto-soldering, PCB isolation routing and drilling, laser cutting, glue dispensing, pick-and-place and 3D printing, with 3D toolpath visualization and a dockable panel UI. It is the web successor to the Qt Candle GRBL controller.",
+            "applicationCategory": ["DesignApplication", "DeveloperApplication"],
+            "applicationSubCategory": "CNC / CAD/CAM / G-code sender",
+            "operatingSystem": "Web browser (Chromium: Chrome, Edge, Opera, Brave)",
+            "browserRequirements": "Requires a Chromium-based browser with the Web Serial API (Chrome, Edge, Opera or Brave).",
+            "softwareVersion": "1.0",
+            "inLanguage": "en",
+            "license": "https://github.com/hemangjoshi37a/karmyogi/blob/main/LICENSE",
+            "isAccessibleForFree": true,
+            "featureList": [
+              "GRBL control over Web Serial (jog, DRO, overrides, console, MDI, macros)",
+              "G-code sender with 3D toolpath visualization",
+              "CNC carving and engraving (DXF import to G-code)",
+              "Pen plotting with single-stroke vector fonts",
+              "Auto-soldering with solder-wire feeder control",
+              "PCB isolation routing and drilling (Gerber and Excellon import)",
+              "Laser cutting, glue dispensing, pick-and-place and 3D printing modes",
+              "Dockable, floatable, resizable panel UI for desktop and mobile"
+            ],
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "author": { "@id": "https://hjlabs.in/#org" },
+            "creator": { "@id": "https://hjlabs.in/#org" },
+            "publisher": { "@id": "https://hjlabs.in/#org" }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://hjlabs.in/#org",
+            "name": "hjLabs",
+            "url": "https://hjlabs.in/",
+            "sameAs": ["https://github.com/hemangjoshi37a"]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://karmyogi.hjlabs.in/#website",
+            "url": "https://karmyogi.hjlabs.in/",
+            "name": "karmyogi",
+            "description": "Browser-based GRBL CNC controller and CAD/CAM workbench.",
+            "inLanguage": "en",
+            "publisher": { "@id": "https://hjlabs.in/#org" }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

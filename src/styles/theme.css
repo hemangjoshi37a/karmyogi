@@ -1,3 +1,33 @@
+/* Density / layout tokens — theme-INDEPENDENT (identical in light & dark).
+   These give every workbench panel one consistent, compact "control surface"
+   rhythm: control heights, field/label type scale, spacing, radii and the
+   responsive card-grid sizing. Desktop is compact; each panel bumps control
+   heights back up to ≥36px touch targets at its own narrow/mobile container
+   widths (so the same tokens stay touch-friendly on phones). Panels SHOULD
+   reference these rather than hardcoding pixel values, so the whole app can be
+   re-tuned from one place. */
+:root {
+  --ctl-h: 28px;          /* compact control height (desktop) */
+  --ctl-h-lg: 34px;       /* primary / send action height */
+  --ctl-h-touch: 38px;    /* ≥ tap target at narrow/mobile widths */
+  --fs-section: 10.5px;   /* uppercase section / card label */
+  --fs-label: 11px;       /* field label */
+  --fs-ctl: 12px;         /* input / button text */
+  --fs-body: 12px;        /* body / hint text */
+  --fs-mono: 11.5px;      /* monospace (g-code preview, console) */
+  --sp-1: 4px;
+  --sp-2: 6px;
+  --sp-3: 8px;
+  --sp-4: 12px;
+  --pad-card-y: 8px;
+  --pad-card-x: 10px;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --card-min: 248px;      /* card grid: min card width before it drops a column */
+  --field-min: 92px;      /* field grid: min field width before it wraps */
+  --icon-btn: 28px;       /* square icon-button side (desktop) */
+}
+
 /* Theme tokens — light/dark via [data-theme] on <html>. */
 :root,
 :root[data-theme='dark'] {

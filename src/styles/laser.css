@@ -1,0 +1,318 @@
+/* Laser-cutting panel. Co-located styles; uses theme CSS variables only.
+   Dense, card-based layout matching the Soldering / CAD-CAM panels:
+   - a slim header (title + CO2/Fiber mode radio) and a live status strip,
+   - bordered cards (DXF import, sheet/nesting, cut params, pierce, focus) that
+     stack vertically; their inner fields TILE into a responsive grid.
+   Density is driven by the shared tokens in theme.css (--ctl-h, --fs-*, --sp-*,
+   --card-min, --field-min); narrow/mobile container widths bump controls back
+   to ≥36px touch targets via the container query at the end.
+   The whole panel is the only scroll container — vertical only, never sideways. */
+
+.lp-panel {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  container-type: inline-size;
+  container-name: laserpanel;
+}
+
+/* ───────────────────────── header ───────────────────────── */
+.lp-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--ctl-h-lg);
+}
+.lp-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.lp-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* CO2 / Fiber mode radio — segmented control pinned right. */
+.lp-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.lp-mode-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: calc(var(--ctl-h) - 6px);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  color: var(--fg-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lp-mode-opt input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.lp-mode-opt.is-on {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* ───────────────────────── status strip ───────────────────────── */
+.lp-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-body);
+  color: var(--fg-muted);
+}
+.lp-status-pill b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.lp-status-sep {
+  opacity: 0.5;
+}
+.lp-status-sync {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ───────────────────────── cards ───────────────────────── */
+.lp-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.lp-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.lp-card-head h4 {
+  margin: 0;
+  font-size: var(--fs-section);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--fg-muted);
+}
+.lp-card-count {
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ───────────────────────── fields grid ───────────────────────── */
+.lp-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2);
+}
+.lp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.lp-field-label {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lp-input {
+  display: inline-flex;
+  align-items: center;
+  height: var(--ctl-h);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.lp-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--sp-2);
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--fs-ctl);
+}
+.lp-input.has-unit i {
+  flex: 0 0 auto;
+  padding: 0 var(--sp-2);
+  font-style: normal;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  border-left: 1px solid var(--border);
+}
+.lp-input input:focus {
+  outline: none;
+}
+.lp-input:focus-within {
+  border-color: var(--accent);
+}
+
+/* ───────────────────────── buttons / toggles ───────────────────────── */
+.lp-import-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.lp-btn {
+  height: var(--ctl-h-lg);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.lp-btn:hover {
+  border-color: var(--accent);
+}
+.lp-btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.lp-import-info {
+  font-size: var(--fs-body);
+  color: var(--fg-muted);
+}
+
+.lp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+/* ───────────────────────── radio rows ───────────────────────── */
+.lp-radio-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.lp-radio-label {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.lp-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-ctl);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.lp-radio.is-on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ───────────────────────── hints / warnings ───────────────────────── */
+.lp-hint {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--fg-muted);
+}
+.lp-hint.is-warn {
+  color: var(--warn);
+}
+.lp-note {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  font-style: italic;
+}
+.lp-warn {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--danger);
+}
+.lp-warn-list {
+  margin: 0;
+  padding-left: var(--sp-4, 14px);
+  font-size: var(--fs-label);
+  color: var(--warn);
+}
+.lp-safety {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* ───────────────────────── narrow / mobile (container query) ───────────────────────── */
+@container laserpanel (max-width: 480px) {
+  .lp-input,
+  .lp-radio {
+    height: var(--ctl-h-touch);
+  }
+  .lp-btn {
+    height: var(--ctl-h-touch);
+  }
+  .lp-mode-opt {
+    height: var(--ctl-h-touch);
+  }
+  .lp-status-sync {
+    margin-left: 0;
+  }
+}
+
+/* Frame (perimeter-trace) button in the header — pushed to the right edge. */
+.lp-head .lp-frame {
+  margin-left: auto;
+}

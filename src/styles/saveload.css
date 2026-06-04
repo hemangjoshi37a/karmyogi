@@ -1,0 +1,37 @@
+/* Reusable Save / Load icon-button pair (SaveLoadButtons.tsx). Theme tokens only;
+   compact on desktop, grows to a touch target on coarse pointers. */
+.km-io {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.km-io-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.km-io-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.km-io-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+@media (pointer: coarse) {
+  .km-io-btn {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+}

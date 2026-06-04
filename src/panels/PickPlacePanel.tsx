@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useT } from '../i18n'
 import { useMachine, useProgram, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
+import { IconButton } from '../components/IconButton'
+import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import {
   defaultPnpOp,
   defaultPnpParams,
@@ -29,6 +31,53 @@ const PAD = 6
 /** Per-op params the table edits (everything else is global). */
 type PanelParams = Omit<PnpParams, 'programName' | 'metric'>
 
+/** The serializable Pick & Place document written by Save / read by Load. */
+interface PnpDoc {
+  kind: 'karmyogi.pnp'
+  version: 1
+  ops: PnpOp[]
+  params: PanelParams
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null
+const numOr = (v: unknown, f: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : f
+const boolOr = (v: unknown, f: boolean): boolean => (typeof v === 'boolean' ? v : f)
+
+/** Narrow one unknown entry into a valid PnpOp (drops anything malformed). */
+function parseOp(v: unknown): PnpOp | null {
+  if (!isRecord(v)) return null
+  const op = defaultPnpOp({
+    pickX: numOr(v.pickX, 0),
+    pickY: numOr(v.pickY, 0),
+    placeX: numOr(v.placeX, 0),
+    placeY: numOr(v.placeY, 0),
+  })
+  if (typeof v.rotation === 'number' && Number.isFinite(v.rotation)) op.rotation = v.rotation
+  return op
+}
+
+/** Narrow unknown into a valid PanelParams, falling back per-field to `base`. */
+function parsePnpParams(v: unknown, base: PanelParams): PanelParams {
+  if (!isRecord(v)) return base
+  const headType: PnpHeadType =
+    v.headType === 'vacuum' || v.headType === 'gripper' ? v.headType : base.headType
+  return {
+    headType,
+    travelZ: numOr(v.travelZ, base.travelZ),
+    pickZ: numOr(v.pickZ, base.pickZ),
+    placeZ: numOr(v.placeZ, base.placeZ),
+    feedXY: numOr(v.feedXY, base.feedXY),
+    feedZ: numOr(v.feedZ, base.feedZ),
+    gripRpm: numOr(v.gripRpm, base.gripRpm),
+    pickDwellMs: numOr(v.pickDwellMs, base.pickDwellMs),
+    placeDwellMs: numOr(v.placeDwellMs, base.placeDwellMs),
+    rotaryAxis: boolOr(v.rotaryAxis, base.rotaryAxis),
+    decimals: numOr(v.decimals, base.decimals),
+  }
+}
+
 /** Head-type labelling: pick/release vs grip/open. */
 function headLabels(head: PnpHeadType, t: ReturnType<typeof useT>): { on: string; off: string } {
   return head === 'gripper'
@@ -45,9 +94,11 @@ function headLabels(head: PnpHeadType, t: ReturnType<typeof useT>): { on: string
  * position. Generation is live + debounced into the shared program store so the
  * Visualizer previews the travel/pick/place path; Send streams it to the machine.
  *
- * Layout: a single vertical-only scroller of bordered CARD sections — head,
- * operations table, bed preview, motion params (essentials visible, niche
- * settings behind a collapsed Advanced section), and Send + raw G-code.
+ * Layout: a vertical-only scroller whose CARD sections tile into a responsive
+ * grid — head + operations table and the bed preview stay full width, while the
+ * motion params and the collapsed Advanced section tile beside each other at
+ * wide widths (collapsing to one column when the panel is narrow). The Send +
+ * raw G-code card spans full width at the foot.
  */
 export function PickPlacePanel() {
   const t = useT()
@@ -80,6 +131,7 @@ export function PickPlacePanel() {
   const [selected, setSelected] = useState(-1)
   const [showRaw, setShowRaw] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   const labels = headLabels(params.headType, t)
 
@@ -145,6 +197,27 @@ export function PickPlacePanel() {
     grbl.startProgram(lines)
   }
 
+  // ---- Save / Load document ------------------------------------------------
+  const doc: PnpDoc = { kind: 'karmyogi.pnp', version: 1, ops, params }
+
+  function loadDoc(data: unknown) {
+    if (!isRecord(data)) {
+      setLoadError(t('pnp.load.bad', 'Could not load — not a valid pick & place file.'))
+      return
+    }
+    if (Array.isArray(data.ops)) {
+      const next: PnpOp[] = []
+      for (const raw of data.ops) {
+        const op = parseOp(raw)
+        if (op) next.push(op)
+      }
+      setOps(next)
+      setSelected(-1)
+    }
+    setParams((p) => parsePnpParams(data.params, p))
+    setLoadError('')
+  }
+
   /** Machine-Y (up) → SVG-Y (down). */
   const sy = (y: number) => BED.h - y
 
@@ -160,8 +233,14 @@ export function PickPlacePanel() {
           <b>{t('pnp.intro.send', 'Send ▶')}</b> {t('pnp.intro.tomachine', 'to the machine.')}
         </p>
 
+        {/* Cards tile into a responsive grid: wide cards (ops table, bed
+            preview, send bar) span all columns; the motion + advanced param
+            cards tile beside each other at wide widths and collapse to one
+            column when the panel is narrow. */}
+        <div className="pp-cards">
+
         {/* --- Head + operations --------------------------------------- */}
-        <section className="pp-card">
+        <section className="pp-card pp-card-wide">
           <h3>{t('pnp.ops.title', 'Operations')}</h3>
           <div className="pp-card-body">
             <div className="pp-row">
@@ -244,15 +323,26 @@ export function PickPlacePanel() {
                         />
                       </td>
                       <td className="pp-actions">
-                        <button title={t('pnp.row.up', 'Move up')} onClick={(e) => { e.stopPropagation(); moveRow(i, -1) }} disabled={i === 0}>
-                          ↑
-                        </button>
-                        <button title={t('pnp.row.down', 'Move down')} onClick={(e) => { e.stopPropagation(); moveRow(i, 1) }} disabled={i === ops.length - 1}>
-                          ↓
-                        </button>
-                        <button className="pp-del" title={t('pnp.row.delete', 'Delete op')} onClick={(e) => { e.stopPropagation(); deleteRow(i) }}>
-                          ✕
-                        </button>
+                        <IconButton
+                          className="pp-row-btn"
+                          icon="↑"
+                          label={t('pnp.row.up', 'Move up')}
+                          onClick={(e) => { e.stopPropagation(); moveRow(i, -1) }}
+                          disabled={i === 0}
+                        />
+                        <IconButton
+                          className="pp-row-btn"
+                          icon="↓"
+                          label={t('pnp.row.down', 'Move down')}
+                          onClick={(e) => { e.stopPropagation(); moveRow(i, 1) }}
+                          disabled={i === ops.length - 1}
+                        />
+                        <IconButton
+                          className="pp-row-btn pp-del"
+                          icon="✕"
+                          label={t('pnp.row.delete', 'Delete op')}
+                          onClick={(e) => { e.stopPropagation(); deleteRow(i) }}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -261,14 +351,25 @@ export function PickPlacePanel() {
             </div>
 
             <div className="pp-row pp-op-tools">
-              <button className="primary" onClick={addRow}>
+              <button className="primary pp-add" onClick={addRow}>
                 {t('pnp.addOp', '+ Add op')}
               </button>
-              <button onClick={() => setOps([])} disabled={ops.length === 0}>
+              <button className="pp-clear" onClick={() => setOps([])} disabled={ops.length === 0}>
                 {t('pnp.clear', 'Clear')}
               </button>
+              <SaveLoadButtons
+                value={doc}
+                onLoad={loadDoc}
+                onError={setLoadError}
+                fileBase="karmyogi-pick-place"
+                ext="kpnp"
+                saveDisabled={ops.length === 0}
+                saveTitle={t('pnp.save', 'Save operations + params')}
+                loadTitle={t('pnp.load', 'Load operations + params')}
+              />
               <span className="pp-spacer" />
               <button
+                className="pp-set"
                 onClick={() => recordInto('pick')}
                 disabled={!connected}
                 title={connected ? t('pnp.setPick.title.on', 'Fill the selected op pick X/Y from the live machine position') : t('pnp.set.title.off', 'Connect to set from machine')}
@@ -278,6 +379,7 @@ export function PickPlacePanel() {
                   : t('pnp.setPick', '⌖ Set pick from machine')}
               </button>
               <button
+                className="pp-set"
                 onClick={() => recordInto('place')}
                 disabled={!connected}
                 title={connected ? t('pnp.setPlace.title.on', 'Fill the selected op place X/Y from the live machine position') : t('pnp.set.title.off', 'Connect to set from machine')}
@@ -292,12 +394,13 @@ export function PickPlacePanel() {
                 ? t('pnp.wpos', 'Live WPos  {x}, {y}', { x: wpos.x.toFixed(2), y: wpos.y.toFixed(2) })
                 : t('pnp.notConnected', 'Not connected — set buttons disabled')}
             </span>
+            {loadError && <span className="pp-meta pp-load-error">{loadError}</span>}
           </div>
         </section>
 
         {/* --- 2D bed preview ------------------------------------------ */}
         {ops.length > 0 && (
-          <section className="pp-card">
+          <section className="pp-card pp-card-wide">
             <h3>{t('pnp.preview.title', 'Bed preview · pick ○ → place △')}</h3>
             <div className="pp-card-body pp-preview2d-body">
               <svg
@@ -524,7 +627,7 @@ export function PickPlacePanel() {
         </section>
 
         {/* --- Send + raw G-code --------------------------------------- */}
-        <section className="pp-card pp-send-card">
+        <section className="pp-card pp-card-wide pp-send-card">
           <h3>{t('pnp.send.title', 'Generate & send')}</h3>
           <div className="pp-card-body">
             <div className="pp-row pp-generate">
@@ -550,6 +653,7 @@ export function PickPlacePanel() {
             {showRaw && <pre className="pp-preview">{gcode}</pre>}
           </div>
         </section>
+        </div>
       </div>
     </div>
   )

@@ -8,6 +8,10 @@
   background: var(--bg-panel);
   color: var(--fg);
   overflow: hidden;
+  /* This panel often docks into a narrow column on a WIDE window, so window
+     media queries never fire. Reflow off the panel's OWN width. */
+  container-type: inline-size;
+  container-name: printpanel;
 }
 
 /* Vertical-only scroll — content reflows so it never scrolls sideways. */
@@ -16,44 +20,70 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
+  padding: var(--sp-2);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
+}
+
+/* --- one-line intro --- */
+.print-intro {
+  margin: 0;
+  padding: 0 var(--sp-1) var(--sp-1);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+.print-intro b {
+  color: var(--fg);
+}
+
+/* Control / param cards tile into a responsive grid: 2–3 columns at wide
+   container widths, collapsing to one column when the panel is narrow. */
+.print-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+/* The 3D preview + the primary slice/send bar span every column. */
+.print-card-wide {
+  grid-column: 1 / -1;
 }
 
 /* --- sections --- */
 .print-section {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg);
+  min-width: 0;
 }
 .print-section > h3 {
   margin: 0;
-  padding: 5px 8px;
-  font-size: 10px;
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-section);
   color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
 }
 .print-section-body {
-  padding: 8px;
+  padding: var(--pad-card-y) var(--pad-card-x);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 /* --- buttons --- */
 .print-btn {
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-4);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-ctl);
 }
 .print-btn:hover:not(:disabled) {
   border-color: var(--accent);
@@ -68,8 +98,30 @@
   border-color: var(--accent);
   font-weight: 600;
 }
+/* Primary slice/send actions are taller than secondary controls. */
+.print-actions .print-btn {
+  min-height: var(--ctl-h-lg);
+}
 .print-send {
   border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+}
+
+/* --- compact icon buttons (shared .icon-btn chrome via IconButton) --- */
+.print-icon-btn.icon-btn {
+  min-width: var(--icon-btn);
+  min-height: var(--ctl-h);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+}
+.print-icon-btn.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.print-icon-btn .icon-btn-glyph {
+  font-size: 14px;
 }
 
 /* --- file drop / import --- */
@@ -78,11 +130,15 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 16px 12px;
+  gap: var(--sp-3);
+  min-height: 84px;
+  padding: var(--sp-3) var(--sp-4);
   border: 2px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-input);
+}
+.print-drop .print-btn.primary {
+  min-height: var(--ctl-h-lg);
 }
 .print-drop.print-dragover {
   border-color: var(--accent);
@@ -90,7 +146,7 @@
 }
 .print-drop-hint {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 .print-file-input {
   display: none;
@@ -101,17 +157,17 @@
   width: 100%;
   height: clamp(200px, 38vh, 360px);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   overflow: hidden;
   background: #15181c;
 }
 
 /* --- size / fit readout --- */
 .print-size {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--fg);
-  padding: 4px 6px;
-  border-radius: 4px;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
 }
 .print-size-bad {
@@ -124,40 +180,51 @@
   color: var(--danger);
 }
 
-/* --- arrange controls --- */
+/* --- arrange controls: scale field + a tight icon toolbar --- */
 .print-arrange {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-2) var(--sp-3);
   align-items: flex-end;
 }
+.print-arrange .print-field-inline {
+  min-width: var(--field-min);
+}
+.print-arrange-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
 
-/* --- fields / grid --- */
+/* --- fields / grid: compact auto grid, never one-per-huge-column --- */
 .print-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
 }
 .print-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 12px;
+  gap: 2px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
+  min-width: 0;
 }
 .print-field-inline {
   flex-direction: column;
-  min-width: 90px;
 }
 .print-field input {
-  min-height: 36px;
-  padding: 0 8px;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 var(--sp-3);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--fs-ctl);
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
 }
 .print-field input:focus {
@@ -167,14 +234,14 @@
 .print-check {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--sp-3);
+  font-size: var(--fs-body);
   color: var(--fg);
-  min-height: 36px;
+  min-height: var(--ctl-h);
 }
 .print-check input {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
 /* --- advanced toggle --- */
@@ -186,8 +253,8 @@
   border: none;
   color: var(--fg-muted);
   cursor: pointer;
-  padding: 8px;
-  font-size: 12px;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-label);
 }
 .print-advanced-toggle:hover,
 .print-gcode-toggle:hover {
@@ -198,14 +265,19 @@
 .print-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-3);
 }
 
 /* --- progress --- */
+.print-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
 .print-progress {
   width: 100%;
-  height: 8px;
-  border-radius: 4px;
+  height: 10px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   overflow: hidden;
 }
@@ -214,49 +286,133 @@
   background: var(--accent);
   transition: width 0.15s ease;
 }
+.print-progress-label {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.print-progress-pct {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* Cancel sits beside Slice while a job runs. */
+.print-cancel {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  color: var(--danger);
+}
+.print-cancel:hover:not(:disabled) {
+  border-color: var(--danger);
+}
 
 /* --- status / info / errors --- */
 .print-status,
 .print-info {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--fg);
-  padding: 4px 6px;
-  border-radius: 4px;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
 }
 .print-error {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--danger);
-  padding: 4px 6px;
-  border-radius: 4px;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 .print-hint,
 .print-note {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-label);
   line-height: 1.5;
   color: var(--fg-muted);
 }
 .print-note {
   border-top: 1px dashed var(--border);
-  padding-top: 8px;
+  padding-top: var(--sp-2);
 }
 
 /* --- raw g-code view --- */
 .print-gcode-meta {
-  margin-left: 8px;
+  margin-left: var(--sp-3);
   opacity: 0.7;
 }
 .print-gcode-text {
   margin: 0;
   max-height: 280px;
   overflow: auto;
-  padding: 8px;
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
+  padding: var(--sp-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-mono);
   line-height: 1.4;
   background: var(--bg-input);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   white-space: pre;
+}
+
+/* --- narrow panel (≤560px): one column of cards, off PANEL width --- */
+@container printpanel (max-width: 560px) {
+  .print-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- very narrow column (≤360px, e.g. default ~290px dock): grow controls
+   back to ≥36px touch targets; fields still pack but get touch height. --- */
+@container printpanel (max-width: 360px) {
+  .print-btn,
+  .print-icon-btn.icon-btn,
+  .print-advanced-toggle,
+  .print-gcode-toggle {
+    min-height: var(--ctl-h-touch);
+  }
+  .print-actions .print-btn,
+  .print-drop .print-btn.primary {
+    min-height: var(--ctl-h-touch);
+  }
+  .print-icon-btn.icon-btn {
+    min-width: var(--ctl-h-touch);
+  }
+  .print-field input {
+    height: var(--ctl-h-touch);
+  }
+  .print-check {
+    min-height: var(--ctl-h-touch);
+  }
+}
+
+/* Fallback for browsers without container-query support: key off the window so
+   phone-width viewports still collapse and get touch-friendly sizing.
+   (Chromium — the only supported target — has container queries.) */
+@supports not (container-type: inline-size) {
+  @media (max-width: 560px) {
+    .print-cards {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 768px) {
+    .print-btn,
+    .print-icon-btn.icon-btn,
+    .print-advanced-toggle,
+    .print-gcode-toggle {
+      min-height: var(--ctl-h-touch);
+    }
+    .print-actions .print-btn,
+    .print-drop .print-btn.primary {
+      min-height: var(--ctl-h-touch);
+    }
+    .print-icon-btn.icon-btn {
+      min-width: var(--ctl-h-touch);
+    }
+    .print-field input {
+      height: var(--ctl-h-touch);
+    }
+    .print-check {
+      min-height: var(--ctl-h-touch);
+    }
+  }
 }

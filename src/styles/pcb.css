@@ -1,4 +1,7 @@
-/* PCB workbench panel (W10). Co-located styles; uses theme CSS variables only. */
+/* PCB workbench panel (W10). Co-located styles; uses theme CSS variables only.
+   Compact on desktop (density tokens), comfortable on touch. The panel usually
+   docks into a narrow column on a WIDE window, so layout reflow is driven off
+   the PANEL's own width via a named container query — not window media queries. */
 
 .pcb-panel {
   display: flex;
@@ -8,40 +11,58 @@
   background: var(--bg-panel);
   color: var(--fg);
   overflow: hidden;
+  container-type: inline-size;
+  container-name: pcbpanel;
 }
 
-/* Vertical-only scroll — content reflows so it never scrolls sideways. */
+/* Vertical-only scroll. Sections tile into a responsive card-grid so they fill
+   the panel width at wide sizes (killing bottom whitespace) and collapse to a
+   single column when the panel is narrow. */
 .pcb-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  padding: var(--sp-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+
+/* The upload step, the layer table, and the output card stay full width. */
+.pcb-section-wide {
+  grid-column: 1 / -1;
 }
 
 /* --- sections --- */
 .pcb-section {
+  min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg);
+  align-self: start;
 }
 .pcb-section > h3 {
   margin: 0;
-  padding: 5px 8px;
-  font-size: 10px;
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-section);
   color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
 }
+.pcb-section > h3.pcb-h3-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
 .pcb-section-body {
-  padding: 8px;
+  padding: var(--pad-card-y) var(--pad-card-x);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 /* --- file drop / import --- */
@@ -49,10 +70,10 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border: 2px dashed var(--border);
-  border-radius: 6px;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
   background: var(--bg-input);
   justify-content: center;
 }
@@ -62,66 +83,67 @@
 }
 .pcb-drop-hint {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 .pcb-load-input {
   display: none;
 }
 .pcb-load-btn {
-  min-height: 36px;
+  min-height: var(--ctl-h);
 }
 
-/* Primary ZIP upload — make it the obvious first action. */
+/* Primary ZIP upload — capped dropzone, the obvious first action. */
 .pcb-drop-primary {
   flex-direction: column;
-  gap: 6px;
-  padding: 16px 12px;
+  gap: var(--sp-1);
+  min-height: 84px;
+  padding: var(--sp-3) var(--sp-4);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 .pcb-load-zip {
-  min-height: 42px;
-  padding: 0 18px;
-  font-size: 13px;
+  min-height: var(--ctl-h-lg);
+  padding: 0 16px;
+  font-size: var(--fs-ctl);
   font-weight: 600;
 }
 .pcb-intro {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--fs-body);
+  line-height: 1.45;
   color: var(--fg-muted);
 }
 .pcb-kbd {
   display: inline-block;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 
 .pcb-info {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
 .pcb-error {
   color: var(--danger);
   border: 1px solid var(--danger);
-  border-radius: 5px;
-  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 .pcb-warnings {
   color: var(--warn);
-  font-size: 12px;
+  font-size: var(--fs-body);
   max-height: 110px;
   overflow: auto;
   margin: 0;
   padding-left: 18px;
 }
 .pcb-status {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--ok);
   font-variant-numeric: tabular-nums;
 }
@@ -130,12 +152,12 @@
 .pcb-stages {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 .pcb-stage-btn {
   flex: 1 1 auto;
-  min-height: 36px;
-  min-width: 84px;
+  min-height: var(--ctl-h);
+  min-width: 80px;
 }
 .pcb-stage-btn.active {
   background: var(--accent);
@@ -149,39 +171,54 @@
   color: var(--accent-fg);
 }
 
-/* --- z-mode toggle --- */
+/* --- z-mode toggle (compact segmented control) --- */
 .pcb-zmode {
   display: flex;
-  gap: 6px;
+  gap: 0;
 }
 .pcb-zmode button {
   flex: 1 1 auto;
-  min-height: 36px;
+  min-height: var(--ctl-h-lg);
+  border-radius: 0;
+  margin-left: -1px;
+}
+.pcb-zmode button:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+  margin-left: 0;
+}
+.pcb-zmode button:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 .pcb-zmode button.active {
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
+  position: relative;
+  z-index: 1;
 }
 
-/* --- parameter grid --- */
+/* --- parameter / field grid (compact, packs left, wraps naturally) --- */
 .pcb-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
 }
 .pcb-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  min-width: 0;
 }
 .pcb-field > span {
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 .pcb-field input {
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
   width: 100%;
+  min-width: 0;
 }
 
 /* --- generate / output --- */
@@ -189,24 +226,58 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .pcb-generate .primary {
-  min-height: 38px;
+  min-height: var(--ctl-h-lg);
 }
 .pcb-hint {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-body);
   flex: 1 1 160px;
+}
+
+/* --- at-a-glance board summary chips --- */
+.pcb-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  align-items: center;
+}
+.pcb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--sp-2);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.pcb-chip-dim {
+  background: var(--bg-input);
+  color: var(--fg);
+  font-weight: 600;
+}
+.pcb-chip-ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+.pcb-chip-off {
+  color: var(--fg-muted);
+  opacity: 0.7;
 }
 
 /* --- inline package warning --- */
 .pcb-warnings-inline {
   color: var(--warn);
-  font-size: 12px;
+  font-size: var(--fs-body);
   border: 1px solid var(--warn);
-  border-radius: 5px;
-  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
@@ -216,19 +287,19 @@
   max-width: 100%;
   overflow-x: hidden;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .pcb-layer-table {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-variant-numeric: tabular-nums;
 }
 .pcb-layer-table thead th {
   text-align: left;
-  padding: 4px 6px;
-  font-size: 10px;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-section);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--fg-muted);
@@ -238,22 +309,21 @@
   top: 0;
 }
 .pcb-layer-table tbody td {
-  padding: 3px 6px;
+  padding: 3px var(--sp-2);
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
-/* Fixed column widths so the table fills its box without sideways scroll, even
-   in the narrow (~270px) default column. The RUN column must be wide enough for
-   the two icon buttons (Preview + Play) so neither gets clipped. */
+/* Fixed column widths so the table fills its box without sideways scroll. The
+   RUN column must fit the two icon buttons (Preview + Play) without clipping. */
 .pcb-layer-table th:nth-child(1),
-.pcb-layer-table td:nth-child(1) { width: 30%; }
+.pcb-layer-table td:nth-child(1) { width: 26%; }
 .pcb-layer-table th:nth-child(2),
-.pcb-layer-table td:nth-child(2) { width: 31%; }
+.pcb-layer-table td:nth-child(2) { width: 28%; }
 .pcb-layer-table th:nth-child(3),
-.pcb-layer-table td:nth-child(3) { width: 14%; }
+.pcb-layer-table td:nth-child(3) { width: 24%; }
 .pcb-col-run,
 .pcb-cell-run {
-  width: 25%;
+  width: 22%;
   white-space: nowrap;
   text-align: center;
 }
@@ -270,55 +340,61 @@
   white-space: nowrap;
 }
 .pcb-role-select {
-  min-height: 30px;
+  height: var(--ctl-h);
+  min-height: 0;
   width: 100%;
   min-width: 0;
 }
 .pcb-row-actions {
   display: inline-flex;
-  gap: 3px;
+  gap: var(--sp-1);
   justify-content: center;
 }
-.pcb-icon-btn {
-  min-width: 27px;
-  min-height: 28px;
-  padding: 0 3px;
-  font-size: 13px;
+/* Compact icon buttons (shared .icon-btn chrome via IconButton); override the
+   square side to the density token. */
+.pcb-icon-btn.icon-btn {
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  min-width: var(--icon-btn);
+  min-height: var(--icon-btn);
+  padding: 0;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+}
+.pcb-icon-btn .icon-btn-glyph {
+  font-size: 13px;
 }
 .pcb-icon-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .pcb-icon-play:not(:disabled) {
-  color: var(--ok, #3fb950);
-  border-color: color-mix(in srgb, var(--ok, #3fb950) 50%, var(--border));
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 50%, var(--border));
 }
 .pcb-icon-play:not(:disabled):hover {
-  background: color-mix(in srgb, var(--ok, #3fb950) 16%, transparent);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
 }
 
 /* --- collapsible raw G-code preview --- */
 .pcb-gcode {
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
 }
 .pcb-gcode-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   width: 100%;
   background: transparent;
   border: none;
   color: var(--fg-muted);
-  font-size: 12px;
-  min-height: 32px;
-  padding: 4px 8px;
+  font-size: var(--fs-body);
+  min-height: var(--ctl-h);
+  padding: var(--sp-1) var(--sp-2);
   cursor: pointer;
   text-align: left;
 }
@@ -328,17 +404,17 @@
 .pcb-gcode-meta {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--fs-label);
   opacity: 0.8;
 }
 .pcb-gcode-text {
   margin: 0;
-  padding: 8px;
+  padding: var(--sp-2);
   max-height: 220px;
   overflow: auto;
   border-top: 1px solid var(--border);
   font-family: var(--mono, ui-monospace, monospace);
-  font-size: 11px;
+  font-size: var(--fs-mono);
   line-height: 1.45;
   white-space: pre;
   color: var(--fg);
@@ -366,9 +442,9 @@
   background: transparent;
   border: none;
   color: var(--fg-muted);
-  font-size: 12px;
-  min-height: 36px;
-  padding: 4px 2px;
+  font-size: var(--fs-body);
+  min-height: var(--ctl-h);
+  padding: var(--sp-1) 2px;
   cursor: pointer;
 }
 .pcb-toggle-single:hover {
@@ -377,15 +453,15 @@
 .pcb-single {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-3);
   padding-top: 2px;
 }
 
 /* --- per-layer legend under the table --- */
 .pcb-legend {
   margin: 0;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: var(--fs-label);
+  line-height: 1.45;
   color: var(--fg-muted);
 }
 
@@ -397,11 +473,11 @@
   background: transparent;
   border: none;
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: var(--fs-section);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  min-height: 36px;
-  padding: 5px 8px;
+  min-height: var(--ctl-h);
+  padding: var(--sp-1) var(--pad-card-x);
   cursor: pointer;
   text-align: left;
 }
@@ -414,7 +490,7 @@
 
 /* sub-group label inside a section body */
 .pcb-subhead {
-  font-size: 10px;
+  font-size: var(--fs-section);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--fg-muted);
@@ -424,12 +500,53 @@
   margin-top: 0;
 }
 
-@media (max-width: 768px) {
-  .pcb-grid {
-    grid-template-columns: repeat(auto-fit, minmax(46%, 1fr));
+/* --- narrow panel (docked column or phone): collapse the card-grid to a single
+   column, stack the layer table into cards, and grow controls to ≥36px touch
+   targets. Driven off the PANEL's own width. --- */
+@container pcbpanel (max-width: 560px) {
+  .pcb-scroll {
+    grid-template-columns: 1fr;
   }
-  .pcb-stage-btn {
-    flex: 1 1 40%;
+}
+
+@container pcbpanel (max-width: 360px) {
+  .pcb-load-btn,
+  .pcb-load-zip,
+  .pcb-stage-btn,
+  .pcb-zmode button,
+  .pcb-field input,
+  .pcb-role-select,
+  .pcb-toggle-single,
+  .pcb-advanced-toggle,
+  .pcb-gcode-toggle,
+  .pcb-generate .primary {
+    min-height: var(--ctl-h-touch);
+  }
+  .pcb-field input,
+  .pcb-role-select {
+    height: var(--ctl-h-touch);
+  }
+}
+
+@media (max-width: 768px) {
+  .pcb-scroll {
+    grid-template-columns: 1fr;
+  }
+  .pcb-load-btn,
+  .pcb-load-zip,
+  .pcb-stage-btn,
+  .pcb-zmode button,
+  .pcb-field input,
+  .pcb-role-select,
+  .pcb-toggle-single,
+  .pcb-advanced-toggle,
+  .pcb-gcode-toggle,
+  .pcb-generate .primary {
+    min-height: var(--ctl-h-touch);
+  }
+  .pcb-field input,
+  .pcb-role-select {
+    height: var(--ctl-h-touch);
   }
   /* On narrow screens, reflow the layer table into stacked cards. */
   .pcb-layer-table,
@@ -448,13 +565,13 @@
   }
   .pcb-layer-table tbody tr {
     border: 1px solid var(--border);
-    border-radius: 5px;
-    margin-bottom: 6px;
-    padding: 4px;
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--sp-2);
+    padding: var(--sp-1);
   }
   .pcb-layer-table tbody td {
     border-bottom: none;
-    padding: 4px 6px;
+    padding: var(--sp-1) var(--sp-2);
     max-width: none;
   }
   .pcb-cell-name {
@@ -474,14 +591,15 @@
     text-align: left;
   }
   /* Keep touch targets comfortable on phones (slim defaults are desktop). */
-  .pcb-role-select {
-    min-height: 36px;
-  }
-  .pcb-icon-btn {
+  .pcb-icon-btn.icon-btn {
+    width: 40px;
+    height: 40px;
     min-width: 40px;
     min-height: 40px;
-    font-size: 16px;
     flex: 1 1 auto;
+  }
+  .pcb-icon-btn .icon-btn-glyph {
+    font-size: 16px;
   }
   .pcb-row-actions {
     display: flex;

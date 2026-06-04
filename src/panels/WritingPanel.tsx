@@ -2,28 +2,70 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Polyline } from '../core/geometry'
 import { Toolpath } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
-import { StrokeFont, TextAlign } from '../core/strokeFont'
-import { useProgram, useMachine, usePersistentState } from '../store'
-import { grbl } from '../serial/controller'
+import { StrokeFont, TextAlign, type LayoutOptions } from '../core/strokeFont'
+import { OutlineFont } from '../core/outlineFont'
+import { applyTextStyle } from '../core/textStyle'
+import {
+  BUILTIN_ENTRY,
+  detectKindByName,
+  loadCatalogFont,
+  loadFontCatalog,
+  loadLocalFont,
+  loadSystemFonts,
+  systemFontsSupported,
+  type FontCatalogEntry,
+  type FontKind,
+  type LoadedFont,
+} from '../core/fontLibrary'
+import { useProgram, usePersistentState } from '../store'
 import { useT } from '../i18n'
+import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { IconButton } from '../components/IconButton'
 import '../styles/writing.css'
 
-/** Split G-code into non-empty lines for streaming to the controller. */
-function gcodeLines(gcode: string): string[] {
-  return gcode.split(/\r?\n/).filter((l) => l.trim().length > 0)
-}
-
-const ALIGN_OPTIONS: { value: TextAlign; key: string; label: string }[] = [
-  { value: TextAlign.Left, key: 'writing.align.left', label: 'Left' },
-  { value: TextAlign.Center, key: 'writing.align.center', label: 'Center' },
-  { value: TextAlign.Right, key: 'writing.align.right', label: 'Right' },
+const ALIGN_OPTIONS: { value: TextAlign; key: string; label: string; glyph: string }[] = [
+  { value: TextAlign.Left, key: 'writing.align.left', label: 'Left', glyph: '⬅' },
+  { value: TextAlign.Center, key: 'writing.align.center', label: 'Center', glyph: '⬛' },
+  { value: TextAlign.Right, key: 'writing.align.right', label: 'Right', glyph: '➡' },
 ]
 
+/** G-code generation mode. Stroke = centerlines; Outline = glyph contours. */
+type GenMode = 'stroke' | 'outline'
+
 /**
- * Build pen-mode G-code from laid-out stroke polylines. Each stroke becomes a
- * rapid (pen up) to its start, then feed moves (pen down) along its points. The
- * emitter maps Rapid->penUpZ and Feed->penDownZ in ZMode.Pen, so Z values here
- * are placeholders (0). origin offsets the whole layout in XY.
+ * The serializable Writing document saved to / loaded from a `.kwrite` file
+ * (plain JSON). Captures the text plus all style/layout/pen params. An uploaded
+ * custom font cannot be embedded, so only `fontId` is stored; on load, an
+ * `upload:`-prefixed id falls back to the built-in font.
+ */
+interface WritingDoc {
+  text: string
+  charHeight: number
+  lineSpacing: number
+  letterSpacing: number
+  originX: number
+  originY: number
+  align: TextAlign
+  penUpZ: number
+  penDownZ: number
+  feed: number
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  fontId: string
+  genMode: GenMode
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/**
+ * Build pen-mode G-code from laid-out polylines. Each polyline becomes a rapid
+ * (pen up) to its start, then feed moves (pen down) along its points; closed
+ * polylines (outline contours) get a final feed back to the start. The emitter
+ * maps Rapid->penUpZ and Feed->penDownZ in ZMode.Pen, so Z values here are
+ * placeholders (0). `origin` offsets the whole layout in XY.
  */
 function strokesToGcode(
   strokes: Polyline[],
@@ -40,6 +82,8 @@ function strokesToGcode(
       const p = pl.points[i]
       tp.feed({ x: p.x + origin.x, y: p.y + origin.y, z: 0 })
     }
+    // Close contours so the outline is fully traced.
+    if (pl.closed) tp.feed({ x: first.x + origin.x, y: first.y + origin.y, z: 0 })
   }
 
   const emitter = new GcodeEmitter({
@@ -55,15 +99,14 @@ function strokesToGcode(
 }
 
 /**
- * Writing / Pen-plotter panel. Type text, lay it out with a single-stroke
- * vector font (built-in Hershey simplex, or a custom JSON font from the Qt
- * handwriting pipeline), and generate pen-mode G-code (Z = pen up/down) that is
- * pushed to the program store for 3D preview + streaming.
+ * Writing / Pen-plotter panel. Type text, pick a font (built-in Hershey,
+ * bundled library fonts, or an uploaded JSON / TTF / OTF), style it (bold /
+ * italic / underline, size, alignment), choose Stroke vs Outline G-code mode,
+ * and it previews live in the Visualizer + auto-syncs to the Program tab.
  */
 export function WritingPanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
-  const connected = useMachine((s) => s.connection === 'connected')
 
   const [text, setText] = usePersistentState('karmyogi.writing.text', 'Hello\nWorld 123')
   const [charHeight, setCharHeight] = usePersistentState('karmyogi.writing.charHeight', 10)
@@ -76,57 +119,190 @@ export function WritingPanel() {
   const [penDownZ, setPenDownZ] = usePersistentState('karmyogi.writing.penDownZ', 0)
   const [feed, setFeed] = usePersistentState('karmyogi.writing.feed', 1500)
   const [showAdvanced, setShowAdvanced] = usePersistentState('karmyogi.writing.showAdvanced', false)
-  const [showRaw, setShowRaw] = usePersistentState('karmyogi.writing.showRaw', false)
 
-  // The active font lives in component state; default is the built-in font.
-  const [font, setFont] = useState<StrokeFont>(() => StrokeFont.builtin())
-  const [fontName, setFontName] = useState('Built-in')
+  // Styling (persisted).
+  const [bold, setBold] = usePersistentState('karmyogi.writing.bold', false)
+  const [italic, setItalic] = usePersistentState('karmyogi.writing.italic', false)
+  const [underline, setUnderline] = usePersistentState('karmyogi.writing.underline', false)
+
+  // Font selection + generation mode (persisted). The mode is auto-set to a
+  // sensible default for the font kind on selection, but the user can override.
+  const [fontId, setFontId] = usePersistentState('karmyogi.writing.fontId', BUILTIN_ENTRY.id)
+  const [genMode, setGenMode] = usePersistentState<GenMode>('karmyogi.writing.genMode', 'stroke')
+
+  // The font catalog (built-in + bundled library), populated on mount.
+  const [catalog, setCatalog] = useState<FontCatalogEntry[]>([BUILTIN_ENTRY])
+  // Enumerated local (client system) fonts via the Local Font Access API. Loaded
+  // on demand (a user gesture is required) — empty until the user clicks "Load
+  // system fonts". Kept separate from `catalog` so the catalog-load effect (which
+  // re-fetches catalog ids) never touches these; they hold live FontData handles.
+  const [localFonts, setLocalFonts] = useState<FontCatalogEntry[]>([])
+  const [loadingSystem, setLoadingSystem] = useState(false)
+  // The currently-loaded, ready-to-use font (built-in by default).
+  const [loaded, setLoaded] = useState<LoadedFont>(() => ({ kind: 'stroke', font: StrokeFont.builtin() }))
+  const [fontName, setFontName] = useState(BUILTIN_ENTRY.name)
+  // Kind of the active font (drives default mode + which modes make sense).
+  const [fontKind, setFontKind] = useState<FontKind>('stroke')
+  // The last fontId we applied a default gen-mode for, so we only reset the
+  // user's chosen mode when the FONT actually changes — not when the catalog
+  // finishes loading async (which previously re-ran the effect and flickered).
+  const lastModeFontIdRef = useRef<string | null>(null)
+
   const [info, setInfo] = useState(() =>
     t('writing.info.autoRegen', 'Type text — G-code regenerates automatically.'),
   )
-  const [preview, setPreview] = useState('')
-  const previewRef = useRef('')
   const fileRef = useRef<HTMLInputElement>(null)
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // The font object used for layout (stroke or outline share a .layout API).
+  const layoutFont = loaded.font
+  // Built-in stroke font reused as the centerline fallback when an outline font
+  // is active but Stroke mode is selected (outline fonts have no centerlines).
+  const builtinStroke = useMemo(() => StrokeFont.builtin(), [])
+
+  // Populate the catalog from the bundled manifest once on mount.
+  useEffect(() => {
+    const ac = new AbortController()
+    void (async () => {
+      const { entries, note } = await loadFontCatalog(ac.signal)
+      if (ac.signal.aborted) return
+      setCatalog(entries)
+      if (note) {
+        setInfo(
+          t('writing.info.libraryNote', 'Font library: {note}. Built-in font available.', { note }),
+        )
+      }
+    })()
+    return () => ac.abort()
+  }, [t])
+
+  // When the selected font id changes, load it. Uploads ('upload:...') are loaded
+  // directly in the upload handler, so skip them here. A 'local:...' id is an
+  // enumerated system font: find its live FontData handle and load via .blob().
+  // Everything else is a bundled catalog entry fetched over the network.
+  useEffect(() => {
+    if (fontId.startsWith('upload:')) return
+    const isLocal = fontId.startsWith('local:')
+    const entry = isLocal
+      ? localFonts.find((e) => e.id === fontId)
+      : catalog.find((e) => e.id === fontId) ?? BUILTIN_ENTRY
+    // A local id with no matching handle (e.g. restored from a stale persisted
+    // value before the user reloaded system fonts) — leave the current font and
+    // hint the user, rather than crash.
+    if (!entry) {
+      if (isLocal) {
+        // A persisted system-font id can't be used until the user re-grants
+        // local-font access. Fall back to the built-in stroke font cleanly so the
+        // status doesn't flip between this hint and an "outline fell back" note.
+        setFontKind('stroke')
+        setInfo(
+          t('writing.info.localStale', 'Reload system fonts to use this font (using built-in for now).'),
+        )
+      }
+      return
+    }
+    const ac = new AbortController()
+    void (async () => {
+      try {
+        const lf = isLocal ? await loadLocalFont(entry) : await loadCatalogFont(entry, ac.signal)
+        if (ac.signal.aborted) return
+        setLoaded(lf)
+        setFontName(entry.name)
+        setFontKind(lf.kind)
+        // Set the natural default mode ONLY when the FONT actually changed — not
+        // when the catalog merely finished loading (which would reset the user's
+        // chosen mode and flicker the status line).
+        if (lastModeFontIdRef.current !== fontId) {
+          setGenMode(lf.kind === 'outline' ? 'outline' : 'stroke')
+          lastModeFontIdRef.current = fontId
+        }
+      } catch (e) {
+        if (ac.signal.aborted) return
+        setInfo(
+          t('writing.info.fontFailed', 'Failed to load font: {error}', {
+            error: (e as Error).message,
+          }),
+        )
+      }
+    })()
+    return () => ac.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontId, catalog, localFonts])
+
+  // Keep the generation mode VALID for the active font: a stroke-only font can't
+  // produce outlines, so snap a stale/persisted `outline` mode back to `stroke`.
+  // This prevents the confusing "(font has no outline data — fell back)" status
+  // (and the flicker it caused) when the built-in/stroke font is active.
+  useEffect(() => {
+    if (fontKind !== 'outline' && genMode === 'outline') setGenMode('stroke')
+  }, [fontKind, genMode, setGenMode])
+
   // Distinct characters in the text that the active font cannot render.
-  const missing = useMemo(() => font.missingGlyphs(text), [font, text])
+  const missing = useMemo(() => layoutFont.missingGlyphs(text), [layoutFont, text])
 
   const generate = useCallback((): string => {
     if (text.trim().length === 0) {
       setInfo(t('writing.info.enterText', 'Enter some text first.'))
-      setPreview('')
-      previewRef.current = ''
       return ''
     }
-    const strokes = font.layout(text, {
+    const layoutOpts: LayoutOptions = {
       charHeightMm: charHeight,
       lineSpacingFactor: lineSpacing,
       letterSpacingMm: letterSpacing,
       align,
-    })
+    }
+    // Stroke mode always uses a stroke font (the built-in if the active font is
+    // an outline font, which has no centerlines). Outline mode requires an
+    // outline font; if the active font is a stroke font we fall back to stroke.
+    let strokes: Polyline[]
+    let effectiveMode: GenMode = genMode
+    if (genMode === 'outline' && loaded.kind === 'outline') {
+      strokes = loaded.font.layout(text, layoutOpts)
+    } else if (genMode === 'outline' && loaded.kind === 'stroke') {
+      // Stroke font has no contours — fall back to its centerline strokes.
+      effectiveMode = 'stroke'
+      strokes = loaded.font.layout(text, layoutOpts)
+    } else if (genMode === 'stroke' && loaded.kind === 'outline') {
+      // Outline font has no centerlines — render with the built-in stroke font.
+      effectiveMode = 'stroke'
+      strokes = builtinStroke.layout(text, layoutOpts)
+    } else {
+      strokes = loaded.font.layout(text, layoutOpts)
+    }
+
     if (strokes.length === 0) {
       setInfo(t('writing.info.nothingToDraw', 'Nothing to draw (no renderable glyphs).'))
-      setPreview('')
-      previewRef.current = ''
       return ''
     }
 
-    const gcode = strokesToGcode(
+    // Apply bold / italic / underline styling to the laid-out polylines.
+    const styled = applyTextStyle(
       strokes,
+      { bold, italic, underline, charHeightMm: charHeight },
+      charHeight * (lineSpacing > 0 ? lineSpacing : 1.5),
+    )
+
+    const gcode = strokesToGcode(
+      styled,
       { x: originX, y: originY },
       { penUpZ, penDownZ, feedXY: feed },
     )
     setProgram('text — pen', gcode)
-    setPreview(gcode)
-    previewRef.current = gcode
 
     const lineCount = text.split('\n').length
+    const modeLabel =
+      effectiveMode === 'outline'
+        ? t('writing.mode.outline', 'Outline')
+        : t('writing.mode.stroke', 'Stroke')
     let msg = t(
-      'writing.info.generated',
-      '{strokes} pen stroke(s), {lines} line(s) → Visualizer.',
-      { strokes: strokes.length, lines: lineCount },
+      'writing.info.generatedMode',
+      '{mode}: {strokes} path(s), {lines} line(s) → Visualizer.',
+      { mode: modeLabel, strokes: styled.length, lines: lineCount },
     )
+    if (effectiveMode !== genMode)
+      msg += ' ' + t('writing.info.modeFallback', '(font has no {wanted} data — fell back)', {
+        wanted: genMode === 'outline' ? 'outline' : 'stroke',
+      })
     if (missing.length > 0)
       msg +=
         ' ' +
@@ -137,8 +313,9 @@ export function WritingPanel() {
     setInfo(msg)
     return gcode
   }, [
-    t, text, font, charHeight, lineSpacing, letterSpacing, align,
-    originX, originY, penUpZ, penDownZ, feed, missing, fontName, setProgram,
+    t, text, loaded, genMode, charHeight, lineSpacing, letterSpacing, align,
+    bold, italic, underline, originX, originY, penUpZ, penDownZ, feed, missing,
+    fontName, setProgram, builtinStroke,
   ])
 
   // Live G-code: always regenerate ~300ms after the last change and push to the
@@ -152,41 +329,118 @@ export function WritingPanel() {
     }
   }, [generate, text])
 
-  // Stream the (freshly-generated) program to the machine.
-  const play = useCallback(() => {
-    const gcode = previewRef.current || generate()
-    const lines = gcodeLines(gcode)
-    if (lines.length === 0 || !connected) return
-    grbl.startProgram(lines)
-  }, [generate, connected])
+  // Upload a custom font file: JSON single-stroke, or TTF/OTF outline.
+  const loadUpload = useCallback(
+    async (file: File) => {
+      const kind = detectKindByName(file.name)
+      try {
+        if (kind === 'outline') {
+          const buf = await file.arrayBuffer()
+          const f = OutlineFont.fromArrayBuffer(buf, file.name)
+          setLoaded({ kind: 'outline', font: f })
+          setFontName(f.name())
+          setFontKind('outline')
+          setGenMode('outline')
+          setFontId('upload:' + file.name)
+          setInfo(
+            t('writing.info.fontUploadedTtf', 'Loaded outline font "{name}" ({count} glyphs).', {
+              name: f.name(),
+              count: f.glyphCount(),
+            }),
+          )
+        } else {
+          const json = await file.text()
+          const f = StrokeFont.fromJson(json)
+          setLoaded({ kind: 'stroke', font: f })
+          setFontName(f.name())
+          setFontKind('stroke')
+          setGenMode('stroke')
+          setFontId('upload:' + file.name)
+          setInfo(
+            t('writing.info.fontLoaded', 'Loaded custom font "{name}" ({count} glyphs).', {
+              name: f.name(),
+              count: f.glyphCount(),
+            }),
+          )
+        }
+      } catch (e) {
+        setInfo(
+          t('writing.info.fontFailed', 'Failed to load font: {error}', {
+            error: (e as Error).message,
+          }),
+        )
+      }
+    },
+    [t, setFontId, setGenMode],
+  )
 
-  const loadFont = useCallback(async (file: File) => {
+  // Enumerate the user's local (client) system fonts via the Local Font Access
+  // API. Must run from a user gesture (the button click). Degrades gracefully:
+  // on an unsupported browser or denied permission it shows a friendly note and
+  // leaves the bundled catalog untouched. NOTE: a static SPA cannot read the
+  // *server* PC's fonts — this reads the visitor's own installed fonts, the
+  // correct supported approach.
+  const loadSystem = useCallback(async () => {
+    if (loadingSystem) return
+    setLoadingSystem(true)
+    setInfo(t('writing.info.loadingSystem', 'Requesting access to your system fonts…'))
     try {
-      const json = await file.text()
-      const loaded = StrokeFont.fromJson(json)
-      setFont(loaded)
-      setFontName(loaded.name())
-      setInfo(
-        t('writing.info.fontLoaded', 'Loaded custom font "{name}" ({count} glyphs).', {
-          name: loaded.name(),
-          count: loaded.glyphCount(),
-        }),
-      )
-    } catch (e) {
-      setInfo(
-        t('writing.info.fontFailed', 'Failed to load font: {error}', {
-          error: (e as Error).message,
-        }),
-      )
+      const { entries, ok, note } = await loadSystemFonts()
+      if (ok && entries.length > 0) setLocalFonts(entries)
+      setInfo(note)
+    } finally {
+      setLoadingSystem(false)
     }
-  }, [t])
+  }, [loadingSystem, t])
 
-  const useBuiltin = useCallback(() => {
-    setFont(StrokeFont.builtin())
-    setFontName('Built-in')
-    setInfo(t('writing.info.usingBuiltin', 'Using built-in font.'))
-    if (fileRef.current) fileRef.current.value = ''
-  }, [t])
+  // Whether the active font supports each mode (for disabling/coloring toggles).
+  const canOutline = fontKind === 'outline'
+  const canStroke = fontKind === 'stroke' // outline fonts fall back to built-in stroke
+
+  // The current state as a save document (.kwrite).
+  const doc: WritingDoc = {
+    text, charHeight, lineSpacing, letterSpacing, originX, originY, align,
+    penUpZ, penDownZ, feed, bold, italic, underline, fontId, genMode,
+  }
+
+  // Apply a loaded document. `data` is untrusted: validate every field and keep
+  // the current value for anything missing or of the wrong type. An uploaded
+  // font id can't be restored (the file isn't embedded), so fall back to built-in.
+  const loadDoc = useCallback(
+    (data: unknown) => {
+      if (!isObj(data)) {
+        setInfo(t('writing.info.loadInvalid', 'Could not load — file is not a valid writing document.'))
+        return
+      }
+      if (typeof data.text === 'string') setText(data.text)
+      if (isNum(data.charHeight)) setCharHeight(data.charHeight)
+      if (isNum(data.lineSpacing)) setLineSpacing(data.lineSpacing)
+      if (isNum(data.letterSpacing)) setLetterSpacing(data.letterSpacing)
+      if (isNum(data.originX)) setOriginX(data.originX)
+      if (isNum(data.originY)) setOriginY(data.originY)
+      if (data.align === TextAlign.Left || data.align === TextAlign.Center || data.align === TextAlign.Right)
+        setAlign(data.align)
+      if (isNum(data.penUpZ)) setPenUpZ(data.penUpZ)
+      if (isNum(data.penDownZ)) setPenDownZ(data.penDownZ)
+      if (isNum(data.feed)) setFeed(data.feed)
+      if (typeof data.bold === 'boolean') setBold(data.bold)
+      if (typeof data.italic === 'boolean') setItalic(data.italic)
+      if (typeof data.underline === 'boolean') setUnderline(data.underline)
+      if (data.genMode === 'stroke' || data.genMode === 'outline') setGenMode(data.genMode)
+      // An uploaded or local system font cannot be embedded in the saved doc —
+      // fall back to the built-in font for those ids.
+      if (typeof data.fontId === 'string')
+        setFontId(
+          data.fontId.startsWith('upload:') || data.fontId.startsWith('local:')
+            ? BUILTIN_ENTRY.id
+            : data.fontId,
+        )
+      setInfo(t('writing.info.loaded', 'Loaded writing document — preview updated.'))
+    },
+    [t, setText, setCharHeight, setLineSpacing, setLetterSpacing, setOriginX, setOriginY,
+      setAlign, setPenUpZ, setPenDownZ, setFeed, setBold, setItalic, setUnderline,
+      setGenMode, setFontId],
+  )
 
   return (
     <div className="wr-panel">
@@ -194,13 +448,27 @@ export function WritingPanel() {
         <p className="wr-intro">
           {t(
             'writing.intro',
-            'Type text → it previews live in the Visualizer → press Send ▶. Rendered as a single-stroke vector font in pen-plotter G-code (Z = pen up / down).',
+            'Type text → it previews live in the Visualizer and auto-syncs to the Program tab for streaming. Choose a font, style it, and pick Stroke (centerlines) or Outline (glyph contours) — output is safe pen-plotter G-code (Z = pen up / down).',
           )}
         </p>
+        <p className="wr-status" role="status">{info}</p>
 
-        {/* ---- Text ---- */}
-        <section className="wr-card">
-          <h3>{t('writing.text.title', 'Text')}</h3>
+        <div className="wr-cards">
+        {/* ---- Text (spans full width) ---- */}
+        <section className="wr-card wr-span">
+          <h3 className="wr-card-head">
+            <span>{t('writing.text.title', 'Text')}</span>
+            <SaveLoadButtons
+              value={doc}
+              onLoad={loadDoc}
+              fileBase="karmyogi-writing"
+              ext="kwrite"
+              saveDisabled={text.trim().length === 0}
+              saveTitle={t('writing.save', 'Save writing document')}
+              loadTitle={t('writing.load', 'Load writing document')}
+              onError={setInfo}
+            />
+          </h3>
           <div className="wr-card-body">
             <textarea
               className="wr-text"
@@ -214,48 +482,194 @@ export function WritingPanel() {
           </div>
         </section>
 
-        {/* ---- Essentials: size, alignment, pen Z, feed ---- */}
-        <section className="wr-card">
-          <h3>{t('writing.penLayout.title', 'Pen & Layout')}</h3>
+        {/* ---- Font: picker + icon toolbar + style toggles + mode ---- */}
+        <section className="wr-card wr-span">
+          <h3>{t('writing.font.title', 'Font')}</h3>
           <div className="wr-card-body">
-            <div className="wr-grid">
-              <label className="wr-field" title={t('writing.charHeight.tip', 'Cap height of the text in millimetres.')}>
-                <span>{t('writing.charHeight', 'Char height')}</span>
+            {/* picker + compact icon toolbar (upload / built-in / system fonts) */}
+            <div className="wr-font-row">
+              <label className="wr-field wr-font-pick" title={t('writing.font.pickTip', 'Choose a font: built-in Hershey (offline), a bundled font, an uploaded file, or one of your loaded system fonts.')}>
+                <span>{t('writing.font.pick', 'Font')}</span>
+                <select value={fontId} onChange={(e) => setFontId(e.target.value)}>
+                  <optgroup label={t('writing.font.group.bundled', 'Bundled')}>
+                    {catalog.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}{e.kind === 'outline' ? ' · TTF' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {localFonts.length > 0 && (
+                    <optgroup label={t('writing.font.group.system', 'System ({count})', { count: localFonts.length })}>
+                      {localFonts.map((e) => (
+                        <option key={e.id} value={e.id}>{e.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {fontId.startsWith('upload:') && (
+                    <optgroup label={t('writing.font.group.uploaded', 'Uploaded')}>
+                      <option value={fontId}>{fontName}</option>
+                    </optgroup>
+                  )}
+                </select>
+              </label>
+              <div className="wr-font-tools" role="toolbar" aria-label={t('writing.font.tools', 'Font sources')}>
+                <IconButton
+                  className="wr-icon"
+                  icon="⤒"
+                  label={t('writing.font.uploadTip', 'Upload a custom font: single-stroke JSON, or a TrueType/OpenType .ttf/.otf for outline mode.')}
+                  onClick={() => fileRef.current?.click()}
+                />
+                <IconButton
+                  className="wr-icon"
+                  icon="⌂"
+                  label={t('writing.font.builtinTip', 'Use the built-in Hershey single-stroke font (always available, works offline).')}
+                  onClick={() => setFontId(BUILTIN_ENTRY.id)}
+                />
+                <IconButton
+                  className={'wr-icon' + (loadingSystem ? ' is-busy' : '')}
+                  icon="🖥"
+                  label={
+                    systemFontsSupported()
+                      ? t('writing.font.systemTip', 'Load all fonts installed on this computer (asks for the browser "Fonts" permission).')
+                      : t('writing.font.systemNa', 'System fonts need a Chromium browser (Chrome/Edge) over HTTPS or localhost.')
+                  }
+                  disabled={loadingSystem || !systemFontsSupported()}
+                  onClick={() => void loadSystem()}
+                />
+              </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".json,application/json,.ttf,.otf,.woff,font/ttf,font/otf"
+                className="wr-file"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) void loadUpload(f)
+                  if (fileRef.current) fileRef.current.value = ''
+                }}
+              />
+            </div>
+
+            {/* Stroke / Outline segmented mode toggle */}
+            <div className="wr-mode" role="group" aria-label={t('writing.mode.label', 'G-code mode')}>
+              <button
+                type="button"
+                className={'wr-seg' + (genMode === 'stroke' ? ' is-active' : '')}
+                aria-pressed={genMode === 'stroke'}
+                onClick={() => setGenMode('stroke')}
+                title={t('writing.mode.strokeTip', 'Follow the font centerlines (single-stroke). Best for Hershey/JSON fonts; outline fonts use the built-in stroke font.')}
+              >
+                {t('writing.mode.stroke', 'Stroke')}
+                {!canStroke && <span className="wr-seg-note">·{t('writing.mode.builtin', 'built-in')}</span>}
+              </button>
+              <button
+                type="button"
+                className={'wr-seg' + (genMode === 'outline' ? ' is-active' : '')}
+                aria-pressed={genMode === 'outline'}
+                onClick={() => setGenMode('outline')}
+                disabled={!canOutline}
+                title={
+                  canOutline
+                    ? t('writing.mode.outlineTip', 'Engrave around each glyph contour. Best for TTF/OTF fonts.')
+                    : t('writing.mode.outlineNa', 'Outline mode needs a TTF/OTF font. Pick or upload one.')
+                }
+              >
+                {t('writing.mode.outline', 'Outline')}
+              </button>
+            </div>
+
+            {/* B / I / U style toggles + size */}
+            <div className="wr-style-row">
+              <div className="wr-style-toggles" role="group" aria-label={t('writing.style.label', 'Text style')}>
+                <button
+                  type="button"
+                  className={'wr-tgl wr-tgl-b' + (bold ? ' is-active' : '')}
+                  aria-pressed={bold}
+                  onClick={() => setBold(!bold)}
+                  title={t('writing.style.bold', 'Bold — thicken strokes with extra parallel passes.')}
+                >B</button>
+                <button
+                  type="button"
+                  className={'wr-tgl wr-tgl-i' + (italic ? ' is-active' : '')}
+                  aria-pressed={italic}
+                  onClick={() => setItalic(!italic)}
+                  title={t('writing.style.italic', 'Italic — slant the text.')}
+                >I</button>
+                <button
+                  type="button"
+                  className={'wr-tgl wr-tgl-u' + (underline ? ' is-active' : '')}
+                  aria-pressed={underline}
+                  onClick={() => setUnderline(!underline)}
+                  title={t('writing.style.underline', 'Underline — add a line under each row of text.')}
+                >U</button>
+              </div>
+              <label className="wr-field wr-size" title={t('writing.charHeight.tip', 'Cap height of the text in millimetres (font size).')}>
+                <span>{t('writing.size', 'Size')}</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" min={0.5} step={0.5} value={charHeight}
                     onChange={(e) => setCharHeight(Number(e.target.value))} />
                   <em>mm</em>
                 </span>
               </label>
-              <label className="wr-field" title={t('writing.alignment.tip', 'Horizontal alignment of each line of text.')}>
-                <span>{t('writing.alignment', 'Alignment')}</span>
-                <select value={align} onChange={(e) => setAlign(Number(e.target.value) as TextAlign)}>
-                  {ALIGN_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{t(o.key, o.label)}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="wr-field" title={t('writing.penUpZ.tip', 'Z height when the pen is lifted for travel moves (safe-Z).')}>
-                <span>{t('writing.penUpZ', 'Pen up Z')}</span>
+            </div>
+
+            {missing.length > 0 && (
+              <p className="wr-warn" role="status">
+                {t('writing.missingGlyphs', 'Missing glyph(s): {glyphs} — rendered as blank space.', {
+                  glyphs: missing.map((c) => (c === ' ' ? '␣' : c)).join(' '),
+                })}
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* ---- Essentials: alignment, pen Z, feed — icon-labelled fields ---- */}
+        <section className="wr-card">
+          <h3>{t('writing.penLayout.title', 'Pen & Layout')}</h3>
+          <div className="wr-card-body">
+            {/* Alignment as icon toggle buttons (⬅ ⬛ ➡). */}
+            <div className="wr-field" title={t('writing.alignment.tip', 'Horizontal alignment of each line of text.')}>
+              <span className="wr-ic-label" aria-hidden="true">⬌</span>
+              <div className="wr-align" role="group" aria-label={t('writing.alignment', 'Alignment')}>
+                {ALIGN_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    className={'wr-tgl' + (align === o.value ? ' is-active' : '')}
+                    aria-pressed={align === o.value}
+                    onClick={() => setAlign(o.value)}
+                    title={t(o.key, o.label)}
+                    aria-label={t(o.key, o.label)}
+                  >{o.glyph}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="wr-grid">
+              <label className="wr-field wr-ic" title={t('writing.penUpZ.tip', 'Pen-up Z — height the pen lifts to for travel moves (safe-Z), in mm.')}>
+                <span className="wr-ic-label" aria-hidden="true">⤒ Z</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penUpZ}
-                    onChange={(e) => setPenUpZ(Number(e.target.value))} />
+                    onChange={(e) => setPenUpZ(Number(e.target.value))}
+                    aria-label={t('writing.penUpZ', 'Pen up Z')} />
                   <em>mm</em>
                 </span>
               </label>
-              <label className="wr-field" title={t('writing.penDownZ.tip', 'Z height when the pen is down and drawing.')}>
-                <span>{t('writing.penDownZ', 'Pen down Z')}</span>
+              <label className="wr-field wr-ic" title={t('writing.penDownZ.tip', 'Pen-down Z — height the pen drops to while drawing, in mm.')}>
+                <span className="wr-ic-label" aria-hidden="true">⤓ Z</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penDownZ}
-                    onChange={(e) => setPenDownZ(Number(e.target.value))} />
+                    onChange={(e) => setPenDownZ(Number(e.target.value))}
+                    aria-label={t('writing.penDownZ', 'Pen down Z')} />
                   <em>mm</em>
                 </span>
               </label>
-              <label className="wr-field" title={t('writing.feed.tip', 'Drawing (pen-down) feed rate in mm per minute.')}>
-                <span>{t('writing.feed', 'Feed')}</span>
+              <label className="wr-field wr-ic" title={t('writing.feed.tip', 'Feed — drawing (pen-down) feed rate, in mm per minute.')}>
+                <span className="wr-ic-label" aria-hidden="true">⏱</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" min={1} step={50} value={feed}
-                    onChange={(e) => setFeed(Number(e.target.value))} />
+                    onChange={(e) => setFeed(Number(e.target.value))}
+                    aria-label={t('writing.feed', 'Feed')} />
                   <em>mm/min</em>
                 </span>
               </label>
@@ -317,105 +731,7 @@ export function WritingPanel() {
           )}
         </section>
 
-        {/* ---- Font ---- */}
-        <section className="wr-card">
-          <h3>{t('writing.font.title', 'Font')}</h3>
-          <div className="wr-card-body">
-            <div className="wr-font-row">
-              <button type="button" className="wr-btn" onClick={() => fileRef.current?.click()}
-                title={t('writing.font.loadTip', 'Load a custom single-stroke font JSON (from the handwriting pipeline).')}>
-                {t('writing.font.load', 'Load font JSON…')}
-              </button>
-              <button type="button" className="wr-btn" onClick={useBuiltin} disabled={fontName === 'Built-in'}
-                title={t('writing.font.builtinTip', 'Switch back to the built-in Hershey simplex font.')}>
-                {t('writing.font.useBuiltin', 'Use built-in')}
-              </button>
-              <span className="wr-font-name" title={t('writing.font.active', 'Active font: {name}', { name: fontName })}>
-                {t('writing.font.activeLabel', 'Active:')} <strong>{fontName}</strong>
-              </span>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".json,application/json"
-                className="wr-file"
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) void loadFont(f)
-                }}
-              />
-            </div>
-            {missing.length > 0 && (
-              <p className="wr-warn" role="status">
-                {t('writing.missingGlyphs', 'Missing glyph(s): {glyphs} — rendered as blank space.', {
-                  glyphs: missing.map((c) => (c === ' ' ? '␣' : c)).join(' '),
-                })}
-              </p>
-            )}
-          </div>
-        </section>
-
-        {/* ---- Send ---- */}
-        <section className="wr-card">
-          <h3>{t('writing.send.title', 'Send')}</h3>
-          <div className="wr-card-body">
-            <div className="wr-actions">
-              <button
-                type="button"
-                className="wr-btn primary wr-play"
-                onClick={play}
-                disabled={!connected || preview.length === 0}
-                title={connected
-                  ? t('writing.send.streamTip', 'Stream this program to the machine')
-                  : t('writing.send.connectTip', 'Connect to a machine to send')}
-              >
-                {t('writing.send.btn', '▶ Send to machine')}
-              </button>
-              <button
-                type="button"
-                className="wr-btn wr-regen"
-                onClick={generate}
-                title={t('writing.send.regenTip', 'Regenerate G-code now')}
-              >
-                ↻
-              </button>
-            </div>
-            {!connected && preview.length > 0 && (
-              <p className="wr-info">{t('writing.send.previewLive', 'Preview is live; connect to a machine to send.')}</p>
-            )}
-            <p className="wr-info">{info}</p>
-          </div>
-        </section>
-
-        {/* ---- Raw G-code (collapsed by default) ---- */}
-        <section className={'wr-card wr-collapsible' + (showRaw ? ' is-open wr-grow' : '')}>
-          <h3>
-            <button
-              type="button"
-              className="wr-toggle"
-              onClick={() => setShowRaw(!showRaw)}
-              aria-expanded={showRaw}
-            >
-              <span className="wr-caret">{showRaw ? '▾' : '▸'}</span>
-              {t('writing.raw.title', 'Raw G-code')}
-              {preview.length > 0 && (
-                <span className="wr-toggle-note">
-                  {t('writing.raw.lines', '{count} lines', { count: gcodeLines(preview).length })}
-                </span>
-              )}
-            </button>
-          </h3>
-          {showRaw && (
-            <div className="wr-card-body">
-              <textarea
-                className="wr-preview"
-                readOnly
-                value={preview}
-                placeholder={t('writing.raw.placeholder', 'Generated G-code preview will appear here.')}
-                spellCheck={false}
-              />
-            </div>
-          )}
-        </section>
+        </div>
       </div>
     </div>
   )

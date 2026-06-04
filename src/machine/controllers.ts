@@ -41,15 +41,18 @@ export const CONTROLLER_PROFILES: Record<ControllerKind, ControllerProfile> = {
       hasLaser: true,
       hasHoming: true,
       hasProbe: true,
+      extendedOverrides: true,
+      network: true,
     },
     grblCompatible: true,
     supported: 'full',
     transport: 'webserial',
     // FluidNC exposes GRBL `$`-settings over serial (plus a YAML config), so the
-    // classic `$`-editor works.
+    // classic `$`-editor works. Dialect is pure-GRBL (omit) — `?`/`!`/`~`/`0x18`,
+    // `$$` and `$J=` all behave exactly like GRBL over Web Serial.
     settingsModel: 'grbl',
     notes:
-      'ESP32 firmware. GRBL-compatible streaming/realtime/status over Web Serial; YAML config, extra axes.',
+      'ESP32 firmware. GRBL-compatible streaming/realtime/status over Web Serial; YAML config, extra axes, WiFi/WebSocket.',
   },
   grblhal: {
     kind: 'grblhal',
@@ -62,12 +65,14 @@ export const CONTROLLER_PROFILES: Record<ControllerKind, ControllerProfile> = {
       hasLaser: false,
       hasHoming: true,
       hasProbe: true,
+      extendedOverrides: true,
     },
     grblCompatible: true,
     supported: 'full',
     transport: 'webserial',
     // grblHAL keeps GRBL `$`-settings but extends the set; the `$$`-driven editor
     // lists whatever the controller reports, so the extended superset just works.
+    // Dialect is pure-GRBL (omit): same `?`/`!`/`~`/`0x18`, `$$`, `$J=`.
     settingsModel: 'grblhal',
     notes: 'GRBL successor (32-bit). GRBL-compatible dialect — full support.',
   },
@@ -82,6 +87,7 @@ export const CONTROLLER_PROFILES: Record<ControllerKind, ControllerProfile> = {
       hasLaser: false,
       hasHoming: true,
       hasProbe: false,
+      temperature: true,
     },
     // Line-based, ok-acknowledged streaming — usable via the existing path, but
     // GRBL-specific `$`/realtime niceties differ, so flag it experimental.
@@ -91,8 +97,19 @@ export const CONTROLLER_PROFILES: Record<ControllerKind, ControllerProfile> = {
     // Marlin keeps settings in EEPROM, managed via M-codes (M503 report, M500 save)
     // — NOT a GRBL `$`-table.
     settingsModel: 'marlin',
+    // Real protocol deviations, captured as data so the serial layer adapts:
+    // Marlin has NO GRBL `?`/`!`/`~`/`0x18` realtime byte channel — sending those
+    // would be ignored at best. Status/position comes from polling `M114`; reset is
+    // `M112`; jog is a plain relative `G0` move; no `$$` settings.
+    dialect: {
+      status: 'marlin',
+      realtimeBytes: false,
+      jogCommand: 'g91-move',
+      dollarSettings: false,
+      reset: 'marlin-m112',
+    },
     notes:
-      'Line-based ok-ack streaming. Usable, but `$`-settings/realtime differ from GRBL — experimental.',
+      'Line-based ok-ack streaming. No GRBL `?`/`!`/`~`/`0x18` realtime bytes — karmyogi polls M114 for position and uses M112 to stop. Settings via M-codes (M503/M500). Experimental.',
   },
   smoothieware: {
     kind: 'smoothieware',
@@ -114,8 +131,54 @@ export const CONTROLLER_PROFILES: Record<ControllerKind, ControllerProfile> = {
     // Smoothieware settings live in the `config` file, read/written with
     // `config-get` / `config-set` — not a GRBL `$`-table.
     settingsModel: 'smoothie',
+    // Smoothie does NOT implement GRBL's `?`/`!`/`~`/`0x18` realtime bytes the same
+    // way and has no `$$`. It DOES understand `M114` (position) and `M112` (stop)
+    // and `$J` is absent, so jog is a relative `G0` move. ok-ack streaming is fine.
+    dialect: {
+      status: 'marlin', // M114-style position reply (RepRap-compatible)
+      realtimeBytes: false,
+      jogCommand: 'g91-move',
+      dollarSettings: false,
+      reset: 'marlin-m112',
+    },
     notes:
-      'Line-based G-code over USB serial (ok-ack); GRBL-compatible streaming — experimental.',
+      'Line-based G-code over USB serial (ok-ack). No GRBL realtime bytes; position via M114, stop via M112, settings in the SD `config` file. Experimental.',
+  },
+  masso: {
+    kind: 'masso',
+    label: 'Masso G3 Touch',
+    machineType: 'cnc3',
+    baud: 115200,
+    capabilities: {
+      axes: [...STANDARD_3AXIS],
+      hasSpindle: true,
+      hasLaser: false,
+      hasHoming: true,
+      hasProbe: true,
+    },
+    // HONESTY: Masso is a standalone all-in-one controller with its own touchscreen.
+    // It runs jobs from a USB stick / its on-board file system and does NOT expose a
+    // GRBL-style host-streaming serial protocol over USB — there is no `?`/`$$`/`ok`
+    // line-streaming channel to drive from a browser. So this is NOT grblCompatible
+    // and live connect is intentionally NOT wired (don't fake a protocol).
+    // What IS genuinely useful: treat Masso as an OFFLINE / EXPORT target — generate
+    // safe, standard G-code here and copy it to the Masso via USB stick. Mock connect
+    // works for trying the UI.
+    grblCompatible: false,
+    supported: 'experimental',
+    transport: 'webserial',
+    // All motion/machine settings are configured on the Masso touchscreen itself.
+    settingsModel: 'masso',
+    dialect: {
+      status: 'none',
+      realtimeBytes: false,
+      dollarSettings: false,
+      reset: 'none',
+    },
+    notes:
+      'Standalone all-in-one CNC controller with its own touchscreen; runs jobs from a USB stick. ' +
+      'It does NOT speak a GRBL-style host-streaming serial protocol, so live browser connect is not supported. ' +
+      'Use karmyogi as an offline/export target: generate G-code and copy it to the Masso via USB (or use Mock to explore the UI).',
   },
   ruida: {
     kind: 'ruida',
@@ -199,6 +262,7 @@ export const CONTROLLER_LIST: ControllerProfile[] = [
   CONTROLLER_PROFILES.grblhal,
   CONTROLLER_PROFILES.marlin,
   CONTROLLER_PROFILES.smoothieware,
+  CONTROLLER_PROFILES.masso,
   CONTROLLER_PROFILES.ruida,
   CONTROLLER_PROFILES.ezcad,
   CONTROLLER_PROFILES.fscut,

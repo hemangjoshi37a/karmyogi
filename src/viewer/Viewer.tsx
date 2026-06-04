@@ -4,8 +4,9 @@ import {
   useMemo,
   useRef,
   useEffect,
+  useState,
 } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import * as THREE from 'three'
@@ -15,6 +16,13 @@ import { ToolMarker } from './ToolMarker'
 import { StockBlock } from './StockBlock'
 import { CarvedStock } from './CarvedStock'
 import { PlacementGizmo } from './PlacementGizmo'
+import { CameraBedPlane } from './CameraBedPlane'
+import { JobBox } from './JobBox'
+import { ViewportShapes } from './ViewportShapes'
+import { ShapeContextMenu } from './ShapeContextMenu'
+import { useViewportShapes, type ShapeKind } from '../store/viewportShapes'
+import { shapesToGcode } from '../core/viewportShapeGcode'
+import { useProgram } from '../store/program'
 import { gcodeToPolylines, type Segment, type Bounds } from './gcodeToPolylines'
 import {
   frameBounds,
@@ -160,15 +168,107 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     if (orbitRef.current) orbitRef.current.enabled = !dragging
   }
 
+  // ---- Viewport shapes (right-click to add; inline gizmo to transform) ------
+  const containerRef = useRef<HTMLDivElement>(null)
+  const shapes = useViewportShapes((s) => s.shapes)
+  const selectShape = useViewportShapes((s) => s.select)
+  const addShape = useViewportShapes((s) => s.addShape)
+  const removeShape = useViewportShapes((s) => s.removeShape)
+
+  // Context-menu state: open position (CSS px within the stage) + the bed-plane
+  // world point under the cursor (so the new shape lands where the user clicked).
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    worldX: number
+    worldY: number
+  } | null>(null)
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 })
+
+  const onBedContext = (e: ThreeEvent<MouseEvent>) => {
+    e.nativeEvent.preventDefault()
+    e.stopPropagation()
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (rect) {
+      setStageSize({ w: rect.width, h: rect.height })
+      setMenu({
+        x: e.nativeEvent.clientX - rect.left,
+        y: e.nativeEvent.clientY - rect.top,
+        worldX: e.point.x,
+        worldY: e.point.y,
+      })
+    }
+  }
+
+  const pickShape = (kind: ShapeKind) => {
+    if (menu) addShape(kind, menu.worldX, menu.worldY)
+    setMenu(null)
+  }
+
+  // Delete the selected shape with Delete/Backspace (when no input is focused).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
+        return
+      const id = useViewportShapes.getState().selectedId
+      if (id) {
+        e.preventDefault()
+        removeShape(id)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [removeShape])
+
+  // Live G-code: shapes → safe G-code → program store section "viewport shapes".
+  // Debounced so dragging the gizmo doesn't thrash the program/visualizer.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const gcodeOut = shapesToGcode(shapes)
+      const prog = useProgram.getState()
+      const existing = prog.sections.find((s) => s.name === 'viewport shapes')
+      if (gcodeOut.trim() === '') {
+        // No shapes left → drop our section if one exists.
+        if (existing) prog.removeSection(existing.id)
+      } else {
+        prog.setProgram('viewport shapes', gcodeOut)
+      }
+    }, 200)
+    return () => clearTimeout(handle)
+  }, [shapes])
+
   return (
-    <Canvas
-      style={{ height: '100%', width: '100%', background: bg }}
-      camera={{ position: [200, -260, 220], up: [0, 0, 1], fov: FOV, near: 0.1, far: 5000 }}
+    <div
+      ref={containerRef}
+      style={{ position: 'relative', height: '100%', width: '100%' }}
     >
-      <ambientLight intensity={0.8} />
-      <directionalLight position={[100, -100, 300]} intensity={0.6} />
-      <Bed width={width} depth={depth} />
-      <StockBlock visible={showStock} />
+      <Canvas
+        style={{ height: '100%', width: '100%', background: bg }}
+        camera={{ position: [200, -260, 220], up: [0, 0, 1], fov: FOV, near: 0.1, far: 5000 }}
+        // Canvas-level miss: a left-click that hits NO object (truly empty space,
+        // not a gizmo handle or a shape) clears the selection. Using the
+        // Canvas-level hook — rather than a deselect handler on the bed catcher —
+        // means clicking a gizmo handle (which IS an object) never deselects, so
+        // the inline gizmo's resize/rotate handles stay grabbable.
+        onPointerMissed={(e) => {
+          if ((e as MouseEvent).button === 0) selectShape(null)
+        }}
+      >
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[100, -100, 300]} intensity={0.6} />
+        <Bed width={width} depth={depth} />
+        {/* Invisible bed-plane catcher: ONLY used to capture right-clicks and
+            report the cursor's bed point for the add-shape menu. It does NOT
+            handle selection (that is Canvas-level `onPointerMissed`), so it can
+            never steal a gizmo-handle drag. */}
+        <mesh position={[0, 0, -0.5]} onContextMenu={onBedContext}>
+          <planeGeometry args={[Math.max(width, depth) * 4, Math.max(width, depth) * 4]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+        <ViewportShapes onDraggingChanged={onGizmoDragging} />
+        <StockBlock visible={showStock} />
       {carveSim && revealIndex !== undefined && revealIndex >= 0 && (
         <CarvedStock
           segments={parsed.segments}
@@ -194,9 +294,23 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       {gizmo && (
         <PlacementGizmo mode={gizmoMode} onDraggingChanged={onGizmoDragging} />
       )}
+      {/* Live camera → 3D overlay (self-gated on the camera-calib store's `enabled`). */}
+      <CameraBedPlane />
+      <JobBox />
       <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.1} />
       <ViewController bounds={controlBounds} bedSize={bedSize} apiRef={apiRef} />
-    </Canvas>
+      </Canvas>
+      {menu && (
+        <ShapeContextMenu
+          x={menu.x}
+          y={menu.y}
+          containerW={stageSize.w}
+          containerH={stageSize.h}
+          onPick={pickShape}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </div>
   )
 })
 

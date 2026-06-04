@@ -1,4 +1,5 @@
-/* W8 Writing / Pen-plotter panel. Theme CSS vars only — no global edits. */
+/* W8 Writing / Pen-plotter panel. Theme CSS vars + shared density tokens only —
+   no global edits. Compact on desktop, comfortable on touch (container queries). */
 
 .wr-panel {
   display: flex;
@@ -18,25 +19,53 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 7px;
+  padding: var(--sp-3);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--sp-3);
   container-type: inline-size;
   container-name: writingpanel;
 }
 
 .wr-intro {
   margin: 0;
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: var(--fs-body);
+  line-height: 1.4;
   color: var(--fg-muted);
+}
+
+/* compact live-status line (stroke/line count, font load, missing glyphs) shown
+   under the intro now that the Send + Raw G-code cards are gone — everything is
+   live in the Visualizer and auto-synced to the Program tab. */
+.wr-status {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-label);
+  line-height: 1.4;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: var(--radius);
+}
+
+/* --- card grid: control/param cards tile into 2–3 columns at wide widths and
+   collapse to one column when the panel is narrow, killing bottom whitespace.
+   align-content:start keeps cards packed to the top instead of stretching. --- */
+.wr-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+/* Wide elements (text input, the Send bar, the raw-code table) span all cols. */
+.wr-span {
+  grid-column: 1 / -1;
 }
 
 /* --- bordered card sections --- */
 .wr-card {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg);
   display: flex;
   flex-direction: column;
@@ -44,19 +73,25 @@
 }
 .wr-card > h3 {
   margin: 0;
-  padding: 4px 8px;
-  font-size: 10px;
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-section);
   font-weight: 600;
   color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
 }
+.wr-card > h3.wr-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-1);
+}
 .wr-card-body {
-  padding: 7px;
+  padding: var(--pad-card-y) var(--pad-card-x);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 
@@ -70,20 +105,20 @@
   min-height: 0;
 }
 
-/* Fluid two-column field grid; auto-collapses to one column when the column
-   is too narrow for two ≥130px fields. minmax(min(100%,…)) keeps it from ever
-   overflowing horizontally even at ~270px. */
+/* Compact field grid: fields pack left tightly and wrap naturally instead of
+   stretching one-per-huge-column. */
 .wr-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
-  gap: 7px 10px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--field-min)), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
 }
 
 .wr-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 11.5px;
+  gap: 2px;
+  font-size: var(--fs-label);
   min-width: 0;
 }
 .wr-field > span:first-child {
@@ -94,45 +129,51 @@
 .wr-input {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 .wr-input input {
   flex: 1 1 auto;
   min-width: 0;
   width: 100%;
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
+  font-size: var(--fs-ctl);
 }
 .wr-input em {
   flex: 0 0 auto;
   font-style: normal;
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 
 .wr-field select,
 .wr-field input {
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
   min-width: 0;
   width: 100%;
+  font-size: var(--fs-ctl);
 }
 
 .wr-text {
   width: 100%;
   box-sizing: border-box;
-  min-height: 76px;
+  min-height: 72px;
   resize: vertical;
   font: inherit;
+  font-size: var(--fs-ctl);
   line-height: 1.4;
 }
 
+/* Font picker: compact toolbar (load = secondary, built-in = icon button). */
 .wr-font-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .wr-font-name {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--fg-muted);
   flex: 1 1 auto;
   min-width: 0;
@@ -148,14 +189,180 @@
   display: none;
 }
 
-.wr-btn {
-  min-height: 36px;
-  padding: 6px 14px;
-  font: inherit;
+/* Font picker dropdown grows to fill; the icon toolbar stays compact beside it. */
+.wr-font-pick {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.wr-font-pick select {
+  width: 100%;
+}
+
+/* Compact icon toolbar (upload / built-in / load-system-fonts) — AutoCAD-palette
+   feel, mirrors the dense icon buttons used in Glue/Soldering. Aligns to the
+   bottom of the labelled picker beside it. */
+.wr-font-tools {
+  display: inline-flex;
+  align-self: flex-end;
+  gap: var(--sp-1);
+}
+.wr-font-tools .wr-icon.icon-btn {
+  width: var(--icon-btn);
+  height: var(--ctl-h);
+  min-width: var(--icon-btn);
+  min-height: 0;
+  padding: 0;
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.wr-font-tools .wr-icon.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.wr-font-tools .wr-icon.icon-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.wr-font-tools .wr-icon.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.wr-font-tools .wr-icon .icon-btn-glyph {
+  font-size: 14px;
+}
+.wr-font-tools .wr-icon.is-busy {
+  opacity: 0.7;
+}
+
+/* ---- Stroke | Outline segmented control ---- */
+.wr-mode {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-input);
+}
+.wr-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 var(--sp-3);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wr-seg:last-child {
+  border-right: none;
+}
+.wr-seg:hover:not(:disabled):not(.is-active) {
+  color: var(--fg);
+}
+.wr-seg.is-active {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+.wr-seg:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.wr-seg-note {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  opacity: 0.8;
+}
+
+/* ---- B / I / U style toggles + size ---- */
+.wr-style-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+.wr-style-toggles {
+  display: inline-flex;
+  gap: var(--sp-1);
+}
+.wr-tgl {
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  min-width: var(--ctl-h);
+  min-height: 0;
+  padding: 0;
+  font-size: var(--fs-ctl);
+  line-height: 1;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.wr-tgl:hover:not(.is-active) {
+  border-color: var(--accent);
+}
+.wr-tgl:active {
+  transform: translateY(1px);
+}
+.wr-tgl.is-active {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.wr-tgl-b {
+  font-weight: 800;
+}
+.wr-tgl-i {
+  font-style: italic;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+.wr-tgl-u {
+  text-decoration: underline;
+}
+.wr-size {
+  flex: 0 0 auto;
+  width: 96px;
+}
+
+/* ---- icon-labelled Pen & Layout fields ---- */
+/* A small glyph stands in for the verbose label; the explainer lives in title=.
+   Reused for pen-up/down Z and feed (stacked: glyph above the input). */
+.wr-ic-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-ctl);
+  line-height: 1;
+  color: var(--fg-muted);
+}
+
+/* Alignment as an icon toggle group (⬅ ⬛ ➡) sitting beside its glyph. */
+.wr-align {
+  display: inline-flex;
+  gap: var(--sp-1);
+}
+.wr-align .wr-tgl {
+  font-size: 13px;
+}
+
+.wr-btn {
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 var(--sp-3);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .wr-btn:hover:not(:disabled) {
@@ -174,34 +381,55 @@
   border-color: var(--accent);
 }
 
+/* Send bar: primary action + compact regen icon button. */
 .wr-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .wr-play {
   flex: 1 1 auto;
-  min-width: 140px;
+  min-width: 160px;
+  height: var(--ctl-h-lg);
   font-weight: 600;
 }
-.wr-regen {
+/* shared .icon-btn base gives layout; panel chrome + compact size here */
+.wr-regen.icon-btn {
   flex: 0 0 auto;
-  min-width: 40px;
-  padding: 6px 10px;
+  width: var(--ctl-h-lg);
+  height: var(--ctl-h-lg);
+  min-width: var(--ctl-h-lg);
+  min-height: 0;
+  padding: 0;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.wr-regen.icon-btn:hover {
+  border-color: var(--accent);
+}
+.wr-regen.icon-btn:active {
+  transform: translateY(1px);
+}
+.wr-regen .icon-btn-glyph {
+  font-size: 15px;
 }
 
 /* collapsible toggle (Advanced + Raw G-code) */
 .wr-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   width: 100%;
-  min-height: 34px;
-  padding: 4px 8px;
-  font-size: 11px;
+  height: var(--ctl-h-lg);
+  min-height: 0;
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-section);
   font-weight: 600;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   text-align: left;
   color: var(--fg-muted);
@@ -235,13 +463,13 @@
 
 .wr-info {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.4;
   color: var(--fg-muted);
 }
 .wr-warn {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.4;
   color: var(--warn);
 }
@@ -253,48 +481,152 @@
   min-height: 120px;
   resize: vertical;
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-mono);
   line-height: 1.35;
   white-space: pre;
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
 }
 
-/* ---- narrow docked column (≤300px panel width): force a single field column
-   and let the Send button + font-row buttons span the full width so nothing is
-   squeezed. Driven by the PANEL's OWN width (container query), so it fires when
-   docked narrow on a wide window — not just at phone viewport widths. */
-@container writingpanel (max-width: 300px) {
+/* ---- narrow docked column (≤430px panel width): instead of one tall column,
+   the field grid keeps tiling into a compact masonry of tight fields (label
+   stacked above a ~3-char input) so 3–4 settings sit per row and the panel stays
+   short. Labels go small-uppercase to match the Soldering panel; controls grow
+   to the ≥36px touch target. Driven by the PANEL's OWN width (container query),
+   so it fires when docked narrow on a wide window — not just at phone viewport.
+   Mirrors .sp-pcard-grid / .sp-mini in soldering.css for a consistent look. */
+@container writingpanel (max-width: 430px) {
+  /* compact masonry: each field ~76px min, so 3–5 settings tile per row at a
+     narrow panel width instead of stacking into one tall column. */
   .wr-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+    gap: var(--sp-2);
+    align-items: start;
+  }
+  /* small uppercase labels, tight stacked input (Soldering .sp-mini look) */
+  .wr-field {
+    gap: 2px;
+  }
+  .wr-field > span:first-child {
+    font-size: var(--fs-label);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* unit suffix wraps tight under/beside the input; shrink it and let the input
+     keep a usable minimum so a long unit (mm/min) never crushes the field. */
+  .wr-input {
+    gap: 3px;
+  }
+  .wr-input input {
+    min-width: 36px;
+  }
+  .wr-input em {
+    font-size: 10px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .wr-input input,
+  .wr-field select,
+  .wr-field input,
+  .wr-btn,
+  .wr-toggle {
+    height: var(--ctl-h-touch);
+  }
+  .wr-play,
+  .wr-regen.icon-btn {
+    height: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
   }
   .wr-play {
     min-width: 100%;
   }
-  .wr-font-row .wr-btn {
+  .wr-regen.icon-btn {
+    width: var(--ctl-h-touch);
+    min-width: var(--ctl-h-touch);
+  }
+  /* font picker stacks full-width; the icon toolbar spreads its buttons evenly
+     beneath it at touch size. */
+  .wr-font-pick {
     flex: 1 1 100%;
+  }
+  .wr-font-tools {
+    flex: 1 1 100%;
+    align-self: stretch;
+    justify-content: flex-start;
+  }
+  .wr-font-tools .wr-icon.icon-btn {
+    flex: 1 1 0;
+    height: var(--ctl-h-touch);
+    min-width: var(--ctl-h-touch);
+  }
+  /* segmented mode control fills the row, each half growing equally */
+  .wr-mode {
+    display: flex;
+    align-self: stretch;
+    width: 100%;
+  }
+  .wr-seg {
+    flex: 1 1 0;
+    justify-content: center;
+    height: var(--ctl-h-touch);
+  }
+  /* B/I/U toggles + size keep on one row but grow to touch targets */
+  .wr-style-row {
+    gap: var(--sp-2);
+  }
+  .wr-tgl {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+    min-width: var(--ctl-h-touch);
+  }
+  .wr-size {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 76px;
   }
 }
 
-/* ---- mobile / touch (≤480px panel width): bigger tap targets. Also a
+/* ---- mobile / touch (≤768px): bigger tap targets everywhere. Also a
    container query — measures the panel, not the window. */
-@container writingpanel (max-width: 480px) {
+@container writingpanel (max-width: 768px) {
   .wr-btn,
   .wr-input input,
   .wr-field select,
   .wr-field input,
   .wr-toggle {
-    min-height: 40px;
+    height: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
+  }
+  .wr-play,
+  .wr-regen.icon-btn {
+    height: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
+  }
+  .wr-regen.icon-btn {
+    width: var(--ctl-h-touch);
+    min-width: var(--ctl-h-touch);
+  }
+  .wr-seg {
+    height: var(--ctl-h-touch);
+  }
+  .wr-tgl {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+    min-width: var(--ctl-h-touch);
   }
 }
 
 /* Fallback for browsers without container-query support: key off the window so
-   phone-width viewports still get the single-column + touch-friendly sizing. */
+   phone-width viewports still get single-column + touch-friendly sizing. */
 @supports not (container-type: inline-size) {
   @media (max-width: 768px) {
+    .wr-cards,
     .wr-grid {
       grid-template-columns: 1fr;
     }
@@ -306,7 +638,17 @@
     .wr-field select,
     .wr-field input,
     .wr-toggle {
-      min-height: 40px;
+      height: var(--ctl-h-touch);
+      min-height: var(--ctl-h-touch);
+    }
+    .wr-play,
+    .wr-regen.icon-btn {
+      height: var(--ctl-h-touch);
+      min-height: var(--ctl-h-touch);
+    }
+    .wr-regen.icon-btn {
+      width: var(--ctl-h-touch);
+      min-width: var(--ctl-h-touch);
     }
   }
 }

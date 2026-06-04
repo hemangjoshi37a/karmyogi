@@ -1,0 +1,18 @@
+{
+  "_comment": "Bundled font library for the Writing / pen-plotter tab. The built-in Hershey single-stroke font is added automatically by the app (id 'builtin') and is NOT listed here. To add a font: drop the .ttf/.otf (outline) or single-stroke .json (stroke) file into this public/fonts/ folder and add an entry to the 'fonts' array below. The app fetches each 'file' relative to /fonts/ at runtime; no rebuild of the core is needed.",
+  "_kinds": "kind = 'outline' for TrueType/OpenType .ttf/.otf (G-code follows glyph contours); kind = 'stroke' for single-stroke JSON fonts from the handwriting pipeline (G-code follows centerlines).",
+  "fonts": [
+    {
+      "id": "inconsolata",
+      "name": "Inconsolata (mono)",
+      "file": "Inconsolata-Regular.ttf",
+      "kind": "outline"
+    },
+    {
+      "id": "pacifico",
+      "name": "Pacifico (script)",
+      "file": "Pacifico-Regular.ttf",
+      "kind": "outline"
+    }
+  ]
+}

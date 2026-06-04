@@ -13,6 +13,7 @@ export type ControllerKind =
   | 'grblhal'
   | 'marlin'
   | 'smoothieware'
+  | 'masso'
   | 'ruida'
   | 'ezcad'
   | 'fscut'
@@ -43,9 +44,60 @@ export type Transport = 'webserial'
  *  - `grblhal`  — GRBL-compatible `$`-settings, an extended superset (same editor).
  *  - `marlin`   — settings live in EEPROM, managed via M-codes (M503 report, M500 save).
  *  - `smoothie` — settings live in the `config` file (`config-get` / `config-set`).
+ *  - `masso`    — settings live entirely on the controller's own touchscreen; the
+ *                 host has no editable-settings channel at all (offline/export target).
  *  - `none`     — no host-editable machine settings over this connection (lasers).
  */
-export type SettingsModel = 'grbl' | 'grblhal' | 'marlin' | 'smoothie' | 'none'
+export type SettingsModel = 'grbl' | 'grblhal' | 'marlin' | 'smoothie' | 'masso' | 'none'
+
+/**
+ * How a controller reports live machine status (state + position) so the serial
+ * layer stops assuming everyone speaks GRBL's `<...>` realtime report.
+ *  - `grbl`   — `?` realtime byte → `<Idle|MPos:…>` report (GRBL family).
+ *  - `marlin` — no GRBL `?`; poll `M114` for position (and `M105` for temps); the
+ *               reply is an `ok`-terminated `X:.. Y:.. Z:..` line, not `<...>`.
+ *  - `none`   — no host status channel (proprietary controllers / Masso).
+ */
+export type StatusDialect = 'grbl' | 'marlin' | 'none'
+
+/**
+ * The concrete protocol differences the serial transport branches on, captured as
+ * DATA so the GRBL path stays the default and other firmwares opt in to deviations
+ * via a profile's `dialect`. Everything is optional with GRBL-shaped defaults
+ * (see `resolveDialect` in src/serial/dialect.ts) so existing profiles are unchanged.
+ */
+export interface Dialect {
+  /** How live status/position is queried + parsed. Defaults to `grbl`. */
+  status?: StatusDialect
+  /**
+   * Does the controller honour GRBL single-byte realtime commands (`?`, `!`, `~`,
+   * `0x18`, overrides)? GRBL/grblHAL/FluidNC: true. Marlin/Smoothie: false — they
+   * have no realtime byte channel, so we must NOT spray those bytes at them.
+   * Defaults to true.
+   */
+  realtimeBytes?: boolean
+  /**
+   * Line terminator for streamed commands. GRBL is tolerant of `\n`; Marlin and
+   * Smoothie are happiest with `\n` too, but we keep this explicit. Defaults to `\n`.
+   */
+  lineEnding?: '\n' | '\r\n'
+  /**
+   * Does it support GRBL `$J=` jog? GRBL family: true. Others: false → we fall back
+   * to a relative `G91 G0/G1` move (no cancellable jog). Defaults to true.
+   */
+  jogCommand?: 'grbl-$J' | 'g91-move'
+  /**
+   * Does the firmware expose host-pushed/queryable GRBL `$`-settings (`$$`)? Drives
+   * whether the controller auto-syncs settings on connect. Defaults to true.
+   */
+  dollarSettings?: boolean
+  /**
+   * Soft-reset/stop strategy. GRBL: a `0x18` realtime byte. Marlin/Smoothie: emit an
+   * `M112` emergency-stop line (no realtime reset byte). `none`: nothing safe to send.
+   * Defaults to `grbl-0x18`.
+   */
+  reset?: 'grbl-0x18' | 'marlin-m112' | 'none'
+}
 
 /**
  * Capability flags the rest of the app branches on instead of hard-coding GRBL.
@@ -57,6 +109,17 @@ export interface Capabilities {
   hasLaser: boolean
   hasHoming: boolean
   hasProbe: boolean
+  /**
+   * Firmware extras beyond the GRBL baseline, surfaced so the UI can advertise
+   * them honestly. All optional; absent === not advertised. e.g. grblHAL/FluidNC
+   * support more realtime overrides, FluidNC has WiFi/WebSocket + a YAML config,
+   * Marlin reports tool/bed temperatures via `M105`.
+   */
+  extendedOverrides?: boolean
+  /** Has a WebSocket/network endpoint (FluidNC, ESP3D, grblHAL-ws). */
+  network?: boolean
+  /** Reports tool/bed temperatures (Marlin / RepRap printers via `M105`). */
+  temperature?: boolean
 }
 
 /**
@@ -83,6 +146,11 @@ export interface ControllerProfile {
    * config-file view vs. "no settings over this connection").
    */
   settingsModel: SettingsModel
+  /**
+   * Protocol deviations from the GRBL baseline the serial transport branches on.
+   * Omit entirely for pure GRBL behaviour (the default). See `Dialect`.
+   */
+  dialect?: Dialect
   /** Short note shown in the UI / tooltip. */
   notes: string
 }

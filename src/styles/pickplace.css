@@ -10,7 +10,7 @@
 }
 
 /* The only scroll container. Vertical only — never horizontal. It is also a
-   size-query container so the op table can reflow based on the PANEL width
+   size-query container so the cards + op table reflow based on the PANEL width
    (not the window) — the panel is often a narrow docked column on a wide
    screen, where a window media query would never fire. */
 .pp-scroll {
@@ -18,28 +18,41 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
+  padding: var(--sp-3);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-3);
   container-type: inline-size;
   container-name: ppscroll;
 }
 
 .pp-intro {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: var(--fs-body);
+  line-height: 1.4;
   color: var(--fg-muted);
 }
 .pp-intro b {
   color: var(--fg);
 }
 
+/* --- card grid: control/param cards tile into 2–3 columns at wide container
+   widths and collapse to one column when narrow. Wide cards (ops table, bed
+   preview, send bar) span every column. --- */
+.pp-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+.pp-card-wide {
+  grid-column: 1 / -1;
+}
+
 /* --- bordered card sections --- */
 .pp-card {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg);
   display: flex;
   flex-direction: column;
@@ -47,8 +60,8 @@
 }
 .pp-card > h3 {
   margin: 0;
-  padding: 5px 8px;
-  font-size: 10px;
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-section);
   font-weight: 600;
   color: var(--fg-muted);
   text-transform: uppercase;
@@ -56,10 +69,10 @@
   border-bottom: 1px solid var(--border);
 }
 .pp-card-body {
-  padding: 8px;
+  padding: var(--pad-card-y) var(--pad-card-x);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 
@@ -73,18 +86,18 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 .pp-row button {
-  min-height: 36px;
+  min-height: var(--ctl-h);
 }
 .pp-spacer {
   flex: 1 1 auto;
 }
 .pp-meta {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-variant-numeric: tabular-nums;
 }
 .pp-meta b {
@@ -96,32 +109,55 @@
 .pp-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: var(--sp-2);
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 .pp-head select {
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
 }
 
-/* --- fluid field grid; collapses to one column when narrow --- */
+/* --- op tools row: compact buttons; the two "set from machine" buttons pack
+   to the right and may wrap, never stretching full width. --- */
+.pp-op-tools {
+  margin-top: 2px;
+}
+.pp-add,
+.pp-clear {
+  min-height: var(--ctl-h);
+}
+.pp-set {
+  min-height: var(--ctl-h);
+  font-size: var(--fs-ctl);
+}
+.pp-set:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- compact field grid: fields pack left tightly and wrap naturally, never
+   stretching one-per-huge-column across the card. --- */
 .pp-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
-  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
 }
 .pp-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 11px;
+  gap: 2px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   min-width: 0;
 }
 .pp-field input,
 .pp-field select {
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
 }
 
@@ -130,14 +166,14 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--sp-3);
+  font-size: var(--fs-body);
   color: var(--fg-muted);
 }
 .pp-check input {
   width: auto;
-  min-height: 20px;
-  min-width: 20px;
+  min-height: 18px;
+  min-width: 18px;
 }
 
 /* --- op table --- */
@@ -153,16 +189,16 @@
 .pp-table th {
   background: var(--bg-elev);
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--fs-label);
   text-transform: uppercase;
   letter-spacing: 0.3px;
   text-align: left;
-  padding: 6px 4px;
+  padding: var(--sp-1) var(--sp-1);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 .pp-table td {
-  padding: 3px 4px;
+  padding: 3px var(--sp-1);
   border-bottom: 1px solid var(--border);
 }
 .pp-table tr.pp-row-selected td {
@@ -176,53 +212,58 @@
 .pp-table input {
   width: 100%;
   min-width: 0;
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
   box-sizing: border-box;
 }
 .pp-empty {
-  padding: 16px 8px;
+  padding: var(--sp-4) var(--sp-3);
   text-align: center;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 
 .pp-actions-col {
-  width: 92px;
+  width: 96px;
 }
 .pp-actions {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-1);
   white-space: nowrap;
   justify-content: flex-end;
 }
-.pp-actions button {
-  min-width: 28px;
-  min-height: 36px;
-  padding: 2px 4px;
+/* Compact icon buttons (shared .icon-btn chrome via IconButton). */
+.pp-row-btn.icon-btn {
+  min-width: var(--icon-btn);
+  min-height: var(--icon-btn);
+  padding: 0;
 }
-.pp-actions .pp-del:not(:disabled) {
+.pp-row-btn .icon-btn-glyph {
+  font-size: 13px;
+}
+.pp-row-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pp-del.icon-btn:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);
 }
-.pp-actions .pp-del:not(:disabled):hover {
+.pp-del.icon-btn:not(:disabled):hover {
   background: var(--danger);
   color: var(--bg);
 }
 
-.pp-op-tools {
-  margin-top: 2px;
-}
-
 /* --- 2D bed preview --- */
 .pp-preview2d-body {
-  padding: 8px;
+  padding: var(--sp-2);
 }
 .pp-preview2d {
   width: 100%;
-  height: 160px;
+  height: 150px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
 }
 .pp-bed {
   fill: transparent;
@@ -283,10 +324,10 @@
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 36px;
-  padding: 5px 8px;
-  font-size: 10px;
+  gap: var(--sp-2);
+  min-height: var(--ctl-h);
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-section);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -312,7 +353,7 @@
 /* --- hint --- */
 .pp-hint {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-label);
   line-height: 1.45;
   color: var(--fg-muted);
 }
@@ -322,24 +363,24 @@
 
 /* --- generate / send --- */
 .pp-generate {
-  gap: 8px;
+  gap: var(--sp-3);
 }
 .pp-play {
   flex: 1 1 auto;
-  min-height: 40px;
+  min-height: var(--ctl-h-lg);
   font-weight: 600;
 }
 
 /* --- raw G-code (collapsible) --- */
 .pp-raw-toggle {
   align-self: flex-start;
-  min-height: 32px;
-  padding: 4px 8px;
-  font-size: 11px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .pp-raw-toggle:hover {
@@ -348,22 +389,30 @@
 }
 .pp-preview {
   margin: 0;
-  padding: 6px 8px;
-  max-height: 240px;
+  padding: var(--sp-2) var(--sp-3);
+  max-height: 220px;
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-mono);
   line-height: 1.45;
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   white-space: pre;
 }
 
-/* --- narrow panel: reflow the op table into stacked label/value rows ---
-   Container query on .pp-scroll so this fires whenever the PANEL is narrow
-   (docked column or mobile), independent of the window width. --- */
+/* --- narrow panel (≤560px): collapse the card grid to a single column ---
+   Driven by the PANEL's own width (named container query) so it reflows when
+   docked into a narrow column on a wide window, not only at phone viewport. */
+@container ppscroll (max-width: 560px) {
+  .pp-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- narrow panel (≤400px): reflow the op table into stacked label/value rows
+   and grow controls back toward touch targets. --- */
 @container ppscroll (max-width: 400px) {
   .pp-table,
   .pp-table thead,
@@ -382,9 +431,9 @@
   }
   .pp-table tr {
     border: 1px solid var(--border);
-    border-radius: 6px;
-    margin-bottom: 8px;
-    padding: 4px 6px;
+    border-radius: var(--radius);
+    margin-bottom: var(--sp-3);
+    padding: var(--sp-1) var(--sp-2);
     background: var(--bg-elev);
   }
   .pp-table tr.pp-row-selected {
@@ -396,14 +445,14 @@
   .pp-table td {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--sp-3);
     border-bottom: none;
     padding: 3px 0;
   }
   .pp-table td[data-label]::before {
     content: attr(data-label);
     flex: 0 0 64px;
-    font-size: 11px;
+    font-size: var(--fs-label);
     color: var(--fg-muted);
     text-transform: uppercase;
     letter-spacing: 0.3px;
@@ -411,24 +460,77 @@
   .pp-idx {
     width: 100%;
     text-align: left;
-    font-size: 11px;
+    font-size: var(--fs-label);
   }
   .pp-idx::before {
     content: 'Op ';
   }
   .pp-actions {
     justify-content: flex-start;
-    padding-top: 4px;
-  }
-  .pp-actions button {
-    flex: 1 1 auto;
-    min-height: 40px;
+    padding-top: var(--sp-1);
   }
   .pp-rot-table {
     max-width: none;
   }
-  .pp-play,
-  .pp-raw-toggle {
+}
+
+/* --- very narrow column (≤360px) and mobile: grow controls to ≥36px touch
+   targets and let fields/inputs breathe (compact on desktop, comfortable on
+   touch). --- */
+@container ppscroll (max-width: 360px) {
+  .pp-head select,
+  .pp-add,
+  .pp-clear,
+  .pp-set,
+  .pp-field input,
+  .pp-field select,
+  .pp-table input,
+  .pp-raw-toggle,
+  .pp-toggle {
+    min-height: var(--ctl-h-touch);
+    height: auto;
+  }
+  .pp-row-btn.icon-btn {
+    min-width: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
+  }
+  .pp-row-btn,
+  .pp-set {
+    flex: 1 1 auto;
+  }
+  .pp-play {
     min-height: 44px;
+  }
+}
+
+/* Fallback for browsers without container-query support: key off the window so
+   phone-width viewports still collapse the grid and get touch-friendly sizing.
+   (Chromium — the only supported target — has container queries.) */
+@supports not (container-type: inline-size) {
+  @media (max-width: 560px) {
+    .pp-cards {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 768px) {
+    .pp-head select,
+    .pp-add,
+    .pp-clear,
+    .pp-set,
+    .pp-field input,
+    .pp-field select,
+    .pp-table input,
+    .pp-raw-toggle,
+    .pp-toggle {
+      min-height: var(--ctl-h-touch);
+      height: auto;
+    }
+    .pp-row-btn.icon-btn {
+      min-width: var(--ctl-h-touch);
+      min-height: var(--ctl-h-touch);
+    }
+    .pp-play {
+      min-height: 44px;
+    }
   }
 }

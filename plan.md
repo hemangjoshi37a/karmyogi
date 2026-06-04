@@ -322,13 +322,196 @@ be **slow, bounded, and confirm-gated**; abort on lost tracking.
   G-code emitter + bed-fit check + the simulation preview; Z depth never trusts the
   camera alone (probe-backed). Bounded, confirm-gated jog for any auto-move.
 
-### 7.8 Why it's parked
+### 7.8 Why the FULL auto-setup is parked
 
-It is impossible to verify in the required **closed loop** without a real USB camera
-on the machine (marker detection, lens distortion, lighting, tool tracking are all
-empirical). Implement when the camera is available; until then this spec is the
-contract. Note: the format work it complements — robust DXF (incl. **SPLINE/NURBS +
-ELLIPSE**) import — is already done, so a vision-placed drawing will carve.
+The full one-button auto-setup-and-carve loop is impossible to verify without a real
+USB camera on the machine (lens distortion, lighting, tool tracking, material ML are
+all empirical). It stays parked. **But one slice does NOT need the machine and is
+being built now → 7.9.**
+
+### 7.9 ACTIVE — Live camera → calibrated 3D bed/job in the viewport ("does it fit?")
+
+> **Status: building now (user request).** A self-contained, backend-free slice of
+> W-Vision: point **ordinary webcams** at the bed and render the **real bed plane (and
+> the job sitting on it) in the 3D viewport**, correctly placed in machine-mm — so the
+> operator can drop the design onto the job and *see whether it fits* before cutting.
+> Verifiable in the closed loop with a laptop webcam (or a synthetic/mock frame), so it
+> ships independently of the CNC hardware.
+>
+> **Locked build scope (decided 2026-06):**
+> - **Calibration:** machine-motion (recommended) · QR-auto · manual-corner — all feed
+>   ONE image⇄bed-mm homography (see the ordered list below).
+> - **ONE camera is sufficient for the core goal** — live bed + job **footprint** + the
+>   **fit check** all come from the single bed-plane homography. (A homography only
+>   relates the Z=0 plane, so one view can't recover stock *height* — that's the only
+>   thing a single camera lacks.)
+> - **Height (Z):** default to the **Z-probe** (already built; most accurate, and cutting
+>   depth must be probe-backed anyway — vision is never trusted for cutting Z). Optional
+>   alternatives, all giving a *preview* only: **controlled-motion stereo with the same
+>   one camera** (gantry-mounted or bed-moving → known baselines → triangulate the top),
+>   a top-face marker, or operator entry. A **second static camera + visual hull** is
+>   just ONE optional way to get a live height preview — NOT required.
+> - **Live webcam video projected onto the bed plane** (rectified through the camera's
+>   homography) with an **opacity slider** — the photographic "live 3D from camera"
+>   look, orbitable, with the design/toolpath overlaid on top + green/red fit check.
+> - Build treats **camera 1 as primary** (footprint + fit) and **camera 2 as optional**
+>   (visual-hull height preview); the probe path is the recommended height source.
+
+**Metric scale needs a known-size reference → QR is the recommended calibration; pure
+markerless is non-metric.** (Decided with the user 2026-06.) You cannot recover true
+real-world millimetres from video alone — a fully reference-free reconstruction is only
+known up to an unknown scale, which is useless for CNC. So *some* known real dimension
+must anchor the scale. The QR is the best anchor (exact printed size, auto-detected
+sub-pixel corners, carries its own ID + bed position, doesn't need the whole bed in
+frame, zero manual clicking). The bed rectangle can substitute **only if its true size
+is known and its corners are visible/clickable**. Pure markerless (no known dimension)
+is still useful for a *non-metric* flat-plane video view, just not for 1:1 fit checks.
+
+**Why it works with no backend (just Vite + the browser):**
+- **Geometry = a planar homography.** The bed is a plane (Z=0). A camera viewing a
+  plane maps image⇄bed-mm by one **3×3 homography H** (8 DOF), solved from **≥4 points
+  whose bed-mm position is known** via the normalized **DLT** (pure-TS, no SVD lib /
+  OpenCV). Where the ≥4 known points come from, in **recommended order**:
+  1. **Machine-motion self-calibration (BEST — recommended; user idea, no print needed).**
+     The machine's own GRBL motion IS a precise ruler. The tool's pixel at ≥4 known
+     machine-XY positions gives image↔**machine-mm** correspondences → `solveHomography`.
+     Because the reference points are machine coordinates by construction, H is **natively
+     1:1 in the machine frame** — this also eliminates the "tie the calibration frame to
+     machine zero" step the QR/manual methods need. Two sub-modes:
+     - **AUTO (the DEFAULT — one button, fully hands-off).** Press *Auto-calibrate*: the
+       app jogs the tool (`$J=G90` absolute, cancellable) to a small bounded grid around
+       the current position (e.g. 3×3 = 9 points within ±20 mm), waits for each move to
+       settle, and snaps a frame at each. The tool sits at a different pixel in every
+       frame while the bed is static, so the **per-pixel median of the frames = the
+       background**; each frame minus background isolates the **tool blob → its centroid =
+       the tool pixel** for that frame's known machine XY. Solve from the auto-found pairs.
+       No clicking, no markers. Safety: XY-only (never Z), strictly bounded to ±spread,
+       confirm-gated, abortable (→ `jogCancel`), per-move timeout; needs the machine
+       connected + not in Alarm.
+     - **MANUAL (fallback).** Jog to ≥4 spots yourself and click the tool tip in the frame
+       at each. For when auto-detection struggles (poor contrast/lighting).
+     Caveat (both): keep the tool at a consistent Z near the bed surface (tool-tip height
+     adds parallax otherwise).
+  2. **QR auto (metric, offline):** the shipped `KMYG1|TARGET|…|X=|Y=|S=` codes (§7.2)
+     have an **exact known printed size + position**. The native `BarcodeDetector` API
+     (Chromium — already required for Web Serial) returns each code's payload **and** 4
+     `cornerPoints` in one call → H, zero clicks. Frame = the sheet's; tie to machine
+     zero by placing the sheet's BL corner at the origin (its arrow shows X→/Y↑).
+  3. **Markerless bed-corner (offline, metric only if bed size known):** operator clicks
+     the 4 bed corners once (or auto-detect the largest quadrilateral); uses the known
+     `bed` store size as the scale anchor → H.
+  4. **Pure markerless (non-metric):** flat-plane video view with no scale anchor —
+     visual only; fit checks disabled until (1)–(3) supply a real dimension.
+- **Two QR roles — bed + stock (recommended minimal setup, user request):**
+  1. **Bed QR** (`KMYG1|TARGET`, known size + known bed position) → solves each camera's
+     image⇄bed-mm homography H = the world frame.
+  2. **Stock QR** (`KMYG1|STOCK`, known size, stuck on the workpiece, e.g. a corner at a
+     known offset) → its detected corners mapped through H give the stock's **origin,
+     orientation and footprint in bed-mm directly** (its known printed size is an
+     independent scale check too). This is the easy, robust way to "know things" about
+     the job — no background-subtraction guesswork for the footprint.
+  With both QRs, one frame per camera fixes the whole scene: bed plane + where the job
+  sits on it, in real millimetres.
+- **Job footprint (where the stock sits):** from the **stock QR** (recommended) — its
+  corners through H give the footprint + pose in bed-mm directly. Markerless fallback:
+  capture an **empty-bed reference frame**, then **background-subtract** the live frame
+  (per-pixel diff + threshold + largest contour) → silhouette → outline mapped to mm
+  through H. Either way the footprint is in real bed-mm.
+- **Markerless job height / coarse 3D (the multi-camera part):** with **two** cameras
+  each calibrated to the same bed plane, intersect the two job silhouettes in 3D —
+  classic **shape-from-silhouette / visual hull** (carve a coarse voxel/height field
+  that projects inside both silhouettes) → a job **box with real height**, or just the
+  top-surface height. MVP can also accept a typed thickness; the visual hull is the
+  markerless upgrade. (Optional later: decompose H + assumed intrinsics → 6-DoF camera
+  pose to draw each camera's frustum in the scene.)
+- **The one honest constraint — absolute scale.** Metric (mm) 3D needs *some* known
+  real dimension. We get it for free from the **known bed size**, so no QR is needed —
+  but a fully reference-free reconstruction can only be recovered up to an unknown
+  scale, which is useless for CNC. So: markerless ✅, but *dimension-less* ✗ — the bed
+  (or any one known length) is the reference, and QR is just an automated way to supply
+  it. Full SfM/MVS of arbitrary geometry is deliberately out of scope (heavy, fiddly,
+  not real-time in-browser) — the bed-plane homography + silhouette/visual-hull gives
+  ~90% of the value simply and verifiably.
+
+**What renders in the 3D viewport:**
+- **Bed plane** at Z=0 covering the machine work area, **textured with the live camera
+  frame rectified through H** (a small fragment shader samples the `<video>` texture by
+  H so the real bed appears undistorted and aligned to mm) — with an opacity slider.
+- **Job plane / box**: the stock footprint as a rectangle on the bed (from detected
+  `KMYG1|STOCK` corner stickers, OR a rectangle the user drags over the job in the
+  camera image → mapped to mm via H, OR typed W×D×thickness). Rendered as a plane (or a
+  box if a thickness is given).
+- **Fit check**: the loaded program/design is already in bed-mm, so compare its XY
+  bounding box (and the placement gizmo) against the job rectangle → **green = fits,
+  red = overhangs**, with the overhang amount. Reuses the existing `PlacementGizmo` +
+  `programXYBounds()`.
+- Two cameras: each is independently calibrated to the **same** bed plane (own H); the
+  viewport can blend/choose feeds and cross-check agreement. Data model is `cameras[]`.
+
+**Entry points (both, per the request):**
+- **Camera panel** — a new **"Bed tracking / calibration"** card: pick camera(s), live
+  detection status + quality (markers seen, reprojection error), "Calibrate" (lock H),
+  set/auto-detect the job rectangle, manual-corner fallback. Builds on the existing
+  `getUserMedia` feed already in `CameraPanel.tsx`.
+- **3D viewport** — a toolbar **toggle "Show live camera 3D"** (📷) next to the existing
+  Show-stock / sim toggles, **persisted across page refresh** (localStorage via the
+  app's `usePersistentState` / zustand-`persist` pattern, key `karmyogi.viewer.cameraOverlay`;
+  full calibration under `karmyogi.camera`). Choice + calibration survive reload.
+
+**Owned files (disjoint, mostly NEW — parallel-safe):**
+- `src/core/cameraCalib.ts` — **pure math, no React/three**: `solveHomography4` (DLT),
+  `applyH` / `invertH`, multi-point least-squares + reprojection error,
+  `fitCheck(bbox, jobRect)`, background-subtraction silhouette → contour → bed-mm
+  outline, two-view **visual-hull** height estimate, and optional marker-payload parsing
+  (`KMYG1|…`). Takes raw `ImageData`/point arrays in, returns geometry out (no DOM).
+  Mirrors the Qt-core "pure module" rule.
+- `src/store/cameraCalib.ts` — zustand **`persist`** store: `cameras[]` (deviceId, H,
+  quality), `jobRect`, `overlayOpacity`, `enabled`; exported from `src/store/index.ts`.
+- `src/viewer/CameraBedPlane.tsx` (+ optional `JobPlane.tsx`) — three.js plane(s) reading
+  the store; H-sampling shader for the live texture.
+- `src/panels/CameraPanel.tsx` + `src/styles/camera.css` — the calibration/tracking UI
+  (this panel is ALSO where the §-wide UI-polish pass for Camera lands, to avoid two
+  agents touching one file).
+- **Orchestrator-integrated shared wiring** (not parallel): `src/viewer/Viewer.tsx`
+  (mount the overlay), `src/panels/VisualizerPanel.tsx` (the persisted toggle button),
+  `src/store/index.ts` (export), i18n keys.
+
+**Honest accuracy caveats:** a single planar homography is exact for the bed *plane* and
+nails XY-footprint fit. True job **height/3D solid** needs user-entered thickness, a
+top-of-stock marker, or two-camera stereo (enhancement). Wide-angle webcam **lens
+distortion** adds error; a one-time intrinsics calibration (§7.3.1) can be added later.
+Cutting still never trusts vision for Z — depth stays probe-backed (§7.3 step 8).
+
+---
+
+### 7.10 ACTIVE — Digital twin of the machine in the 3D viewport (user request)
+
+> Goal: show the operator's ACTUAL machine (frame + moving bed + moving head) in
+> the 3D viewport, animated live by the GRBL position — a true digital twin the
+> design/toolpath sits inside. Built on the camera feed + the kinematics calib.
+
+**Honest approach (realistic in-browser, no backend):**
+- **NOT** automatic photogrammetry (photos → dense mesh). Full SfM/MVS is heavy,
+  needs many well-distributed photos, and won't run client-side. Don't promise it.
+- **YES — a parametric BOX-KINEMATIC twin.** The machine is mostly rectangular, so
+  model it as a small rig of boxes (base frame, bed/table, Y carriage, X gantry, Z
+  head, spindle) and **animate it from the live `wpos` + the kinematics map**: on
+  this user's machine the **bed box translates in Y**, the **head box in X/Z** (per
+  §7.9 auto-detect). It moves in real time with the real machine. This IS the twin;
+  no photogrammetry needed.
+- **Photos set proportions + skin.** The user streams **all-around photos** via the
+  camera→server bridge; the dev/agent reads them to set each box's real dimensions
+  and optionally project them as textures so the twin looks like the actual machine.
+
+**Three inputs:** (1) all-around photos (bridge) → proportions + skin; (2) bed
+movement (§7.9 auto-cal, Y→bed); (3) head movement (§7.9 auto-cal, X/Z→head).
+
+**Owned files (when built):** `src/viewer/MachineModel.tsx` (parametric box rig,
+reads live `useMachine.wpos` + an axis-map store) + `src/store/machineModel.ts`
+(box dimensions + axis→part mapping, persisted). No new heavy deps.
+
+**Sequencing:** camera feed → kinematics auto-cal (bed vs head) → box-kinematic
+twin animated by live position, proportions/skin from the photos.
 
 ---
 

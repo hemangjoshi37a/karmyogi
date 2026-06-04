@@ -1,3 +1,5 @@
+# karmyogi — https://karmyogi.hjlabs.in/
+# Allow all crawlers full access (JS/CSS must remain crawlable for rendering).
 User-agent: *
 Allow: /
 

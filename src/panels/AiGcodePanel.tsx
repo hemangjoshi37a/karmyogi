@@ -18,6 +18,7 @@ import {
 import { useBed } from '../store/bed'
 import { useProgram } from '../store'
 import { useT } from '../i18n'
+import { IconButton } from '../components/IconButton'
 import '../styles/ai.css'
 
 /**
@@ -278,55 +279,63 @@ export function AiGcodePanel() {
         )}
       </p>
 
-      {/* Provider toggle. */}
-      <div className="ai-seg" role="tablist" aria-label={t('ai.providerAria', 'AI provider')}>
-        {(['openai', 'anthropic'] as Provider[]).map((p) => (
-          <button
-            key={p}
-            type="button"
-            role="tab"
-            aria-selected={provider === p}
-            className="ai-seg-btn"
-            data-on={provider === p ? 'true' : 'false'}
-            onClick={() => switchProvider(p)}
-            title={t('ai.provider.tip', 'Use {name}', { name: PROVIDER_INFO[p].label })}
-          >
-            {PROVIDER_INFO[p].label}
-          </button>
-        ))}
-      </div>
-
-      {/* Auth-mode toggle: API key (recommended) vs session cookie (advanced). */}
-      <div className="ai-auth-mode-group">
-        <label className="ai-label ai-auth-label">
-          {t('ai.auth.methodLabel', 'Authentication Method')}
-        </label>
-        <div className="ai-seg ai-seg-sub" role="tablist" aria-label={t('ai.authAria', 'Authentication method')}>
-          {(['key', 'session'] as AuthMode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              role="tab"
-              aria-selected={authMode === m}
-              className="ai-seg-btn"
-              data-on={authMode === m ? 'true' : 'false'}
-              onClick={() => {
-                setAuthMode(m)
-                setError(null)
-              }}
-              title={
-                m === 'key'
-                  ? t('ai.auth.keyTip', 'Use your own API key (recommended)')
-                  : t('ai.auth.sessionTip', 'Paste a logged-in session cookie via your own relay (advanced)')
-              }
-            >
-              {m === 'key'
-                ? t('ai.auth.key', 'API key')
-                : t('ai.auth.session', 'Login session')}
-            </button>
-          ))}
+      {/* Setup + chat tile into a responsive grid so they fill the panel width
+          and collapse to one column when docked narrow / on mobile. */}
+      <div className="ai-cards">
+      {/* Connection: provider + auth-mode toggles grouped in one compact card. */}
+      <section className="ai-card">
+        <div className="ai-field-block">
+          <span className="ai-label">{t('ai.providerAria', 'AI provider')}</span>
+          <div className="ai-seg" role="tablist" aria-label={t('ai.providerAria', 'AI provider')}>
+            {(['openai', 'anthropic'] as Provider[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                role="tab"
+                aria-selected={provider === p}
+                className="ai-seg-btn"
+                data-on={provider === p ? 'true' : 'false'}
+                onClick={() => switchProvider(p)}
+                title={t('ai.provider.tip', 'Use {name}', { name: PROVIDER_INFO[p].label })}
+              >
+                {PROVIDER_INFO[p].label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+
+        {/* Auth-mode toggle: API key (recommended) vs session cookie (advanced). */}
+        <div className="ai-field-block">
+          <label className="ai-label ai-auth-label">
+            {t('ai.auth.methodLabel', 'Authentication Method')}
+          </label>
+          <div className="ai-seg ai-seg-sub" role="tablist" aria-label={t('ai.authAria', 'Authentication method')}>
+            {(['key', 'session'] as AuthMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={authMode === m}
+                className="ai-seg-btn"
+                data-on={authMode === m ? 'true' : 'false'}
+                onClick={() => {
+                  setAuthMode(m)
+                  setError(null)
+                }}
+                title={
+                  m === 'key'
+                    ? t('ai.auth.keyTip', 'Use your own API key (recommended)')
+                    : t('ai.auth.sessionTip', 'Paste a logged-in session cookie via your own relay (advanced)')
+                }
+              >
+                {m === 'key'
+                  ? t('ai.auth.key', 'API key')
+                  : t('ai.auth.session', 'Login session')}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {authMode === 'key' ? (
         /* API key — masked. */
@@ -346,27 +355,23 @@ export function AiGcodePanel() {
               onChange={(e) => setApiKey(provider, e.target.value)}
               aria-label={t('ai.key.aria', '{provider} API key', { provider: info.label })}
             />
-            <button
+            <IconButton
               type="button"
-              className="ai-btn ai-mini"
+              className="ai-icon-btn"
+              icon={showKey ? '🙈' : '👁'}
               onClick={() => setShowKey((v) => !v)}
-              title={showKey ? t('ai.key.hide', 'Hide key') : t('ai.key.show', 'Show key')}
-              aria-label={showKey ? t('ai.key.hide', 'Hide key') : t('ai.key.show', 'Show key')}
-            >
-              {showKey ? '🙈' : '👁'}
-            </button>
+              label={showKey ? t('ai.key.hide', 'Hide key') : t('ai.key.show', 'Show key')}
+            />
             {hasKey && (
-              <button
+              <IconButton
                 type="button"
-                className="ai-btn ai-mini"
+                className="ai-icon-btn ai-icon-danger"
+                icon="✕"
                 onClick={() => clearCredentials(provider)}
-                title={t('ai.creds.clearTip', 'Remove the stored {provider} key from this browser', {
+                label={t('ai.creds.clearTip', 'Remove the stored {provider} key from this browser', {
                   provider: info.label,
                 })}
-                aria-label={t('ai.creds.clear', 'Clear stored credentials')}
-              >
-                ✕
-              </button>
+              />
             )}
           </div>
           <p className="ai-note">
@@ -398,7 +403,7 @@ export function AiGcodePanel() {
           {/* The one easy action: paste, or import a saved cookie file. */}
           <div className="ai-row">
             <a
-              className="ai-btn ai-grow ai-bigbtn"
+              className="ai-btn ai-grow"
               href={`https://${info.site}/`}
               target="_blank"
               rel="noreferrer noopener"
@@ -408,7 +413,7 @@ export function AiGcodePanel() {
             </a>
             <button
               type="button"
-              className="ai-btn ai-grow ai-bigbtn"
+              className="ai-btn ai-grow"
               onClick={() => cookieFileRef.current?.click()}
               title={t(
                 'ai.session.importTip',
@@ -480,6 +485,7 @@ export function AiGcodePanel() {
       )}
 
       {/* Model + machine context — collapsible (the credential UI stays visible). */}
+      <section className="ai-card ai-card-wide">
       <button
         type="button"
         className="ai-disclosure ai-setup-toggle"
@@ -496,11 +502,9 @@ export function AiGcodePanel() {
       </button>
 
       {showConfig && (
-      <section className="ai-card">
-        <label className="ai-label" htmlFor="ai-model">
+      <div className="ai-fields">
+        <label htmlFor="ai-model">
           {t('ai.model.label', 'Model')}
-        </label>
-        <div className="ai-row">
           <select
             id="ai-model"
             className="ai-input"
@@ -514,24 +518,27 @@ export function AiGcodePanel() {
           >
             {MODEL_OPTIONS[provider].map((m) => (
               <option key={m} value={m}>
-                {m === DEFAULT_MODELS[provider] ? `${m} (default)` : m}
+                {m === DEFAULT_MODELS[provider] ? t('ai.model.default', '{m} (default)', { m }) : m}
               </option>
             ))}
             <option value="__custom__">{t('ai.model.custom', 'Custom…')}</option>
           </select>
-        </div>
-        <input
-          className="ai-input ai-mono"
-          type="text"
-          value={model}
-          placeholder={t('ai.model.customPlaceholder', 'custom model id')}
-          spellCheck={false}
-          onChange={(e) => setModel(provider, e.target.value)}
-          aria-label={t('ai.model.customAria', 'Custom model id')}
-        />
+        </label>
+        <label>
+          {t('ai.model.custom', 'Custom…')}
+          <input
+            className="ai-input ai-mono"
+            type="text"
+            value={model}
+            placeholder={t('ai.model.customPlaceholder', 'custom model id')}
+            spellCheck={false}
+            onChange={(e) => setModel(provider, e.target.value)}
+            aria-label={t('ai.model.customAria', 'Custom model id')}
+          />
+        </label>
 
         {/* Read-only machine context summary. */}
-        <div className="ai-context" role="group" aria-label={t('ai.ctx.aria', 'Machine context')}>
+        <div className="ai-context ai-fields-wide" role="group" aria-label={t('ai.ctx.aria', 'Machine context')}>
           <span className="ai-ctx-item">
             {t('ai.ctx.bed', 'Bed')}:{' '}
             <b>
@@ -539,7 +546,8 @@ export function AiGcodePanel() {
             </b>
           </span>
         </div>
-        <div className="ai-row">
+        <label>
+          {t('ai.ctx.toolAria', 'Tool (optional)')}
           <input
             className="ai-input"
             type="text"
@@ -548,8 +556,9 @@ export function AiGcodePanel() {
             onChange={(e) => setTool(e.target.value)}
             aria-label={t('ai.ctx.toolAria', 'Tool (optional)')}
           />
-        </div>
-        <div className="ai-row">
+        </label>
+        <label>
+          {t('ai.ctx.matAria', 'Material (optional)')}
           <input
             className="ai-input"
             type="text"
@@ -558,31 +567,31 @@ export function AiGcodePanel() {
             onChange={(e) => setMaterial(e.target.value)}
             aria-label={t('ai.ctx.matAria', 'Material (optional)')}
           />
-        </div>
-      </section>
+        </label>
+      </div>
       )}
+      </section>
 
       {/* ---- Chat conversation ---- */}
-      <section className="ai-card ai-chat-card">
+      <section className="ai-card ai-chat-card ai-card-wide">
         <header className="ai-out-head">
           <span className="ai-label">{t('ai.chat.label', 'Chat')}</span>
           <span className="ai-out-stats">
             <span className="ai-chat-count">
               {t('ai.chat.count', '{n} messages', { n: chat.length })}
             </span>
-            <button
+            <IconButton
               type="button"
-              className="ai-btn ai-mini"
+              className="ai-icon-btn ai-icon-danger"
+              icon="🗑"
               disabled={chat.length === 0 || busy}
               onClick={() => {
                 clearChat()
                 setError(null)
                 setLoadedId(null)
               }}
-              title={t('ai.chat.clearTip', 'Clear this conversation (cannot be undone)')}
-            >
-              {t('ai.chat.clear', '🗑 Clear chat')}
-            </button>
+              label={t('ai.chat.clearTip', 'Clear this conversation (cannot be undone)')}
+            />
           </span>
         </header>
 
@@ -634,14 +643,13 @@ export function AiGcodePanel() {
                       >
                         {t('ai.load', '↗ Load into Program')}
                       </button>
-                      <button
+                      <IconButton
                         type="button"
-                        className="ai-btn"
+                        className="ai-icon-btn"
+                        icon="⧉"
                         onClick={() => navigator.clipboard?.writeText(m.gcode ?? '').catch(() => {})}
-                        title={t('ai.copyTip', 'Copy the G-code to the clipboard')}
-                      >
-                        {t('ai.copy', '⧉ Copy')}
-                      </button>
+                        label={t('ai.copyTip', 'Copy the G-code to the clipboard')}
+                      />
                     </div>
                     {loadedId === m.id && (
                       <p className="ai-note ai-ok" role="status" aria-live="polite">
@@ -690,7 +698,7 @@ export function AiGcodePanel() {
           className="ai-textarea ai-composer"
           rows={3}
           value={prompt}
-          placeholder={chat.length === 0 ? EXAMPLE_PROMPT : t('ai.chat.followupPlaceholder', 'Refine the code above…')}
+          placeholder={chat.length === 0 ? t('ai.examplePrompt', EXAMPLE_PROMPT) : t('ai.chat.followupPlaceholder', 'Refine the code above…')}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -724,6 +732,7 @@ export function AiGcodePanel() {
           )}
         </div>
       </section>
+      </div>
     </div>
   )
 }

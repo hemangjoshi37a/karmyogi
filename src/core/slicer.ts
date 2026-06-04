@@ -290,6 +290,28 @@ export interface SliceResult {
   layerCount: number;
 }
 
+/**
+ * Optional progress reporter passed into the long-running slice / emit
+ * functions so a worker (or any caller) can surface paced progress without the
+ * core depending on any UI/DOM. `current`/`total` are unit-less step counts
+ * (e.g. layers); `fraction` is a 0..1 convenience already scoped to the phase.
+ * Returning `false` requests cooperative cancellation.
+ */
+export type SliceProgress = (info: {
+  phase: 'slice' | 'gcode';
+  current: number;
+  total: number;
+  fraction: number;
+}) => void | boolean;
+
+/** Thrown by the pure functions when a progress callback requests cancel. */
+export class SliceCancelled extends Error {
+  constructor() {
+    super('Slicing cancelled.');
+    this.name = 'SliceCancelled';
+  }
+}
+
 interface Seg {
   a: Point;
   b: Point;
@@ -474,7 +496,7 @@ function buildInfill(boundary: Polyline, spacing: number, angleDeg: number): Pol
  * so the model sits on the bed (z>=0) where desired. Layers are generated from
  * the lowest non-empty Z up to the top by `layerHeight`.
  */
-export function sliceMesh(mesh: StlMesh, params: SliceParams): SliceResult {
+export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: SliceProgress): SliceResult {
   const warnings: string[] = [];
   const result: SliceResult = { layers: [], bounds: new BBox(), warnings, layerCount: 0 };
 
@@ -521,6 +543,10 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams): SliceResult {
   let degenerateLayers = 0;
 
   for (let li = 0; li < nLayers; li++) {
+    if (onProgress) {
+      const cancel = onProgress({ phase: 'slice', current: li, total: nLayers, fraction: nLayers > 0 ? li / nLayers : 0 });
+      if (cancel === false) throw new SliceCancelled();
+    }
     // Sample the plane at the middle of the layer slab for stable contours.
     const planeZ = zMin + (li + 0.5) * layerH;
     const segs: Seg[] = [];
@@ -651,7 +677,7 @@ function extrusionPerMm(lineWidth: number, layerHeight: number, filamentDiameter
  * fan/Z handling, perimeters then infill with computed E, retraction on travel,
  * and an end sequence that turns everything off and parks.
  */
-export function sliceToGcode(slice: SliceResult, params: GcodeParams): string {
+export function sliceToGcode(slice: SliceResult, params: GcodeParams, onProgress?: SliceProgress): string {
   const dec = params.decimals ?? 3;
   const f = (v: number) => fmt(v, dec);
   const ePerMm = extrusionPerMm(params.lineWidth, params.layerHeight, params.filamentDiameter);
@@ -748,7 +774,12 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams): string {
   };
 
   // ---- Per-layer ------------------------------------------------------------
-  for (let li = 0; li < slice.layers.length; li++) {
+  const nLayers = slice.layers.length;
+  for (let li = 0; li < nLayers; li++) {
+    if (onProgress) {
+      const cancel = onProgress({ phase: 'gcode', current: li, total: nLayers, fraction: nLayers > 0 ? li / nLayers : 0 });
+      if (cancel === false) throw new SliceCancelled();
+    }
     const layer = slice.layers[li];
     const isFirst = li === 0;
     const speed = isFirst ? firstSpeed : params.printSpeed;
@@ -784,3 +815,58 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams): string {
 
   return out.join('\n') + '\n';
 }
+
+// ============================================================================
+// Worker message protocol (shared by slicer.worker.ts and the Print panel)
+// ============================================================================
+
+/**
+ * Request posted to the slicer worker. The placed mesh is passed as raw
+ * interleaved triangle data + bbox so the heavy `StlMesh` object never has to
+ * be structured-cloned wholesale; the `triangles` buffer is sent as a
+ * Transferable (zero-copy) by the panel.
+ */
+export interface SliceWorkerRequest {
+  type: 'slice';
+  triangles: Float32Array;
+  triangleCount: number;
+  vertexCount: number;
+  bbox: { min: [number, number, number]; max: [number, number, number] };
+  format: 'binary' | 'ascii';
+  sliceParams: SliceParams;
+  gcodeParams: GcodeParams;
+}
+
+/** Cancel the in-flight slice. */
+export interface SliceWorkerCancel {
+  type: 'cancel';
+}
+
+export type SliceWorkerInbound = SliceWorkerRequest | SliceWorkerCancel;
+
+/** Paced progress update from the worker. `fraction` is 0..1 over the whole job. */
+export interface SliceWorkerProgress {
+  type: 'progress';
+  phase: 'slice' | 'gcode';
+  current: number;
+  total: number;
+  fraction: number;
+}
+
+/** Final success: generated G-code plus summary stats. */
+export interface SliceWorkerDone {
+  type: 'done';
+  gcode: string;
+  layers: number;
+  lines: number;
+  warnings: string[];
+}
+
+export interface SliceWorkerError {
+  type: 'error';
+  message: string;
+  /** True when the failure was a cooperative cancel rather than a real error. */
+  cancelled?: boolean;
+}
+
+export type SliceWorkerOutbound = SliceWorkerProgress | SliceWorkerDone | SliceWorkerError;

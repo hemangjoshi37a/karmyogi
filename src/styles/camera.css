@@ -1,10 +1,11 @@
-/* Camera panel. Theme CSS vars only (no globals edited). */
+/* Camera panel. Compact / sleek — uses shared density tokens from theme.css.
+   Theme CSS vars only (no globals edited). */
 
 .cam-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 8px;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
   height: 100%;
   /* Vertical-only scroll — never a horizontal scrollbar. */
   overflow-y: auto;
@@ -20,48 +21,83 @@
 /* Short muted intro line, matching the other panels. */
 .cam-intro {
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-body);
   line-height: 1.45;
   color: var(--fg-muted);
+}
+
+/* ---- card grid: tile to fill width, collapse to 1 col when narrow ---- */
+.cam-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+  min-width: 0;
+}
+/* Wide cards (bed tracking, clips) span the whole grid. */
+.cam-span {
+  grid-column: 1 / -1;
 }
 
 /* ---- bordered card sections ---- */
 .cam-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: var(--sp-2);
+  padding: var(--pad-card-y) var(--pad-card-x);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--fg) 3%, var(--bg-panel));
   min-width: 0;
 }
 .cam-card-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
   min-width: 0;
 }
 .cam-card-head > h4 {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-section);
   font-weight: 600;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* Sub-heading inside a card (e.g. "Job on the bed"). */
+.cam-subhead {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-section);
+  font-weight: 600;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--fg-muted);
 }
 
 .cam-hint {
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-body);
+  line-height: 1.4;
   color: var(--fg-muted);
+}
+.cam-warn {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  color: var(--warn);
+}
+.cam-pending {
+  color: var(--accent);
 }
 
 .cam-raw {
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   white-space: nowrap;
 }
@@ -73,7 +109,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .cam-grow {
   flex: 1 1 auto;
@@ -84,21 +120,31 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 36px;
-  min-width: 36px;
-  padding: 4px 12px;
+  gap: var(--sp-2);
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   text-decoration: none;
   cursor: pointer;
+  white-space: nowrap;
 }
 .cam-btn:hover:not(:disabled) {
   border-color: var(--accent);
+}
+/* Primary / recommended action. */
+.cam-btn.cam-primary {
+  min-height: var(--ctl-h-lg);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
+  color: var(--fg);
+}
+.cam-btn.cam-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 26%, var(--bg-input));
 }
 .cam-btn.danger {
   border-color: var(--danger);
@@ -112,12 +158,51 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* Compact square-ish icon action (the print button). */
+.cam-btn.cam-icon {
+  flex: 0 0 auto;
+  min-width: var(--ctl-h);
+  padding: 0 var(--sp-2);
+}
 .cam-btn.cam-mini {
   flex: 0 0 auto;
-  min-width: 36px;
-  padding: 4px 8px;
-  font-size: 12px;
+  min-width: var(--ctl-h);
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-2);
   color: var(--fg-muted);
+}
+
+/* ---- compact icon buttons (shared .icon-btn chrome via IconButton) ---- */
+.cam-icon-btn.icon-btn {
+  flex: 0 0 auto;
+  min-width: var(--icon-btn);
+  min-height: var(--icon-btn);
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.cam-icon-btn.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.cam-icon-btn.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.cam-icon-btn .icon-btn-glyph {
+  font-size: 13px;
+}
+/* When an icon-btn is also a mini clip control, keep it square. */
+.cam-icon-btn.cam-mini.icon-btn {
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  min-width: var(--ctl-h);
+  min-height: var(--ctl-h);
 }
 
 /* Power toggle — its dot lights with the accent when live. */
@@ -146,14 +231,14 @@
 .cam-select {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 36px;
-  padding: 4px 8px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   cursor: pointer;
 }
 .cam-select:focus {
@@ -170,12 +255,17 @@
   position: relative;
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg);
   overflow: hidden;
 }
 .cam-stage[data-live='true'] {
   border-color: var(--accent);
+}
+/* While this slot is the active calibration target, hint that it's clickable. */
+.cam-stage[data-calib='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
 }
 .cam-video {
   display: block;
@@ -186,22 +276,25 @@
   object-fit: contain;
   background: #000;
 }
+.cam-video[data-clickable='true'] {
+  cursor: crosshair;
+}
 .cam-empty {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 18px 14px;
+  gap: var(--sp-2);
+  padding: 16px 14px;
   text-align: center;
   aspect-ratio: 4 / 3;
   align-items: center;
   justify-content: center;
 }
 .cam-empty > strong {
-  font-size: 12.5px;
+  font-size: var(--fs-ctl);
   color: var(--fg);
 }
 .cam-empty > span {
-  font-size: 11px;
+  font-size: var(--fs-label);
   line-height: 1.45;
   color: var(--fg-muted);
   max-width: 38ch;
@@ -211,12 +304,21 @@
 .cam-rec {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: var(--fs-label);
   font-weight: 600;
   color: var(--danger);
   white-space: nowrap;
+}
+/* Floating REC badge over the feed. */
+.cam-rec-overlay {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
 }
 .cam-rec-dot {
   width: 10px;
@@ -237,34 +339,36 @@
   }
 }
 
-/* ---- field rows (timelapse params) ---- */
-.cam-field {
+/* ---- compact fields grid (replaces the over-spread label+input rows) ---- */
+.cam-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
+}
+.cam-fields > label {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.cam-field > label {
-  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
-  font-size: 12px;
 }
-.cam-sub {
-  display: block;
-  font-size: 10.5px;
+.cam-flabel {
+  font-size: var(--fs-label);
   color: var(--fg-muted);
+  line-height: 1.2;
+}
+.cam-fields .cam-input {
+  width: 100%;
 }
 .cam-input {
-  min-height: 36px;
-  width: 92px;
-  max-width: 40vw;
-  padding: 4px 8px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   font-family: ui-monospace, monospace;
   text-align: right;
 }
@@ -275,10 +379,231 @@
 .cam-input:disabled {
   opacity: 0.55;
 }
-.cam-units {
-  font-size: 11px;
+
+/* ---- 3D toggle + opacity field row ---- */
+.cam-fields-3d {
+  grid-template-columns: 1fr;
+  gap: var(--sp-2);
+}
+.cam-range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.cam-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  cursor: pointer;
+}
+.cam-switch input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.cam-switch-wide {
+  padding: var(--sp-1) 0;
+}
+
+/* ---- segmented controls (slot / method choosers) ---- */
+.cam-seg-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.cam-seg-label {
+  font-size: var(--fs-label);
   color: var(--fg-muted);
-  min-width: 36px;
+  min-width: 54px;
+}
+.cam-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.cam-seg-btn {
+  min-height: var(--ctl-h-lg);
+  padding: 0 var(--sp-3);
+  border: none;
+  border-left: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cam-seg-btn:first-child {
+  border-left: none;
+}
+.cam-seg-btn:hover:not(:disabled) {
+  color: var(--fg);
+}
+.cam-seg-btn.on {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-input));
+  color: var(--fg);
+}
+.cam-seg-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Calibration quality chip. */
+.cam-quality {
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-label);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.cam-quality-good {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.cam-quality-ok {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.cam-quality-poor {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ---- per-method body block ---- */
+.cam-method {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* Corner-progress dots for manual bed-corner calibration. */
+.cam-corner-dots {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.cam-corner-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--fg-muted);
+}
+.cam-corner-dot.done {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.cam-corner-dot.next {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Auto-calibration progress / result readouts. */
+.cam-auto-progress {
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-body);
+}
+.cam-auto-done {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  color: var(--fg);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ok) 10%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--ok) 30%, var(--border));
+}
+
+/* Detected per-axis kinematics readout (Auto method, after the probe). */
+.cam-kin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-body);
+}
+.cam-kin-title {
+  font-size: var(--fs-label);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.cam-kin-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cam-kin-axis {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--fg);
+}
+.cam-kin-arrow {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.cam-kin-kind {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+/* Head axis = tool moves locally; bed axis = whole frame shifts. */
+.cam-kin-kind.cam-kin-head {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.cam-kin-kind.cam-kin-bed {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.cam-kin-kind.cam-kin-none {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.cam-kin-scale {
+  flex: 1 1 auto;
+  text-align: right;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* Calibration status message. */
+.cam-calib-msg {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  color: var(--fg);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.cam-job-readout {
+  font-family: ui-monospace, monospace;
+  color: var(--fg);
 }
 
 /* ---- recorded clips list ---- */
@@ -288,16 +613,16 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .cam-clip {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   min-width: 0;
-  padding: 4px 6px;
+  padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
 }
 .cam-clip-tag {
@@ -307,7 +632,7 @@
   font-weight: 700;
   letter-spacing: 0.4px;
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   color: var(--fg-muted);
 }
@@ -322,7 +647,7 @@
 .cam-clip-name {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-mono);
   font-family: ui-monospace, monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -335,58 +660,57 @@
   white-space: nowrap;
 }
 
-/* ---- narrow column (≤340px): stack fields so label + input never collide,
-   full-width inputs, ≥36px tap targets. Driven by the PANEL's own width. ---- */
-@container campanel (max-width: 340px) {
-  .cam-field {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
+/* ---- narrow column (≤340px): stack fields, full-width inputs, ≥38px taps.
+   Driven by the PANEL's own width. ---- */
+@container campanel (max-width: 360px) {
+  .cam-cards {
+    grid-template-columns: 1fr;
   }
-  .cam-field > label {
-    flex: 0 0 auto;
-  }
-  .cam-field .cam-input {
-    width: 100%;
-    max-width: none;
-    flex: 1 1 auto;
-  }
-  .cam-field .cam-units {
-    min-width: 0;
-    align-self: flex-end;
-    margin-top: -2px;
+  .cam-fields {
+    grid-template-columns: 1fr;
   }
   .cam-row .cam-btn.cam-grow {
     flex: 1 1 100%;
   }
+  .cam-seg {
+    width: 100%;
+  }
+  .cam-seg-btn {
+    flex: 1 1 auto;
+  }
 }
 
-/* ---- mobile / touch (≤480px panel width): bigger tap targets. Container
-   query — measures the panel, not the window. ---- */
+/* ---- touch (≤480px panel width): bigger tap targets. Container query —
+   measures the panel, not the window. ---- */
 @container campanel (max-width: 480px) {
   .cam-btn,
   .cam-input,
-  .cam-select {
-    min-height: 38px;
+  .cam-select,
+  .cam-seg-btn,
+  .cam-icon-btn.icon-btn {
+    min-height: var(--ctl-h-touch);
+  }
+  .cam-icon-btn.icon-btn {
+    min-width: var(--ctl-h-touch);
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
   }
 }
 
 /* Fallback for browsers without container-query support: key off the window so
-   phone-width viewports still get the touch-friendly sizing. */
+   phone-width viewports still get the touch-friendly sizing + single column. */
 @supports not (container-type: inline-size) {
   @media (max-width: 480px) {
+    .cam-cards,
+    .cam-fields {
+      grid-template-columns: 1fr;
+    }
     .cam-btn,
     .cam-input,
-    .cam-select {
-      min-height: 38px;
-    }
-    .cam-field {
-      flex-direction: column;
-      align-items: stretch;
-    }
-    .cam-field .cam-input {
-      width: 100%;
-      max-width: none;
+    .cam-select,
+    .cam-seg-btn,
+    .cam-icon-btn.icon-btn {
+      min-height: var(--ctl-h-touch);
     }
   }
 }

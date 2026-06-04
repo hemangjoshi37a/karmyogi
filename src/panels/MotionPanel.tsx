@@ -28,6 +28,7 @@ import '../styles/motion.css'
  *  - `grbl` / `grblhal` → the full `$`-settings editor (`GrblSettingsEditor`).
  *  - `marlin`           → an honest M-code view (settings live in EEPROM).
  *  - `smoothie`         → an honest config-file view (`config-get` / `config-set`).
+ *  - `masso`            → an honest "managed on-device / offline-export" notice.
  *  - `none`             → a capability-aware "no editable settings" notice (lasers).
  *
  * Selecting a controller in the titlebar dropdown updates `useMachineProfile`, so
@@ -44,6 +45,8 @@ export function MotionPanel() {
       return <MarlinSettingsView profile={profile} />
     case 'smoothie':
       return <SmoothieSettingsView profile={profile} />
+    case 'masso':
+      return <MassoSettingsView profile={profile} />
     case 'none':
     default:
       return <NoSettingsView profile={profile} />
@@ -718,6 +721,53 @@ function SmoothieSettingsView({ profile }: { profile: ControllerProfile }) {
       <section className="mo-section">
         <h5 className="mo-group">{t('motion.cap.heading', 'Capabilities')}</h5>
         <CapabilitySummary caps={profile.capabilities} />
+      </section>
+    </div>
+  )
+}
+
+/**
+ * `settingsModel: 'masso'` — Masso is a standalone all-in-one controller with its
+ * own touchscreen; all machine settings are configured ON THE DEVICE, and it does
+ * not expose a host-streaming serial protocol over USB. Be honest: there is nothing
+ * to edit from the browser. Explain the offline/export workflow (generate G-code →
+ * copy to a USB stick → run from the Masso pendant) and show capabilities.
+ */
+function MassoSettingsView({ profile }: { profile: ControllerProfile }) {
+  const t = useT()
+  return (
+    <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and controller settings')}>
+      <section className="mo-section">
+        <h4>
+          {t('motion.heading.controllerFor', '{label} controller', { label: profile.label })}
+        </h4>
+        <div className="mo-alert" role="status">
+          {t(
+            'motion.masso.notice',
+            '{label} is a standalone controller — all motion and machine settings are configured on its own touchscreen, not from the host. It also has no GRBL-style host-streaming serial protocol, so karmyogi can’t connect live or read/write settings.',
+            { label: profile.label },
+          )}
+        </div>
+      </section>
+
+      <section className="mo-section">
+        <h5 className="mo-group">{t('motion.masso.workflow.heading', 'Offline / export workflow')}</h5>
+        <div className="mo-note">
+          {t(
+            'motion.masso.workflow.body',
+            'Use karmyogi as a CAD/CAM + G-code generator: design or import your job, generate safe G-code, then copy the .nc/.gcode file to a USB stick and run it from the Masso pendant. Configure feeds, homing, soft limits, spindle and probing on the Masso touchscreen itself.',
+          )}
+        </div>
+      </section>
+
+      <section className="mo-section">
+        <h5 className="mo-group">{t('motion.cap.heading', 'Capabilities')}</h5>
+        <CapabilitySummary caps={profile.capabilities} />
+      </section>
+
+      <section className="mo-section">
+        <h5 className="mo-group">{t('motion.notes.heading', 'About this controller')}</h5>
+        <div className="mo-note">{profile.notes}</div>
       </section>
     </div>
   )

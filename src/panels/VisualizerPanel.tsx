@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Viewer, type ViewerHandle } from '../viewer/Viewer'
 import { gcodeToPolylines, type Segment } from '../viewer/gcodeToPolylines'
-import { useProgram, useMachine } from '../store'
+import { useProgram, useMachine, useCameraCalib } from '../store'
 import { useBed } from '../store/bed'
 import { buildTimeline } from '../core/simulation'
 import { usePlayback } from '../store/playback'
@@ -41,6 +41,11 @@ export function VisualizerPanel() {
   // Material-removal simulation: progressively carve the stock surface as the
   // toolpath reveals. On by default so the operator sees stock → finished part.
   const [carveSim, setCarveSim] = useState(true)
+
+  // Live camera → 3D bed overlay (persisted in the camera-calib store, so the
+  // toggle survives refresh). The overlay components self-gate on `enabled`.
+  const camOverlay = useCameraCalib((s) => s.enabled)
+  const toggleCamOverlay = useCameraCalib((s) => s.toggleEnabled)
 
   // Placement gizmo: toggle the in-scene move/rotate/scale handles.
   const [gizmoOn, setGizmoOn] = useState(false)
@@ -251,6 +256,17 @@ export function VisualizerPanel() {
             <span style={{ color: '#22d3ee' }}>▼</span>
           </button>
           <BedSizeControl />
+          <button
+            className={
+              camOverlay ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
+            }
+            onClick={toggleCamOverlay}
+            title={t('vz.cameraOverlay', 'Show live camera 3D (bed + job from the Camera panel)')}
+            aria-label={t('vz.cameraOverlay', 'Show live camera 3D')}
+            aria-pressed={camOverlay}
+          >
+            📷
+          </button>
           <span className="vz-toolbar-sep" aria-hidden="true" />
           <button
             className={
@@ -352,6 +368,7 @@ export function VisualizerPanel() {
  * update live.
  */
 function BedSizeControl() {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const width = useBed((s) => s.width)
   const depth = useBed((s) => s.depth)
@@ -365,34 +382,38 @@ function BedSizeControl() {
       <button
         className="vz-toolbar-btn"
         onClick={() => setOpen((o) => !o)}
-        title="Bed size (work area)"
-        aria-label="Bed size"
+        title={t('vz.bedSize.title', 'Bed size (work area)')}
+        aria-label={t('vz.bedSize.aria', 'Bed size')}
         aria-expanded={open}
       >
         📐
       </button>
       {open && (
-        <div className="vz-bed-pop" role="dialog" aria-label="Bed size (mm)">
+        <div
+          className="vz-bed-pop"
+          role="dialog"
+          aria-label={t('vz.bedSize.dialog', 'Bed size (mm)')}
+        >
           <BedField
             label="X"
             color="#ef4444"
             value={width}
             onChange={setWidth}
-            title="Work area width — X axis (mm)"
+            title={t('vz.bedSize.x', 'Work area width — X axis (mm)')}
           />
           <BedField
             label="Y"
             color="#22c55e"
             value={depth}
             onChange={setDepth}
-            title="Work area depth — Y axis (mm)"
+            title={t('vz.bedSize.y', 'Work area depth — Y axis (mm)')}
           />
           <BedField
             label="Z"
             color="#3b82f6"
             value={height}
             onChange={setHeight}
-            title="Work area height — Z axis (mm)"
+            title={t('vz.bedSize.z', 'Work area height — Z axis (mm)')}
           />
         </div>
       )}
@@ -499,6 +520,7 @@ function DimensionsOverlay({
   bedW: number
   bedD: number
 }) {
+  const t = useT()
   if (!dims) {
     return (
       <div className="vz-dims" data-empty="true" aria-hidden="true">
@@ -510,16 +532,19 @@ function DimensionsOverlay({
   const bedLabel = `${mm(bedW)}×${mm(bedD)}`
   const fitLabel =
     dims.fit === 'danger'
-      ? `exceeds bed ${bedLabel}`
+      ? t('vz.fit.exceeds', 'exceeds bed {bed}', { bed: bedLabel })
       : dims.fit === 'warn'
-        ? `outside bed ${bedLabel}`
-        : `fits bed ${bedLabel}`
+        ? t('vz.fit.outside', 'outside bed {bed}', { bed: bedLabel })
+        : t('vz.fit.fits', 'fits bed {bed}', { bed: bedLabel })
 
   return (
-    <div className="vz-dims" role="status" aria-label="Program dimensions">
+    <div className="vz-dims" role="status" aria-label={t('vz.programDims.aria', 'Program dimensions')}>
       <div
         className="vz-dims-row vz-dims-size"
-        title="Width (X) × Depth (Y) of the loaded program's bounding box, in mm"
+        title={t(
+          'vz.size.title',
+          "Width (X) × Depth (Y) of the loaded program's bounding box, in mm",
+        )}
       >
         <span className="vz-dims-val">{mm(dims.w)}</span>
         <span className="vz-dims-x">×</span>
@@ -528,20 +553,30 @@ function DimensionsOverlay({
       </div>
       <div
         className="vz-dims-row vz-dims-meta"
-        title="Z range (top→bottom) and total cut depth, in mm"
+        title={t('vz.zrange.title', 'Z range (top→bottom) and total cut depth, in mm')}
       >
-        <span>Z {mm(dims.min[2])}…{mm(dims.max[2])} ({mm(dims.d)})</span>
+        <span>
+          {t('vz.zrange', 'Z {min}…{max} ({depth})', {
+            min: mm(dims.min[2]),
+            max: mm(dims.max[2]),
+            depth: mm(dims.d),
+          })}
+        </span>
       </div>
       <div
         className="vz-dims-row vz-dims-meta"
-        title="Footprint area covered by the toolpath"
+        title={t('vz.footprint.title', 'Footprint area covered by the toolpath')}
       >
         <span>{fmtArea(dims.area)}</span>
       </div>
       <div
         className="vz-dims-row vz-dims-fit"
         data-fit={dims.fit}
-        title={`Whether the program fits within the machine work area (bed ${bedLabel} mm)`}
+        title={t(
+          'vz.fit.title',
+          'Whether the program fits within the machine work area (bed {bed} mm)',
+          { bed: bedLabel },
+        )}
       >
         <span className="vz-dims-dot" data-fit={dims.fit} />
         <span>{fitLabel}</span>

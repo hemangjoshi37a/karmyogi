@@ -2,7 +2,7 @@
 // Ported from the Qt/C++ reference cadcam/pcbcam.{h,cpp}.
 // Pure TypeScript: no React/DOM/three.js imports.
 
-import { Polyline, Point, distanceSquared, kEpsilon } from './geometry';
+import { Polyline, Point, distance, distanceSquared, kEpsilon } from './geometry';
 import { Tool, Toolpath, toolRadius } from './toolpath';
 import { offsetPolygon } from './offset';
 import { GerberData } from './gerber';
@@ -25,48 +25,92 @@ function cutLoop(tp: Toolpath, loop: Polyline, z: number, safeZ: number): void {
   tp.rapid({ x: end.x, y: end.y, z: safeZ });
 }
 
+/** Remove consecutive duplicate vertices (within kEpsilon). */
+function dedupePoints(pts: Point[]): Point[] {
+  const out: Point[] = [];
+  for (const p of pts) {
+    if (out.length === 0 || distance(out[out.length - 1], p) > kEpsilon) out.push({ x: p.x, y: p.y });
+  }
+  return out;
+}
+
 /**
- * Convert a (centreline, width) trace into a closed outline polygon by inflating
- * the centreline by width/2 (round caps approximated by the offset). For a
- * degenerate/zero-width trace the polyline is returned closed as-is.
+ * Offset an OPEN polyline laterally by signed `dist` (left of travel direction is
+ * positive). Each vertex is shifted along the bisector of its two adjacent
+ * segment normals (miter join); endpoints shift along their single segment
+ * normal. This is the correct construction for isolation routing along a copper
+ * trace centreline — one offset path per side of the trace.
  */
-export function traceToOutline(centreline: Polyline, width: number): Polyline {
-  // v1 simplification: build the outline of the inflated centreline by offsetting
-  // it as a (closed) polygon by +width/2. For an open trace we first close it
-  // (out-and-back) so the offsetter sees a thin slab around the path.
-  if (centreline.points.length < 2 || width <= kEpsilon) {
-    const c = centreline.clone();
-    c.closed = true;
-    return c;
+export function offsetOpenPolyline(line: Polyline, dist: number): Polyline {
+  const pts = dedupePoints(line.points);
+  const out = new Polyline();
+  const n = pts.length;
+  if (n < 2 || Math.abs(dist) <= kEpsilon) {
+    for (const p of pts) out.add(p);
+    return out;
   }
 
-  // Construct a degenerate closed polygon that traces the centreline forward and
-  // back, then offset it outward by width/2 to produce the copper outline.
-  const slab = new Polyline();
-  for (const p of centreline.points) slab.add(p);
-  for (let i = centreline.points.length - 2; i >= 0; --i) slab.add(centreline.points[i]);
-  slab.closed = true;
-
-  const outline = offsetPolygon(slab, width / 2.0);
-  if (outline.points.length < 3) {
-    slab.closed = true;
-    return slab;
+  // Left-hand unit normal of segment i (points to the left of travel a->b).
+  const seg: Point[] = [];
+  for (let i = 0; i < n - 1; ++i) {
+    const dx = pts[i + 1].x - pts[i].x;
+    const dy = pts[i + 1].y - pts[i].y;
+    const len = Math.hypot(dx, dy);
+    seg.push(len > kEpsilon ? { x: -dy / len, y: dx / len } : { x: 0, y: 0 });
   }
-  outline.closed = true;
-  return outline;
+
+  for (let i = 0; i < n; ++i) {
+    let nx: number;
+    let ny: number;
+    if (i === 0) {
+      nx = seg[0].x;
+      ny = seg[0].y;
+    } else if (i === n - 1) {
+      nx = seg[n - 2].x;
+      ny = seg[n - 2].y;
+    } else {
+      // Miter: average the two segment normals, then rescale so the cut stays at
+      // `dist` from both edges (1/cos(half-angle)). Clamp the miter length to
+      // avoid spikes at sharp corners.
+      let mx = seg[i - 1].x + seg[i].x;
+      let my = seg[i - 1].y + seg[i].y;
+      const mlen = Math.hypot(mx, my);
+      if (mlen <= kEpsilon) {
+        // 180° reversal: fall back to the previous normal.
+        nx = seg[i - 1].x;
+        ny = seg[i - 1].y;
+      } else {
+        mx /= mlen;
+        my /= mlen;
+        const cos = mx * seg[i].x + my * seg[i].y; // = cos(half angle)
+        const scale = cos > 0.2 ? 1 / cos : 1 / 0.2; // clamp ≤5× to avoid spikes
+        nx = mx * scale;
+        ny = my * scale;
+      }
+    }
+    out.add({ x: pts[i].x + nx * dist, y: pts[i].y + ny * dist });
+  }
+  return out;
 }
 
 /**
  * Isolation-route the copper described by `gerber`.
  *
- * SIMPLIFICATION (v1): each copper feature is converted to a closed polygon and
- * offset OUTWARD by (toolRadius + pass*stepover) to mill an isolation gap around
- * it. Traces (centreline + width) are turned into a closed outline by inflating
- * the centreline by width/2; pads/regions are used directly. Each pass produces
- * a feed-following toolpath at `cutZ`. This does NOT merge overlapping copper
- * into single nets — features are isolated individually.
+ * The tool follows a path that clears copper by exactly the tool radius (plus
+ * one tool-width per extra pass) away from every copper edge:
+ *
+ *  - Open TRACES (centreline + width): the isolation cut runs parallel to the
+ *    centreline on BOTH sides at distance (width/2 + toolRadius + pass*step).
+ *    Each side is a separate open feed path — this is what isolation milling
+ *    actually does and what a correct preview shows (twin lines hugging every
+ *    track), instead of inflating a zero-area slab (which collapsed to dots).
+ *  - Closed PADS / REGIONS (real area): offset OUTWARD by (toolRadius +
+ *    pass*step) to mill a ring around the feature.
+ *
+ * Each pass is a feed-following toolpath at `cutZ`. Features are isolated
+ * individually (overlapping copper is not merged into single nets in v1).
  *   safeZ   retract height (mm), cutZ engraving depth (negative into copper).
- *   passes  number of concentric isolation passes (>=1); spacing = tool.stepover.
+ *   passes  number of isolation passes (>=1); spacing = one tool width (step).
  */
 export function isolationRoutes(
   gerber: GerberData,
@@ -80,31 +124,41 @@ export function isolationRoutes(
   if (passes < 1) passes = 1;
 
   const r = toolRadius(tool);
-  // stepover stored as fraction in Tool; for isolation we want a metric step.
+  // tool.stepover is a fraction (0..1) of the diameter; resolve to a metric step
+  // (the lateral spacing between successive isolation passes).
   let step = tool.stepover;
-  if (step <= 0.0) step = tool.diameter * 0.5;
-  if (step <= 1.0) step = step * tool.diameter; // treat <=1 as a fraction
+  if (step <= 0.0) step = 0.5;
+  if (step <= 1.0) step = step * tool.diameter; // <=1 is a fraction of Ø
+  else step = step; // already metric
 
-  // Collect every copper feature as a closed polygon to isolate.
-  const features: Polyline[] = [];
+  // ---- Open traces: offset the centreline to each side. ----
   for (const t of gerber.traces) {
-    const o = traceToOutline(t.centreline, t.width);
-    if (o.points.length >= 3) features.push(o);
+    if (t.centreline.points.length < 2) continue;
+    for (let pass = 0; pass < passes; ++pass) {
+      const d = t.width / 2.0 + r + pass * step;
+      for (const sign of [+1, -1]) {
+        const side = offsetOpenPolyline(t.centreline, sign * d);
+        if (side.points.length >= 2) cutLoop(tp, side, cutZ, safeZ);
+      }
+    }
   }
+
+  // ---- Closed pads / regions: offset outward. ----
+  const closedFeatures: Polyline[] = [];
   for (const pad of gerber.pads)
     if (pad.points.length >= 3) {
       const p = pad.clone();
       p.closed = true;
-      features.push(p);
+      closedFeatures.push(p);
     }
   for (const reg of gerber.regions)
     if (reg.points.length >= 3) {
       const p = reg.clone();
       p.closed = true;
-      features.push(p);
+      closedFeatures.push(p);
     }
 
-  for (const feat of features) {
+  for (const feat of closedFeatures) {
     for (let pass = 0; pass < passes; ++pass) {
       const delta = r + pass * step; // outward isolation ring
       const ring = offsetPolygon(feat, +delta);
@@ -114,6 +168,81 @@ export function isolationRoutes(
     }
   }
   return tp;
+}
+
+/**
+ * Derive a single closed board-outline polygon from a Gerber edge-cuts /
+ * mechanical layer. Board outlines are exported either as a closed region
+ * (G36/G37), a flashed/closed pad, or — most commonly — as a chain of open
+ * trace draws that together form the perimeter. This stitches trace segments
+ * end-to-end into one loop. Returns `null` when no usable outline is found, so
+ * the caller can fall back to the bounding box.
+ */
+export function boardOutlinePolygon(gerber: GerberData): Polyline | null {
+  // 1. A real filled region is the cleanest source.
+  let best: Polyline | null = null;
+  let bestArea = 0;
+  const consider = (poly: Polyline) => {
+    if (poly.points.length < 3) return;
+    const a = Math.abs(poly.signedArea());
+    if (a > bestArea) {
+      bestArea = a;
+      best = poly;
+    }
+  };
+  for (const r of gerber.regions) consider(r);
+  // A single closed-ish trace (start ≈ end) is also a direct outline.
+  for (const t of gerber.traces) {
+    const p = t.centreline;
+    if (p.points.length >= 3 && distance(p.points[0], p.points[p.points.length - 1]) < 0.5) {
+      const c = p.clone();
+      c.closed = true;
+      consider(c);
+    }
+  }
+  if (best) {
+    const loop = (best as Polyline).clone();
+    loop.closed = true;
+    return loop;
+  }
+
+  // 2. Stitch open trace segments into a closed loop by joining nearest endpoints.
+  const segs = gerber.traces
+    .map((t) => dedupePoints(t.centreline.points))
+    .filter((p) => p.length >= 2);
+  if (segs.length > 0) {
+    const tol = 0.2; // mm — endpoints within this are "the same" node
+    const used = new Array<boolean>(segs.length).fill(false);
+    used[0] = true;
+    const loop: Point[] = segs[0].slice();
+    let progressed = true;
+    while (progressed) {
+      progressed = false;
+      const tail = loop[loop.length - 1];
+      for (let i = 0; i < segs.length; ++i) {
+        if (used[i]) continue;
+        const s = segs[i];
+        if (distance(tail, s[0]) <= tol) {
+          for (let k = 1; k < s.length; ++k) loop.push(s[k]);
+          used[i] = true;
+          progressed = true;
+          break;
+        }
+        if (distance(tail, s[s.length - 1]) <= tol) {
+          for (let k = s.length - 2; k >= 0; --k) loop.push(s[k]);
+          used[i] = true;
+          progressed = true;
+          break;
+        }
+      }
+    }
+    const out = new Polyline();
+    for (const p of dedupePoints(loop)) out.add(p);
+    out.closed = true;
+    if (out.points.length >= 3) return out;
+  }
+
+  return null;
 }
 
 /**

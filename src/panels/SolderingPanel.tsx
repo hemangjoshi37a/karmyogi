@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMachine, useProgram } from '../store'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
@@ -34,6 +34,49 @@ const num = (v: string, fallback: number): number => {
 const intNum = (v: string, fallback: number): number => {
   const n = parseInt(v, 10)
   return Number.isFinite(n) ? n : fallback
+}
+
+const CSV_HEADER = 'x,y,freeZ,touchZ,type,feedSeconds'
+
+/** Serialize the soldering points to a CSV string (header + one row each). */
+function pointsToCsv(points: SolderPoint[]): string {
+  const rows = points.map((p) =>
+    [p.x, p.y, p.freeZ, p.touchZ, p.type, p.feedSeconds].join(','),
+  )
+  return [CSV_HEADER, ...rows].join('\n') + '\n'
+}
+
+/** Lenient feed-type parse: accepts the enum values or the human labels. */
+function parseFeedType(v: string): SolderFeedType {
+  const s = v.trim().toLowerCase().replace(/[\s_-]/g, '')
+  return s === 'presolder' ? SolderFeedType.PreSolder : SolderFeedType.TouchDown
+}
+
+/**
+ * Parse a CSV string into soldering points. Tolerant of an optional header row,
+ * extra whitespace, and missing trailing columns (filled from the point
+ * defaults). Returns [] if nothing usable was found.
+ */
+function csvToPoints(text: string): SolderPoint[] {
+  const out: SolderPoint[] = []
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line) continue
+    const cols = line.split(',').map((c) => c.trim())
+    // Skip a header row (first cell non-numeric, e.g. "x").
+    if (!Number.isFinite(parseFloat(cols[0]))) continue
+    out.push(
+      defaultSolderPoint({
+        x: num(cols[0], 0),
+        y: num(cols[1], 0),
+        freeZ: num(cols[2], 5),
+        touchZ: num(cols[3], -1),
+        type: cols[4] ? parseFeedType(cols[4]) : SolderFeedType.TouchDown,
+        feedSeconds: num(cols[5], 0.5),
+      }),
+    )
+  }
+  return out
 }
 
 /**
@@ -125,8 +168,9 @@ export function SolderingPanel() {
 
   const [points, setPoints] = useState<SolderPoint[]>([])
   const [selected, setSelected] = useState(-1)
-  const [showRaw, setShowRaw] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  // Hidden <input type=file> trigger for "Load CSV".
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Global generator params (programName is fixed here; metric stays mm/G21).
   const [params, setParams] = useState<Omit<SolderingParams, 'programName' | 'metric'>>(() => {
@@ -174,6 +218,30 @@ export function SolderingPanel() {
 
   function updatePoint(i: number, patch: Partial<SolderPoint>) {
     setPoints((p) => p.map((pt, idx) => (idx === i ? { ...pt, ...patch } : pt)))
+  }
+
+  // Download the current point list as a CSV the operator can re-load later.
+  function saveCsv() {
+    const blob = new Blob([pointsToCsv(points)], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'solder-points.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Read a CSV chosen from the local PC and REPLACE the current point list.
+  function loadCsvFile(file: File) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const parsed = csvToPoints(String(reader.result ?? ''))
+      if (parsed.length > 0) {
+        setPoints(parsed)
+        setSelected(-1)
+      }
+    }
+    reader.readAsText(file)
   }
 
   // Record the live machine work-position. If a row is selected, fill its X/Y;
@@ -243,6 +311,31 @@ export function SolderingPanel() {
             disabled={points.length === 0}
             title={t('solder.toolbar.clear', 'Clear all')}
             body={t('solder.toolbar.clear.body', 'Remove every soldering point and start over.')}
+          />
+          <span className="sp-tools-sep" aria-hidden="true" />
+          <ToolButton
+            glyph="⭳"
+            onClick={saveCsv}
+            disabled={points.length === 0}
+            title={t('solder.toolbar.saveCsv', 'Save CSV')}
+            body={t('solder.toolbar.saveCsv.body', 'Download the current solder-point list as a CSV file you can re-load later.')}
+          />
+          <ToolButton
+            glyph="⭱"
+            onClick={() => fileInputRef.current?.click()}
+            title={t('solder.toolbar.loadCsv', 'Load CSV')}
+            body={t('solder.toolbar.loadCsv.body', 'Load a solder-point list from a CSV file on your PC (replaces the current list).')}
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) loadCsvFile(f)
+              e.target.value = '' // allow re-loading the same file
+            }}
           />
           <span className="sp-tools-sep" aria-hidden="true" />
           <ToolButton
@@ -545,19 +638,147 @@ export function SolderingPanel() {
             </tbody>
           </table>
         </div>
-      </div>
 
-      {/* Raw G-code (collapsible, slim). */}
-      <div className="sp-raw">
-        <button
-          className="sp-raw-toggle"
-          onClick={() => setShowRaw((v) => !v)}
-          aria-expanded={showRaw}
-        >
-          <span className="sp-raw-caret" aria-hidden="true">{showRaw ? '▾' : '▸'}</span>
-          {t('solder.raw', 'Raw G-code ({count} lines)', { count: lineCount })}
-        </button>
-        {showRaw && <pre className="sp-preview">{gcode}</pre>}
+        {/* Narrow PANEL: each point becomes a compact card — tight 3-char fields
+            for X/Y/Free-Z/Touch-Z/Feed in a masonry grid, and radio buttons for
+            the feed type so the choice is readable at a glance. Hidden on wide
+            panels (the table above is shown instead) — toggled purely in CSS. */}
+        <div className="sp-cards">
+          {points.length === 0 && (
+            <p className="sp-empty">
+              {t(
+                'solder.table.empty',
+                'No points yet. Press + to add one, or ⌖ to record the machine position.',
+              )}
+            </p>
+          )}
+          {points.map((pt, i) => (
+            <div
+              key={i}
+              className={`sp-pcard${i === selected ? ' is-selected' : ''}`}
+              onClick={() => setSelected(i)}
+            >
+              <div className="sp-pcard-head">
+                <span className="sp-pcard-idx">
+                  {t('solder.card.point', 'Point')} {i + 1}
+                </span>
+                <div className="sp-pcard-actions">
+                  <button
+                    className="sp-row-ico"
+                    title={t('solder.row.moveUp', 'Move up')}
+                    aria-label={t('solder.row.moveUp', 'Move up')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      moveRow(i, -1)
+                    }}
+                    disabled={i === 0}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="sp-row-ico"
+                    title={t('solder.row.moveDown', 'Move down')}
+                    aria-label={t('solder.row.moveDown', 'Move down')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      moveRow(i, 1)
+                    }}
+                    disabled={i === points.length - 1}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="sp-row-ico sp-del"
+                    title={t('solder.row.delete', 'Delete point')}
+                    aria-label={t('solder.row.delete', 'Delete point')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteRow(i)
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="sp-pcard-grid">
+                <label className="sp-mini">
+                  <span>X</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={pt.x}
+                    onChange={(e) => updatePoint(i, { x: num(e.target.value, pt.x) })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </label>
+                <label className="sp-mini">
+                  <span>Y</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={pt.y}
+                    onChange={(e) => updatePoint(i, { y: num(e.target.value, pt.y) })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </label>
+                <label className="sp-mini">
+                  <span>{t('solder.table.freeZ', 'Free-Z')}</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={pt.freeZ}
+                    onChange={(e) => updatePoint(i, { freeZ: num(e.target.value, pt.freeZ) })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </label>
+                <label className="sp-mini">
+                  <span>{t('solder.table.touchZ', 'Touch-Z')}</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={pt.touchZ}
+                    onChange={(e) => updatePoint(i, { touchZ: num(e.target.value, pt.touchZ) })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </label>
+                <label className="sp-mini">
+                  <span>{t('solder.card.feed', 'Feed')}</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={pt.feedSeconds}
+                    onChange={(e) => updatePoint(i, { feedSeconds: num(e.target.value, pt.feedSeconds) })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </label>
+              </div>
+
+              <div className="sp-pcard-type" onClick={(e) => e.stopPropagation()}>
+                <span className="sp-pcard-type-label">{t('solder.table.feedType', 'Type')}</span>
+                <label className={`sp-radio${pt.type === SolderFeedType.PreSolder ? ' is-on' : ''}`}>
+                  <input
+                    type="radio"
+                    name={`sp-type-${i}`}
+                    checked={pt.type === SolderFeedType.PreSolder}
+                    onChange={() => updatePoint(i, { type: SolderFeedType.PreSolder })}
+                  />
+                  {t('solder.feedType.preSolder', 'pre-solder')}
+                </label>
+                <label className={`sp-radio${pt.type === SolderFeedType.TouchDown ? ' is-on' : ''}`}>
+                  <input
+                    type="radio"
+                    name={`sp-type-${i}`}
+                    checked={pt.type === SolderFeedType.TouchDown}
+                    onChange={() => updatePoint(i, { type: SolderFeedType.TouchDown })}
+                  />
+                  {t('solder.feedType.touchDown', 'touch-down')}
+                </label>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

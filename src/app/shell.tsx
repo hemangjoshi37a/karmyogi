@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -14,6 +14,8 @@ import { NotificationBell } from '../components/NotificationBell'
 import { PanelLauncher } from '../components/PanelLauncher'
 import { LanguageSwitcher } from '../components/LanguageSwitcher'
 import { ConnectionControl } from '../components/ConnectionControl'
+import { AboutModal } from '../components/AboutModal'
+import { useT } from '../i18n'
 import { Modal } from '../components/Modal'
 import { MotionPanel } from '../panels/MotionPanel'
 // Probe is rendered in a modal here AND still registered as a dock tab in
@@ -33,7 +35,8 @@ const LEFT_TABS = [
   { id: 'pnp', title: 'Pick & Place' },
   { id: 'signature', title: 'Signature' },
   { id: 'print', title: '3D Printing' },
-  { id: 'probe', title: 'Probe & Limits' },
+  { id: 'laser', title: 'Laser Cutting' },
+  { id: 'welding', title: 'Welding' },
   { id: 'camera', title: 'Camera' },
 ]
 
@@ -41,27 +44,6 @@ const LEFT_TABS = [
 // and shared as the canonical repo URL.
 const REPO_URL = 'https://github.com/hemangjoshi37a/karmyogi'
 const ISSUES_URL = `${REPO_URL}/issues/new`
-const openExternal = (url: string) => window.open(url, '_blank', 'noopener,noreferrer')
-
-/** GitHub mark (inherits the button's text color via currentColor). */
-function GitHubGlyph() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
-    </svg>
-  )
-}
-
-/** Bug glyph for "report an issue". */
-function BugGlyph() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M8 2l1.5 2.5M16 2l-1.5 2.5" />
-      <rect x="8" y="6" width="8" height="12" rx="4" />
-      <path d="M12 6v12M3 9h3M3 14h3M3 19l3-2M18 9h3M18 14h3M18 19l-3-2M5 5l3 2.5M19 5l-3 2.5" />
-    </svg>
-  )
-}
 
 // Hand-tuned canonical workspace: LEFT column (Coordinates + all CAM/utility
 // tabs), CENTER column split vertically (Visualizer on top, Program + Console
@@ -76,7 +58,7 @@ const DEFAULT_LAYOUT: SerializedDockview = {
         {
           type: 'leaf',
           data: {
-            views: ['coords', 'cadcam', 'writing', 'soldering', 'pcb', 'glue', 'pnp', 'signature', 'print', 'probe', 'camera'],
+            views: ['coords', 'cadcam', 'writing', 'soldering', 'pcb', 'glue', 'pnp', 'signature', 'print', 'laser', 'welding', 'camera'],
             activeView: 'coords',
             id: '1',
           },
@@ -166,6 +148,7 @@ function buildDefaultLayout(api: DockviewApi) {
 export function Shell() {
   const apiRef = useRef<DockviewApi | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const t = useT()
   const isMobile = useIsMobile()
   const theme = useSettings((s) => s.theme)
   const toggleTheme = useSettings((s) => s.toggleTheme)
@@ -177,6 +160,7 @@ export function Shell() {
   const resetLayout = useLayout((s) => s.reset)
   const [showMotion, setShowMotion] = useState(false)
   const [showProbe, setShowProbe] = useState(false)
+  const [showAbout, setShowAbout] = useState(false)
 
   // Persist the dock layout automatically (debounced) on every change, so it
   // survives reloads AND browser close/open without a manual "save".
@@ -201,15 +185,53 @@ export function Shell() {
         }
       }
       if (!restored) buildDefaultLayout(event.api)
-      // Keep tab titles in sync with the registry, so renames (e.g. CAD/CAM →
-      // 3D Carving) apply even to a restored saved layout.
+      // Reconcile a RESTORED layout against the current registry so the app can
+      // gain/lose tabs across versions without the user having to "Reset layout"
+      // (and lose their arrangement): drop panels whose id is no longer
+      // registered (e.g. the removed Probe tab), and add newly-registered CAM
+      // tabs (e.g. Laser/Welding) into the left group. A fresh default already
+      // has the right set, so this only runs for a restored layout.
+      if (restored) {
+        const validIds = new Set(availablePanels.map((p) => p.id))
+        for (const panel of [...event.api.panels]) {
+          if (!validIds.has(panel.id)) event.api.removePanel(panel)
+        }
+        // Anchor new tabs to the left group (Coordinates), like the default build.
+        const anchor =
+          event.api.getPanel('coords') ??
+          event.api.getPanel(LEFT_TABS.find((tt) => event.api.getPanel(tt.id))?.id ?? '')
+        for (const tab of LEFT_TABS) {
+          if (event.api.getPanel(tab.id)) continue
+          event.api.addPanel({
+            id: tab.id,
+            component: tab.id,
+            title: tab.title,
+            ...(anchor ? { position: { referencePanel: anchor.id, direction: 'within' as const } } : {}),
+          })
+        }
+      }
+      // Keep tab titles in sync with the registry AND translate them: each tab's
+      // title comes from `t('tab.<id>', <English default>)`, so renames and the
+      // active language both apply even to a restored saved layout.
       for (const spec of availablePanels) {
-        event.api.getPanel(spec.id)?.api.setTitle(spec.title)
+        event.api.getPanel(spec.id)?.api.setTitle(t('tab.' + spec.id, spec.title))
       }
       event.api.onDidLayoutChange(scheduleSave)
+      // Persist the reconciled layout so the add/remove sticks immediately.
+      if (restored) scheduleSave()
     },
-    [scheduleSave],
+    [scheduleSave, t],
   )
+
+  // Re-translate every open tab's title when the language changes (the `t`
+  // identity changes with the active language, re-running this effect).
+  useEffect(() => {
+    const api = apiRef.current
+    if (!api) return
+    for (const spec of availablePanels) {
+      api.getPanel(spec.id)?.api.setTitle(t('tab.' + spec.id, spec.title))
+    }
+  }, [t])
 
   const onReset = useCallback(() => {
     resetLayout()
@@ -229,8 +251,13 @@ export function Shell() {
       existing.api.setActive()
       return
     }
-    api.addPanel({ id: panel.id, component: panel.component, title: panel.title, params: panel.params })
-  }, [])
+    api.addPanel({
+      id: panel.id,
+      component: panel.component,
+      title: t('tab.' + panel.id, panel.title),
+      params: panel.params,
+    })
+  }, [t])
 
   return (
     <div className="app-shell">
@@ -246,7 +273,7 @@ export function Shell() {
           />
           <span className="brand-word">karm<span className="accent">yogi</span></span>
         </span>
-        <span style={{ color: 'var(--fg-muted)' }}>GRBL workbench</span>
+        <span style={{ color: 'var(--fg-muted)' }}>{t('app.subtitle', 'CAD/CAM workbench')}</span>
         <span className="brand-by">
           by <a href="https://hjLabs.in" target="_blank" rel="noopener noreferrer">hjLabs.in</a>
           {' · '}
@@ -277,14 +304,9 @@ export function Shell() {
           <NotificationBell />
           <LanguageSwitcher />
           <IconButton
-            icon={<GitHubGlyph />}
-            label="View source on GitHub"
-            onClick={() => openExternal(REPO_URL)}
-          />
-          <IconButton
-            icon={<BugGlyph />}
-            label="Report a bug (GitHub issues)"
-            onClick={() => openExternal(ISSUES_URL)}
+            icon="ⓘ"
+            label="About karmyogi (source, license, report a bug)"
+            onClick={() => setShowAbout(true)}
           />
           <IconButton
             icon={theme === 'dark' ? '☀' : '☾'}
@@ -314,6 +336,12 @@ export function Shell() {
           <ProbePanel />
         </div>
       </Modal>
+      <AboutModal
+        open={showAbout}
+        onClose={() => setShowAbout(false)}
+        repoUrl={REPO_URL}
+        issuesUrl={ISSUES_URL}
+      />
     </div>
   )
 }

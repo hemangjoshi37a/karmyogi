@@ -1,10 +1,10 @@
-/* Probe & Limits panel. Theme CSS vars only (no globals edited). */
+/* Probe & Limits panel. Theme CSS vars / density tokens only (no globals edited). */
 
 .pr-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 8px;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
   height: 100%;
   /* Vertical-only scroll — never a horizontal scrollbar. */
   overflow-y: auto;
@@ -21,19 +21,34 @@
 /* Short muted intro line, matching the other panels. */
 .pr-intro {
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-body);
   line-height: 1.45;
   color: var(--fg-muted);
+}
+
+/* Cards tile into a responsive grid: 2–3 columns at wide container widths,
+   collapsing to one column when the panel is narrow. The hero (live switches)
+   and the wide advanced section span all columns; the Z-probe and auto-detect
+   control cards pack side-by-side and fill the width instead of leaving a tall
+   empty column at the bottom. */
+.pr-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+.pr-card-wide {
+  grid-column: 1 / -1;
 }
 
 /* ---- bordered card sections ---- */
 .pr-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: var(--sp-2);
+  padding: var(--pad-card-y) var(--pad-card-x);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--fg) 3%, var(--bg-panel));
   min-width: 0;
 }
@@ -41,22 +56,22 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--sp-3);
   flex-wrap: wrap;
   min-width: 0;
 }
 .pr-card-head > h4 {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-section);
   font-weight: 600;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--fg-muted);
 }
 
 .pr-hint {
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-body);
   color: var(--fg-muted);
 }
 
@@ -64,23 +79,23 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .pr-grow { flex: 1 1 auto; }
 
 .pr-note {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-label);
   line-height: 1.45;
   color: var(--fg-muted);
 }
 .pr-note code {
   font-family: ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: var(--fs-mono);
 }
 .pr-note.caution {
-  padding: 6px 8px;
-  border-radius: 5px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--warn);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
   color: var(--fg);
@@ -88,19 +103,21 @@
 
 /* ---- buttons ---- */
 .pr-btn {
-  min-height: 30px;
-  min-width: 30px;
+  min-height: var(--ctl-h);
+  min-width: var(--ctl-h);
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   cursor: pointer;
 }
 .pr-btn:hover:not(:disabled) { border-color: var(--accent); }
+/* Primary actions (Probe Z, Auto-detect, Home) read taller. */
 .pr-btn.primary {
+  min-height: var(--ctl-h-lg);
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
@@ -111,38 +128,56 @@
 }
 .pr-btn.danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); }
 .pr-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-/* secondary / smaller-emphasis actions (no-alarm probe, $# dump) */
-.pr-btn.pr-mini {
-  flex: 1 1 auto;
-  font-size: 11px;
+/* The movement-free "Use configured travel" stays at compact height. */
+.pr-btn-sm { font-size: var(--fs-ctl); }
+
+/* ---- compact icon buttons (shared .icon-btn chrome via IconButton) ---- */
+.pr-icon-btn.icon-btn {
+  flex: 0 0 auto;
+  min-width: var(--icon-btn);
+  min-height: var(--icon-btn);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
   color: var(--fg-muted);
+  cursor: pointer;
 }
+.pr-icon-btn.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.pr-icon-btn.icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pr-icon-btn .icon-btn-glyph { font-size: 14px; }
+
+/* Tight toolbar rows of secondary/icon actions. */
+.pr-mini-row { gap: var(--sp-1); }
+.pr-adv-actions { gap: var(--sp-2); }
 
 /* ---- live switch detection: indicator lights ---- */
 .pr-lights {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: var(--sp-2);
 }
 .pr-light {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  flex: 1 1 64px;
-  min-width: 56px;
-  padding: 10px 6px;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-1);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--bg-input);
   transition: border-color 80ms linear;
 }
 .pr-light[data-on='true'] { border-color: var(--ok); }
 .pr-light.door[data-on='true'] { border-color: var(--danger); }
 .pr-dot {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--fg-muted);
   opacity: 0.4;
@@ -160,7 +195,7 @@
   box-shadow: 0 0 10px var(--danger);
 }
 .pr-light .pr-lbl {
-  font-size: 11px;
+  font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: 0.3px;
 }
@@ -173,7 +208,7 @@
 
 .pr-raw {
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   white-space: nowrap;
 }
@@ -183,13 +218,13 @@
 .pr-code {
   display: block;
   margin: 0;
-  padding: 6px 8px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--fg);
   font-family: ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: var(--fs-mono);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -197,17 +232,69 @@
 }
 .pr-code .pr-code-cmt { color: var(--fg-muted); }
 
-/* ---- field grid (probe params + setting toggles) ---- */
+/* ---- compact field grid (probe params): label-over-input cells that pack
+   left and wrap naturally instead of one stretched row per field. ---- */
+.pr-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: start;
+}
+.pr-fields > label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.pr-field-name {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--fg);
+  font-size: var(--fs-label);
+}
+.pr-fields .pr-sub {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--fg-muted);
+}
+
+.pr-input {
+  height: var(--ctl-h);
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  font-family: ui-monospace, monospace;
+  text-align: right;
+}
+.pr-input:focus { outline: none; border-color: var(--accent); }
+.pr-input:disabled { opacity: 0.55; }
+.pr-units {
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+/* The $-setting toggles stay as a labelled row (label + on/off button). */
 .pr-field {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 .pr-field > label {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-ctl);
 }
 .pr-num {
   font-family: ui-monospace, monospace;
@@ -215,42 +302,21 @@
 }
 .pr-field .pr-sub {
   display: block;
-  font-size: 10.5px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
-}
-.pr-input {
-  min-height: 30px;
-  width: 92px;
-  max-width: 40vw;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 12px;
-  font-family: ui-monospace, monospace;
-  text-align: right;
-}
-.pr-input:focus { outline: none; border-color: var(--accent); }
-.pr-input:disabled { opacity: 0.55; }
-.pr-units {
-  font-size: 11px;
-  color: var(--fg-muted);
-  min-width: 52px;
 }
 
 /* on/off toggle button used for $20/$21/$22/$5/$6 */
 .pr-toggle {
-  min-height: 30px;
+  min-height: var(--ctl-h);
   min-width: 46px;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   font-weight: 600;
   cursor: pointer;
 }
@@ -266,9 +332,9 @@
 .pr-disclosure {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-3);
   width: 100%;
-  min-height: 30px;
+  min-height: var(--ctl-h);
   padding: 2px 0;
   border: none;
   background: none;
@@ -285,23 +351,23 @@
 }
 .pr-disclosure-title {
   flex: 1 1 auto;
-  font-size: 11px;
+  font-size: var(--fs-section);
   font-weight: 600;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--fg-muted);
 }
 .pr-disclosure:hover .pr-disclosure-title { color: var(--fg); }
 .pr-disclosure-hint {
-  font-size: 10.5px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   font-style: italic;
 }
 .pr-adv-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 4px;
+  gap: var(--sp-2);
+  padding-top: var(--sp-1);
   border-top: 1px solid var(--border);
 }
 
@@ -309,18 +375,18 @@
 .pr-detect-status {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 .pr-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: var(--sp-1);
+  padding: 3px var(--sp-3);
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-input);
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   white-space: nowrap;
   max-width: 100%;
@@ -344,89 +410,102 @@
 
 /* Inline are-you-sure row before the (machine-moving) homing cycle. */
 .pr-confirm {
-  padding: 6px 8px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--danger);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 .pr-confirm-q {
   flex: 1 1 100%;
-  font-size: 11.5px;
+  font-size: var(--fs-body);
   color: var(--fg);
 }
 
 /* Detected-size success readout. */
 .pr-detect-result {
-  padding: 6px 8px;
-  border-radius: 5px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--ok);
   background: color-mix(in srgb, var(--ok) 12%, transparent);
   color: var(--fg);
-  font-size: 11.5px;
+  font-size: var(--fs-body);
 }
 .pr-detect-result .pr-sub {
   display: block;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 
-/* ---- narrow column (≤340px): stack each field so label + input never
-   collide, full-width inputs, ≥36px tap targets. Driven by the PANEL's own
-   width (container query), so it fires when docked narrow on a wide window. */
-@container probepanel (max-width: 340px) {
+/* ---- narrow column (≤360px): stack the $-setting toggle fields so label +
+   button never collide, full-width inputs/toggles, ≥36px tap targets. Driven
+   by the PANEL's own width (container query), so it fires when docked narrow on
+   a wide window. Cards already collapse to one column at this width. ---- */
+@container probepanel (max-width: 360px) {
+  .pr-cards {
+    grid-template-columns: 1fr;
+  }
   .pr-field {
     flex-direction: column;
     align-items: stretch;
-    gap: 4px;
+    gap: var(--sp-1);
   }
   .pr-field > label { flex: 0 0 auto; }
   /* The toggle ($20/$21/… settings) sits on its own full-width row, label above. */
-  .pr-field .pr-input,
   .pr-field .pr-toggle {
     width: 100%;
     max-width: none;
     flex: 1 1 auto;
   }
-  .pr-field .pr-units {
-    min-width: 0;
-    align-self: flex-end;
-    margin-top: -2px;
+  /* Grow controls back to comfortable touch targets. */
+  .pr-btn,
+  .pr-toggle,
+  .pr-disclosure { min-height: var(--ctl-h-touch); }
+  .pr-btn.primary { min-height: var(--ctl-h-touch); }
+  .pr-input { height: var(--ctl-h-touch); }
+  .pr-icon-btn.icon-btn {
+    min-width: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
   }
-  /* Mini secondary actions stack rather than squeeze. */
-  .pr-row .pr-btn { flex: 1 1 100%; }
+  /* Mini secondary actions stay tight; primary text buttons fill the row. */
+  .pr-row .pr-btn.pr-grow { flex: 1 1 100%; }
 }
 
 /* ---- mobile / touch (≤480px panel width): bigger tap targets, lights flow
-   3-across. Also a container query — measures the panel, not the window. */
+   3-across. Also a container query — measures the panel, not the window. ---- */
 @container probepanel (max-width: 480px) {
   .pr-btn,
-  .pr-input,
   .pr-toggle,
-  .pr-disclosure { min-height: 38px; }
-  .pr-row .pr-btn { flex: 1 1 auto; }
-  .pr-input {
-    flex: 1 1 auto;
-    width: auto;
-    max-width: none;
+  .pr-disclosure { min-height: var(--ctl-h-touch); }
+  .pr-btn.primary { min-height: var(--ctl-h-touch); }
+  .pr-input { height: var(--ctl-h-touch); }
+  .pr-icon-btn.icon-btn {
+    min-width: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
   }
-  .pr-light {
-    flex-basis: 30%;
-    min-height: 70px;
+  .pr-lights {
+    grid-template-columns: repeat(3, 1fr);
   }
-  .pr-dot { width: 28px; height: 28px; }
+  .pr-light { padding: var(--sp-3) var(--sp-1); }
+  .pr-dot { width: 24px; height: 24px; }
 }
 
 /* Fallback for browsers without container-query support: key off the window
    so phone-width viewports still get the touch-friendly sizing. */
 @supports not (container-type: inline-size) {
-  @media (max-width: 480px) {
+  @media (max-width: 768px) {
+    .pr-cards { grid-template-columns: 1fr; }
     .pr-btn,
-    .pr-input,
     .pr-toggle,
-    .pr-disclosure { min-height: 38px; }
-    .pr-input { flex: 1 1 auto; width: auto; max-width: none; }
-    .pr-light { flex-basis: 30%; min-height: 70px; }
-    .pr-dot { width: 28px; height: 28px; }
+    .pr-disclosure { min-height: var(--ctl-h-touch); }
+    .pr-btn.primary { min-height: var(--ctl-h-touch); }
+    .pr-input { height: var(--ctl-h-touch); }
+    .pr-icon-btn.icon-btn {
+      min-width: var(--ctl-h-touch);
+      min-height: var(--ctl-h-touch);
+    }
+    .pr-lights { grid-template-columns: repeat(3, 1fr); }
+    .pr-light { padding: var(--sp-3) var(--sp-1); }
+    .pr-dot { width: 24px; height: 24px; }
   }
 }

@@ -25,6 +25,17 @@ export {
 export type { RealtimeByteName } from './realtime'
 
 export {
+  GRBL_DIALECT,
+  resolveDialect,
+  statusQueryLine,
+  g91JogLines,
+  isMarlinPositionLine,
+  parseMarlinStatus,
+  parseStatusForDialect,
+} from './dialect'
+export type { ResolvedDialect } from './dialect'
+
+export {
   parseSettingLine,
   parseSettingsBlock,
   readSettingsCommand,
@@ -36,3 +47,6 @@ export type { GrblSetting, GrblSettingMeta } from './settings'
 
 export { MockPort } from './mockPort'
 export type { MockPortOptions } from './mockPort'
+
+export { WsPort } from './wsPort'
+export type { WsPortOptions } from './wsPort'

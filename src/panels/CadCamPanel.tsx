@@ -7,13 +7,17 @@ import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
 import { Polyline } from '../core/geometry'
 import { parseStl, type StlMesh } from '../core/slicer'
 import {
-  carveMesh,
-  placeToolpath,
   parseEpsPaths,
   defaultCarve3DParams,
+  autoCarveParams,
   type Carve3DParams,
   type ToolType,
+  type CarveJobSpec,
+  type CarveProgramGlobals,
+  type CarveWorkerRequest,
+  type CarveWorkerOutbound,
 } from '../core/carve3d'
+import { defaultCutoutParams, type CutoutParams } from '../core/cutout'
 import { useProgram, usePersistentState } from '../store'
 import { useCarveJobs, type CarveJob, type ApplyAllKey, type JobSpeeds } from '../store/carveJobs'
 import { useBed } from '../store/bed'
@@ -29,6 +33,9 @@ import {
 import { useStock } from '../store/stock'
 import { Modal } from '../components/Modal'
 import { InfoTip } from '../components/InfoTip'
+import { IconButton } from '../components/IconButton'
+import { FrameButton } from '../components/FrameButton'
+import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { useT } from '../i18n'
 import '../styles/cadcam.css'
 
@@ -289,6 +296,76 @@ const DEFAULT_2D: Params2D = (() => {
   }
 })()
 
+/** The serializable 3D-Carving document written by Save / read by Load. */
+interface CarveDoc {
+  kind: 'karmyogi.carve'
+  version: 1
+  bitId: string
+  bitLength: number
+  p2d: Params2D
+  cutout: CutoutParams
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null
+const numOr = (v: unknown, f: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : f
+const boolOr = (v: unknown, f: boolean): boolean => (typeof v === 'boolean' ? v : f)
+
+/** Narrow unknown into valid CutoutParams, falling back to the normalised base. */
+function parseCutout(v: unknown, base: CutoutParams): CutoutParams {
+  if (!isRecord(v)) return base
+  const shape = v.shape === 'outline' || v.shape === 'rect' ? v.shape : base.shape
+  const t = isRecord(v.tabs) ? v.tabs : {}
+  const r = isRecord(v.rect) ? v.rect : {}
+  const rectMode = r.mode === 'auto' || r.mode === 'manual' ? r.mode : base.rect.mode
+  return {
+    enabled: boolOr(v.enabled, base.enabled),
+    shape,
+    clearAround: boolOr(v.clearAround, base.clearAround),
+    stockThicknessMm: numOr(v.stockThicknessMm, base.stockThicknessMm),
+    cutStepdownMm: numOr(v.cutStepdownMm, base.cutStepdownMm),
+    breakThroughMm: numOr(v.breakThroughMm, base.breakThroughMm),
+    finishAllowanceMm: numOr(v.finishAllowanceMm, base.finishAllowanceMm),
+    side: 'outside',
+    tabs: {
+      count: numOr(t.count, base.tabs.count),
+      lengthMm: numOr(t.lengthMm, base.tabs.lengthMm),
+      heightMm: numOr(t.heightMm, base.tabs.heightMm),
+    },
+    rect: {
+      mode: rectMode,
+      marginMm: numOr(r.marginMm, base.rect.marginMm),
+      x: numOr(r.x, base.rect.x),
+      y: numOr(r.y, base.rect.y),
+      width: numOr(r.width, base.rect.width),
+      height: numOr(r.height, base.rect.height),
+    },
+  }
+}
+
+/** Narrow unknown into valid Params2D, falling back per-field to `base`. */
+function parseP2d(v: unknown, base: Params2D): Params2D {
+  if (!isRecord(v)) return base
+  const zMode = v.zMode === ZMode.Pen || v.zMode === ZMode.Spindle ? v.zMode : base.zMode
+  return {
+    diameter: numOr(v.diameter, base.diameter),
+    stepdown: numOr(v.stepdown, base.stepdown),
+    stepover: numOr(v.stepover, base.stepover),
+    safeZ: numOr(v.safeZ, base.safeZ),
+    surfaceZ: numOr(v.surfaceZ, base.surfaceZ),
+    cutDepth: numOr(v.cutDepth, base.cutDepth),
+    feedXY: numOr(v.feedXY, base.feedXY),
+    feedZ: numOr(v.feedZ, base.feedZ),
+    zMode,
+    spindleRPM: numOr(v.spindleRPM, base.spindleRPM),
+    penUpZ: numOr(v.penUpZ, base.penUpZ),
+    penDownZ: numOr(v.penDownZ, base.penDownZ),
+    decimals: numOr(v.decimals, base.decimals),
+    lineNumbers: boolOr(v.lineNumbers, base.lineNumbers),
+  }
+}
+
 /** Classify a picked file by its extension. */
 function classify(name: string): Mode | 'dxf' {
   const ext = name.toLowerCase().split('.').pop() ?? ''
@@ -298,52 +375,6 @@ function classify(name: string): Mode | 'dxf' {
   if (ext === 'eps' || ext === 'ai') return '2d'
   if (ext === 'cdr') return 'cdr'
   return 'none'
-}
-
-/**
- * Strip the standard {@link GcodeEmitter} header/footer from a single-job
- * program, returning just the cutting body so several jobs can be stitched under
- * ONE shared header (units/plane), spindle start, and footer. A safe-Z retract
- * is prepended so each stitched job begins above the stock before its first XY
- * travel (the boundary between jobs is always safe).
- *
- * The emitter header is fixed: optional `( … )` comments, then G21, G90, G94,
- * G17, `G0 Z<safe>`, optional `M3 …`/`G4 …`. The footer is `G0 Z<safe>`, optional
- * `M5`, `M30`. We drop those modal/setup/spindle/end lines and keep everything in
- * between (comments and motion).
- */
-function extractEmitterBody(program: string, safeZ: number): string[] {
-  const raw = program.split(/\r?\n/)
-  // Header words to drop wherever they appear at the top (and the program-level
-  // comments). We strip leading setup until the first real motion/comment body.
-  const isHeaderLine = (l: string): boolean => {
-    const s = l.trim()
-    if (s === '') return true
-    if (/^G21$|^G20$|^G90$|^G91$|^G94$|^G17$/.test(s)) return true
-    if (/^M3\b/.test(s) || /^M4\b/.test(s) || /^G4\b/.test(s)) return true
-    // The header's initial safe-Z retract.
-    if (/^G0\s+Z/i.test(s)) return true
-    // Generator banner / program-name comments.
-    if (/^\(Generated by /i.test(s)) return true
-    return false
-  }
-  // Find the end of the contiguous header block.
-  let start = 0
-  while (start < raw.length && isHeaderLine(raw[start])) start++
-  // Find the start of the footer block (M30 / M5 / trailing safe-Z) from the end.
-  let end = raw.length
-  while (end > start) {
-    const s = raw[end - 1].trim()
-    if (s === '' || /^M30\b/.test(s) || /^M5\b/.test(s) || /^G0\s+Z/i.test(s)) {
-      end--
-      continue
-    }
-    break
-  }
-  const body = raw.slice(start, end).filter((l) => l.trim().length > 0)
-  if (body.length === 0) return []
-  // Prepend a safe retract so the job's first rapid XY is preceded by a lift.
-  return [`G0 Z${safeZ.toFixed(3)}`, ...body]
 }
 
 /** Mesh XY-bbox centre — the pivot for a job's rotation/scale placement. */
@@ -362,10 +393,20 @@ function jobCarveParams(
   job: CarveJob,
   global: { toolDiameter: number; toolType: ToolType; safeZ: number; spindleRPM: number; feedZ: number },
 ): Carve3DParams {
+  // The job's `stepover` is the FINE finishing stepover (surface quality). Bulk
+  // roughing can clear far faster with a coarser stepover — derive that from the
+  // tool diameter so roughing isn't needlessly crawling at the finishing pitch.
+  const auto = autoCarveParams(global.toolDiameter, global.toolType, job.speeds.cutDepthMm / Math.max(global.toolDiameter, 0.01))
+  // Auto-skip roughing when the whole relief fits in one stepdown (finishing
+  // alone clears it — faster). Honour the user's explicit roughing toggle: only
+  // skip when they left roughing ON but it's not actually needed.
+  const reliefDepth = Math.max(0, job.maxDepth)
+  const roughingNeeded = reliefDepth > Math.max(job.speeds.cutDepthMm, 0.01) + 1e-6
   return defaultCarve3DParams({
     toolDiameter: global.toolDiameter,
     toolType: global.toolType,
     stepover: job.stepover,
+    roughStepover: Math.max(job.stepover, auto.roughStepover),
     stepdown: job.speeds.cutDepthMm,
     safeZ: global.safeZ,
     maxDepth: job.maxDepth,
@@ -373,7 +414,7 @@ function jobCarveParams(
     feedZ: global.feedZ,
     travelFeed: job.speeds.freeSpeedMmS * 60,
     spindleRPM: global.spindleRPM,
-    doRoughing: job.roughing,
+    doRoughing: job.roughing && roughingNeeded,
     doFinishing: job.finishing,
     finishDir: job.finishDir,
   })
@@ -396,6 +437,9 @@ function jobCarveParams(
 export function CadCamPanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
+  // The currently-loaded/combined program lines — used by the Frame button to
+  // trace this carving's XY perimeter on the machine (placement already baked).
+  const programLines = useProgram((s) => s.lines)
   const bed = useBed()
 
   // ---- multi-job carving store -------------------------------------------
@@ -453,6 +497,19 @@ export function CadCamPanel() {
   const [side, setSide] = useState<ProfileSide>(ProfileSide.Outside)
   const [p2d, setP2d] = usePersistentState<Params2D>('karmyogi.carve.2d', DEFAULT_2D)
 
+  // Optional CUTOUT pass: after the relief is carved, profile the part's outer
+  // perimeter down through the stock to free it, leaving holding tabs. One shared
+  // setting across all jobs (each job cuts around its own footprint, using its own
+  // stock thickness when the override below is off). Default OFF. Persisted so the
+  // operator's preference survives reloads.
+  const [cutoutRaw, setCutout] = usePersistentState<CutoutParams>(
+    'karmyogi.carve.cutout',
+    defaultCutoutParams(),
+  )
+  // An OLDER persisted shape may be missing the newer `shape` / `clearAround` /
+  // `rect` fields — normalise through the defaults so nested reads never crash.
+  const cutout = useMemo(() => defaultCutoutParams(cutoutRaw), [cutoutRaw])
+
   // Tool/bit selection — persisted so the operator's bit survives reloads.
   const [bitId, setBitId] = usePersistentState<string>('karmyogi.carve.bit', DEFAULT_BIT_ID)
   // Bit cutting LENGTH (flute/usable length, mm) — a primary, beginner-visible
@@ -467,6 +524,8 @@ export function CadCamPanel() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   /** Material whose info modal is open (large image + properties), or null. */
   const [infoMaterial, setInfoMaterial] = useState<MaterialPreset | null>(null)
+  /** Friendly message shown when a Load fails to parse. */
+  const [loadError, setLoadError] = useState('')
 
   // ---- material + bit + recommendation ------------------------------------
   const material = useMemo(
@@ -510,18 +569,24 @@ export function CadCamPanel() {
   // only re-assert it when the bit/material actually changes (below), so a manual
   // override isn't stomped on every render.
   useEffect(() => {
+    // Improved auto-derivation: a FINE finishing stepover from the desired
+    // surface scallop (ball-nose) or a sane fraction of the diameter (flat),
+    // plus a stepdown sized from the material's depth-of-cut. Roughing uses a
+    // coarser stepover internally (see jobCarveParams) and is auto-skipped for
+    // shallow reliefs — both shorten machine time without hurting finish.
+    const auto = autoCarveParams(bit.diameter, bitTypeToToolType(bit.type), material.stepdownFraction)
     const speeds: Partial<CarveJob['speeds']> = {
       cutSpeedMmS: Math.round((rec.feedXY / 60) * 100) / 100,
-      cutDepthMm: rec.stepdown,
+      cutDepthMm: auto.stepdown,
       // Free/travel speed → MAX (rapid-class link feed).
       freeSpeedMmS: Math.round((RAPID_FEED_MM_MIN / 60) * 100) / 100,
     }
-    setDefaults({ speeds, stepover: rec.stepover })
+    setDefaults({ speeds, stepover: auto.finishStepover })
     // Plunge-Z (feedZ) + spindle are global; recompute on bit/material change.
     setGlobal({ feedZ: rec.feedZ, spindleRPM: rec.spindleRPM })
     if (selectedJob) {
       setJobSpeeds(selectedJob.id, speeds)
-      updateJob(selectedJob.id, { stepover: rec.stepover })
+      updateJob(selectedJob.id, { stepover: auto.finishStepover })
     }
     // Keep the 2D vector knobs aligned with the recommendation too.
     setP2d((p) => ({
@@ -707,92 +772,156 @@ export function CadCamPanel() {
     return out
   }
 
-  // ---- 3D: combined carve over ALL enabled jobs ---------------------------
+  // ---- 3D: combined carve over ALL enabled jobs (in a Web Worker) ----------
   const [carveStats, setCarveStats] = useState<{
     jobs: number
     grids: number
   } | null>(null)
+  // Carve progress 0..1 (null = not carving). Drives a small "carving…" bar so a
+  // heavy relief no longer freezes the UI — the compute runs off-thread.
+  const [carveProgress, setCarveProgress] = useState<number | null>(null)
+
+  // The active carve worker (null when idle), held in a ref so a replace/cancel
+  // can terminate it without re-rendering. `carveJobIdRef` is a monotonic id so a
+  // late `done` from a superseded request is ignored.
+  const carveWorkerRef = useRef<Worker | null>(null)
+  const carveJobIdRef = useRef(0)
+  // The last program NAME this panel pushed to the store, so removing all jobs
+  // (or the worker producing nothing) can remove the stale carve section.
+  const lastCarveNameRef = useRef<string | null>(null)
+
+  function teardownCarveWorker() {
+    if (carveWorkerRef.current) {
+      carveWorkerRef.current.terminate()
+      carveWorkerRef.current = null
+    }
+  }
+
+  // Remove our previously-pushed carve section from the shared program store
+  // (called when there is nothing to carve, so a stale section can't linger).
+  function clearCarveProgram() {
+    const name = lastCarveNameRef.current
+    if (!name) return
+    const st = useProgram.getState()
+    const sec = st.sections.find((s) => s.name === name)
+    if (sec) st.removeSection(sec.id)
+    lastCarveNameRef.current = null
+  }
 
   function generate3D(): string {
     const active = jobs.filter((j) => j.enabled)
     if (active.length === 0) {
+      teardownCarveWorker()
       setGcode('')
       setLineCount(0)
       setCarveStats(null)
-      return ''
-    }
-    const allWarnings: string[] = []
-    // Each job carves with ITS OWN feeds, so we emit each job's body with a
-    // per-job emitter (which writes that job's F words) and stitch the bodies
-    // under ONE shared header / spindle-start / footer — so the operator gets a
-    // single combined program with correct per-job speeds.
-    const bodies: string[] = []
-    let grids = 0
-    let carved = 0
-    for (const job of active) {
-      const params = jobCarveParams(job, carveGlobal)
-      const result = carveMesh(job.mesh, params)
-      for (const w of result.warnings) allWarnings.push(`${job.name}: ${w}`)
-      if (result.gridX > 0) grids += 1
-      if (result.toolpaths.length === 0) continue
-
-      // Bake the job's placement (move/rotate/scale about its mesh centre).
-      const pivot = meshCenter(job.mesh)
-      const placed = result.toolpaths.map((tp) => {
-        const p = placeToolpath(tp, job.placement, pivot)
-        p.name = `${job.name} — ${tp.name}`
-        return p
-      })
-      const jobEmitter = new GcodeEmitter({
-        programName: '',
-        comments: true,
-        safeZ: carveGlobal.safeZ,
-        feedXY: job.speeds.cutSpeedMmS * 60,
-        feedZ: carveGlobal.feedZ,
-        travelFeed: job.speeds.freeSpeedMmS * 60,
-        zMode: ZMode.Spindle,
-        useSpindle: false, // spindle handled once in the shared header
-        spindleRPM: carveGlobal.spindleRPM,
-      })
-      const body = extractEmitterBody(jobEmitter.emitProgram(placed), carveGlobal.safeZ)
-      if (body.length > 0) bodies.push(`(${job.name})`, ...body)
-      carved += 1
-    }
-    setWarnings(allWarnings)
-    setCarveStats({ jobs: carved, grids })
-
-    if (bodies.length === 0) {
-      setGcode('')
-      setLineCount(0)
+      setCarveProgress(null)
+      clearCarveProgram()
       return ''
     }
 
-    // Assemble the SINGLE combined program: one safe header, one M3, all job
-    // bodies (each prefixed by a safe-Z retract from extractEmitterBody), one M5.
-    const name =
-      active.length === 1 ? `${active[0].name} — 3D Carving` : `${active.length} jobs — 3D Carving`
-    const safe = carveGlobal.safeZ.toFixed(3)
-    const lines: string[] = [
-      `(${name})`,
-      '(Generated by karmyogi 3D Carving — multi-model)',
-      'G21',
-      'G90',
-      'G94',
-      'G17',
-      `G0 Z${safe}`,
-      `M3 S${carveGlobal.spindleRPM.toFixed(3)}`,
-      ...bodies,
-      `G0 Z${safe}`,
-      'M5',
-      'M30',
-    ]
-    const out = lines.join('\n') + '\n'
-    const count = out.split('\n').filter((l) => l.length > 0).length
-    setProgram(name, out)
-    setGcode(out)
-    setLineCount(count)
-    return out
+    // Build per-job specs + copy each mesh's triangle buffer to TRANSFER it
+    // (zero-copy) to the worker, leaving the in-memory mesh intact for the
+    // viewer. carveMesh/buildCutout/emit all run off the main thread.
+    const globals: CarveProgramGlobals = {
+      safeZ: carveGlobal.safeZ,
+      spindleRPM: carveGlobal.spindleRPM,
+      feedZ: carveGlobal.feedZ,
+      toolDiameter: carveGlobal.toolDiameter,
+    }
+    const transfers: ArrayBuffer[] = []
+    const workerJobs = active.map((job) => {
+      const spec: CarveJobSpec = {
+        name: job.name,
+        params: jobCarveParams(job, carveGlobal),
+        placement: job.placement,
+        pivot: meshCenter(job.mesh),
+        stockThicknessMm: job.stock.height,
+      }
+      const tris = job.mesh.triangles.slice()
+      transfers.push(tris.buffer)
+      return {
+        spec,
+        triangles: tris,
+        triangleCount: job.mesh.triangleCount,
+        vertexCount: job.mesh.vertexCount,
+        bbox: job.mesh.bbox,
+        format: job.mesh.format,
+      }
+    })
+
+    // Supersede any in-flight carve.
+    teardownCarveWorker()
+    const jobId = ++carveJobIdRef.current
+    let worker: Worker
+    try {
+      worker = new Worker(new URL('../core/carve3d.worker.ts', import.meta.url), { type: 'module' })
+    } catch {
+      setCarveProgress(null)
+      return ''
+    }
+    carveWorkerRef.current = worker
+    setCarveProgress(0)
+
+    worker.onmessage = (e: MessageEvent<CarveWorkerOutbound>) => {
+      const msg = e.data
+      if (msg.jobId !== carveJobIdRef.current) return // a superseded request
+      if (msg.type === 'progress') {
+        setCarveProgress(msg.total > 0 ? msg.done / msg.total : 0)
+        return
+      }
+      if (msg.type === 'done') {
+        teardownCarveWorker()
+        setCarveProgress(null)
+        setWarnings(msg.warnings)
+        setCarveStats({ jobs: msg.jobsCarved, grids: msg.grids })
+        if (!msg.gcode) {
+          setGcode('')
+          setLineCount(0)
+          clearCarveProgram()
+          return
+        }
+        const name =
+          active.length === 1
+            ? `${active[0].name} — 3D Carving`
+            : `${active.length} jobs — 3D Carving`
+        // If the program name changed (job count crossed 1↔many, or a renamed
+        // single job), remove the previous section so it doesn't linger.
+        if (lastCarveNameRef.current && lastCarveNameRef.current !== name) clearCarveProgram()
+        lastCarveNameRef.current = name
+        setProgram(name, msg.gcode)
+        setGcode(msg.gcode)
+        setLineCount(msg.lineCount)
+        return
+      }
+      // error
+      teardownCarveWorker()
+      setCarveProgress(null)
+      if (!msg.cancelled) {
+        setWarnings([t('cc.carveFailed', 'Carve failed: {msg}', { msg: msg.message })])
+      }
+    }
+    worker.onerror = () => {
+      teardownCarveWorker()
+      setCarveProgress(null)
+    }
+
+    const req: CarveWorkerRequest = {
+      type: 'carve',
+      jobId,
+      jobs: workerJobs,
+      globals,
+      cutout: cutout.enabled ? cutout : null,
+    }
+    worker.postMessage(req, transfers)
+    return ''
   }
+
+  // Terminate any live carve worker on unmount so a backgrounded carve can't leak.
+  useEffect(() => {
+    return () => teardownCarveWorker()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function generate(): string {
     if (mode === '3d') return generate3D()
@@ -813,10 +942,22 @@ export function CadCamPanel() {
   }
 
   // Live G-code: regenerate (debounced) whenever inputs change, off the UI
-  // critical path so a heavy carve never blocks typing.
+  // critical path so a heavy carve never blocks typing. For 3D the heavy compute
+  // runs in a Web Worker (generate3D posts to it), so the timeout body never
+  // blocks; for 2D it's a quick synchronous emit.
   useEffect(() => {
     if (mode !== '2d' && mode !== '3d') return
-    if (mode === '3d' && jobs.filter((j) => j.enabled).length === 0) return
+    // No enabled 3D jobs (e.g. the last job was removed) → tear down the worker
+    // and remove our now-orphaned program section, then stop.
+    if (mode === '3d' && jobs.filter((j) => j.enabled).length === 0) {
+      teardownCarveWorker()
+      setGcode('')
+      setLineCount(0)
+      setCarveStats(null)
+      setCarveProgress(null)
+      clearCarveProgram()
+      return
+    }
     setBusy(true)
     const id = window.setTimeout(() => {
       try {
@@ -831,7 +972,7 @@ export function CadCamPanel() {
       setBusy(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, drawing, epsPolys, op, side, p2d, polylines, carveRev, jobs, carveGlobal])
+  }, [mode, drawing, epsPolys, op, side, p2d, polylines, carveRev, jobs, carveGlobal, cutout])
 
   // When the panel becomes visible again (tab re-selected) and we have carve
   // jobs, re-assert our program so a sibling panel can't leave a stale program
@@ -880,6 +1021,31 @@ export function CadCamPanel() {
     const d = selectedJob.stock.depth
     return { w, d, fits: w <= bed.width && d <= bed.depth }
   }, [selectedJob, bed.width, bed.depth])
+
+  // ---- Save / Load document (carve params + cutout; STL re-imported) -------
+  const carveDoc: CarveDoc = {
+    kind: 'karmyogi.carve',
+    version: 1,
+    bitId,
+    bitLength,
+    p2d,
+    cutout: cutoutRaw,
+  }
+
+  function loadCarveDoc(data: unknown) {
+    if (!isRecord(data)) {
+      setLoadError(t('cc.load.bad', 'Could not load — not a valid carving settings file.'))
+      return
+    }
+    // bitId: accept only a string that resolves to a real bit.
+    if (typeof data.bitId === 'string' && getBit(data.bitId)) setBitId(data.bitId)
+    if (typeof data.bitLength === 'number' && Number.isFinite(data.bitLength))
+      setBitLength(data.bitLength)
+    setP2d((p) => parseP2d(data.p2d, p))
+    // Narrow the cutout against the current normalised values, then store it.
+    if (isRecord(data.cutout)) setCutout(parseCutout(data.cutout, cutout))
+    setLoadError('')
+  }
 
   return (
     <div
@@ -1159,7 +1325,7 @@ export function CadCamPanel() {
           </section>
 
           {/* ================= IMPORT / DROP ================= */}
-          <section className="cc-section">
+          <section className="cc-section cc-span">
             <h3>1 · {t('cc.model', 'Model')}</h3>
             <div className="cc-section-body">
               <div className={'cc-drop' + (dragOver ? ' cc-dragover' : '')}>
@@ -1345,6 +1511,11 @@ export function CadCamPanel() {
                 setNestWarn(res.warnings)
               }}
             />
+          )}
+
+          {/* ================= CUTOUT (cut part free from stock) ================= */}
+          {mode === '3d' && jobs.length > 0 && (
+            <CutoutCard t={t} cutout={cutout} setCutout={setCutout} />
           )}
 
           {/* Material + recommended-passes now live in the primary section and
@@ -1541,27 +1712,59 @@ export function CadCamPanel() {
           )}
 
           {/* ---- output / live preview (streaming lives in the Program tab) ---- */}
-          <section className="cc-section cc-output">
+          <section className="cc-section cc-output cc-span">
             <h3>{t('cc.output', 'Output')}</h3>
             <div className="cc-section-body">
               <div className="cc-generate">
                 <span className="cc-gen-meta">
-                  {busy ? t('cc.generating', 'Generating…') : t('cc.livePreview', 'Live preview')} ·{' '}
+                  {carveProgress !== null
+                    ? t('cc.carving', 'Carving…')
+                    : busy
+                      ? t('cc.generating', 'Generating…')
+                      : t('cc.livePreview', 'Live preview')}{' '}
+                  ·{' '}
                   <b>{lineCount}</b> {t('cc.linesToViz', 'lines → Visualizer')}
                   {mode === '3d' && carveStats && (
                     <> · {t('cc.combinedJobs', '{n} jobs combined', { n: carveStats.jobs })}</>
                   )}
                 </span>
-                <button
+                {carveProgress !== null && (
+                  <div
+                    className="cc-carve-progress"
+                    role="progressbar"
+                    aria-label={t('cc.carveProgress', 'carving progress')}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(carveProgress * 100)}
+                    title={t('cc.carvingOffThread', 'Carving off the main thread — the UI stays responsive')}
+                  >
+                    <div className="cc-carve-progress-bar" style={{ width: `${Math.round(carveProgress * 100)}%` }} />
+                  </div>
+                )}
+                <FrameButton
+                  className="cc-frame"
+                  lines={programLines}
+                  safeZ={carveGlobal.safeZ}
+                  label={t('cc.frame', 'Frame')}
+                />
+                <IconButton
                   className="cc-regen"
+                  icon="↻"
+                  label={t('cc.regen', 'Regenerate now')}
                   onClick={() => generate()}
                   disabled={!canGenerate}
-                  title={t('cc.regen', 'Regenerate now')}
-                  aria-label={t('cc.regen', 'Regenerate now')}
-                >
-                  ↻
-                </button>
+                />
+                <SaveLoadButtons
+                  value={carveDoc}
+                  onLoad={loadCarveDoc}
+                  onError={setLoadError}
+                  fileBase="karmyogi-carving"
+                  ext="kcarve"
+                  saveTitle={t('cc.save', 'Save carve settings')}
+                  loadTitle={t('cc.load', 'Load carve settings')}
+                />
               </div>
+              {loadError && <div className="cc-error">{loadError}</div>}
 
               {mode === 'none' && (
                 <span className="cc-hint">{t('cc.importToGen', 'Import a model to generate a toolpath.')}</span>
@@ -1635,6 +1838,284 @@ function ApplyAll({
   )
 }
 
+/**
+ * Compact "✂ Cut part from stock" card (3D mode). When enabled, the emitted
+ * program appends — AFTER the relief finishing pass — a profiling pass around
+ * each carved part's outer footprint, cutting down through the stock so the part
+ * is freed, with evenly-spaced holding TABS so it doesn't break loose. Each job
+ * cuts using its OWN stock thickness; these fields are shared across jobs.
+ * Default OFF.
+ */
+function CutoutCard({
+  t,
+  cutout,
+  setCutout,
+}: {
+  t: ReturnType<typeof useT>
+  cutout: CutoutParams
+  setCutout: (updater: CutoutParams | ((prev: CutoutParams) => CutoutParams)) => void
+}) {
+  const num = (v: string, fallback = 0) => (Number.isFinite(+v) ? +v : fallback)
+  const fNum = (n: number) => String(Math.round(n * 1000) / 1000)
+  // Normalise prev through defaults so writes against an older saved shape (no
+  // shape/clearAround/rect fields) never read undefined nested objects.
+  const patch = (p: Partial<CutoutParams>) =>
+    setCutout((c) => ({ ...defaultCutoutParams(c), ...p }))
+  const patchTabs = (p: Partial<CutoutParams['tabs']>) =>
+    setCutout((c) => {
+      const n = defaultCutoutParams(c)
+      return { ...n, tabs: { ...n.tabs, ...p } }
+    })
+  const patchRect = (p: Partial<CutoutParams['rect']>) =>
+    setCutout((c) => {
+      const n = defaultCutoutParams(c)
+      return { ...n, rect: { ...n.rect, ...p } }
+    })
+
+  const isRect = cutout.shape === 'rect'
+  const isManual = cutout.rect.mode === 'manual'
+
+  return (
+    <section className={'cc-section cc-cutout cc-span' + (cutout.enabled ? ' on' : '')}>
+      <h3>
+        <label className="cc-cutout-toggle">
+          <input
+            type="checkbox"
+            checked={cutout.enabled}
+            onChange={(e) => patch({ enabled: e.target.checked })}
+          />
+          <span className="cc-cutout-title">✂ {t('cc.cutout', 'Cut part from stock')}</span>
+        </label>
+        <Tip
+          id="cutout"
+          title={t('cc.cutout', 'Cut part from stock')}
+          body={t(
+            'cc.cutoutTip',
+            'After the relief is carved, cut the part free from the block. Choose to follow the part’s outline or cut a rectangle, optionally clearing the material around the part. Holding tabs leave small bridges so the part stays put until you snap it out.',
+          )}
+        />
+      </h3>
+      {cutout.enabled && (
+        <div className="cc-section-body">
+          {/* ---- SHAPE: the up-front choice (part outline vs rectangle) ---- */}
+          <div className="cc-cutshape" role="group" aria-label={t('cc.cutoutShape', 'Cutout shape')}>
+            <button
+              type="button"
+              className={'cc-cutshape-btn' + (!isRect ? ' active' : '')}
+              onClick={() => patch({ shape: 'outline' })}
+              aria-pressed={!isRect}
+              title={t('cc.cutoutOutlineTip', 'Cut along the carved part’s outer edge — the tool rides just outside the part outline.')}
+            >
+              <span className="cc-cutshape-ico" aria-hidden>⬡</span>
+              <span className="cc-cutshape-lbl">{t('cc.cutoutOutline', 'Part outline')}</span>
+            </button>
+            <button
+              type="button"
+              className={'cc-cutshape-btn' + (isRect ? ' active' : '')}
+              onClick={() => patch({ shape: 'rect' })}
+              aria-pressed={isRect}
+              title={t('cc.cutoutRectTip', 'Cut a rectangle you size yourself — auto-fit to the part plus a margin, or set explicit X/Y origin and size.')}
+            >
+              <span className="cc-cutshape-ico" aria-hidden>▭</span>
+              <span className="cc-cutshape-lbl">{t('cc.cutoutRect', 'Rectangle')}</span>
+            </button>
+          </div>
+
+          {/* ---- RECTANGLE fields (only for the rectangle shape) ---- */}
+          {isRect && (
+            <>
+              <div className="cc-subops cc-cutrect-mode">
+                <button
+                  type="button"
+                  className={'cc-subop-btn' + (!isManual ? ' active' : '')}
+                  onClick={() => patchRect({ mode: 'auto' })}
+                  title={t('cc.cutoutRectAutoTip', 'Size the rectangle to the part bounding box plus a margin')}
+                >
+                  {t('cc.cutoutRectAuto', 'Auto (part + margin)')}
+                </button>
+                <button
+                  type="button"
+                  className={'cc-subop-btn' + (isManual ? ' active' : '')}
+                  onClick={() => patchRect({ mode: 'manual' })}
+                  title={t('cc.cutoutRectManualTip', 'Set an explicit origin and size for the rectangle')}
+                >
+                  {t('cc.cutoutRectManual', 'Custom size')}
+                </button>
+              </div>
+              <div className="cc-grid">
+                {!isManual && (
+                  <div className="cc-field">
+                    <label>{t('cc.cutoutMargin', 'Margin around part (mm)')}</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={fNum(cutout.rect.marginMm)}
+                      title={t('cc.cutoutMarginTip', 'Extra space left around the part’s bounding box on every side')}
+                      onChange={(e) => patchRect({ marginMm: num(e.target.value) })}
+                    />
+                  </div>
+                )}
+                {isManual && (
+                  <>
+                    <div className="cc-field">
+                      <label>{t('cc.cutoutRectX', 'Origin X (mm)')}</label>
+                      <input
+                        type="number"
+                        step={1}
+                        value={fNum(cutout.rect.x)}
+                        title={t('cc.cutoutRectXTip', 'Lower-left X of the rectangle in bed coordinates')}
+                        onChange={(e) => patchRect({ x: num(e.target.value) })}
+                      />
+                    </div>
+                    <div className="cc-field">
+                      <label>{t('cc.cutoutRectY', 'Origin Y (mm)')}</label>
+                      <input
+                        type="number"
+                        step={1}
+                        value={fNum(cutout.rect.y)}
+                        title={t('cc.cutoutRectYTip', 'Lower-left Y of the rectangle in bed coordinates')}
+                        onChange={(e) => patchRect({ y: num(e.target.value) })}
+                      />
+                    </div>
+                    <div className="cc-field">
+                      <label>{t('cc.cutoutRectW', 'Width (mm)')}</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={fNum(cutout.rect.width)}
+                        title={t('cc.cutoutRectWTip', 'Rectangle width along X')}
+                        onChange={(e) => patchRect({ width: Math.max(0, num(e.target.value)) })}
+                      />
+                    </div>
+                    <div className="cc-field">
+                      <label>{t('cc.cutoutRectH', 'Height (mm)')}</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={fNum(cutout.rect.height)}
+                        title={t('cc.cutoutRectHTip', 'Rectangle height along Y')}
+                        onChange={(e) => patchRect({ height: Math.max(0, num(e.target.value)) })}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ---- CLEAR AROUND (pocket) toggle ---- */}
+          <label className="cc-check cc-cutclear">
+            <input
+              type="checkbox"
+              checked={cutout.clearAround}
+              onChange={(e) => patch({ clearAround: e.target.checked })}
+            />
+            {t('cc.cutoutClear', 'Clear material around part (pocket to bottom)')}
+            <Tip
+              id="cutoutClear"
+              title={t('cc.cutoutClear', 'Clear material around part (pocket)')}
+              body={t(
+                'cc.cutoutClearTip',
+                'Instead of only cutting the perimeter, clear all the stock between the cut boundary and the part down to the bottom level — leaving the part standing on a cleared floor.',
+              )}
+            />
+          </label>
+
+          <div className="cc-rowlabel">{t('cc.cutoutDepth', 'Depth & edge')}</div>
+          <div className="cc-grid">
+            <div className="cc-field">
+              <label>{t('cc.cutStepdown', 'Stepdown / pass (mm)')}</label>
+              <input
+                type="number"
+                min={0.1}
+                step={0.1}
+                value={fNum(cutout.cutStepdownMm)}
+                title={t('cc.cutStepdownTip', 'Depth removed per profile pass through the stock')}
+                onChange={(e) => patch({ cutStepdownMm: num(e.target.value) })}
+              />
+            </div>
+            <div className="cc-field">
+              <label>{t('cc.breakThrough', 'Break-through (mm)')}</label>
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                value={fNum(cutout.breakThroughMm)}
+                title={t('cc.breakThroughTip', 'Extra depth below the stock bottom so the cut goes fully through')}
+                onChange={(e) => patch({ breakThroughMm: num(e.target.value) })}
+              />
+            </div>
+            {!isRect && (
+              <div className="cc-field">
+                <label>{t('cc.finishAllowance', 'Finish allowance (mm)')}</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={fNum(cutout.finishAllowanceMm)}
+                  title={t('cc.finishAllowanceTip', 'Extra clearance beyond the tool radius left on the part edge')}
+                  onChange={(e) => patch({ finishAllowanceMm: num(e.target.value) })}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="cc-rowlabel">{t('cc.holdingTabs', 'Holding tabs')}</div>
+          <div className="cc-grid">
+            <div className="cc-field">
+              <label>{t('cc.tabCount', 'Count')}</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={String(cutout.tabs.count)}
+                title={t('cc.tabCountTip', 'Number of bridges spaced evenly around the part')}
+                onChange={(e) => patchTabs({ count: Math.max(0, Math.round(num(e.target.value))) })}
+              />
+            </div>
+            <div className="cc-field">
+              <label>{t('cc.tabLength', 'Length (mm)')}</label>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={fNum(cutout.tabs.lengthMm)}
+                title={t('cc.tabLengthTip', 'Width of each tab along the perimeter')}
+                onChange={(e) => patchTabs({ lengthMm: num(e.target.value) })}
+              />
+            </div>
+            <div className="cc-field">
+              <label>{t('cc.tabHeight', 'Height (mm)')}</label>
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                value={fNum(cutout.tabs.heightMm)}
+                title={t('cc.tabHeightTip', 'Material left under each tab, measured up from the stock bottom')}
+                onChange={(e) => patchTabs({ heightMm: num(e.target.value) })}
+              />
+            </div>
+          </div>
+          <span className="cc-hint">
+            {isRect
+              ? t(
+                  'cc.cutoutHintRect',
+                  'Cuts a rectangle through each job’s own stock thickness. Set 0 tabs only if the part is held some other way.',
+                )
+              : t(
+                  'cc.cutoutHint',
+                  'Cuts through each job’s own stock thickness, riding outside the part edge. Set 0 tabs only if the part is held some other way.',
+                )}
+          </span>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function SelectedJobCard({
   t,
   job,
@@ -1658,7 +2139,7 @@ function SelectedJobCard({
   const fNum = (n: number) => String(Math.round(n * 1000) / 1000)
 
   return (
-    <section className="cc-section cc-jobcard">
+    <section className="cc-section cc-jobcard cc-span">
       <h3>
         {t('cc.editing', 'Editing')}: <span className="cc-jobcard-name">{job.name}</span>
       </h3>

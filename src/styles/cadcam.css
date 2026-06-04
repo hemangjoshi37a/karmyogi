@@ -21,16 +21,16 @@
 .cc-scroll {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 7px;
+  padding: var(--sp-3);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--sp-3);
 }
 
 /* --- intro + flow stepper --- */
 .cc-intro {
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-body);
   line-height: 1.4;
   color: var(--fg-muted);
 }
@@ -40,10 +40,10 @@
   list-style: none;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-2);
   margin: 0;
   padding: 0;
-  font-size: 11px;
+  font-size: var(--fs-label);
 }
 .cc-flow li {
   display: inline-flex;
@@ -51,7 +51,7 @@
   gap: 5px;
   flex: 1 1 auto;
   justify-content: center;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 14px;
   color: var(--fg-muted);
@@ -76,54 +76,75 @@
 }
 .cc-flow li.done .cc-flow-n { background: var(--accent); color: var(--accent-fg); }
 
-/* --- masonry card pack --- */
-/* CSS multi-column packs cards densely with no vertical gaps; the panel itself
-   scrolls vertically. `break-inside: avoid` keeps each card whole. Collapses to
-   a single column at narrow widths via the @container query below. */
+/* --- card pack (tile to fill width) ---
+   A responsive auto-fill grid: the control/param cards flow into 2–3 columns at
+   wide container widths (filling the panel and killing bottom whitespace) and
+   collapse to one column when the panel is narrow. Cards that must stay full
+   width (the model/import card, the selected-job card, the live-preview Output)
+   span every column via `.cc-span`. */
 .cc-cards {
-  column-width: 250px;
-  column-gap: 7px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
 }
+.cc-span { grid-column: 1 / -1; }
 
 /* --- sections (cards) --- */
 .cc-section {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg);
-  margin: 0 0 7px;
-  break-inside: avoid;
-  -webkit-column-break-inside: avoid;
-  page-break-inside: avoid;
+  margin: 0;
   overflow: hidden;
+  align-self: start;
 }
 .cc-section > h3 {
   margin: 0;
-  padding: 4px 8px;
-  font-size: 10px;
+  padding: 4px var(--pad-card-x);
+  font-size: var(--fs-section);
   color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
 }
 .cc-section-body {
-  padding: 7px 8px;
+  padding: var(--pad-card-y) var(--pad-card-x);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--sp-2);
 }
 
 /* the Output card carries the live-preview status — subtle accent edge */
 .cc-output { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+
+/* --- carving progress bar (3D carve runs in a Web Worker; this shows it's
+   working without freezing the UI) --- */
+.cc-carve-progress {
+  flex: 1 1 120px;
+  height: 6px;
+  min-width: 80px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  overflow: hidden;
+}
+.cc-carve-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.15s ease;
+}
 
 /* --- DXF drop / import --- */
 .cc-drop {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px 8px;
-  padding: 9px 10px;
+  gap: var(--sp-1) var(--sp-3);
+  min-height: 84px;
+  padding: var(--sp-3) var(--pad-card-x);
   border: 2px dashed var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-input);
   text-align: center;
   justify-content: center;
@@ -132,17 +153,17 @@
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
-.cc-drop-icon { font-size: 18px; color: var(--accent); flex: 0 0 auto; }
-.cc-drop-hint { color: var(--fg-muted); font-size: 11px; flex: 1 1 100%; }
+.cc-drop-icon { font-size: 17px; color: var(--accent); flex: 0 0 auto; }
+.cc-drop-hint { color: var(--fg-muted); font-size: var(--fs-label); flex: 1 1 100%; }
 .cc-load-input { display: none; }
-.cc-load-btn { min-height: 36px; }
+.cc-load-btn { min-height: var(--ctl-h-lg); }
 
 .cc-import-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px 12px;
+  gap: var(--sp-1) var(--sp-4);
   align-items: center;
-  font-size: 11.5px;
+  font-size: var(--fs-body);
 }
 .cc-stat { color: var(--fg-muted); }
 .cc-stat b { color: var(--fg); font-variant-numeric: tabular-nums; }
@@ -158,7 +179,7 @@
 }
 .cc-warnings {
   color: var(--warn);
-  font-size: 12px;
+  font-size: var(--fs-body);
   max-height: 96px;
   overflow: auto;
   margin: 0;
@@ -212,8 +233,8 @@
 /* --- material / bit-type picker grid (icon + label cards) --- */
 .cc-pickgrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+  gap: var(--sp-2);
 }
 .cc-pick {
   display: flex;
@@ -221,8 +242,8 @@
   align-items: center;
   justify-content: center;
   gap: 3px;
-  min-height: 56px;
-  padding: 6px 4px;
+  min-height: 52px;
+  padding: var(--sp-2) var(--sp-1);
   text-align: center;
   line-height: 1.15;
   cursor: pointer;
@@ -247,7 +268,7 @@
   border-color: var(--accent);
 }
 .cc-pick-label {
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
@@ -311,16 +332,16 @@
 .cc-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .cc-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-height: 36px;
-  padding: 4px 10px;
+  min-height: var(--ctl-h);
+  padding: 3px 10px;
   border-radius: 16px;
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   cursor: pointer;
 }
 .cc-chip.active {
@@ -334,13 +355,13 @@
 .cc-recgrid {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px 12px;
-  font-size: 12px;
+  gap: var(--sp-1) var(--sp-4);
+  font-size: var(--fs-body);
 }
 .cc-recitem { color: var(--fg-muted); }
 .cc-recitem b { color: var(--fg); font-variant-numeric: tabular-nums; }
 .cc-use-rec {
-  min-height: 40px;
+  min-height: var(--ctl-h-lg);
   font-weight: 600;
   background: var(--ok);
   color: var(--accent-fg);
@@ -358,12 +379,12 @@
 .cc-ops {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 .cc-op-btn {
   flex: 1 1 auto;
-  min-height: 36px;
-  min-width: 72px;
+  min-height: var(--ctl-h-lg);
+  min-width: 64px;
 }
 .cc-op-btn.active {
   background: var(--accent);
@@ -373,13 +394,13 @@
 .cc-subops {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 .cc-subop-btn {
   flex: 1 1 auto;
-  min-height: 36px;
-  min-width: 64px;
-  font-size: 12px;
+  min-height: var(--ctl-h);
+  min-width: 56px;
+  font-size: var(--fs-ctl);
 }
 .cc-subop-btn.active {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
@@ -388,28 +409,32 @@
 }
 .cc-warn-line {
   color: var(--warn);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 
-/* --- parameter grid --- */
+/* --- parameter grid (compact field-grid) --- */
+/* align-items:start so the label scan-line is flush across the row even when
+   some fields carry a trailing `.cc-rechint` recommendation under the input. */
 .cc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-  gap: 7px 8px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: start;
 }
 .cc-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 .cc-field label {
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 .cc-field input,
 .cc-field select {
-  min-height: 36px;
+  min-height: 0;
+  height: var(--ctl-h);
   width: 100%;
 }
 .cc-field input:invalid { border-color: var(--danger); }
@@ -418,31 +443,33 @@
 .cc-nudge {
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0;
 }
 .cc-nudge input {
   flex: 1 1 auto;
   min-width: 0;
+  height: var(--ctl-h);
   text-align: center;
 }
 .cc-nudge button {
   flex: 0 0 auto;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: var(--icon-btn);
+  min-height: 0;
+  height: var(--ctl-h);
   padding: 0;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
 }
 
 /* --- z-mode toggle --- */
 .cc-zmode {
   display: flex;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 .cc-zmode button {
   flex: 1 1 auto;
-  min-height: 36px;
+  min-height: var(--ctl-h-lg);
 }
 .cc-zmode button.active {
   background: var(--accent);
@@ -455,9 +482,9 @@
 .cc-adv-toggle {
   width: 100%;
   text-align: left;
-  min-height: 34px;
+  min-height: var(--ctl-h-lg);
   padding: 6px 8px;
-  font-size: 10px;
+  font-size: var(--fs-section);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--fg-muted);
@@ -470,10 +497,10 @@
 .cc-check {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--sp-3);
+  font-size: var(--fs-ctl);
   color: var(--fg);
-  min-height: 36px;
+  min-height: var(--ctl-h);
   cursor: pointer;
 }
 .cc-check input { min-height: auto; width: 16px; height: 16px; flex: 0 0 auto; }
@@ -483,30 +510,83 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .cc-regen {
-  min-height: 40px;
-  min-width: 40px;
+  min-height: var(--icon-btn);
+  min-width: var(--icon-btn);
   flex: 0 0 auto;
 }
 .cc-gen-meta {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-body);
   flex: 1 1 auto;
 }
 .cc-gen-meta b { color: var(--fg); font-variant-numeric: tabular-nums; }
 
+/* --- Frame (perimeter-trace) control --- */
+.cc-frame { flex: 0 0 auto; }
+.frame-ctl {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.frame-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--icon-btn);
+  padding: 0 10px;
+  font-size: var(--fs-label);
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.frame-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.frame-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.frame-btn-ico { font-size: 13px; line-height: 1; }
+.frame-btn-lbl { white-space: nowrap; }
+.frame-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.frame-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.frame-opt input {
+  width: 4.5em;
+  min-height: var(--ctl-h);
+  font-variant-numeric: tabular-nums;
+}
+
+@container cadcampanel (max-width: 420px) {
+  .frame-ctl { width: 100%; }
+  .frame-btn { min-height: var(--ctl-h-touch); flex: 1 1 auto; justify-content: center; }
+  .frame-opt input { min-height: var(--ctl-h-touch); }
+}
+
 /* --- collapsible raw G-code --- */
 .cc-raw-toggle {
   align-self: flex-start;
-  min-height: 30px;
+  min-height: var(--ctl-h);
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .cc-raw-toggle:hover { border-color: var(--accent); color: var(--fg); }
@@ -516,17 +596,17 @@
   max-height: 280px;
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-mono);
   line-height: 1.35;
   white-space: pre;
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
 }
 
-.cc-hint { color: var(--fg-muted); font-size: 12px; }
+.cc-hint { color: var(--fg-muted); font-size: var(--fs-body); }
 
 /* ============================================================================
    Multi-model carving: tool strip, jobs list, selected-job card.
@@ -538,13 +618,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
-  min-height: 26px;
+  min-width: var(--icon-btn);
+  min-height: var(--icon-btn);
   padding: 0 5px;
   font-size: 13px;
   line-height: 1;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg-muted);
   cursor: pointer;
@@ -554,8 +634,8 @@
 .cc-iconbtn.danger:hover { color: var(--danger); border-color: var(--danger); }
 
 /* --- header inline actions (e.g. re-nest button on the Jobs card) --- */
-.cc-section > h3 { display: flex; align-items: center; gap: 6px; }
-.cc-h3-actions { margin-left: auto; display: inline-flex; gap: 4px; }
+.cc-section > h3 { display: flex; align-items: center; gap: var(--sp-2); }
+.cc-h3-actions { margin-left: auto; display: inline-flex; gap: var(--sp-1); }
 .cc-h3-actions .cc-iconbtn { min-height: 22px; min-width: 22px; font-size: 12px; }
 
 /* --- global tool strip --- */
@@ -570,28 +650,30 @@
 /* The primary card carries a stronger accent edge — it's the focal point. */
 .cc-primary { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 
-/* Bit type / width / length on one tidy auto-fit row. */
+/* Bit type / width / length on one tidy compact field-grid row. */
 .cc-prim-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 6px 8px;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: start;
 }
 .cc-prim-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 .cc-prim-lbl {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 .cc-prim-select,
 .cc-prim-input {
-  min-height: 36px;
+  min-height: 0;
+  height: var(--ctl-h);
   width: 100%;
   min-width: 0;
 }
@@ -601,34 +683,43 @@
 .cc-autoadv { border-color: color-mix(in srgb, var(--ok) 30%, var(--border)); }
 .cc-autogrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 5px 12px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--sp-1) var(--sp-4);
 }
 .cc-autorow {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 4px 0;
+  gap: var(--sp-2);
+  padding: 3px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
-  min-height: 30px;
+  min-height: var(--ctl-h);
 }
 .cc-autorow-lbl {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11.5px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   min-width: 0;
 }
 .cc-autorow-val {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   flex: 0 0 auto;
   white-space: nowrap;
 }
 .cc-autorow-val b { color: var(--fg); font-variant-numeric: tabular-nums; font-size: 12px; }
+.cc-autorow-unit { font-size: var(--fs-label); color: var(--fg-muted); }
+/* compact editable number on the auto rows — never stretches the row */
+.cc-auto-input {
+  width: 64px;
+  min-height: 0;
+  height: var(--ctl-h);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 /* small "auto" pill on each computed value */
 .cc-auto-badge {
@@ -647,21 +738,23 @@
 
 /* the two editable fields (Plunge-Z, Safe-Z) span the auto grid full width and
    sit slightly apart from the read-only rows */
+/* the two editable fields (Plunge-Z, Safe-Z) sit half-width side-by-side and
+   slightly apart from the read-only rows */
 .cc-autofield {
-  grid-column: 1 / -1;
+  grid-column: auto;
   margin-top: 2px;
 }
-.cc-autofield input { min-height: 36px; }
+.cc-autofield input { min-height: 0; height: var(--ctl-h); }
 .cc-strip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-2);
   align-items: stretch;
 }
 .cc-strip-select {
   flex: 1 1 120px;
   min-width: 0;
-  min-height: 32px;
+  min-height: var(--ctl-h);
 }
 .cc-strip-field {
   display: flex;
@@ -669,14 +762,14 @@
   gap: 4px;
   flex: 1 1 96px;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 .cc-strip-field > span { flex: 0 0 auto; }
 .cc-strip-field input {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 30px;
+  min-height: var(--ctl-h);
   text-align: right;
 }
 .cc-strip-field > i { flex: 0 0 auto; font-style: normal; color: var(--fg-muted); font-size: 10px; }
@@ -693,10 +786,10 @@
 .cc-jobrow {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1);
   padding: 3px 4px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
 }
 .cc-jobrow.active {
@@ -708,9 +801,9 @@
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   min-width: 0;
-  min-height: 30px;
+  min-height: var(--ctl-h);
   padding: 2px 4px;
   text-align: left;
   background: transparent;
@@ -727,7 +820,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--fs-ctl);
 }
 .cc-jobrow .cc-iconbtn { flex: 0 0 auto; min-width: 24px; min-height: 24px; }
 
@@ -735,16 +828,16 @@
 .cc-jobcard { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
 .cc-jobcard-name { color: var(--fg); text-transform: none; letter-spacing: 0; font-weight: 600; }
 /* tighter rows inside the dense job card */
-.cc-jobcard .cc-section-body { gap: 6px; }
-.cc-jobcard .cc-check { min-height: 28px; font-size: 11.5px; }
+.cc-jobcard .cc-section-body { gap: var(--sp-2); }
+.cc-jobcard .cc-check { min-height: var(--ctl-h); font-size: var(--fs-label); }
 
 /* sub-section label inside a card, with an optional apply-all button */
 .cc-rowlabel {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   margin-top: 2px;
-  font-size: 10px;
+  font-size: var(--fs-section);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--fg-muted);
@@ -758,10 +851,10 @@
   min-width: 18px;
   min-height: 18px;
   padding: 0 2px;
-  font-size: 11px;
+  font-size: var(--fs-label);
   line-height: 1;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
@@ -770,31 +863,43 @@
 /* labels that host an apply-all sit on one line */
 .cc-field label { display: flex; align-items: center; gap: 5px; }
 
-/* touch sizing for the new slim controls on phone widths */
-@container cadcampanel (max-width: 480px) {
-  .cc-iconbtn { min-width: 36px; min-height: 36px; }
-  .cc-job-en { width: 20px; height: 20px; }
-  .cc-strip-select { min-height: 38px; }
-  .cc-strip-field input { min-height: 36px; }
-}
+/* ============================================================================
+   Responsive / touch. Compact on the desktop (above), comfortable on touch.
+   These key off the PANEL's own width (container query), not the window — the
+   panel is normally a narrow docked column on a WIDE window, so window media
+   queries would never fire. Below ~560px the card grid collapses to one column;
+   below ~480px controls grow back to the ≥36px touch target (--ctl-h-touch).
+   ============================================================================ */
 
-/* Narrow column / mobile reflow. These key off the PANEL's own width
-   (container query), not the window — the panel is normally a narrow docked
-   column on a wide window, so window media queries would never fire. */
-
-/* ≤560px panel: force a single card column (column-width can still try to make
-   two thin columns just above this). */
+/* ≤560px panel: collapse the card grid to a single column. */
 @container cadcampanel (max-width: 560px) {
-  .cc-cards { column-width: auto; columns: 1; }
+  .cc-cards { grid-template-columns: 1fr; }
 }
 
-/* ≤480px panel: bigger touch targets for phone/narrow use. */
+/* ≤480px panel: grow controls back to ≥36px touch targets for phone/narrow. */
 @container cadcampanel (max-width: 480px) {
+  .cc-iconbtn,
+  .cc-regen { min-width: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
+  .cc-job-en { width: 20px; height: 20px; }
+  .cc-strip-select,
+  .cc-strip-field input { min-height: var(--ctl-h-touch); }
+  .cc-field input,
+  .cc-field select,
+  .cc-prim-select,
+  .cc-prim-input,
+  .cc-auto-input,
+  .cc-autofield input,
+  .cc-nudge input,
+  .cc-nudge button { height: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
+  .cc-nudge button { min-width: var(--ctl-h-touch); }
   .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
-  .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; }
-  .cc-regen, .cc-raw-toggle { min-height: 42px; }
-  .cc-raw-toggle { min-width: 40px; }
-  .cc-adv-toggle, .cc-check { min-height: 42px; }
+  .cc-prim-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
+  .cc-autogrid { grid-template-columns: 1fr; }
+  .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
+  .cc-zmode button { min-height: var(--ctl-h-touch); }
+  .cc-raw-toggle { min-width: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
+  .cc-load-btn,
+  .cc-adv-toggle, .cc-check { min-height: var(--ctl-h-touch); }
   /* keep pickers/chips comfortably touch-sized */
   .cc-pickgrid { grid-template-columns: repeat(auto-fit, minmax(40%, 1fr)); }
   .cc-pick { min-height: 60px; }
@@ -805,23 +910,129 @@
    so nothing squeezes below readable or overflows horizontally. Listed AFTER
    the 480px block so it wins the cascade at the narrowest widths. */
 @container cadcampanel (max-width: 300px) {
-  .cc-grid { grid-template-columns: 1fr; }
+  .cc-grid,
+  .cc-prim-grid { grid-template-columns: 1fr; }
   .cc-op-btn, .cc-subop-btn { flex: 1 1 100%; min-width: 0; }
   .cc-pickgrid { grid-template-columns: 1fr; }
   .cc-chip { flex: 1 1 100%; justify-content: center; }
+}
+
+/* Mobile shell: the panel can run OUTSIDE a docked column (full-width on a
+   phone), so also grow controls + single-column the grids off the window width
+   so touch sizing holds even where the container query can't infer narrowness. */
+@media (max-width: 768px) {
+  .cc-cards { grid-template-columns: 1fr; }
+  .cc-field input,
+  .cc-field select,
+  .cc-prim-select,
+  .cc-prim-input,
+  .cc-auto-input,
+  .cc-autofield input,
+  .cc-nudge input,
+  .cc-nudge button { height: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
+  .cc-nudge button { min-width: var(--ctl-h-touch); }
+  .cc-op-btn, .cc-subop-btn, .cc-zmode button { min-height: var(--ctl-h-touch); }
+}
+
+/* --- Cutout (cut part free from stock) card --- */
+/* Reuses .cc-grid / .cc-field / .cc-rowlabel / .cc-hint; only the header toggle
+   and the enabled-accent edge are bespoke so the card matches the panel. */
+.cc-cutout > h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /* keep the optional InfoTip pushed to the right of the toggle */
+  justify-content: space-between;
+}
+.cc-cutout.on {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.cc-cutout-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  /* the h3 already uppercases; the title span below re-applies it for clarity */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cc-cutout-toggle input {
+  width: 16px;
+  height: 16px;
+  min-height: auto;
+  flex: 0 0 auto;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.cc-cutout-title {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-cutout.on .cc-cutout-title { color: var(--fg); }
+
+/* The up-front SHAPE choice: two large, clearly-readable segmented buttons with
+   an icon over a label — "Part outline" vs "Rectangle". */
+.cc-cutshape {
+  display: flex;
+  gap: var(--sp-2);
+}
+.cc-cutshape-btn {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 56px;
+  padding: var(--sp-2) var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  cursor: pointer;
+  text-align: center;
+  line-height: 1.1;
+}
+.cc-cutshape-btn:hover { border-color: var(--accent); color: var(--fg); }
+.cc-cutshape-btn.active {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.cc-cutshape-ico { font-size: 22px; line-height: 1; }
+.cc-cutshape-btn.active .cc-cutshape-ico { color: var(--accent); }
+.cc-cutshape-lbl { font-size: var(--fs-ctl); font-weight: 600; }
+
+/* The rect auto/custom sub-toggle reuses .cc-subops/.cc-subop-btn spacing. */
+.cc-cutrect-mode { margin-top: 1px; }
+
+/* The clear-around (pocket) checkbox sits as its own emphasized row. */
+.cc-cutclear { font-size: var(--fs-ctl); }
+
+/* Touch sizing: the header toggle is a primary tap target on phones. */
+@container cadcampanel (max-width: 560px) {
+  .cc-cutout-toggle { min-height: var(--ctl-h-touch); }
+  .cc-cutout-toggle input { width: 20px; height: 20px; }
+}
+@container cadcampanel (max-width: 300px) {
+  .cc-cutshape { flex-direction: column; }
 }
 
 /* Fallback for browsers without container-query support: key off the window so
    phone-width viewports still get the single-column + touch-friendly sizing. */
 @supports not (container-type: inline-size) {
   @media (max-width: 560px) {
-    .cc-cards { column-width: auto; columns: 1; }
+    .cc-cards { grid-template-columns: 1fr; }
   }
   @media (max-width: 480px) {
     .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
-    .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; }
-    .cc-regen, .cc-raw-toggle { min-height: 42px; }
-    .cc-raw-toggle { min-width: 40px; }
-    .cc-adv-toggle, .cc-check { min-height: 42px; }
+    .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
+    .cc-regen, .cc-raw-toggle { min-height: var(--ctl-h-touch); }
+    .cc-raw-toggle { min-width: var(--ctl-h-touch); }
+    .cc-adv-toggle, .cc-check { min-height: var(--ctl-h-touch); }
+    .cc-cutout-toggle { min-height: var(--ctl-h-touch); }
   }
 }

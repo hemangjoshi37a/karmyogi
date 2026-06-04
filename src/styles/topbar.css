@@ -160,10 +160,142 @@
 }
 .launcher-dot.open { background: var(--ok); border-color: var(--ok); }
 
+/* ---- Server-bridge icon toggle (active state) ---- */
+.km-conn-icon[data-active='true'] {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+/* ---- Machine farm switcher ---- */
+.km-farm { position: relative; display: inline-flex; }
+.km-farm-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+}
+.km-farm-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.km-farm-caret { font-size: 9px; opacity: 0.7; flex: 0 0 auto; }
+
+.km-farm-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  width: min(320px, 94vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.km-farm-head {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+}
+.km-farm-list { max-height: 240px; overflow: auto; padding: 4px; }
+.km-farm-empty { padding: 12px 10px; color: var(--fg-muted); font-size: 12px; text-align: center; }
+.km-farm-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+}
+.km-farm-item[data-active='true'] { background: var(--bg-input); }
+.km-farm-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+.km-farm-pick:hover { background: var(--bg-input); }
+.km-farm-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.km-farm-kind { font-size: 10px; color: var(--fg-muted); text-transform: uppercase; flex: 0 0 auto; }
+.km-farm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+.km-farm-dot[data-status='connected'] { background: var(--ok); border-color: var(--ok); }
+.km-farm-dot[data-status='connecting'] { background: var(--warn); border-color: var(--warn); }
+.km-farm-dot[data-status='error'] { background: var(--danger); border-color: var(--danger); }
+.km-farm-del { padding: 4px 7px; font-size: 11px; flex: 0 0 auto; background: transparent; border: 1px solid transparent; border-radius: 6px; }
+.km-farm-del:hover { background: var(--bg-input); color: var(--danger); }
+
+.km-farm-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+.km-farm-add-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.km-farm-add-row { display: flex; gap: 6px; }
+.km-farm-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+}
+.km-farm-hint { font-size: 10px; color: var(--fg-muted); line-height: 1.4; }
+.km-farm-mock { align-self: flex-start; font-size: 12px; }
+
+/* ---- About modal ---- */
+.km-about { display: flex; flex-direction: column; gap: 14px; }
+.km-about-brand { display: flex; align-items: center; gap: 12px; }
+.km-about-mark { border-radius: 8px; }
+.km-about-name { font-size: 20px; font-weight: 700; }
+.km-about-name .accent { color: var(--accent); }
+.km-about-tag { font-size: 12px; color: var(--fg-muted); }
+.km-about-desc { font-size: 13px; line-height: 1.5; color: var(--fg); margin: 0; }
+.km-about-by { font-size: 13px; margin: 0; }
+.km-about-by a { color: var(--accent); }
+.km-about-links { display: flex; flex-direction: column; gap: 8px; }
+.km-about-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-decoration: none;
+}
+.km-about-link:hover { border-color: var(--accent); }
+
 /* Touch-friendly on small screens: keep icon buttons + menu items >= 36px. */
 @media (max-width: 768px) {
   .icon-btn { min-width: 38px; min-height: 38px; }
   .launcher-item { min-height: 38px; }
   .notif-clear { min-height: 32px; }
   .topbar .topbar-actions { gap: 4px; }
+  .km-farm-toggle { max-width: 120px; }
+  .km-farm-pick, .km-farm-del { min-height: 38px; }
 }

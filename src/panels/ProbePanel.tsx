@@ -3,6 +3,7 @@ import { grbl } from '../serial/controller'
 import { useGrblSettings, useMachine, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
 import { InfoTip } from '../components/InfoTip'
+import { IconButton } from '../components/IconButton'
 import { useT } from '../i18n'
 import '../styles/probe.css'
 
@@ -340,8 +341,9 @@ export function ProbePanel() {
         )}
       </p>
 
+      <div className="pr-cards">
       {/* 1. Live switch detection — the hero. "Press a switch to see it light up." */}
-      <section className="pr-card">
+      <section className="pr-card pr-card-wide">
         <header className="pr-card-head">
           <h4>{t('probe.switch.title', 'Live switch detection')}</h4>
           <span className="pr-raw">
@@ -382,59 +384,61 @@ export function ProbePanel() {
           <h4>{t('probe.z.title', 'Z-Probe')}</h4>
           <span className="pr-raw">{t('probe.z.tag', 'touch off Z')}</span>
         </header>
-        <div className="pr-field">
+        <div className="pr-fields">
           <label htmlFor="pr-feed">
-            {t('probe.z.speed', 'Probe speed')}
-            <InfoTip topic="probeFeed" />
+            <span className="pr-field-name">
+              {t('probe.z.speed', 'Probe speed')}
+              <InfoTip topic="probeFeed" />
+              <span className="pr-units">mm/min</span>
+            </span>
+            <input
+              id="pr-feed"
+              className="pr-input"
+              type="text"
+              inputMode="decimal"
+              value={feed}
+              disabled={!connected}
+              onChange={(e) => setFeed(e.target.value)}
+              aria-label={t('probe.z.speedAria', 'Probe speed (mm/min)')}
+            />
             <span className="pr-sub">{t('probe.z.speedSub', 'how fast to lower toward the workpiece')}</span>
           </label>
-          <input
-            id="pr-feed"
-            className="pr-input"
-            type="text"
-            inputMode="decimal"
-            value={feed}
-            disabled={!connected}
-            onChange={(e) => setFeed(e.target.value)}
-            aria-label={t('probe.z.speedAria', 'Probe speed (mm/min)')}
-          />
-          <span className="pr-units">mm/min</span>
-        </div>
-        <div className="pr-field">
           <label htmlFor="pr-dist">
-            {t('probe.z.maxDist', 'Max distance')}
-            <InfoTip topic="probeDistance" />
+            <span className="pr-field-name">
+              {t('probe.z.maxDist', 'Max distance')}
+              <InfoTip topic="probeDistance" />
+              <span className="pr-units">mm</span>
+            </span>
+            <input
+              id="pr-dist"
+              className="pr-input"
+              type="text"
+              inputMode="decimal"
+              value={dist}
+              disabled={!connected}
+              onChange={(e) => setDist(e.target.value)}
+              aria-label={t('probe.z.maxDistAria', 'Max probe distance (mm)')}
+            />
             <span className="pr-sub">{t('probe.z.maxDistSub', 'give up if no contact within this far')}</span>
           </label>
-          <input
-            id="pr-dist"
-            className="pr-input"
-            type="text"
-            inputMode="decimal"
-            value={dist}
-            disabled={!connected}
-            onChange={(e) => setDist(e.target.value)}
-            aria-label={t('probe.z.maxDistAria', 'Max probe distance (mm)')}
-          />
-          <span className="pr-units">mm</span>
-        </div>
-        <div className="pr-field">
           <label htmlFor="pr-thick">
-            {t('probe.z.plate', 'Plate thickness')}
-            <InfoTip topic="workZero" />
+            <span className="pr-field-name">
+              {t('probe.z.plate', 'Plate thickness')}
+              <InfoTip topic="workZero" />
+              <span className="pr-units">mm</span>
+            </span>
+            <input
+              id="pr-thick"
+              className="pr-input"
+              type="text"
+              inputMode="decimal"
+              value={thickness}
+              disabled={!connected}
+              onChange={(e) => setThickness(e.target.value)}
+              aria-label={t('probe.z.plateAria', 'Plate thickness (mm)')}
+            />
             <span className="pr-sub">{t('probe.z.plateSub', 'thickness of the probe / touch plate')}</span>
           </label>
-          <input
-            id="pr-thick"
-            className="pr-input"
-            type="text"
-            inputMode="decimal"
-            value={thickness}
-            disabled={!connected}
-            onChange={(e) => setThickness(e.target.value)}
-            aria-label={t('probe.z.plateAria', 'Plate thickness (mm)')}
-          />
-          <span className="pr-units">mm</span>
         </div>
         <div className="pr-row">
           <button
@@ -456,25 +460,21 @@ export function ProbePanel() {
             {t('probe.z.setZero', 'Set Z zero')}
           </button>
         </div>
-        <div className="pr-row">
-          <button
-            type="button"
-            className="pr-btn pr-mini"
+        <div className="pr-row pr-mini-row" role="group" aria-label={t('probe.z.miniGroupAria', 'Secondary probe actions')}>
+          <IconButton
+            className="pr-icon-btn"
+            icon="⤓"
+            label={`${t('probe.z.noAlarm', 'Probe (no alarm)')} — ${t('probe.z.noAlarmTip', 'G38.3 Z- F — probe toward the workpiece, but do NOT alarm if no contact is made.')}`}
             disabled={!connected}
             onClick={() => doProbe('3')}
-            title={t('probe.z.noAlarmTip', 'G38.3 Z- F — probe toward the workpiece, but do NOT alarm if no contact is made.')}
-          >
-            {t('probe.z.noAlarm', 'Probe (no alarm)')}
-          </button>
-          <button
-            type="button"
-            className="pr-btn pr-mini"
+          />
+          <IconButton
+            className="pr-icon-btn"
+            icon="#"
+            label={`${t('probe.z.lastProbe', 'Show last probe ($#)')} — ${t('probe.z.lastProbeTip', '$# — dump coordinate systems incl. PRB (last probe result) to the console')}`}
             disabled={!connected}
             onClick={() => grbl.send('$#').catch(() => {})}
-            title={t('probe.z.lastProbeTip', '$# — dump coordinate systems incl. PRB (last probe result) to the console')}
-          >
-            {t('probe.z.lastProbe', 'Show last probe ($#)')}
-          </button>
+          />
         </div>
         {/* Live G-code — exactly what the buttons send, so there's no surprise. */}
         <code className="pr-code" aria-label={t('probe.z.codeAria', 'G-code these buttons send')}>
@@ -509,7 +509,7 @@ export function ProbePanel() {
         </p>
 
         {/* Status line: homing/limits + configured travel. */}
-        <div className="pr-detect-status" role="group" aria-label="Workspace detection status">
+        <div className="pr-detect-status" role="group" aria-label={t('probe.detectStatus.aria', 'Workspace detection status')}>
           <span className="pr-chip" data-on={settingsKnown ? homingOn : undefined}>
             {t('pr.detect.homingChip', 'Homing $22')}:{' '}
             <b>
@@ -578,7 +578,7 @@ export function ProbePanel() {
             </button>
           </div>
         ) : (
-          <div className="pr-row pr-confirm" role="alertdialog" aria-label="Confirm homing">
+          <div className="pr-row pr-confirm" role="alertdialog" aria-label={t('probe.confirmHoming.aria', 'Confirm homing')}>
             <span className="pr-confirm-q">
               {t('pr.detect.confirmQ', 'This will home the machine — keep clear. Continue?')}
             </span>
@@ -605,7 +605,7 @@ export function ProbePanel() {
         <div className="pr-row">
           <button
             type="button"
-            className="pr-btn pr-grow"
+            className="pr-btn pr-grow pr-btn-sm"
             disabled={!settingsKnown || !haveTravel}
             onClick={useConfiguredTravel}
             title={t(
@@ -648,7 +648,7 @@ export function ProbePanel() {
       </section>
 
       {/* 3. Advanced: limits & homing — collapsed by default. */}
-      <section className="pr-card">
+      <section className="pr-card pr-card-wide">
         <button
           type="button"
           className="pr-disclosure"
@@ -701,7 +701,7 @@ export function ProbePanel() {
               value={setVal(6)}
               connected={connected}
             />
-            <div className="pr-row">
+            <div className="pr-row pr-adv-actions" role="group" aria-label={t('probe.adv.actionsAria', 'Homing actions')}>
               <button
                 type="button"
                 className="pr-btn primary pr-grow"
@@ -711,24 +711,25 @@ export function ProbePanel() {
               >
                 {t('probe.adv.home', 'Home ($H)')}
               </button>
-              <button
-                type="button"
-                className="pr-btn pr-grow"
+              <IconButton
+                className="pr-icon-btn"
+                icon="⤓"
+                label={`${t('probe.adv.unlock', 'Unlock ($X)')} — ${t('probe.adv.unlockTip', '$X — clear an alarm / unlock')}`}
                 disabled={!connected}
                 onClick={() => grbl.unlock().catch(() => {})}
-                title={t('probe.adv.unlockTip', '$X — clear an alarm / unlock')}
-              >
-                {t('probe.adv.unlock', 'Unlock ($X)')}
-              </button>
-              <button
-                type="button"
-                className="pr-btn pr-grow"
+              />
+              <IconButton
+                className="pr-icon-btn"
+                icon="⟳"
+                label={
+                  loading
+                    ? t('probe.adv.syncing', '⟳ Syncing…')
+                    : `${t('probe.adv.sync', '⟳ Sync')} — ${t('probe.adv.syncTip', '$$ — re-read settings so the toggles reflect the machine')}`
+                }
                 disabled={!connected || loading}
+                data-loading={loading || undefined}
                 onClick={() => grbl.readSettings().catch(() => {})}
-                title={t('probe.adv.syncTip', '$$ — re-read settings so the toggles reflect the machine')}
-              >
-                {loading ? t('probe.adv.syncing', '⟳ Syncing…') : t('probe.adv.sync', '⟳ Sync')}
-              </button>
+              />
             </div>
             <p className="pr-note caution">
               {t(
@@ -739,6 +740,7 @@ export function ProbePanel() {
           </div>
         )}
       </section>
+      </div>
     </div>
   )
 }

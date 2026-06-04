@@ -15,6 +15,8 @@ import { GluePanel } from '../panels/GluePanel'
 import { PickPlacePanel } from '../panels/PickPlacePanel'
 import { SignaturePanel } from '../panels/SignaturePanel'
 import { PrintPanel } from '../panels/PrintPanel'
+import { LaserPanel } from '../panels/LaserPanel'
+import { WeldingPanel } from '../panels/WeldingPanel'
 import { CameraPanel } from '../panels/CameraPanel'
 import { AiGcodePanel } from '../panels/AiGcodePanel'
 
@@ -39,6 +41,8 @@ export const panelComponents: Record<string, FunctionComponent<IDockviewPanelPro
   pnp: PickPlacePanel as FunctionComponent<IDockviewPanelProps>,
   signature: SignaturePanel as FunctionComponent<IDockviewPanelProps>,
   print: PrintPanel as FunctionComponent<IDockviewPanelProps>,
+  laser: LaserPanel as FunctionComponent<IDockviewPanelProps>,
+  welding: WeldingPanel as FunctionComponent<IDockviewPanelProps>,
   camera: CameraPanel as FunctionComponent<IDockviewPanelProps>,
   aigcode: AiGcodePanel as FunctionComponent<IDockviewPanelProps>,
 }
@@ -61,11 +65,12 @@ export const availablePanels: PanelSpec[] = [
   { id: 'writing', component: 'writing', title: 'Writing' },
   { id: 'soldering', component: 'soldering', title: 'Soldering' },
   { id: 'pcb', component: 'pcb', title: 'PCB' },
-  { id: 'probe', component: 'probe', title: 'Probe & Limits' },
   { id: 'glue', component: 'glue', title: 'Glue Dispense' },
   { id: 'pnp', component: 'pnp', title: 'Pick & Place' },
   { id: 'signature', component: 'signature', title: 'Signature' },
   { id: 'print', component: 'print', title: '3D Printing' },
+  { id: 'laser', component: 'laser', title: 'Laser Cutting' },
+  { id: 'welding', component: 'welding', title: 'Welding' },
   { id: 'camera', component: 'camera', title: 'Camera' },
   { id: 'aigcode', component: 'aigcode', title: 'AI G-code' },
 ]

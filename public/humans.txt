@@ -1,0 +1,11 @@
+/* TEAM */
+Maintainer: hjLabs
+Site: https://hjlabs.in/
+GitHub: https://github.com/hemangjoshi37a
+
+/* SITE */
+Name: karmyogi
+Standards: HTML5, CSS3, TypeScript, React, three.js, Web Serial API
+Software: Vite, React, @react-three/fiber, dockview, zustand
+Description: Browser-based GRBL CNC controller and CAD/CAM workbench — the web
+             successor to the Qt "Candle" GRBL controller.

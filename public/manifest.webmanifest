@@ -1,9 +1,15 @@
 {
-  "name": "karmyogi — GRBL CAD/CAM workbench",
+  "name": "karmyogi — Web GRBL CNC Controller & CAD/CAM",
   "short_name": "karmyogi",
-  "description": "Browser-based control + CAD/CAM workbench for 3-axis GRBL machines",
+  "description": "Free browser-based GRBL CNC controller, G-code sender and CAD/CAM workbench. Web Serial control, 3D toolpath view, CNC carving, laser cutting, PCB isolation routing, pen plotter and auto-solder.",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["productivity", "utilities", "developer"],
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#1a1d21",
   "theme_color": "#0e7c66",
   "icons": [
@@ -23,7 +29,13 @@
       "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

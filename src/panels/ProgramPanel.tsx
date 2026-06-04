@@ -32,9 +32,12 @@ export function ProgramPanel() {
   const t = useT()
   const name = useProgram((s) => s.name)
   const lines = useProgram((s) => s.lines)
+  const sections = useProgram((s) => s.sections)
   const cursor = useProgram((s) => s.cursor)
   const streaming = useProgram((s) => s.streaming)
   const setProgram = useProgram((s) => s.setProgram)
+  const setCombined = useProgram((s) => s.setCombined)
+  const removeSection = useProgram((s) => s.removeSection)
   const clear = useProgram((s) => s.clear)
 
   const connected = useMachine((s) => s.connection === 'connected')
@@ -55,6 +58,12 @@ export function ProgramPanel() {
   // Start line to stream from (1-based). Doubles as a live "current line"
   // readout while streaming. Default 1; clamped to 1..lines.length on use.
   const [startLine, setStartLine] = useState('1')
+
+  // Which section cards are expanded (collapsed by default), keyed by id.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
+  const toggleSection = useCallback((id: string) => {
+    setOpenSections((m) => ({ ...m, [id]: !m[id] }))
+  }, [])
 
   // Local editable buffer for the program text. Kept in sync with the store
   // when the program changes from outside (load, clear), but the textarea is the
@@ -118,8 +127,9 @@ export function ProgramPanel() {
   const commitDraft = useCallback(() => {
     if (streaming) return
     if (draft === storeText) return
-    setProgram(name ?? 'untitled', draft)
-  }, [draft, storeText, name, streaming, setProgram])
+    // Editing the combined text collapses all sections into one edited program.
+    setCombined(name ?? 'edited', draft)
+  }, [draft, storeText, name, streaming, setCombined])
 
   // Persist the editor height after the user drags the textarea's resize grip.
   const editorRef = useRef<HTMLTextAreaElement>(null)
@@ -150,6 +160,18 @@ export function ProgramPanel() {
         {/* --- Run card (full-width): start/current line + transport + progress + ETA --- */}
         <section className="pp-card pp-run-card">
           <div className="pp-btnrow">
+            <button
+              className="pp-icon-btn pp-btn-reset"
+              onClick={() => setStartLine('1')}
+              disabled={streaming || !hasProgram}
+              title={t(
+                'prog.resetStartLine',
+                'Reset start line to 1 (restart from the top)',
+              )}
+              aria-label={t('prog.resetStartLineAria', 'Reset start line to 1')}
+            >
+              ↺
+            </button>
             <input
               className="pp-line-input"
               type="number"
@@ -239,6 +261,81 @@ export function ProgramPanel() {
           </div>
         </section>
       </div>
+
+      {/* --- Sections: one expandable/deletable card per source/tab. Each tab
+              that generates G-code keeps its OWN section here; regenerating from
+              a tab updates its section in place rather than clobbering others. --- */}
+      {sections.length > 0 && (
+        <section className="pp-card pp-sections-card">
+          <div className="pp-sections-header">
+            <span className="pp-section-title">
+              {t('prog.sections', 'Sections')}
+            </span>
+            <span className="pp-meta">
+              {sections.length === 1
+                ? t('prog.sectionCountOne', '{count} section', {
+                    count: sections.length,
+                  })
+                : t('prog.sectionCount', '{count} sections', {
+                    count: sections.length,
+                  })}
+            </span>
+          </div>
+          <ul className="pp-section-list">
+            {sections.map((sec) => {
+              const open = !!openSections[sec.id]
+              const count = sec.rawLines.length
+              return (
+                <li key={sec.id} className="pp-section">
+                  <div className="pp-section-row">
+                    <button
+                      type="button"
+                      className="pp-section-disclosure"
+                      aria-expanded={open}
+                      onClick={() => toggleSection(sec.id)}
+                      title={
+                        open
+                          ? t('prog.sectionHide', 'Collapse section')
+                          : t('prog.sectionShow', 'Expand section')
+                      }
+                    >
+                      <span className="pp-disclosure-caret">
+                        {open ? '▾' : '▸'}
+                      </span>
+                      <span className="pp-section-name" title={sec.name}>
+                        {sec.name}
+                      </span>
+                      <span className="pp-meta pp-section-lines">
+                        {count === 1
+                          ? t('prog.lineCountOne', '{count} line', { count })
+                          : t('prog.lineCount', '{count} lines', { count })}
+                      </span>
+                    </button>
+                    <button
+                      className="pp-icon-btn pp-btn-clear"
+                      onClick={() => removeSection(sec.id)}
+                      disabled={streaming}
+                      title={t('prog.sectionDelete', 'Delete this section')}
+                      aria-label={t(
+                        'prog.sectionDeleteAria',
+                        'Delete section {name}',
+                        { name: sec.name },
+                      )}
+                    >
+                      🗑
+                    </button>
+                  </div>
+                  {open && (
+                    <pre className="pp-section-body">
+                      {sec.rawLines.join('\n')}
+                    </pre>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
 
       {/* --- Program text: editable, collapsible, resizable, scrollable.
               Load + Clear live in the header row, right-aligned. --- */}

@@ -18,9 +18,17 @@ export { useGrblSettings } from './grblSettings'
 
 export { useMachineProfile } from './machineProfile'
 
+export { useMachines } from './machines'
+export type { MachineEntry, TransportKind, MachineLinkStatus } from './machines'
+
 export { useNotifications } from './notifications'
 export type { NotificationLevel, NotificationEntry } from './notifications'
 
 export { usePersistentState } from './persist'
 
 export { useAiGcode } from './aiGcode'
+
+export { useCameraCalib } from './cameraCalib'
+export type { CameraSlot } from './cameraCalib'
+
+export { useCameraLive } from './cameraLive'

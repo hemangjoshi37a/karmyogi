@@ -1,11 +1,11 @@
 /* Signature panel — upload + vectorize + pen G-code. Theme CSS vars only. */
 
 .sig-panel {
-  /* Scroll + size-query container. The 2-column ↔ 1-column switch is driven by
-     the PANEL width (container query on .sig-layout), not the window — the
-     panel is usually a narrow docked column on a wide screen. */
+  /* Scroll + size-query container. Card tiling (1 ↔ 2–3 columns) is driven by
+     the PANEL width (container query), not the window — the panel is usually a
+     narrow docked column on a wide screen. */
   height: 100%;
-  padding: 10px;
+  padding: var(--sp-2);
   /* Vertical-only scroll — never horizontal. */
   overflow-y: auto;
   overflow-x: hidden;
@@ -15,64 +15,122 @@
   container-name: sigpanel;
 }
 
-.sig-layout {
-  /* Wide: two columns — controls (left) + preview (right, prominent).
-     Narrow: single column, controls first (see container query below). */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-  align-content: start;
-  gap: 10px;
-}
-
-/* On wide layouts the preview sits in the right column and stays in view. */
-.sig-preview-col {
-  grid-column: 2;
-  position: sticky;
-  top: 0;
-  align-self: start;
-}
-.sig-controls-col {
-  grid-column: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-
 .sig-intro {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
+  margin: 0 0 var(--sp-2);
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-body);
+  line-height: 1.4;
   color: var(--fg-muted);
 }
 .sig-intro strong {
   color: var(--fg);
 }
 
+/* ---- Mode toggle (Draw / From image) ---- */
+.sig-modes {
+  display: flex;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-3);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+.sig-mode {
+  flex: 1 1 0;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius) - 1px);
+  cursor: pointer;
+}
+.sig-mode:hover {
+  color: var(--fg);
+}
+.sig-mode.active {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+/* ---- Freehand draw surface ---- */
+.sig-draw-surface {
+  display: block;
+  width: 100%;
+  /* Fluid, capped so it doesn't dominate short panels; matches preview box. */
+  height: clamp(200px, 36vh, 320px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  /* Touch-drag must draw, not scroll the panel. */
+  touch-action: none;
+  cursor: crosshair;
+  fill: none;
+  stroke: var(--accent);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.sig-draw-surface path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2px;
+}
+.sig-draw-surface .sig-draw-live {
+  stroke: color-mix(in srgb, var(--accent) 70%, var(--fg));
+}
+.sig-draw-placeholder {
+  fill: var(--fg-muted);
+  stroke: none;
+  font-size: var(--fs-body);
+  pointer-events: none;
+}
+.sig-draw-tools {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+/* Control / param cards tile into a responsive grid: 2–3 columns at wide
+   container widths, collapsing to one column when the panel is narrow. This
+   fills the width and kills the bottom whitespace. */
+.sig-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+/* Centerpiece preview, send action bar and raw g-code span every column. */
+.sig-card-wide {
+  grid-column: 1 / -1;
+}
+
 /* ---- Card section ---- */
 .sig-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: var(--sp-2);
+  padding: var(--pad-card-y) var(--pad-card-x);
+  min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--bg-elev);
 }
 .sig-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .sig-card-head > h4 {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-2);
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-section);
   font-weight: 600;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--fg-muted);
 }
@@ -82,9 +140,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  font-size: 11px;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
   color: var(--accent-fg);
@@ -93,22 +151,23 @@
 }
 
 .sig-badge {
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
   text-transform: none;
   letter-spacing: 0;
 }
 
-/* ---- Upload drop zone ---- */
+/* ---- Upload drop zone (compact, capped height) ---- */
 .sig-drop {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 60px;
-  padding: 10px 12px;
+  min-height: 84px;
+  max-height: 96px;
+  padding: var(--sp-3);
   text-align: center;
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-input);
   cursor: pointer;
 }
@@ -123,11 +182,11 @@
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
 }
 .sig-drop-hint {
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   color: var(--fg-muted);
 }
 .sig-drop-name {
-  font-size: 12px;
+  font-size: var(--fs-ctl);
   color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -140,7 +199,6 @@
 
 /* ---- Traced vector preview (centerpiece) ---- */
 .sig-preview-card {
-  /* let the preview breathe but never force horizontal overflow */
   min-width: 0;
 }
 .sig-preview-box {
@@ -148,11 +206,11 @@
   align-items: center;
   justify-content: center;
   min-height: 200px;
-  /* fluid, capped so it doesn't push controls off-screen on short panels */
-  height: clamp(200px, 40vh, 360px);
-  padding: 8px;
+  /* fluid, capped so it doesn't dominate short panels */
+  height: clamp(200px, 36vh, 320px);
+  padding: var(--sp-3);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-input);
 }
 .sig-svg {
@@ -169,71 +227,82 @@
   vector-effect: non-scaling-stroke;
 }
 .sig-preview-empty {
-  padding: 0 16px;
-  font-size: 12px;
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-body);
   text-align: center;
   color: var(--fg-muted);
 }
 /* Before an image is loaded the box only holds the hint — collapse its reserved
-   height so there's no big empty area above the controls/intro. */
+   height so there's no big empty area. */
 .sig-preview-box:has(.sig-preview-empty) {
   min-height: 0;
   height: auto;
-  padding: 14px;
+  padding: var(--sp-4);
 }
 
-/* Fluid two-column field grid; collapses to one column when narrow. */
-.sig-grid {
+/* Compact field grid: number fields pack left tightly and wrap naturally,
+   never stretching one-per-huge-column across the card. */
+.sig-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
-  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
 }
 
 .sig-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-label);
 }
 .sig-field > span:first-child {
   color: var(--fg-muted);
 }
-.sig-field-wide {
-  grid-column: 1 / -1;
+/* Threshold range spans the card on its own row. */
+.sig-field-range {
+  width: 100%;
 }
 
-/* checkbox row: label sits inline beside the box */
+/* checkbox rows wrap into a tight group */
+.sig-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+}
 .sig-check {
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
+  font-size: var(--fs-ctl);
 }
 .sig-check input {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
 }
 .sig-check span {
   color: var(--fg);
 }
 
-/* range slider gets a comfortable touch height */
+/* range slider — compact on desktop */
 .sig-field input[type='range'] {
   width: 100%;
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
 }
 
 /* number input + unit suffix */
 .sig-input {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .sig-input input {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 36px;
+  height: var(--ctl-h);
+  min-height: 0;
 }
 .sig-input input:disabled {
   opacity: 0.5;
@@ -241,18 +310,19 @@
 .sig-input em {
   flex: 0 0 auto;
   font-style: normal;
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 
 .sig-btn {
-  min-height: 38px;
-  padding: 6px 14px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-4);
   font: inherit;
+  font-size: var(--fs-ctl);
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 .sig-btn:hover:not(:disabled) {
@@ -275,29 +345,40 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .sig-play {
   flex: 1 1 auto;
+  min-height: var(--ctl-h-lg);
   font-weight: 600;
 }
-.sig-regen {
+/* Regenerate is a compact icon button beside the primary send action. */
+.sig-regen.icon-btn {
   flex: 0 0 auto;
-  min-width: 40px;
-  padding: 6px 12px;
+  min-width: var(--ctl-h-lg);
+  min-height: var(--ctl-h-lg);
+  color: var(--fg-muted);
+}
+.sig-regen.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.sig-regen.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* collapsible disclosure header (Advanced / Raw G-code) */
 .sig-disclosure {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-2);
   width: 100%;
-  min-height: 36px;
-  padding: 4px 2px;
-  font-size: 11px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-section);
   font-weight: 600;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   text-align: left;
   color: var(--fg-muted);
@@ -319,7 +400,7 @@
 
 .sig-info {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.4;
   color: var(--fg-muted);
 }
@@ -330,46 +411,86 @@
   max-height: 320px;
   resize: vertical;
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-mono);
   line-height: 1.35;
   white-space: pre;
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
 }
 
-/* Mobile / narrow: single column, preview on top, larger touch targets. */
+/* Narrow panel (docked column ~≤560px): single column of cards, larger
+   touch targets. Driven by the PANEL's own width (container query). */
 @container sigpanel (max-width: 560px) {
-  .sig-layout {
+  .sig-cards {
     grid-template-columns: 1fr;
   }
-  /* Single column: controls (intro + upload) FIRST so there is never empty
-     space above the intro, with the preview below them. */
-  .sig-controls-col {
-    grid-column: 1;
-    grid-row: 1;
-  }
-  .sig-preview-col {
-    grid-column: 1;
-    grid-row: 2;
-    position: static;
-  }
-  .sig-preview-box {
+  .sig-preview-box,
+  .sig-draw-surface {
     height: clamp(160px, 30vh, 280px);
   }
-  .sig-btn {
-    min-height: 42px;
+}
+
+/* Very narrow column (~≤360px, e.g. the default ~290px dock width) and touch:
+   grow controls back to ≥36px tap targets. */
+@container sigpanel (max-width: 360px) {
+  .sig-mode {
+    min-height: var(--ctl-h-touch);
+  }
+  .sig-play {
+    min-height: var(--ctl-h-touch);
+  }
+  .sig-regen.icon-btn {
+    min-width: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
+  }
+  .sig-disclosure {
+    min-height: var(--ctl-h-touch);
   }
   .sig-input input,
   .sig-field input[type='range'] {
-    min-height: 42px;
-  }
-  .sig-disclosure {
-    min-height: 42px;
+    height: var(--ctl-h-touch);
   }
   .sig-drop {
-    min-height: 66px;
+    min-height: 88px;
+  }
+}
+
+/* Fallback for browsers without container-query support: key off the window so
+   phone-width viewports still single-column and get touch-friendly sizing.
+   (Chromium — the only supported target — has container queries.) */
+@supports not (container-type: inline-size) {
+  @media (max-width: 560px) {
+    .sig-cards {
+      grid-template-columns: 1fr;
+    }
+    .sig-preview-box,
+    .sig-draw-surface {
+      height: clamp(160px, 30vh, 280px);
+    }
+  }
+  @media (max-width: 768px) {
+    .sig-mode {
+      min-height: var(--ctl-h-touch);
+    }
+    .sig-play {
+      min-height: var(--ctl-h-touch);
+    }
+    .sig-regen.icon-btn {
+      min-width: var(--ctl-h-touch);
+      min-height: var(--ctl-h-touch);
+    }
+    .sig-disclosure {
+      min-height: var(--ctl-h-touch);
+    }
+    .sig-input input,
+    .sig-field input[type='range'] {
+      height: var(--ctl-h-touch);
+    }
+    .sig-drop {
+      min-height: 88px;
+    }
   }
 }
