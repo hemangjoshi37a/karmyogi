@@ -137,6 +137,35 @@
   gap: var(--sp-1, 4px);
   padding: 2px 4px 2px 2px;
 }
+/* per-section toolpath colour swatch (opens the native colour picker) */
+.pp-section-color {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  cursor: pointer;
+  overflow: hidden;
+}
+.pp-section-color input[type='color'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  cursor: pointer;
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .pp-section-color {
+    width: 26px;
+    height: 26px;
+  }
+}
 .pp-section-disclosure {
   display: flex;
   align-items: center;
@@ -417,4 +446,48 @@
   .pp-icon-btn { min-width: 44px; min-height: 44px; }
   .pp-disclosure { min-height: 38px; }
   .pp-line-input { min-height: 44px; }
+}
+
+/* Frame button in the run row — ICON ONLY (the "Frame" label is hidden); the
+   button's title attribute still provides the hover explainer. Self-contained
+   here so it doesn't depend on the carving panel's stylesheet being loaded. */
+.pp-frame {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.pp-frame .frame-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--icon-btn, 28px);
+  min-height: var(--ctl-h, 28px);
+  padding: 0 6px;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+.pp-frame .frame-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.pp-frame .frame-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pp-frame .frame-btn-lbl {
+  display: none;
+}
+.pp-frame .frame-btn-ico {
+  display: inline-flex;
+  font-size: 14px;
+  line-height: 1;
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .pp-frame .frame-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

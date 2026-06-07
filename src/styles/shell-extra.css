@@ -127,3 +127,11 @@
   /* The farm popover should not exceed the viewport on tiny screens. */
   .km-farm-pop { max-width: calc(100vw - 24px); }
 }
+
+/* Dock tab wrapper that carries a native hover tooltip (per-panel explainer)
+   while delegating all rendering/close/drag to the default dockview tab. */
+.dv-tab-tip {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}

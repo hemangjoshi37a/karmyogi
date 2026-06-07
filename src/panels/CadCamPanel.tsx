@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type CSSProperties, type ReactNode } from 'react'
 import { importDxfString } from '../core/dxf'
 import { Drawing } from '../core/entity'
 import { engrave, profileContours, pocket, ProfileSide, type CamParams } from '../core/cam'
@@ -22,7 +22,14 @@ import {
 } from '../core/carve3d'
 import { defaultCutoutParams, type CutoutParams } from '../core/cutout'
 import { useProgram, usePersistentState } from '../store'
-import { useCarveJobs, type CarveJob, type ApplyAllKey, type JobSpeeds } from '../store/carveJobs'
+import {
+  useCarveJobs,
+  type CarveJob,
+  type ApplyAllKey,
+  type JobSpeeds,
+  type JobDefaults,
+  type GlobalCarveSettings,
+} from '../store/carveJobs'
 import { useBed } from '../store/bed'
 import { MATERIALS, getMaterial, DEFAULT_MATERIAL_ID, type MaterialPreset } from '../core/materials'
 import {
@@ -38,9 +45,7 @@ import { useCameraCalib } from '../store/cameraCalib'
 import { useExperimentalAI } from '../experimental'
 import { Modal } from '../components/Modal'
 import { InfoTip } from '../components/InfoTip'
-import { IconButton } from '../components/IconButton'
 import { Icon } from '../components/Icons'
-import { FrameButton } from '../components/FrameButton'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { useT } from '../i18n'
 import '../styles/cadcam.css'
@@ -49,6 +54,65 @@ import '../styles/cadcam.css'
 type Mode = 'none' | '3d' | '2d' | 'step' | 'cdr'
 
 type Op = 'Engrave' | 'Profile' | 'Pocket'
+
+// ============================================================================
+// Color-coded SETTING PRESETS for the carving tab
+// ----------------------------------------------------------------------------
+// Ten fixed, well-spaced hues — each is one preset SLOT. The floating rail on the
+// left edge loads a slot's settings; the footer save-bar writes the CURRENT
+// settings into the slot whose colour is selected. A preset is a full snapshot of
+// the tunable carving parameters (NOT the loaded geometry/jobs): 2D op + vector
+// params + cutout, the chosen bit, the material, and the 3D carve global + job
+// defaults.
+// ============================================================================
+const PRESET_COLORS = [
+  '#ef4444', '#f97316', '#f59e0b', '#22c55e', '#10b981',
+  '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#ec4899',
+] as const
+
+interface CarvePreset {
+  op: Op
+  side: ProfileSide
+  p2d: Params2D
+  cutout: CutoutParams
+  bitId: string
+  bitLength: number
+  materialId: string
+  carveGlobal: GlobalCarveSettings
+  carveDefaults: JobDefaults
+}
+
+interface PresetSlot {
+  /** Fixed by position (PRESET_COLORS[i]); persisted for forward-compat. */
+  color: string
+  /** Optional human label shown in tooltips + the save-bar. */
+  name: string
+  /** The captured settings, or null for an empty slot. */
+  preset: CarvePreset | null
+}
+
+const DEFAULT_PRESET_SLOTS: PresetSlot[] = PRESET_COLORS.map((color) => ({
+  color,
+  name: '',
+  preset: null,
+}))
+
+/**
+ * Coerce a persisted (possibly older / shorter / colour-drifted) slot array into
+ * exactly 10 slots with the canonical colours, preserving any saved name/preset
+ * by position. Guards the UI from schema drift in localStorage.
+ */
+function normalizeSlots(raw: unknown): PresetSlot[] {
+  const arr = Array.isArray(raw) ? raw : []
+  return PRESET_COLORS.map((color, i) => {
+    const s = arr[i] as Partial<PresetSlot> | undefined
+    return {
+      color,
+      name: typeof s?.name === 'string' ? s.name : '',
+      preset: s && typeof s.preset === 'object' && s.preset !== null ? (s.preset as CarvePreset) : null,
+    }
+  })
+}
 
 /** Per-axis colours mirror the Visualizer's axis gizmo (X red, Y green, Z blue). */
 const AXIS_COLOR = { x: '#ef4444', y: '#22c55e', z: '#3b82f6' } as const
@@ -127,67 +191,6 @@ function AutoRow({
 /** Map a library BitType onto the 3D carver's two tool shapes. */
 function bitTypeToToolType(t: BitType): ToolType {
   return t === 'ball' ? 'ball' : 'flat'
-}
-
-/**
- * Material-picker swatch: a small realistic texture thumbnail. Falls back to the
- * material's emoji glyph if the image is missing or fails to load. Slim by design
- * (sized in CSS via `.cc-pick-swatch`).
- *
- * Clicking the thumbnail opens an info modal (large image + properties) via
- * {@link onInfo}; the click is kept from bubbling so it doesn't also re-select
- * the material — selecting stays on the surrounding button's label/body.
- */
-function MaterialSwatch({
-  material,
-  onInfo,
-  label,
-}: {
-  material: MaterialPreset
-  onInfo: (m: MaterialPreset) => void
-  /** Accessible label, e.g. "View Plywood details". */
-  label: string
-}) {
-  const [failed, setFailed] = useState(!material.image)
-  const open = (e: { stopPropagation: () => void }) => {
-    e.stopPropagation()
-    onInfo(material)
-  }
-  if (failed) {
-    return (
-      <span
-        className="cc-pick-icon cc-pick-swatch-btn"
-        role="button"
-        tabIndex={0}
-        title={label}
-        aria-label={label}
-        onClick={open}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') open(e)
-        }}
-      >
-        {material.icon}
-      </span>
-    )
-  }
-  return (
-    <img
-      className="cc-pick-swatch cc-pick-swatch-btn"
-      src={material.image}
-      alt=""
-      role="button"
-      tabIndex={0}
-      title={label}
-      aria-label={label}
-      loading="lazy"
-      draggable={false}
-      onError={() => setFailed(true)}
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') open(e)
-      }}
-    />
-  )
 }
 
 /** Pretty value rows for the material-info modal. */
@@ -455,9 +458,6 @@ function jobCarveParams(
 export function CadCamPanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
-  // The currently-loaded/combined program lines — used by the Frame button to
-  // trace this carving's XY perimeter on the machine (placement already baked).
-  const programLines = useProgram((s) => s.lines)
   const bed = useBed()
 
   // ---- multi-job carving store -------------------------------------------
@@ -515,7 +515,7 @@ export function CadCamPanel() {
   const [importError, setImportError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
-  const [busy, setBusy] = useState(false)
+  const [, setBusy] = useState(false)
   const [nestWarn, setNestWarn] = useState<string[]>([])
 
   // 2D state (DXF / EPS / AI)
@@ -545,6 +545,15 @@ export function CadCamPanel() {
   // the bit can reach, so we surface it and use it as a sanity hint for depth.
   const [bitLength, setBitLength] = usePersistentState<number>('karmyogi.carve.bitLen', 16)
 
+  // ---- color-coded setting PRESETS (10 slots, persisted) ------------------
+  const [presetSlotsRaw, setPresetSlotsRaw] = usePersistentState<PresetSlot[]>(
+    'karmyogi.carve.presets',
+    DEFAULT_PRESET_SLOTS,
+  )
+  const presetSlots = useMemo(() => normalizeSlots(presetSlotsRaw), [presetSlotsRaw])
+  // The slot the save-bar targets + the rail highlights (kept in sync between them).
+  const [selectedSlot, setSelectedSlot] = useState(0)
+
   // ---- mount reconcile: keep the restored `mode` consistent with live data ---
   // On a tab-switch remount the persisted `mode` is restored, but the heavy 2D
   // drawing geometry (DXF/EPS) cannot be persisted — only 3D jobs survive (in the
@@ -568,9 +577,8 @@ export function CadCamPanel() {
   }, [])
 
   // Output
-  const [gcode, setGcode] = useState('')
-  const [lineCount, setLineCount] = useState(0)
-  const [showRaw, setShowRaw] = useState(false)
+  const [, setGcode] = useState('')
+  const [, setLineCount] = useState(0)
   const [showAdvanced, setShowAdvanced] = useState(false)
   /** Material whose info modal is open (large image + properties), or null. */
   const [infoMaterial, setInfoMaterial] = useState<MaterialPreset | null>(null)
@@ -668,6 +676,68 @@ export function CadCamPanel() {
     // its edited speeds.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bit.id, material.id])
+
+  // ---- preset capture / apply ---------------------------------------------
+  /** Snapshot every tunable carving setting (NOT the loaded geometry/jobs). */
+  const captureSettings = (): CarvePreset => ({
+    op,
+    side,
+    p2d: { ...p2d },
+    cutout: { ...cutoutRaw },
+    bitId,
+    bitLength,
+    materialId: stock.materialId,
+    carveGlobal: { ...carveGlobal },
+    carveDefaults: { ...carveDefaults, speeds: { ...carveDefaults.speeds } },
+  })
+
+  /** Restore a captured preset into all the live settings. */
+  const applyPreset = (p: CarvePreset) => {
+    // If the bit or material actually changes, the auto-derive effect (above)
+    // will fire — disarm it ONCE (same guard it uses on remount) so it doesn't
+    // re-derive speeds/feeds from {bit,material} and stomp the preset's tuned
+    // numbers. When bit+material are unchanged the effect won't fire, so we
+    // leave the guard alone (avoids skipping a later genuine re-derive).
+    if (p.bitId !== bitId || p.materialId !== stock.materialId) {
+      autoComputeMounted.current = false
+    }
+    setOp(p.op)
+    setSide(p.side)
+    setP2d(p.p2d)
+    setCutout(p.cutout)
+    setBitId(p.bitId)
+    setBitLength(p.bitLength)
+    stock.setMaterial(p.materialId)
+    setGlobal(p.carveGlobal)
+    setDefaults(p.carveDefaults)
+    // Reflect the preset on the currently-selected 3D job so the visible
+    // speed/depth/strategy fields (bound to that job) update too.
+    if (selectedJob) {
+      setJobSpeeds(selectedJob.id, p.carveDefaults.speeds)
+      updateJob(selectedJob.id, {
+        stepover: p.carveDefaults.stepover,
+        maxDepth: p.carveDefaults.maxDepth,
+        roughing: p.carveDefaults.roughing,
+        finishing: p.carveDefaults.finishing,
+        finishDir: p.carveDefaults.finishDir,
+      })
+    }
+  }
+
+  const loadSlot = (i: number) => {
+    setSelectedSlot(i)
+    const s = presetSlots[i]
+    if (s?.preset) applyPreset(s.preset)
+  }
+  const saveToSlot = (i: number) => {
+    const snap = captureSettings()
+    setPresetSlotsRaw(presetSlots.map((s, idx) => (idx === i ? { ...s, preset: snap } : s)))
+    setSelectedSlot(i)
+  }
+  const clearSlot = (i: number) =>
+    setPresetSlotsRaw(presetSlots.map((s, idx) => (idx === i ? { ...s, preset: null, name: '' } : s)))
+  const renameSlot = (i: number, name: string) =>
+    setPresetSlotsRaw(presetSlots.map((s, idx) => (idx === i ? { ...s, name } : s)))
 
   // ---- file import --------------------------------------------------------
   /**
@@ -915,13 +985,13 @@ export function CadCamPanel() {
   }
 
   // ---- 3D: combined carve over ALL enabled jobs (in a Web Worker) ----------
-  const [carveStats, setCarveStats] = useState<{
+  const [, setCarveStats] = useState<{
     jobs: number
     grids: number
   } | null>(null)
   // Carve progress 0..1 (null = not carving). Drives a small "carving…" bar so a
   // heavy relief no longer freezes the UI — the compute runs off-thread.
-  const [carveProgress, setCarveProgress] = useState<number | null>(null)
+  const [, setCarveProgress] = useState<number | null>(null)
 
   // The active carve worker (null when idle), held in a ref so a replace/cancel
   // can terminate it without re-rendering. `carveJobIdRef` is a monotonic id so a
@@ -1186,48 +1256,6 @@ export function CadCamPanel() {
     setNestWarn(res.warnings)
   }
 
-  // ---- output actions: copy / download / clear ---------------------------
-  /** A safe file base for the downloaded .nc, derived from the program name. */
-  function gcodeFileBase(): string {
-    const base = (fileName ?? 'carving').replace(/\.[^.]+$/, '')
-    return base.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'carving'
-  }
-  function copyGcode() {
-    if (!gcode) return
-    // navigator.clipboard needs a secure context; fall back to a temp textarea.
-    if (navigator.clipboard?.writeText) {
-      void navigator.clipboard.writeText(gcode).catch(() => fallbackCopy(gcode))
-    } else {
-      fallbackCopy(gcode)
-    }
-  }
-  function fallbackCopy(text: string) {
-    try {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-    } catch {
-      /* best-effort */
-    }
-  }
-  function downloadGcode() {
-    if (!gcode) return
-    const blob = new Blob([gcode], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${gcodeFileBase()}.nc`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(url), 0)
-  }
-
   /** Clear ALL jobs (and the import) after a confirm — a clean "start over". */
   function clearAllJobs() {
     if (jobs.length === 0) return
@@ -1278,9 +1306,7 @@ export function CadCamPanel() {
   const setScale2D = (s: number) =>
     setP2d((p) => ({ ...p, scale: Number.isFinite(s) && s > 0 ? s : p.scale }))
   const round2 = (n: number) => Math.round(n * 100) / 100
-  const canGenerate2D = hasGeometry && (op === 'Engrave' || closedCount > 0)
   const enabledJobs = jobs.filter((j) => j.enabled).length
-  const canGenerate = mode === '3d' ? enabledJobs > 0 : canGenerate2D
 
   // Selected job's footprint vs bed (cheap fit hint).
   const selFootprint = useMemo(() => {
@@ -1504,38 +1530,37 @@ export function CadCamPanel() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
     >
+      <PresetRail
+        slots={presetSlots}
+        selected={selectedSlot}
+        onLoad={loadSlot}
+        onSelect={setSelectedSlot}
+        t={t}
+      />
       <div className="cc-scroll">
-        <h2 className="cc-heading">
-          {t('cc.titleMulti', '2D/3D Carving')}
-          <InfoTip
-            topic="cc.introMulti"
-            title={t('cc.titleMulti', '2D/3D Carving')}
-            body={t(
-              'cc.introMulti',
-              'Import one or more STL models — each becomes a job that auto-nests on the bed and carves in a single combined program. DXF / vector files do 2D engrave · profile · pocket.'
-            )}
-          />
-        </h2>
-
+        {/* The panel heading + its explainer InfoTip were removed; the same
+            explainer now shows as a tooltip when hovering the "2D/3D Carving"
+            dock TAB (see the dock tab component in shell.tsx). */}
         <div className="cc-cards">
           {/* ================= 1 · IMPORT / DROP ================= */}
           <section className="cc-section cc-span">
             <h3>{t('cc.model', 'Model')}</h3>
-            <div className="cc-section-body">
-              <div className={'cc-drop' + (dragOver ? ' cc-dragover' : '')}>
-                <span className="cc-drop-icon" aria-hidden>
-                  <Icon name="upload" size={18} />
+            <div className={'cc-section-body' + (dragOver ? ' cc-dragover' : '')}>
+              {/* Compact upload row: accepted extensions + a rectangular upload
+                  icon button (drag-drop onto the panel still works too). */}
+              <div className="cc-uploadrow">
+                <span className="cc-uploadrow-exts" title={t('cc.dropHintMulti', 'or drop a file anywhere — each model adds a job')}>
+                  .stl / .obj / .step / .dxf / .eps / .ai
                 </span>
                 <button
-                  className="cc-load-btn primary"
+                  type="button"
+                  className="cc-uploadrow-btn"
                   onClick={() => fileRef.current?.click()}
-                  title={t('cc.importTipMulti', 'Add an .stl model as a job (import again for more) — or a .dxf / .eps / .ai vector file')}
+                  title={t('cc.upload', 'Upload')}
+                  aria-label={t('cc.uploadAria', 'Upload model file(s)')}
                 >
-                  {t('cc.importAdd', 'Add model…')}
+                  <Icon name="upload" size={16} />
                 </button>
-                <span className="cc-drop-hint">
-                  {t('cc.dropHintMulti', 'or drop a .stl / .obj / .step / .dxf / .eps / .ai file anywhere — each model adds a job')}
-                </span>
                 <input
                   ref={fileRef}
                   className="cc-load-input"
@@ -1545,6 +1570,25 @@ export function CadCamPanel() {
                   onChange={onFileChange}
                 />
               </div>
+
+              {/* Uploaded model files, listed right here in the Model section. */}
+              <ModelFilesList
+                mode={mode}
+                jobs={jobs}
+                selectedId={selectedId}
+                fileName={fileName}
+                onSelect={selectJob}
+                onRemoveJob={removeJob}
+                onRemove2D={() => {
+                  setMode('none')
+                  setFileName(null)
+                  setDrawing(null)
+                  setEpsPolys(null)
+                  setGcode('')
+                  setWarnings([])
+                }}
+                t={t}
+              />
 
               {importError && <div className="cc-error">{importError}</div>}
 
@@ -1597,141 +1641,34 @@ export function CadCamPanel() {
           <section className="cc-section cc-toolstrip cc-primary">
             <h3>{t('cc.pickBitMat', 'Bit & material')}</h3>
             <div className="cc-section-body">
-              {/* Bit type + width (diameter) + length */}
-              <div className="cc-prim-grid">
-                <label className="cc-prim-field">
-                  <span className="cc-prim-lbl">
-                    {t('cc.bitType', 'Bit type')}
-                    <Tip
-                      id="bitType"
-                      title={t('cc.bitType', 'Bit type')}
-                      body={t(
-                        'cc.tipBitType',
-                        'The shape of your cutter. Flat = straight bottom (pockets/profiles); Ball = rounded tip (smooth 3D relief). This picks the right tool model for the carve.',
-                      )}
-                    />
-                  </span>
-                  <select
-                    className="cc-prim-select"
-                    value={bitType}
-                    onChange={(e) => pickBitType(e.target.value as BitType)}
-                    aria-label={t('cc.bitType', 'Bit type')}
-                  >
-                    {BIT_TYPES.map((bt) => (
-                      <option key={bt.type} value={bt.type}>
-                        {bt.icon} {t(bt.i18nKey, bt.name)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="cc-prim-field">
-                  <span className="cc-prim-lbl">
-                    {t('cc.bitWidth', 'Bit width ⌀ (mm)')}
-                    <Tip
-                      id="bitWidth"
-                      title={t('cc.bitWidth', 'Bit width ⌀ (mm)')}
-                      body={t(
-                        'cc.tipBitWidth',
-                        'The cutting diameter of your bit. A wider bit clears faster but loses fine detail; a narrower bit is slower but finer. All speeds/depths below are sized for this width.',
-                      )}
-                    />
-                  </span>
-                  <select
-                    className="cc-prim-select"
-                    value={bit.id}
-                    onChange={(e) => setBitId(e.target.value)}
-                    aria-label={t('cc.bitWidth', 'Bit width ⌀ (mm)')}
-                  >
-                    {sizesForType.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.icon} {t(b.i18nKey, b.name)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="cc-prim-field">
-                  <span className="cc-prim-lbl">
-                    {t('cc.bitLength', 'Bit length (mm)')}
-                    <Tip
-                      id="bitLength"
-                      title={t('cc.bitLength', 'Bit length (mm)')}
-                      body={t(
-                        'cc.tipBitLength',
-                        'The usable cutting length of the bit — the deepest it can reach. Keep your total carve depth under this so the bit shank never rubs the stock.',
-                      )}
-                    />
-                  </span>
-                  <input
-                    className="cc-prim-input"
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={String(bitLength)}
-                    onChange={(e) =>
-                      setBitLength(Number.isFinite(+e.target.value) ? +e.target.value : 1)
-                    }
-                    aria-label={t('cc.bitLength', 'Bit length (mm)')}
-                  />
-                </label>
+              {/* Graphical bit + material card (replaces the old 3 bit selects
+                  + material dropdown row). */}
+              <div className="cc-bitmat">
+                <BitWidget
+                  bitType={bitType}
+                  diameter={bit.diameter}
+                  bitLength={bitLength}
+                  onPickType={pickBitType}
+                  onWidth={(mm) => {
+                    if (!sizesForType.length) return
+                    let best = sizesForType[0]
+                    for (const b of sizesForType)
+                      if (Math.abs(b.diameter - mm) < Math.abs(best.diameter - mm)) best = b
+                    setBitId(best.id)
+                  }}
+                  onLength={(mm) => setBitLength(mm >= 1 ? mm : 1)}
+                  t={t}
+                />
+                <MaterialCard
+                  material={material}
+                  onPick={(id) => {
+                    stock.setMaterial(id)
+                    if (mode === '3d' && selectedJob) updateJob(selectedJob.id, { material: id })
+                  }}
+                  onInfo={setInfoMaterial}
+                  t={t}
+                />
               </div>
-
-              {/* Material — a compact dropdown (the 4th primary choice) with an
-                  inline swatch + info icon to the details modal. */}
-              <label className="cc-prim-field cc-matfield">
-                <span className="cc-prim-lbl cc-prim-matlbl">
-                  {t('cc.material', 'Material')}
-                  <Tip
-                    id="material"
-                    title={t('cc.material', 'Material')}
-                    body={t(
-                      'cc.tipMaterial',
-                      'What you are cutting. Together with the bit, this decides safe feeds, spindle speed and depth-of-cut. Pick from the list; open the details for full properties.',
-                    )}
-                  />
-                </span>
-                <div className="cc-matrow">
-                  <MaterialSwatch
-                    material={material}
-                    onInfo={setInfoMaterial}
-                    label={t('cc.matViewDetails', 'View {mat} details', {
-                      mat: t(material.i18nKey, material.name),
-                    })}
-                  />
-                  <select
-                    className="cc-prim-select cc-matselect"
-                    value={material.id}
-                    onChange={(e) => {
-                      const id = e.target.value
-                      stock.setMaterial(id)
-                      if (mode === '3d' && selectedJob) updateJob(selectedJob.id, { material: id })
-                    }}
-                    aria-label={t('cc.material', 'Material')}
-                    title={t(material.notesKey, material.notes)}
-                  >
-                    {MATERIALS.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.icon} {t(m.i18nKey, m.name)}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="cc-iconbtn cc-matinfo-btn"
-                    onClick={() => setInfoMaterial(material)}
-                    title={t('cc.matViewDetails', 'View {mat} details', {
-                      mat: t(material.i18nKey, material.name),
-                    })}
-                    aria-label={t('cc.matViewDetails', 'View {mat} details', {
-                      mat: t(material.i18nKey, material.name),
-                    })}
-                  >
-                    <Icon name="info" size={15} />
-                  </button>
-                </div>
-              </label>
-              <span className="cc-hint">
-                {t('cc.primaryHint', 'One bit cuts every job. Speeds & depth are worked out from these — see Advanced (auto) below.')}
-              </span>
               {nonCarveBitIn3D && (
                 <span className="cc-warn-line">
                   <Icon name="warning" size={13} />{' '}
@@ -2155,112 +2092,672 @@ export function CadCamPanel() {
           )}
 
           {/* ---- output / live preview (streaming lives in the Program tab) ---- */}
-          <section className="cc-section cc-output cc-span">
-            <h3>{t('cc.output', 'Output')}</h3>
-            <div className="cc-section-body">
-              {/* Status: live state + line count (+ carve progress bar). */}
-              <div className="cc-out-status">
-                <span className="cc-gen-meta">
-                  {carveProgress !== null
-                    ? t('cc.carving', 'Carving…')
-                    : busy
-                      ? t('cc.generating', 'Generating…')
-                      : t('cc.livePreview', 'Live preview')}{' '}
-                  ·{' '}
-                  <b>{lineCount}</b> {t('cc.linesToViz', 'lines → Visualizer')}
-                  {mode === '3d' && carveStats && (
-                    <> · {t('cc.combinedJobs', '{n} jobs combined', { n: carveStats.jobs })}</>
-                  )}
-                </span>
-                {carveProgress !== null && (
-                  <div
-                    className="cc-carve-progress"
-                    role="progressbar"
-                    aria-label={t('cc.carveProgress', 'carving progress')}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={Math.round(carveProgress * 100)}
-                    title={t('cc.carvingOffThread', 'Carving off the main thread — the UI stays responsive')}
-                  >
-                    <div className="cc-carve-progress-bar" style={{ width: `${Math.round(carveProgress * 100)}%` }} />
-                  </div>
-                )}
-              </div>
-              {/* Actions toolbar: the primary Regenerate action on the left, the
-                 secondary Save/Load + Frame controls grouped and aligned right.
-                 Each cluster keeps its own gap so buttons read as tidy groups. */}
-              <div className="cc-out-actions">
-                <div className="cc-out-actions-primary">
-                  <IconButton
-                    className="cc-regen"
-                    icon="↻"
-                    label={t('cc.regen', 'Regenerate now')}
-                    onClick={() => generate()}
-                    disabled={!canGenerate}
-                  />
-                </div>
-                <div className="cc-out-actions-secondary">
-                  <SaveLoadButtons
-                    value={carveDoc}
-                    onLoad={loadCarveDoc}
-                    onError={setLoadError}
-                    fileBase="karmyogi-carving"
-                    ext="kcarve"
-                    saveTitle={t('cc.save', 'Save carve settings')}
-                    loadTitle={t('cc.load', 'Load carve settings')}
-                  />
-                  <FrameButton
-                    className="cc-frame"
-                    lines={programLines}
-                    safeZ={carveGlobal.safeZ}
-                    label={t('cc.frame', 'Frame')}
-                  />
-                </div>
-              </div>
-              {loadError && <div className="cc-error">{loadError}</div>}
-
-              {mode === 'none' && (
-                <span className="cc-hint">{t('cc.importToGen', 'Import a model to generate a toolpath.')}</span>
-              )}
-              {canGenerate && lineCount > 0 && (
-                <span className="cc-hint">{t('cc.openProgramTab', 'Generated live — open the Program tab to stream, pause or step it.')}</span>
-              )}
-
-              {lineCount > 0 && (
-                <>
-                  <div className="cc-raw-head">
-                    <button
-                      className="cc-raw-toggle"
-                      onClick={() => setShowRaw((v) => !v)}
-                      aria-expanded={showRaw}
-                      title={t('cc.rawTip', 'Show the generated G-code text (read-only)')}
-                    >
-                      <Icon name={showRaw ? 'chevron-down' : 'chevron-right'} size={13} />{' '}
-                      {t('cc.rawGcode', 'Raw G-code ({n} lines)', { n: lineCount })}
-                    </button>
-                    <span className="cc-raw-acts">
-                      <IconButton
-                        iconName="copy"
-                        label={t('cc.copyGcode', 'Copy G-code to clipboard')}
-                        onClick={copyGcode}
-                        disabled={!gcode}
-                      />
-                      <IconButton
-                        iconName="download"
-                        label={t('cc.downloadGcode', 'Download G-code (.nc)')}
-                        onClick={downloadGcode}
-                        disabled={!gcode}
-                      />
-                    </span>
-                  </div>
-                  {showRaw && <textarea className="cc-raw" readOnly value={gcode} spellCheck={false} />}
-                </>
-              )}
-            </div>
-          </section>
+          {/* The Output section was removed: regenerate is automatic (live), the
+              Frame button + G-code copy/download moved to the Program tab, and the
+              carve-settings Save/Load moved into the preset bar below. Only the
+              carve-settings load error surfaces here. */}
+          {loadError && <div className="cc-error cc-loaderr">{loadError}</div>}
         </div>
       </div>
+      <PresetSaveBar
+        slots={presetSlots}
+        selected={selectedSlot}
+        onSelect={setSelectedSlot}
+        onSave={saveToSlot}
+        onClear={clearSlot}
+        onRename={renameSlot}
+        extra={
+          <SaveLoadButtons
+            value={carveDoc}
+            onLoad={loadCarveDoc}
+            onError={setLoadError}
+            fileBase="karmyogi-carving"
+            ext="kcarve"
+            saveTitle={t('cc.save', 'Save carve settings')}
+            loadTitle={t('cc.load', 'Load carve settings')}
+          />
+        }
+        t={t}
+      />
       <MaterialInfoModal material={infoMaterial} onClose={() => setInfoMaterial(null)} t={t} />
+    </div>
+  )
+}
+
+// ============================================================================
+// Graphical bit widget + material card (Bit & material section)
+// ============================================================================
+
+/**
+ * Editable dimension number with local text state so typing isn't fought by a
+ * snapped/derived value; commits on blur or Enter.
+ */
+function DimInput({
+  value,
+  onCommit,
+  title,
+  ariaLabel,
+}: {
+  value: number
+  onCommit: (v: number) => void
+  title: string
+  ariaLabel: string
+}) {
+  const [txt, setTxt] = useState(String(value))
+  const [editing, setEditing] = useState(false)
+  useEffect(() => {
+    if (!editing) setTxt(String(value))
+  }, [value, editing])
+  const commit = () => {
+    const v = parseFloat(txt)
+    if (Number.isFinite(v)) onCommit(v)
+    setEditing(false)
+  }
+  return (
+    <input
+      className="cc-dim-input"
+      type="number"
+      min={0}
+      step={0.1}
+      value={txt}
+      title={title}
+      aria-label={ariaLabel}
+      onFocus={() => setEditing(true)}
+      onChange={(e) => setTxt(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+      }}
+    />
+  )
+}
+
+/**
+ * Graphical cutting-bit widget: an SVG of the tool (its tip shape follows the
+ * selected type) with civil-engineering-style double-arrow dimension lines for
+ * WIDTH (⌀, snapped to the nearest stocked size) and HEIGHT (cutting length),
+ * plus a tip-type dropdown beneath. Replaces the old three separate selects.
+ */
+function BitWidget({
+  bitType,
+  diameter,
+  bitLength,
+  onPickType,
+  onWidth,
+  onLength,
+  t,
+}: {
+  bitType: BitType
+  diameter: number
+  bitLength: number
+  onPickType: (type: BitType) => void
+  onWidth: (mm: number) => void
+  onLength: (mm: number) => void
+  t: ReturnType<typeof useT>
+}) {
+  // Tip geometry by type (illustrative, not to scale — the numbers are exact).
+  const pointed = bitType === 'vbit' || bitType === 'engraving' || bitType === 'drill'
+  const tipBottom = bitType === 'ball' ? 86 : pointed ? 90 : 80
+  const tip =
+    bitType === 'ball' ? (
+      <path className="cc-bit-body" d="M52,74 q8,18 16,0 z" />
+    ) : pointed ? (
+      <path className="cc-bit-body" d="M52,74 L60,90 L68,74 z" />
+    ) : (
+      <rect className="cc-bit-body" x="52" y="74" width="16" height="6" />
+    )
+  return (
+    <div className="cc-bit">
+      <svg className="cc-bit-svg" viewBox="2 4 76 124" role="img" aria-label={t('cc.bitDrawing', 'Cutting bit')}>
+        <defs>
+          <marker
+            id="ccDimArrow"
+            viewBox="0 0 10 10"
+            markerWidth="7"
+            markerHeight="7"
+            refX="9"
+            refY="5"
+            orient="auto-start-reverse"
+          >
+            <path d="M0,1 L9,5 L0,9 z" className="cc-bit-arrowhead" />
+          </marker>
+          {/* clip the flute hatching to the cutting body */}
+          <clipPath id="ccBitBodyClip">
+            <rect x="52" y="22" width="16" height="52" />
+          </clipPath>
+        </defs>
+        {/* tool: collar + cutting body + tip */}
+        <rect className="cc-bit-collar" x="48" y="8" width="24" height="14" rx="2" />
+        <rect className="cc-bit-body" x="52" y="22" width="16" height="52" />
+        {/* SPIRAL (helical) flutes: a front helix (solid) + a back helix (faint),
+            curved and crossing — so it reads as a twisted cutting tool. */}
+        <g clipPath="url(#ccBitBodyClip)">
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+            const y = 16 + i * 12
+            return (
+              <path
+                key={'fb' + i}
+                className="cc-bit-flute cc-bit-flute-back"
+                fill="none"
+                d={`M52,${y - 20} Q66,${y - 13} 68,${y}`}
+              />
+            )
+          })}
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+            const y = 16 + i * 12
+            return (
+              <path
+                key={'ff' + i}
+                className="cc-bit-flute"
+                fill="none"
+                d={`M52,${y} Q54,${y - 13} 68,${y - 20}`}
+              />
+            )
+          })}
+        </g>
+        {tip}
+        {/* LENGTH dimension — vertical line on the LEFT spanning the bit from the
+            top of the body to the bottom of the tip, with arrowheads at both
+            ends + extension lines, and the editable value on the line. */}
+        <line className="cc-bit-extline" x1="52" y1="22" x2="30" y2="22" />
+        <line className="cc-bit-extline" x1="52" y1={tipBottom} x2="30" y2={tipBottom} />
+        <line
+          className="cc-bit-dimline"
+          x1="34"
+          y1="22"
+          x2="34"
+          y2={tipBottom}
+          markerStart="url(#ccDimArrow)"
+          markerEnd="url(#ccDimArrow)"
+        />
+        <foreignObject x="6" y={(22 + tipBottom) / 2 - 9} width="30" height="18">
+          <div className="cc-bit-fo">
+            <DimInput
+              value={Math.round(bitLength * 100) / 100}
+              onCommit={onLength}
+              title={t('cc.bitLength', 'Bit length (mm) — the deepest the bit can reach')}
+              ariaLabel={t('cc.bitLength', 'Bit length (mm)')}
+            />
+          </div>
+        </foreignObject>
+        {/* WIDTH (⌀) dimension — the bit is too narrow to fit outward arrows +
+            value between the extension lines, so the arrowheads point INWARD
+            (placed outside the lines) and the editable value sits BELOW. */}
+        <line className="cc-bit-extline" x1="52" y1={tipBottom} x2="52" y2={tipBottom + 16} />
+        <line className="cc-bit-extline" x1="68" y1={tipBottom} x2="68" y2={tipBottom + 16} />
+        <line className="cc-bit-dimline" x1="50" y1={tipBottom + 12} x2="70" y2={tipBottom + 12} />
+        <path className="cc-bit-arrowhead" d={`M46,${tipBottom + 9} L52,${tipBottom + 12} L46,${tipBottom + 15} z`} />
+        <path className="cc-bit-arrowhead" d={`M74,${tipBottom + 9} L68,${tipBottom + 12} L74,${tipBottom + 15} z`} />
+        <foreignObject x="43" y={tipBottom + 15} width="34" height="17">
+          <div className="cc-bit-fo">
+            <DimInput
+              value={Math.round(diameter * 100) / 100}
+              onCommit={onWidth}
+              title={t('cc.bitWidth', 'Bit width ⌀ (mm) — snaps to the nearest stocked size')}
+              ariaLabel={t('cc.bitWidth', 'Bit width ⌀ (mm)')}
+            />
+          </div>
+        </foreignObject>
+      </svg>
+      <label className="cc-bit-tip">
+        <span className="cc-bit-tip-lbl">{t('cc.tipType', 'Tip')}</span>
+        <select
+          className="cc-prim-select"
+          value={bitType}
+          onChange={(e) => onPickType(e.target.value as BitType)}
+          aria-label={t('cc.bitType', 'Bit type')}
+        >
+          {BIT_TYPES.map((bt) => (
+            <option key={bt.type} value={bt.type}>
+              {bt.icon} {t(bt.i18nKey, bt.name)}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+/**
+ * Graphical material card: a medium square with the material PHOTO as the
+ * background, the material NAME overlaid along the bottom, and a translucent
+ * info button overlaid (opens the details modal). Clicking the card opens a
+ * photo grid to pick a different material. Replaces the label + small swatch +
+ * dropdown + info button + helper text row.
+ */
+function MaterialCard({
+  material,
+  onPick,
+  onInfo,
+  t,
+}: {
+  material: MaterialPreset
+  onPick: (id: string) => void
+  onInfo: (m: MaterialPreset) => void
+  t: ReturnType<typeof useT>
+}) {
+  const [open, setOpen] = useState(false)
+  const name = t(material.i18nKey, material.name)
+  return (
+    <div className="cc-matcard-wrap">
+      <button
+        type="button"
+        className="cc-matcard"
+        style={material.image ? { backgroundImage: `url(${material.image})` } : undefined}
+        onClick={() => setOpen(true)}
+        title={t('cc.matPick', 'Material — click to choose ({name})', { name })}
+        aria-haspopup="dialog"
+      >
+        {!material.image && (
+          <span className="cc-matcard-emoji" aria-hidden="true">
+            {material.icon}
+          </span>
+        )}
+        <span className="cc-matcard-name">{name}</span>
+      </button>
+      <button
+        type="button"
+        className="cc-matcard-info"
+        onClick={() => onInfo(material)}
+        title={t('cc.matViewDetails', 'View {mat} details', { mat: name })}
+        aria-label={t('cc.matViewDetails', 'View {mat} details', { mat: name })}
+      >
+        <Icon name="info" size={14} />
+      </button>
+      <Modal
+        open={open}
+        title={t('cc.chooseMaterial', 'Choose material')}
+        onClose={() => setOpen(false)}
+      >
+        <div className="cc-matmodal-grid">
+          {MATERIALS.map((m) => {
+            const mn = t(m.i18nKey, m.name)
+            return (
+              <div
+                key={m.id}
+                className={'cc-matmodal-tile' + (m.id === material.id ? ' is-sel' : '')}
+                style={m.image ? { backgroundImage: `url(${m.image})` } : undefined}
+              >
+                <button
+                  type="button"
+                  className="cc-matmodal-pick"
+                  onClick={() => {
+                    onPick(m.id)
+                    setOpen(false)
+                  }}
+                  title={t('cc.matSelect', 'Use {mat}', { mat: mn })}
+                  aria-label={t('cc.matSelect', 'Use {mat}', { mat: mn })}
+                >
+                  {!m.image && (
+                    <span className="cc-matcard-emoji" aria-hidden="true">
+                      {m.icon}
+                    </span>
+                  )}
+                  <span className="cc-matmodal-name">{mn}</span>
+                </button>
+                <button
+                  type="button"
+                  className="cc-matmodal-info"
+                  onClick={() => {
+                    setOpen(false)
+                    onInfo(m)
+                  }}
+                  title={t('cc.matViewDetails', 'View {mat} details', { mat: mn })}
+                  aria-label={t('cc.matViewDetails', 'View {mat} details', { mat: mn })}
+                >
+                  <Icon name="info" size={15} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+// ============================================================================
+// Color-coded preset rail (left edge) + save bar (footer)
+// ============================================================================
+
+/** Thin pencil glyph for the per-slot edit affordance. */
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+      />
+    </svg>
+  )
+}
+
+/** Floppy-disk glyph for the preset Save button. */
+function SaveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"
+      />
+    </svg>
+  )
+}
+
+/** Recycle-bin glyph for the preset Delete button. */
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM8.5 9.5h1.5v8H8.5v-8zm5.5 0h1.5v8H14v-8zM15.5 4l-1-1h-5l-1 1H5v2h14V4h-3.5z"
+      />
+    </svg>
+  )
+}
+
+/** Uppercase file-extension badge (e.g. "STL") derived from a filename. */
+function fileExt(name: string): string {
+  const m = name.match(/\.([a-z0-9]+)$/i)
+  return m ? m[1].toUpperCase() : '—'
+}
+
+/**
+ * The list of uploaded model files shown directly in the Model section. For 3D
+ * it lists every imported job (click to select for placement, ✕ to remove); for
+ * 2D it shows the single loaded vector file. Empty → a friendly hint.
+ */
+function ModelFilesList({
+  mode,
+  jobs,
+  selectedId,
+  fileName,
+  onSelect,
+  onRemoveJob,
+  onRemove2D,
+  t,
+}: {
+  mode: Mode
+  jobs: CarveJob[]
+  selectedId: string | null
+  fileName: string | null
+  onSelect: (id: string) => void
+  onRemoveJob: (id: string) => void
+  onRemove2D: () => void
+  t: ReturnType<typeof useT>
+}) {
+  const has3D = mode === '3d' && jobs.length > 0
+  const has2D = (mode === '2d' || mode === 'cdr' || mode === 'step') && !!fileName
+  // Nothing uploaded yet → render nothing (no placeholder text).
+  if (!has3D && !has2D) return null
+  return (
+    <ul className="cc-modelfiles">
+      {has3D &&
+        jobs.map((job) => (
+          <li key={job.id} className={'cc-modelfile' + (job.id === selectedId ? ' is-sel' : '')}>
+            <button
+              type="button"
+              className="cc-modelfile-pick"
+              onClick={() => onSelect(job.id)}
+              title={t('cc.modelfilePick', 'Select “{name}” (edit its placement)', { name: job.name })}
+            >
+              <span className="cc-modelfile-ext" aria-hidden="true">3D</span>
+              <span className="cc-modelfile-name">{job.name}</span>
+            </button>
+            <button
+              type="button"
+              className="cc-modelfile-x"
+              onClick={() => onRemoveJob(job.id)}
+              title={t('cc.removeFile', 'Remove this model')}
+              aria-label={t('cc.removeFileAria', 'Remove {name}', { name: job.name })}
+            >
+              ✕
+            </button>
+          </li>
+        ))}
+      {has2D && fileName && (
+        <li className="cc-modelfile is-sel">
+          <span className="cc-modelfile-pick" title={fileName}>
+            <span className="cc-modelfile-ext" aria-hidden="true">{fileExt(fileName)}</span>
+            <span className="cc-modelfile-name">{fileName}</span>
+          </span>
+          <button
+            type="button"
+            className="cc-modelfile-x"
+            onClick={onRemove2D}
+            title={t('cc.removeFile', 'Remove this file')}
+            aria-label={t('cc.removeFileAria', 'Remove {name}', { name: fileName })}
+          >
+            ✕
+          </button>
+        </li>
+      )}
+    </ul>
+  )
+}
+
+/**
+ * Floating, translucent color-swatch rail stuck to the LEFT edge of the carving
+ * tab. Each swatch is one preset slot: clicking a FILLED swatch loads its
+ * settings; hovering reveals an edit (pencil) button that also loads it (the
+ * explicit "tweak this one" affordance). Empty slots show a faint "+"; clicking
+ * one just selects it as the save target (use the footer to store settings into
+ * it). The selected slot is ringed and stays in sync with the footer dropdown.
+ */
+function PresetRail({
+  slots,
+  selected,
+  onLoad,
+  onSelect,
+  t,
+}: {
+  slots: PresetSlot[]
+  selected: number
+  onLoad: (i: number) => void
+  onSelect: (i: number) => void
+  t: ReturnType<typeof useT>
+}) {
+  return (
+    <div className="cc-presets-rail" role="toolbar" aria-label={t('cc.presets.aria', 'Carving setting presets')}>
+      <span className="cc-presets-cap" aria-hidden="true">
+        {t('cc.presets.tag', 'PRESETS')}
+      </span>
+      {slots.map((s, i) => {
+        const filled = !!s.preset
+        const label = s.name || t('cc.presets.slotN', 'Preset {n}', { n: i + 1 })
+        return (
+          <div className="cc-preset-slotwrap" key={i}>
+            <button
+              type="button"
+              className={
+                'cc-preset-slot' +
+                (filled ? ' is-filled' : ' is-empty') +
+                (i === selected ? ' is-sel' : '')
+              }
+              style={{ ['--slot' as string]: s.color } as CSSProperties}
+              aria-pressed={i === selected}
+              aria-label={
+                filled
+                  ? t('cc.presets.loadAria', 'Load preset {n}: {name}', { n: i + 1, name: label })
+                  : t('cc.presets.emptyAria', 'Empty preset slot {n}', { n: i + 1 })
+              }
+              onClick={() => (filled ? onLoad(i) : onSelect(i))}
+            >
+              {!filled && (
+                <span className="cc-preset-plus" aria-hidden="true">
+                  +
+                </span>
+              )}
+            </button>
+            {/* Hover (or always, on touch) flyout: shows the preset NAME, plus an
+                edit button for filled slots that loads it for tweaking. */}
+            <div className="cc-preset-flyout" role="presentation">
+              <span className="cc-preset-flyout-name">
+                {filled ? label : t('cc.presets.emptyName', 'Empty · {name}', { name: label })}
+              </span>
+              {filled && (
+                <button
+                  type="button"
+                  className="cc-preset-edit"
+                  title={t('cc.presets.editTip', 'Edit “{name}” — load to tweak, then Save', { name: label })}
+                  aria-label={t('cc.presets.editAria', 'Edit preset {n}', { n: i + 1 })}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onLoad(i)
+                  }}
+                >
+                  <PencilIcon />
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Sticky footer save-bar: an optional name field, a color dropdown that picks
+ * the target slot (in sync with the rail), and a Save button that writes the
+ * CURRENT settings into the selected color. A Clear button removes a stored
+ * preset. Kept compact + glassy for an enterprise feel.
+ */
+function PresetSaveBar({
+  slots,
+  selected,
+  onSelect,
+  onSave,
+  onClear,
+  onRename,
+  extra,
+  t,
+}: {
+  slots: PresetSlot[]
+  selected: number
+  onSelect: (i: number) => void
+  onSave: (i: number) => void
+  onClear: (i: number) => void
+  onRename: (i: number, name: string) => void
+  /** Extra controls rendered at the start of the bar (e.g. carve Save/Load). */
+  extra?: ReactNode
+  t: ReturnType<typeof useT>
+}) {
+  const [open, setOpen] = useState(false)
+  const [flash, setFlash] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const cur = slots[selected] ?? slots[0]
+
+  // Dismiss the color popover on outside-click / Escape.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const slotLabel = (i: number) => slots[i].name || t('cc.presets.slotN', 'Preset {n}', { n: i + 1 })
+
+  const doSave = () => {
+    onSave(selected)
+    setFlash(true)
+    window.setTimeout(() => setFlash(false), 1300)
+  }
+
+  return (
+    <div className="cc-presets-bar">
+      {extra && (
+        <>
+          <span className="cc-presets-extra">{extra}</span>
+          <span className="cc-presets-sep" aria-hidden="true" />
+        </>
+      )}
+      <input
+        className="cc-presets-name"
+        value={cur.name}
+        placeholder={t('cc.presets.namePh', 'Preset name')}
+        onChange={(e) => onRename(selected, e.target.value)}
+        aria-label={t('cc.presets.nameAria', 'Preset name')}
+      />
+      <div className="cc-presets-dd" ref={wrapRef}>
+        <button
+          type="button"
+          className="cc-presets-dd-btn"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          title={t('cc.presets.pickColor', 'Choose which colour slot to save into')}
+        >
+          <span className="cc-presets-dot" style={{ background: cur.color }} />
+          <span className="cc-presets-caret" aria-hidden="true">
+            ▾
+          </span>
+        </button>
+        {open && (
+          <div className="cc-presets-grid" role="listbox" aria-label={t('cc.presets.pickColor', 'Choose colour slot')}>
+            {slots.map((s, i) => (
+              <button
+                key={i}
+                type="button"
+                role="option"
+                aria-selected={i === selected}
+                title={s.preset ? slotLabel(i) : t('cc.presets.slotEmpty', 'Slot {n} (empty)', { n: i + 1 })}
+                className={
+                  'cc-presets-cell' +
+                  (i === selected ? ' is-sel' : '') +
+                  (s.preset ? ' is-filled' : ' is-empty')
+                }
+                style={{ ['--slot' as string]: s.color } as CSSProperties}
+                onClick={() => {
+                  onSelect(i)
+                  setOpen(false)
+                }}
+              >
+                {i === selected && (
+                  <span className="cc-presets-cell-check" aria-hidden="true">
+                    ✓
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        className={'cc-presets-iconbtn cc-presets-save' + (flash ? ' is-ok' : '')}
+        onClick={doSave}
+        title={t('cc.presets.saveTip', 'Save the current settings into this colour')}
+        aria-label={t('cc.presets.saveBtn', 'Save preset')}
+      >
+        {flash ? (
+          <span className="cc-presets-ok" aria-hidden="true">
+            ✓
+          </span>
+        ) : (
+          <SaveIcon />
+        )}
+      </button>
+      {cur.preset && (
+        <button
+          type="button"
+          className="cc-presets-iconbtn cc-presets-clearbtn"
+          title={t('cc.presets.clearTip', 'Delete this preset slot')}
+          aria-label={t('cc.presets.clearAria', 'Delete preset {n}', { n: selected + 1 })}
+          onClick={() => onClear(selected)}
+        >
+          <TrashIcon />
+        </button>
+      )}
     </div>
   )
 }

@@ -6,10 +6,12 @@ import {
   useState,
   type DragEvent,
 } from 'react'
-import { useProgram, useMachine, usePersistentState } from '../store'
+import { useProgram, useMachine, useSettings } from '../store'
+import { sectionColor } from '../viewer/sectionColors'
 import { grbl } from '../serial/controller'
 import { ProgramProgressBar } from '../components/ProgramProgressBar'
-import { ProgramList } from '../components/ProgramList'
+import { FrameButton } from '../components/FrameButton'
+import { Icon } from '../components/Icons'
 import {
   computeProgress,
   estimateProgramSeconds,
@@ -39,9 +41,10 @@ export function ProgramPanel() {
   const cursor = useProgram((s) => s.cursor)
   const streaming = useProgram((s) => s.streaming)
   const setProgram = useProgram((s) => s.setProgram)
-  const setCombined = useProgram((s) => s.setCombined)
   const removeSection = useProgram((s) => s.removeSection)
+  const setSectionColor = useProgram((s) => s.setSectionColor)
   const clear = useProgram((s) => s.clear)
+  const theme = useSettings((s) => s.theme)
 
   const connected = useMachine((s) => s.connection === 'connected')
   const machineState = useMachine((s) => s.state)
@@ -50,14 +53,6 @@ export function ProgramPanel() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [dragOver, setDragOver] = useState(false)
-  const [textOpen, setTextOpen] = usePersistentState<boolean>(
-    'karmyogi.program.textOpen',
-    true,
-  )
-  const [editorH, setEditorH] = usePersistentState<number>(
-    'karmyogi.program.editorH',
-    260,
-  )
 
   // Start line to stream from (1-based, FULL-program index). Doubles as a live
   // "current line" readout while streaming. Default 1; clamped to 1..lines.length
@@ -70,17 +65,6 @@ export function ProgramPanel() {
   const toggleSection = useCallback((id: string) => {
     setOpenSections((m) => ({ ...m, [id]: !m[id] }))
   }, [])
-
-  // Local editable buffer for the program text. Kept in sync with the store
-  // when the program changes from outside (load, clear), but the textarea is the
-  // source of truth while the user types; we push back to the store on blur.
-  const [draft, setDraft] = useState<string>(() => lines.join('\n'))
-  const storeText = useMemo(() => lines.join('\n'), [lines])
-  useEffect(() => {
-    // Re-sync the editor when the program is replaced from outside (load/clear),
-    // but never clobber the user's in-progress edits.
-    setDraft(storeText)
-  }, [storeText])
 
   // While streaming, the start-line field becomes a live current-line readout
   // (1-based, full-program). The store's `cursor` is already a FULL-program
@@ -146,22 +130,6 @@ export function ProgramPanel() {
     if (e.currentTarget === e.target) setDragOver(false)
   }
 
-  // Commit edits back to the store (re-splits lines). Called on blur so we don't
-  // thrash the store on every keystroke.
-  const commitDraft = useCallback(() => {
-    if (streaming) return
-    if (draft === storeText) return
-    // Editing the combined text collapses all sections into one edited program.
-    setCombined(name ?? 'edited', draft)
-  }, [draft, storeText, name, streaming, setCombined])
-
-  // Persist the editor height after the user drags the textarea's resize grip.
-  const editorRef = useRef<HTMLTextAreaElement>(null)
-  const onEditorMouseUp = useCallback(() => {
-    const h = editorRef.current?.offsetHeight
-    if (h && Math.abs(h - editorH) > 1) setEditorH(h)
-  }, [editorH, setEditorH])
-
   // Resolve the clamped, FULL-program 1-based start line (1..lines.length).
   const startIndex1 = useMemo(() => {
     const n = parseInt(startLine, 10)
@@ -213,6 +181,27 @@ export function ProgramPanel() {
     }
   }
 
+  // Per-section G-code copy / download (moved here from the carving Output).
+  function copySectionGcode(sec: { rawLines: string[] }) {
+    const text = sec.rawLines.join('\n')
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text).catch(() => {})
+    }
+  }
+  function downloadSectionGcode(sec: { name: string; rawLines: string[] }) {
+    const text = sec.rawLines.join('\n')
+    const base = (sec.name || 'program').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'program'
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${base}.nc`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
   const canStream = connected && hasProgram && !streaming
 
   return (
@@ -260,6 +249,14 @@ export function ProgramPanel() {
                       'Start line: Stream begins from this line (1-based)',
                     )
               }
+            />
+            {/* Frame (trace perimeter) — moved here from the carving Output. Uses
+                the loaded program's XY bounds; options hidden (sane defaults). */}
+            <FrameButton
+              className="pp-frame"
+              lines={lines}
+              showOptions={false}
+              label={t('prog.frame', 'Frame')}
             />
             <button
               className="pp-stream primary"
@@ -373,12 +370,27 @@ export function ProgramPanel() {
             </span>
           </div>
           <ul className="pp-section-list">
-            {sections.map((sec) => {
+            {sections.map((sec, i) => {
               const open = !!openSections[sec.id]
               const count = sec.rawLines.length
+              const color = sectionColor(i, theme === 'dark', sec.color)
               return (
                 <li key={sec.id} className="pp-section">
                   <div className="pp-section-row">
+                    <label
+                      className="pp-section-color"
+                      title={t('prog.sectionColor', 'Toolpath line colour in the 3D viewer')}
+                      style={{ background: color }}
+                    >
+                      <input
+                        type="color"
+                        value={color}
+                        onChange={(e) => setSectionColor(sec.id, e.target.value)}
+                        aria-label={t('prog.sectionColorAria', 'Toolpath colour for section {name}', {
+                          name: sec.name,
+                        })}
+                      />
+                    </label>
                     <button
                       type="button"
                       className="pp-section-disclosure"
@@ -401,6 +413,24 @@ export function ProgramPanel() {
                           ? t('prog.lineCountOne', '{count} line', { count })
                           : t('prog.lineCount', '{count} lines', { count })}
                       </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="pp-icon-btn pp-section-io"
+                      onClick={() => copySectionGcode(sec)}
+                      title={t('prog.sectionCopy', 'Copy this section’s G-code')}
+                      aria-label={t('prog.sectionCopyAria', 'Copy G-code for {name}', { name: sec.name })}
+                    >
+                      <Icon name="copy" size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="pp-icon-btn pp-section-io"
+                      onClick={() => downloadSectionGcode(sec)}
+                      title={t('prog.sectionDownload', 'Download this section’s G-code (.nc)')}
+                      aria-label={t('prog.sectionDownloadAria', 'Download G-code for {name}', { name: sec.name })}
+                    >
+                      <Icon name="download" size={14} />
                     </button>
                     <button
                       className="pp-icon-btn pp-btn-clear"
@@ -428,60 +458,23 @@ export function ProgramPanel() {
         </section>
       )}
 
-      {/* --- Live read view: virtualized, line-numbered, cursor-highlighting.
-              Click a line to set the feed-from-line start (when not streaming).
-              Uses programWindow.ts windowing so huge programs stay smooth. --- */}
-      {hasProgram && (
-        <section className="pp-card pp-read-card">
-          <div className="pp-read-header">
-            <span className="pp-section-title">
-              {t('prog.readView', 'Program lines')}
-            </span>
-            <span className="pp-meta">
-              {streaming
-                ? t('prog.atLine', 'line {n} / {total}', {
-                    n: Math.max(0, cursor + 1),
-                    total: lines.length,
-                  })
-                : t('prog.startAtLine', 'start at line {n}', { n: startIndex1 })}
-            </span>
-          </div>
-          <ProgramList
-            lines={lines}
-            cursor={streaming ? cursor : -1}
-            selected={streaming ? -1 : startIndex1 - 1}
-            onSelect={(i) => {
-              if (!streaming) setStartLine(String(i + 1))
-            }}
-          />
-        </section>
-      )}
-
-      {/* --- Program text: editable, collapsible, resizable, scrollable.
-              Load + Clear live in the header row, right-aligned. --- */}
+      {/* --- Program file: name + Load / Clear. The line-by-line read view and
+              the text editor were removed — the Sections list above is the single
+              representation of the program (view its lines by expanding a section,
+              copy/download/delete per section). --- */}
       <section className="pp-card pp-text-card">
         <div className="pp-text-header">
-          <button
-            type="button"
-            className="pp-disclosure"
-            aria-expanded={textOpen}
-            onClick={() => setTextOpen((v) => !v)}
-            title={
-              textOpen
-                ? t('prog.hideEditor', 'Hide program text editor')
-                : t('prog.showEditor', 'Show program text editor')
-            }
-          >
-            <span className="pp-disclosure-caret">{textOpen ? '▾' : '▸'}</span>
-            {t('prog.programText', 'Program text')}
+          <span className="pp-section-title">
+            {t('prog.programFile', 'Program')}
             <span className="pp-meta pp-text-count">
+              {' '}
               (
               {lines.length === 1
                 ? t('prog.lineCountOne', '{count} line', { count: lines.length })
                 : t('prog.lineCount', '{count} lines', { count: lines.length })}
               )
             </span>
-          </button>
+          </span>
           {name && (
             <span className="pp-name" title={name}>
               {name}
@@ -513,38 +506,6 @@ export function ProgramPanel() {
             )}
           </div>
         </div>
-        {textOpen && (
-          <textarea
-            ref={editorRef}
-            className="pp-editor"
-            style={{ height: editorH }}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitDraft}
-            onMouseUp={onEditorMouseUp}
-            readOnly={streaming}
-            spellCheck={false}
-            wrap="off"
-            placeholder={t(
-              'prog.editorPlaceholder',
-              'No program loaded. Drag & drop or ⬆ a .nc / .gcode file, or type / paste G-code here.',
-            )}
-            aria-label={t('prog.editorAria', 'Editable G-code program text')}
-            title={
-              streaming
-                ? t('prog.editorDisabled', 'Editing is disabled while streaming')
-                : t(
-                    'prog.editorHint',
-                    'Edit G-code; changes apply when you click away',
-                  )
-            }
-          />
-        )}
-        {streaming && textOpen && (
-          <span className="pp-hint">
-            {t('prog.readOnlyStreaming', 'Read-only while streaming.')}
-          </span>
-        )}
         <input
           ref={fileRef}
           className="pp-load-input"

@@ -44,6 +44,12 @@ export interface ProgramSection {
    * own placement; the gizmo edits the selected section only.
    */
   placement: JobPlacement
+  /**
+   * Optional per-section toolpath LINE colour in the 3D viewer. When unset the
+   * Visualizer falls back to its automatic per-index palette. Lets the operator
+   * tell different program toolpaths apart at a glance.
+   */
+  color?: string
 }
 
 interface ProgramStore {
@@ -85,6 +91,8 @@ interface ProgramStore {
   setSectionPlacement: (id: string, p: Partial<JobPlacement>) => void
   /** Reset ONE section's placement to identity. */
   resetSectionPlacement: (id: string) => void
+  /** Set ONE section's toolpath line colour (for the 3D viewer); '' clears it. */
+  setSectionColor: (id: string, color: string) => void
   setCursor: (i: number) => void
   setStreaming: (s: boolean) => void
   clear: () => void
@@ -277,6 +285,16 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     const next = sections.slice()
     next[idx] = { ...next[idx], placement: { ...next[idx].placement, ...p } }
     set(deriveFrom(next))
+  },
+  setSectionColor: (id, color) => {
+    const { sections } = get()
+    const idx = sections.findIndex((s) => s.id === id)
+    if (idx < 0) return
+    const next = sections.slice()
+    // Colour is display-only metadata — it doesn't affect rawLines/lines, so we
+    // update the section array without re-baking the combined program.
+    next[idx] = { ...next[idx], color: color || undefined }
+    set({ sections: next })
   },
   resetSectionPlacement: (id) => {
     const { sections } = get()

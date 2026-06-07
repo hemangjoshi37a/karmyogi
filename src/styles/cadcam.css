@@ -8,9 +8,11 @@
   min-height: 0;
   background: var(--bg-panel);
   color: var(--fg);
-  /* Vertical-only scroller — never horizontal. */
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* Non-scrolling POSITIONING CONTEXT: scrolling lives on the inner .cc-scroll
+     so the floating preset rail (absolute, left edge) and the footer save-bar
+     (flex child) stay fixed while the settings scroll between them. */
+  position: relative;
+  overflow: hidden;
   /* This panel is usually a narrow docked column on a WIDE window, so window
      media queries never fire. Drive all layout reflow off the panel's OWN
      width via container queries instead (see @container cadcampanel below). */
@@ -22,9 +24,13 @@
   flex: 1 1 auto;
   min-height: 0;
   padding: var(--sp-3);
+  /* Left gutter so settings clear the floating preset rail on the left edge. */
+  padding-left: calc(var(--sp-3) + 44px);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* --- panel heading (with an InfoTip carrying the explainer) --- */
@@ -1134,4 +1140,761 @@
   font-size: 12px;
   font-weight: 600;
 }
+
+/* ============================================================================
+   Color-coded SETTING PRESETS — floating left rail + footer save-bar
+   ============================================================================ */
+
+/* --- floating translucent rail on the left edge --- */
+.cc-presets-rail {
+  position: absolute;
+  left: 8px;
+  /* Centre vertically within the band ABOVE the footer save-bar (top..bottom +
+     margin:auto), so the rail never overlaps the "Save here" bar at the bottom. */
+  top: 8px;
+  bottom: 64px;
+  margin: auto 0;
+  height: fit-content;
+  max-height: calc(100% - 78px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 6px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elev) 68%, transparent);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.cc-presets-cap {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 7px;
+  letter-spacing: 2px;
+  font-weight: 800;
+  color: var(--fg-muted);
+  opacity: 0.55;
+  margin-bottom: 2px;
+  user-select: none;
+}
+.cc-preset-slotwrap {
+  position: relative;
+  display: flex;
+}
+.cc-preset-slot {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1.5px solid color-mix(in srgb, #000 22%, var(--slot));
+  background: var(--slot);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+.cc-preset-slot:hover {
+  transform: scale(1.14);
+}
+.cc-preset-slot:focus-visible {
+  outline: 2px solid var(--slot);
+  outline-offset: 2px;
+}
+.cc-preset-slot.is-empty {
+  background: transparent;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--slot) 55%, transparent);
+  box-shadow: none;
+  opacity: 0.55;
+}
+.cc-preset-slot.is-empty:hover {
+  opacity: 0.9;
+}
+.cc-preset-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: color-mix(in srgb, var(--slot) 70%, var(--fg));
+}
+.cc-preset-slot.is-sel {
+  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--slot), 0 2px 7px rgba(0, 0, 0, 0.3);
+}
+/* hover/touch flyout — a floating pill to the right of a swatch showing the
+   preset NAME (+ an edit button for filled slots). */
+.cc-preset-flyout {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.34);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 25;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.cc-preset-slotwrap:hover .cc-preset-flyout,
+.cc-preset-slotwrap:focus-within .cc-preset-flyout {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
+}
+.cc-preset-flyout-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-preset-edit {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.cc-preset-edit:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* --- footer save-bar --- */
+.cc-presets-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  /* Compact single row: [name field] [colour dropdown] [save] [delete].
+     Still wraps as a fallback on the very narrowest columns. */
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 15;
+}
+.cc-presets-extra {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+.cc-presets-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  align-self: stretch;
+  margin: 3px 1px;
+  background: var(--border);
+}
+.cc-presets-name {
+  flex: 1 1 40px;
+  min-width: 34px;
+  height: 30px;
+  padding: 2px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+}
+.cc-presets-name:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.cc-presets-dd {
+  position: relative;
+  flex: 0 0 auto;
+}
+.cc-presets-dd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+.cc-presets-dd-btn:hover {
+  border-color: var(--accent);
+}
+.cc-presets-dot {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.cc-presets-caret {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+/* pre-made colour GRID selector (the save-bar dropdown popover) */
+.cc-presets-grid {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(5, 26px);
+  gap: 7px;
+  padding: 9px;
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 97%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+}
+.cc-presets-cell {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1.5px solid color-mix(in srgb, #000 22%, var(--slot));
+  background: var(--slot);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition: transform 0.1s ease;
+}
+.cc-presets-cell:hover {
+  transform: scale(1.12);
+}
+.cc-presets-cell.is-empty {
+  background: transparent;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--slot) 55%, transparent);
+  box-shadow: none;
+  opacity: 0.62;
+}
+.cc-presets-cell.is-sel {
+  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--slot);
+}
+.cc-presets-cell-check {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+/* compact square icon buttons (save / delete) */
+.cc-presets-iconbtn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
+}
+.cc-presets-save {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.cc-presets-save:hover {
+  filter: brightness(1.08);
+}
+.cc-presets-save.is-ok {
+  background: var(--ok, #16a34a);
+  border-color: var(--ok, #16a34a);
+  color: #fff;
+}
+.cc-presets-ok {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}
+.cc-presets-clearbtn {
+  color: var(--fg-muted);
+}
+.cc-presets-clearbtn:hover {
+  border-color: var(--danger, #e5484d);
+  color: var(--danger, #e5484d);
+}
+
+/* touch / mobile: no hover, so the edit pencils are always visible; bigger taps
+   and a wider left gutter so the always-on pencils don't cover the settings. */
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-scroll {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+  /* compact one-row footer on mobile — keep the rail clear of it */
+  .cc-presets-rail {
+    bottom: 100px;
+    max-height: calc(100% - 112px);
+  }
+  .cc-preset-slot {
+    width: 28px;
+    height: 28px;
+  }
+  /* No hover on touch — tapping a swatch focuses it, and :focus-within reveals
+     the flyout (name + edit) for that one slot. */
+  .cc-preset-edit {
+    width: 28px;
+    height: 28px;
+  }
+  .cc-presets-bar {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px;
+  }
+  .cc-presets-name,
+  .cc-presets-dd-btn {
+    height: 38px;
+  }
+  .cc-presets-iconbtn {
+    width: 38px;
+    height: 38px;
+  }
+  .cc-presets-cell {
+    width: 34px;
+    height: 34px;
+  }
+  .cc-presets-grid {
+    grid-template-columns: repeat(5, 34px);
+  }
+}
 .cc-camstock-apply:hover { filter: brightness(1.06); }
+
+/* ============================================================================
+   Model section: compact upload row + uploaded-files list
+   ============================================================================ */
+.cc-section-body.cc-dragover {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+.cc-uploadrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cc-uploadrow-exts {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: -0.2px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 6px 9px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elev) 50%, transparent);
+}
+.cc-uploadrow-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 32px;
+  border-radius: 7px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.cc-uploadrow-btn:hover { filter: brightness(1.08); }
+.cc-modelfiles {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cc-modelfile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.cc-modelfile.is-sel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+}
+.cc-modelfile-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cc-modelfile-ext {
+  flex: 0 0 auto;
+  min-width: 32px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.cc-modelfile-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-modelfile-x {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin-right: 3px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cc-modelfile-x:hover {
+  color: var(--danger, #e5484d);
+  background: color-mix(in srgb, var(--danger, #e5484d) 12%, transparent);
+}
+
+/* ============================================================================
+   Bit & material — graphical bit widget + material card
+   ============================================================================ */
+.cc-bitmat {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  align-items: stretch;
+}
+/* Side-by-side only when the panel is genuinely wide; otherwise stack so the
+   bit drawing + material card each get full width (legible at narrow docks). */
+@container cadcampanel (min-width: 360px) {
+  .cc-bitmat { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
+}
+/* --- bit widget --- */
+.cc-bit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elev);
+}
+.cc-bit-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+}
+.cc-bit-svg {
+  width: 100%;
+  max-width: 108px;
+  height: auto;
+  overflow: visible;
+}
+/* editable dimension value sitting ON a dimension line (HTML in the SVG) */
+.cc-bit-fo {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cc-bit-fo .cc-dim-input {
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  padding: 0 1px;
+  border-radius: 4px;
+}
+.cc-bit-vdim {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.cc-bit-hdim {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.cc-bit-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.cc-bit-field-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+.cc-bit-arrowsvg {
+  flex: 0 0 auto;
+  display: block;
+  color: var(--fg-muted);
+}
+.cc-bit-dim-u {
+  font-size: 9px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.cc-bit-collar {
+  fill: color-mix(in srgb, var(--fg-muted) 38%, var(--bg));
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.cc-bit-body {
+  fill: color-mix(in srgb, var(--accent) 52%, var(--bg-elev));
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+.cc-bit-flute {
+  stroke: color-mix(in srgb, #000 42%, transparent);
+  stroke-width: 1.1;
+}
+/* the back helix sits behind the front one — drawn fainter for 3D depth */
+.cc-bit-flute-back {
+  opacity: 0.4;
+}
+.cc-bit-dimline {
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+}
+.cc-bit-extline {
+  stroke: var(--fg-muted);
+  stroke-width: 0.7;
+  opacity: 0.55;
+}
+.cc-bit-arrowhead {
+  fill: var(--fg-muted);
+}
+.cc-dim-input {
+  width: 40px;
+  height: 22px;
+  padding: 1px 3px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.cc-dim-input::-webkit-outer-spin-button,
+.cc-dim-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.cc-dim-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.cc-bit-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.cc-bit-tip-lbl {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.cc-bit-tip .cc-prim-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* --- material card --- */
+.cc-matcard-wrap {
+  position: relative;
+  min-height: 96px;
+}
+.cc-matcard {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 96px;
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background-color: var(--bg-elev);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+}
+.cc-matcard:hover {
+  border-color: var(--accent);
+}
+.cc-matcard-emoji {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+}
+.cc-matcard-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 10px 6px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.74), rgba(0, 0, 0, 0));
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.cc-matcard-info {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  color: #fff;
+  cursor: pointer;
+}
+.cc-matcard-info:hover {
+  background: rgba(0, 0, 0, 0.64);
+}
+/* material chooser MODAL — a grid of medium tiles (photo + name + info each) */
+.cc-matmodal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 12px;
+  padding: 2px;
+  width: min(72vw, 640px);
+  max-width: 100%;
+}
+.cc-matmodal-tile {
+  position: relative;
+  height: 112px;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background-color: var(--bg-elev);
+  background-size: cover;
+  background-position: center;
+}
+.cc-matmodal-tile.is-sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.cc-matmodal-pick {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.cc-matmodal-pick .cc-matcard-emoji {
+  font-size: 42px;
+}
+.cc-matmodal-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 9px 10px 7px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0));
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.cc-matmodal-info {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  color: #fff;
+  cursor: pointer;
+}
+.cc-matmodal-info:hover {
+  background: rgba(0, 0, 0, 0.66);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-uploadrow-btn { height: 38px; width: 48px; }
+  .cc-dim-input { height: 30px; width: 52px; font-size: 13px; }
+  .cc-modelfile-x { width: 32px; height: 32px; }
+}

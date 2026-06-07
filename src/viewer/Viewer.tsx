@@ -119,6 +119,13 @@ export interface ViewerProps {
   lasso?: boolean
   /** Called with the KEPT segments after the user confirms a lasso deletion. */
   onLassoDelete?: (kept: Segment[]) => void
+  /** Called to EXIT lasso mode (Cancel button / Escape) without deleting. */
+  onLassoExit?: () => void
+  /**
+   * Show the faint colored per-section selection boxes (the "toolpath cubes"
+   * that double as click-to-select-gizmo hit regions). Default true.
+   */
+  showJobBoxes?: boolean
   /**
    * Show the engineering-style 3D dimension annotations (X/Y/Z extension +
    * dimension lines with arrowheads and the measurement in mm) around the
@@ -161,6 +168,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     onSelectSection,
     lasso = false,
     onLassoDelete,
+    onLassoExit,
+    showJobBoxes = true,
     showDimensions = false,
   },
   ref,
@@ -443,6 +452,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           Gizmo handles render on top with stopPropagation, so they stay grabbable;
           clicking the box (re-selecting the same section) is an idempotent no-op. */}
       {onSelectSection &&
+        showJobBoxes &&
         sectionBoxes?.map((sb) => {
           const isSelected = sb.id === selectedSectionId
           return (
@@ -582,7 +592,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           </button>
           <button
             type="button"
-            onClick={() => setLassoSel(null)}
+            onClick={() => {
+              setLassoSel(null)
+              onLassoExit?.()
+            }}
             style={{
               padding: '5px 12px',
               borderRadius: 6,

@@ -17,16 +17,7 @@ import {
   type JobPlacement,
 } from '../core/transform'
 
-// Distinct per-section toolpath colours, tuned for legibility on each theme's
-// background (brighter on dark, deeper on light). Indexed by section order.
-const SECTION_COLORS_DARK = [
-  '#38bdf8', '#fbbf24', '#a78bfa', '#34d399', '#fb7185',
-  '#22d3ee', '#f472b6', '#a3e635', '#fb923c', '#e879f9',
-]
-const SECTION_COLORS_LIGHT = [
-  '#0284c7', '#b45309', '#6d28d9', '#047857', '#be123c',
-  '#0e7490', '#a21caf', '#4d7c0f', '#c2410c', '#9333ea',
-]
+import { sectionColor } from '../viewer/sectionColors'
 import { useViewportShapes, type ShapeKind } from '../store/viewportShapes'
 
 /**
@@ -95,7 +86,6 @@ export function VisualizerPanel() {
   // theme-aware palette keeps every toolpath legible on dark AND light.
   const theme = useSettings((s) => s.theme)
   const sectionData = useMemo(() => {
-    const palette = theme === 'dark' ? SECTION_COLORS_DARK : SECTION_COLORS_LIGHT
     return sections.map((s, i) => {
       const raw = s.rawLines.join('\n')
       const baked = isIdentityJob(s.placement) ? raw : applyJobPlacement(raw, s.placement)
@@ -104,7 +94,8 @@ export function VisualizerPanel() {
         id: s.id,
         segments: parsed.segments,
         bounds: parsed.bounds,
-        color: palette[i % palette.length],
+        // Explicit per-section colour (set in the Program tab) wins; else auto.
+        color: sectionColor(i, theme === 'dark', s.color),
       }
     })
   }, [sections, theme])
@@ -139,6 +130,27 @@ export function VisualizerPanel() {
     setLassoMode(next)
     if (next) setGizmoOn(false)
   }
+  // ESC always exits lasso mode (previously you were stuck until you deleted
+  // something). Turning the mode off cascades into the Viewer, which clears any
+  // pending selection/polygon.
+  useEffect(() => {
+    if (!lassoMode) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setLassoMode(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [lassoMode])
+
+  // Show/hide the faint colored per-program toolpath "cubes" (the click-to-select
+  // bounding boxes). Persisted so the operator's preference survives reloads.
+  const [showJobBoxes, setShowJobBoxes] = usePersistentState(
+    'karmyogi.viewer.showJobBoxes',
+    true,
+  )
   // Apply a lasso deletion: rebuild a SAFE program from the kept segments and
   // replace the program with it (collapsed into one edited section).
   const onLassoDelete = (kept: Segment[]) => {
@@ -303,6 +315,8 @@ export function VisualizerPanel() {
             setShowActualTool={setShowActualTool}
             showSimTool={showSimTool}
             setShowSimTool={setShowSimTool}
+            showJobBoxes={showJobBoxes}
+            setShowJobBoxes={setShowJobBoxes}
             camOverlay={camOverlay}
             toggleCamOverlay={toggleCamOverlay}
           />
@@ -364,8 +378,10 @@ export function VisualizerPanel() {
           sectionPaths={sectionPaths}
           selectedSectionId={selectedSectionId}
           onSelectSection={selectSection}
+          showJobBoxes={showJobBoxes}
           lasso={lassoMode && hasProgram}
           onLassoDelete={onLassoDelete}
+          onLassoExit={() => setLassoMode(false)}
           showDimensions={showDimensions}
         />
         {gizmoOn && placement && (
@@ -420,6 +436,8 @@ function OverflowMenu({
   setShowActualTool,
   showSimTool,
   setShowSimTool,
+  showJobBoxes,
+  setShowJobBoxes,
   camOverlay,
   toggleCamOverlay,
 }: {
@@ -435,6 +453,8 @@ function OverflowMenu({
   setShowActualTool: Toggle
   showSimTool: boolean
   setShowSimTool: Toggle
+  showJobBoxes: boolean
+  setShowJobBoxes: Toggle
   camOverlay: boolean
   toggleCamOverlay: () => void
 }) {
@@ -561,6 +581,12 @@ function OverflowMenu({
             t('vz.dimensions', 'Show toolpath dimensions (X/Y/Z)'),
             () => setShowDimensions((s) => !s),
             showDimensions,
+          )}
+          {item(
+            '⬚',
+            t('vz.jobBoxes', 'Show toolpath cubes (colored boxes)'),
+            () => setShowJobBoxes((s) => !s),
+            showJobBoxes,
           )}
           {item(
             '📦',

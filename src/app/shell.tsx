@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   DockviewReact,
+  DockviewDefaultTab,
   type DockviewReadyEvent,
   type DockviewApi,
+  type IDockviewPanelHeaderProps,
   type SerializedDockview,
 } from 'dockview'
 import { panelComponents, availablePanels, type PanelSpec } from './panelRegistry'
@@ -43,6 +45,28 @@ const LEFT_TABS = [
   { id: 'welding', title: 'Welding' },
   { id: 'camera', title: 'Camera' },
 ]
+
+// Per-tab hover tooltips shown on the dock TAB name. The 2D/3D Carving tab
+// carries the explainer that used to live as an InfoTip in the panel heading.
+// Tabs without an entry fall back to their plain title.
+const TAB_TOOLTIPS: Record<string, { key: string; en: string }> = {
+  cadcam: {
+    key: 'cc.introMulti',
+    en: 'Import one or more STL models — each becomes a job that auto-nests on the bed and carves in a single combined program. DXF / vector files do 2D engrave · profile · pocket.',
+  },
+}
+
+/** Dock tab = the default dockview tab + a native hover tooltip (per-panel explainer). */
+function DockTab(props: IDockviewPanelHeaderProps) {
+  const t = useT()
+  const spec = TAB_TOOLTIPS[props.api.id]
+  const tip = spec ? t(spec.key, spec.en) : props.api.title ?? ''
+  return (
+    <div className="dv-tab-tip" title={tip}>
+      <DockviewDefaultTab {...props} />
+    </div>
+  )
+}
 
 // Project links (the live app + its source). Used by the top-bar icon buttons
 // and shared as the canonical repo URL.
@@ -281,7 +305,6 @@ export function Shell() {
           />
           <span className="brand-word">karm<span className="accent">yogi</span></span>
         </span>
-        <span className="brand-subtitle">{t('app.subtitle', 'CAD/CAM workbench')}</span>
         <span className="brand-by">
           by <a href="https://hjLabs.in" target="_blank" rel="noopener noreferrer">hjLabs.in</a>
           {' · '}
@@ -363,6 +386,7 @@ export function Shell() {
           <DockviewReact
             className="dockview-theme-karmyogi"
             components={panelComponents}
+            defaultTabComponent={DockTab}
             onReady={onReady}
           />
         </div>
