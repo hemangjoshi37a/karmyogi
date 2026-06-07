@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { AuthMode, ChatMessage, Provider } from '../core/aiGcode'
+import type { AuthMode, ChatMessage, LintWarning, Provider } from '../core/aiGcode'
 
 /**
  * AI G-code generator settings, persisted to localStorage.
@@ -28,8 +28,8 @@ export interface ChatTurn {
   at: number
   /** assistant only: G-code extracted + lint-cleaned from `content`. */
   gcode?: string
-  /** assistant only: lint warning strings, pre-formatted for display. */
-  warnings?: { level: 'error' | 'warn' | 'info'; message: string }[]
+  /** assistant only: lint warnings (with code + params for i18n; message is the fallback). */
+  warnings?: LintWarning[]
 }
 
 const CHAT_MAX = 60

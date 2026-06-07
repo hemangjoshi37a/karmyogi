@@ -87,6 +87,57 @@ export function isStatusReport(line: string): boolean {
   return t.startsWith('<') && t.endsWith('>')
 }
 
+/** The six GRBL work coordinate systems, in `$G` / G-code order. */
+export type WorkCoordSystem = 'G54' | 'G55' | 'G56' | 'G57' | 'G58' | 'G59'
+
+const WCS_CODES: ReadonlySet<string> = new Set([
+  'G54',
+  'G55',
+  'G56',
+  'G57',
+  'G58',
+  'G59',
+])
+
+/**
+ * Parsed GRBL `$G` parser-state report (the `[GC:...]` line). Only the fields the
+ * UI needs today are surfaced; the raw modal-word list is kept for everything
+ * else. Example line:
+ *   [GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]
+ */
+export interface ParserState {
+  /** The active work coordinate system (G54–G59), if present. */
+  wcs?: WorkCoordSystem
+  /** All modal words from the report, e.g. ['G0','G54','G17',…]. */
+  words: string[]
+}
+
+/** True if the line is a GRBL parser-state report (`[GC:...]`). */
+export function isParserStateLine(line: string): boolean {
+  const t = line.trim()
+  return t.startsWith('[GC:') && t.endsWith(']')
+}
+
+/**
+ * Parse a GRBL `$G` parser-state line (`[GC:G0 G54 G17 …]`) into its modal
+ * words and the active work coordinate system. Returns undefined if the line is
+ * not a `[GC:…]` report.
+ */
+export function parseParserState(raw: string): ParserState | undefined {
+  const line = raw.trim()
+  if (!isParserStateLine(line)) return undefined
+  const inner = line.slice(4, -1).trim() // strip "[GC:" and "]"
+  const words = inner.length > 0 ? inner.split(/\s+/) : []
+  let wcs: WorkCoordSystem | undefined
+  for (const w of words) {
+    if (WCS_CODES.has(w)) {
+      wcs = w as WorkCoordSystem
+      break
+    }
+  }
+  return { wcs, words }
+}
+
 /**
  * Parse a single GRBL status report line. Returns undefined if the line is not
  * a `<...>` report. A caller-supplied previous WCO is used to fill the missing

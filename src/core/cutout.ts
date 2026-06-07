@@ -36,8 +36,8 @@
 // toolpath AFTER the relief finishing pass so one program does carve + cut-out.
 
 import { Toolpath } from './toolpath';
-import { Polyline, Point, pointInPolygon } from './geometry';
-import { offsetPolygon, insetRings } from './offset';
+import { Polyline, Point, pointInPolygon, orderLoopsInsideOut } from './geometry';
+import { offsetPolygon } from './offset';
 import type { Heightmap } from './carve3d';
 
 /** Cut SHAPE the operator picks up front. */
@@ -96,6 +96,17 @@ export interface CutoutParams {
   finishAllowanceMm: number;
   /** The tool always rides OUTSIDE the part boundary for a cutout. */
   side: 'outside';
+  /**
+   * Max HELICAL-RAMP angle from horizontal (deg) for descending into each profile
+   * depth level instead of plunging straight down (HARDWARE SAFETY). Optional;
+   * defaults to 3°. Lower = gentler/longer ramp.
+   */
+  rampAngleDeg?: number;
+  /**
+   * Hard cap on a single straight-down vertical plunge (mm) in the cutout pass.
+   * Optional; defaults to 0.5mm.
+   */
+  maxStraightPlungeMm?: number;
 }
 
 export function defaultCutoutParams(overrides: Partial<CutoutParams> = {}): CutoutParams {
@@ -117,6 +128,8 @@ export function defaultCutoutParams(overrides: Partial<CutoutParams> = {}): Cuto
     breakThroughMm: 0.3,
     finishAllowanceMm: 0,
     side: 'outside',
+    rampAngleDeg: 3,
+    maxStraightPlungeMm: 0.5,
     ...overrides,
     // Merge nested objects so a partial override (or an OLDER saved shape missing
     // the new fields) keeps sensible defaults for everything not overridden.
@@ -473,15 +486,27 @@ interface ProfileCtx {
   tabTopZ: number;
   tabsCount: number;
   tabsLengthMm: number;
+  /** Stock top Z (mm) — the ramp into the FIRST level descends from here. */
+  topZ: number;
+  /** Max ramp angle from horizontal (deg) for the helical descent into a level. */
+  rampAngleDeg: number;
+  /** Hard cap on a single straight-down vertical plunge (mm). */
+  maxStraightPlungeMm: number;
 }
 
 /**
  * Emit a tabbed profile of one closed ring across all depth levels into `ctx.tp`.
  * Returns true if any tab ramp was actually applied (a pass dipped below the tab
  * top). Z stays <= 0 and every island lead-in/out happens at safe-Z.
+ *
+ * HARDWARE SAFETY: each level is entered with a HELICAL RAMP along the ring (the
+ * Z descends gradually over the first arc-length of the perimeter, capped at the
+ * configured plunge angle) instead of a straight vertical plunge — avoiding the
+ * tool-breakage / burn risk and the dwell mark a point-plunge leaves. The ramp
+ * doubles as a tangential LEAD-IN (the tool eases onto the cut along the contour).
  */
 function emitProfileRing(ring: Polyline, ctx: ProfileCtx): boolean {
-  const { tp, safeZ, levels, tabTopZ, tabsCount, tabsLengthMm } = ctx;
+  const { tp, safeZ, levels, tabTopZ, tabsCount, tabsLengthMm, topZ } = ctx;
   const rp = paramRing(ring);
   if (rp.total < 1e-6) return false;
   const spans = tabSpans(rp, tabsCount, tabsLengthMm);
@@ -489,37 +514,87 @@ function emitProfileRing(ring: Polyline, ctx: ProfileCtx): boolean {
   const start = pointAt(rp, 0);
   let anyTabs = false;
 
+  const tanRamp = Math.tan((Math.max(1, Math.min(30, ctx.rampAngleDeg)) * Math.PI) / 180);
+  const maxStraight = Math.max(0, ctx.maxStraightPlungeMm);
+
+  // Z the tool is currently at when each level begins: the stock top for the first
+  // level, then the previous level for the rest (we ramp from there to the new one).
+  let prevZ = topZ;
+
+  /** Z honouring the tab bridge at arc-length s for a target `level`. */
+  const tabbedZ = (s: number, level: number, belowTab: boolean): number => {
+    if (belowTab && inTab(s, spans, rp.total)) {
+      anyTabs = true;
+      return Math.max(level, tabTopZ);
+    }
+    return level;
+  };
+
   tp.rapid({ x: start.x, y: start.y, z: safeZ });
   for (const level of levels) {
     const levelBelowTabTop = level < tabTopZ - 1e-6 && spans.length > 0;
-    const startZ = levelBelowTabTop && inTab(0, spans, rp.total) ? Math.max(level, tabTopZ) : level;
-    tp.plunge({ x: start.x, y: start.y, z: startZ });
+    const drop = prevZ - level; // descent for this level (>= 0)
 
+    // Position over the ring start at the previous-level height (a no-cut rapid for
+    // the first level from safe-Z; otherwise we're already on the contour).
+    if (prevZ < safeZ - 1e-6) tp.rapid({ x: start.x, y: start.y, z: prevZ });
+
+    if (drop <= maxStraight + 1e-6 || tanRamp <= 1e-6) {
+      // Tiny descent — a short capped plunge is fine.
+      tp.plunge({ x: start.x, y: start.y, z: tabbedZ(0, level, levelBelowTabTop) });
+    } else {
+      // HELICAL RAMP: descend from prevZ to `level` over the first `rampLen` of the
+      // ring (capped to the perimeter), riding the contour. If the perimeter is too
+      // short to make the angle, we loop the ring as many times as needed.
+      const rampLen = drop / tanRamp;
+      let sDone = 0;
+      let zNow = prevZ;
+      tp.feed({ x: start.x, y: start.y, z: zNow }); // first contact = a controlled cut
+      while (sDone < rampLen - 1e-6 && zNow > level + 1e-6) {
+        sDone += sampleStep;
+        const frac = Math.min(1, sDone / rampLen);
+        zNow = prevZ - drop * frac;
+        const sWrap = sDone % rp.total;
+        const p = pointAt(rp, sWrap);
+        // Never ramp ABOVE the tab bridge height where a tab is required.
+        const z = levelBelowTabTop ? Math.max(zNow, tabbedZ(sWrap, level, true)) : zNow;
+        tp.feed({ x: p.x, y: p.y, z });
+      }
+    }
+
+    // Full pass around the ring at the level (honouring tabs).
     let s = sampleStep;
     const end = rp.total;
     while (s < end - 1e-6) {
       const p = pointAt(rp, s);
-      let zHere = level;
-      if (levelBelowTabTop && inTab(s, spans, rp.total)) {
-        zHere = Math.max(level, tabTopZ);
-        anyTabs = true;
-      }
-      tp.feed({ x: p.x, y: p.y, z: zHere });
+      tp.feed({ x: p.x, y: p.y, z: tabbedZ(s, level, levelBelowTabTop) });
       s += sampleStep;
     }
-    const closeZ = levelBelowTabTop && inTab(0, spans, rp.total) ? Math.max(level, tabTopZ) : level;
-    tp.feed({ x: start.x, y: start.y, z: closeZ });
+    tp.feed({ x: start.x, y: start.y, z: tabbedZ(0, level, levelBelowTabTop) });
+    prevZ = level;
   }
   tp.rapid({ x: start.x, y: start.y, z: safeZ });
   return anyTabs;
 }
 
 /**
- * Emit the AREA-CLEARING (pocket) passes for one level: inset rings from the
- * boundary inward, but skipping any sampled point that falls inside a part
- * keep-out region so the carved part is never cut. The part keep-outs are the
- * traced outlines grown OUTWARD by the tool radius (so the tool edge clears the
- * part). One full-depth `level` is cut for the cleared floor.
+ * Emit the AREA-CLEARING (pocket) passes that FLATTEN the empty rectangular field
+ * around the part, leaving the part standing proud on a cleared floor. The cleared
+ * region is everything inside `boundary` (the rectangle, already inset by the tool
+ * radius so the cut stays inside the perimeter profile) but OUTSIDE any part
+ * keep-out (the part outline grown outward by the tool radius so the tool edge
+ * never touches the part).
+ *
+ * Rather than ring-tracing (which fragments into many short scattered moves and
+ * re-plunges as it crosses the part — the "random moves" we must avoid), this
+ * rasterizes the field into a boustrophedon: scan rows of constant Y across the
+ * rectangle, cut the engaged spans (inside boundary, outside keep-out) left↔right
+ * with the sweep direction alternating each row, and stay DOWN linking spans on
+ * the same row when the gap between them is fully clear. The tool lifts to safe-Z
+ * only when the next engaged span is unreachable on the floor (i.e. the part lies
+ * between) — so plunges land only on real stock-to-remove and travel is minimal.
+ *
+ * One full-depth `level` is cut per call (the caller repeats per depth level).
  */
 function emitClearLevel(
   tp: Toolpath,
@@ -527,41 +602,187 @@ function emitClearLevel(
   keepOuts: Polyline[],
   level: number,
   safeZ: number,
-  toolRadius: number,
+  _toolRadius: number,
   stepover: number,
+  ramp: { startZ: number; tanRamp: number; maxStraightMm: number },
 ): void {
-  const rings = insetRings(boundary, Math.max(stepover, 0.1), Math.max(stepover, 0.1));
-  if (rings.length === 0) return;
-  for (const ring of rings) {
-    const rp = paramRing(ring);
-    if (rp.total < 1e-6) continue;
-    const sampleStep = Math.max(0.5, Math.min(rp.total / 96, toolRadius > 0 ? toolRadius : 2));
-    // Walk the ring; lift to safe-Z over keep-out spans, cut at `level` elsewhere.
-    let s = 0;
-    let penDown = false;
-    let last: Point | null = null;
-    while (s < rp.total + sampleStep) {
-      const p = pointAt(rp, Math.min(s, rp.total));
-      const inPart = keepOuts.some((k) => pointInPolygon(k, p));
-      if (inPart) {
-        if (penDown) {
-          tp.rapid({ x: p.x, y: p.y, z: safeZ });
-          penDown = false;
-        }
-      } else {
-        if (!penDown) {
-          tp.rapid({ x: p.x, y: p.y, z: safeZ });
-          tp.plunge({ x: p.x, y: p.y, z: level });
-          penDown = true;
-        } else {
-          tp.feed({ x: p.x, y: p.y, z: level });
-        }
-        last = p;
-      }
-      s += sampleStep;
+  const step = Math.max(stepover, 0.1);
+  // Ramp a span-entry plunge along the span instead of straight down (safety).
+  // `spanLen` is the available cutting length from the entry toward `dir`; the
+  // ramp zig-zags within it (an even number of legs returns to the entry point at
+  // `level`). When the span is too short to make the angle, it falls back to a
+  // capped stepped plunge so a single straight descent never exceeds the cap.
+  const rampSpanPlunge = (entryX: number, y: number, dir: number, spanLen: number): void => {
+    const drop = ramp.startZ - level;
+    if (ramp.startZ < safeZ - 1e-6) tp.rapid({ x: entryX, y, z: ramp.startZ });
+    if (drop <= ramp.maxStraightMm + 1e-6 || ramp.tanRamp <= 1e-6) {
+      tp.plunge({ x: entryX, y, z: level });
+      return;
     }
-    if (last) tp.rapid({ x: last.x, y: last.y, z: safeZ });
+    const rampLen = drop / ramp.tanRamp;
+    const legLen = Math.min(Math.max(spanLen, 0), Math.max(rampLen / 2, step));
+    if (legLen < step * 0.5) {
+      // Too short to ramp — capped stepped plunge.
+      let zNow = ramp.startZ;
+      const cap = ramp.maxStraightMm > 1e-6 ? ramp.maxStraightMm : drop + 1;
+      while (zNow - level > cap + 1e-6) { zNow -= cap; tp.plunge({ x: entryX, y, z: zNow }); }
+      tp.plunge({ x: entryX, y, z: level });
+      return;
+    }
+    let legs = Math.max(2, Math.ceil(rampLen / legLen));
+    if (legs % 2 === 1) legs += 1;
+    const zPerLeg = drop / legs;
+    const xStepRamp = Math.max(step * 0.5, 0.1);
+    tp.feed({ x: entryX, y, z: ramp.startZ });
+    let zSoFar = ramp.startZ;
+    let atX = entryX;
+    for (let leg = 0; leg < legs; leg++) {
+      const goingOut = leg % 2 === 0;
+      const destX = goingOut ? entryX + dir * legLen : entryX;
+      const zEnd = zSoFar - zPerLeg;
+      const n = Math.max(1, Math.ceil(Math.abs(destX - atX) / xStepRamp));
+      for (let i = 1; i <= n; i++) {
+        const t = i / n;
+        tp.feed({ x: atX + (destX - atX) * t, y, z: zSoFar + (zEnd - zSoFar) * t });
+      }
+      atX = destX;
+      zSoFar = zEnd;
+    }
+    tp.feed({ x: entryX, y, z: level });
+  };
+  // Rectangle (axis-aligned) bounds of the clear boundary.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of boundary.points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
   }
+  if (!(maxX - minX > 1e-6 && maxY - minY > 1e-6)) return;
+
+  // Sample X at half-stepover so the engaged/keep-out test resolves the part
+  // boundary cleanly; rows are spaced a full stepover apart.
+  const xStep = Math.max(step * 0.5, 0.1);
+  const inField = (x: number, y: number): boolean => {
+    if (x < minX || x > maxX || y < minY || y > maxY) return false;
+    if (!pointInPolygon(boundary, { x, y })) return false;
+    for (const k of keepOuts) if (pointInPolygon(k, { x, y })) return false;
+    return true;
+  };
+
+  const rows: number[] = [];
+  for (let y = minY + step * 0.5; y <= maxY - step * 0.5 + 1e-9; y += step) rows.push(y);
+  if (rows.length === 0) rows.push((minY + maxY) / 2);
+
+  let down = false;
+  let leftToRight = true;
+  let lastX = 0, lastY = 0;
+  for (const y of rows) {
+    // Collect engaged X spans on this row.
+    interface Span { x0: number; x1: number; }
+    const spans: Span[] = [];
+    let runStart = NaN;
+    for (let x = minX; x <= maxX + 1e-9; x += xStep) {
+      const on = inField(x, y);
+      if (on && Number.isNaN(runStart)) runStart = x;
+      else if (!on && !Number.isNaN(runStart)) {
+        spans.push({ x0: runStart, x1: x - xStep });
+        runStart = NaN;
+      }
+    }
+    if (!Number.isNaN(runStart)) spans.push({ x0: runStart, x1: maxX });
+    if (spans.length === 0) continue;
+
+    const ordered = leftToRight ? spans : spans.slice().reverse();
+    for (const span of ordered) {
+      const entryX = leftToRight ? span.x0 : span.x1;
+      const exitX = leftToRight ? span.x1 : span.x0;
+      // Can we stay DOWN to reach this span's entry? Try the straight link, then
+      // the boustrophedon L-link (along the previous row to entryX, then up to the
+      // new row) — both must stay entirely in the cleared field (never over the
+      // part). The L-link is what lets adjacent serpentine rows chain without a
+      // safe-Z hop. Otherwise lift, reposition, re-plunge.
+      const way = down ? linkClear(inField, lastX, lastY, entryX, y, xStep, step) : null;
+      if (way) {
+        for (const [lx, ly] of way) tp.feed({ x: lx, y: ly, z: level });
+      } else {
+        if (down) tp.rapid({ x: lastX, y: lastY, z: safeZ });
+        tp.rapid({ x: entryX, y, z: safeZ });
+        // Ramp the descent along this span instead of a straight plunge (safety).
+        const spanLen = Math.abs(exitX - entryX);
+        const dir = exitX >= entryX ? 1 : -1;
+        rampSpanPlunge(entryX, y, dir, spanLen);
+        down = true;
+      }
+      tp.feed({ x: exitX, y, z: level });
+      lastX = exitX;
+      lastY = y;
+    }
+    leftToRight = !leftToRight;
+  }
+  if (down) tp.rapid({ x: lastX, y: lastY, z: safeZ });
+}
+
+/** True when the X gap [a..b] at constant row y stays inside the clear field. */
+function rowClear(
+  inField: (x: number, y: number) => boolean,
+  a: number,
+  b: number,
+  y: number,
+  xStep: number,
+): boolean {
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  for (let x = lo; x <= hi + 1e-9; x += xStep) {
+    if (!inField(x, y)) return false;
+  }
+  return true;
+}
+
+/** True when the Y gap [a..b] at constant column x stays inside the clear field. */
+function colClear(
+  inField: (x: number, y: number) => boolean,
+  x: number,
+  a: number,
+  b: number,
+  yStep: number,
+): boolean {
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  for (let y = lo; y <= hi + 1e-9; y += yStep) {
+    if (!inField(x, y)) return false;
+  }
+  return true;
+}
+
+/**
+ * Can the tool stay DOWN on the cleared floor moving from (ax,ay) to (bx,by)?
+ * Tries the straight same-row link first, then the boustrophedon L-link (along the
+ * source row to bx, then up the column to by) — the route adjacent serpentine rows
+ * use. Returns the axis-aligned waypoints (excluding start, including end) when a
+ * fully-in-field route exists, else null (caller must lift to safe-Z and re-plunge).
+ */
+function linkClear(
+  inField: (x: number, y: number) => boolean,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  xStep: number,
+  yStep: number,
+): [number, number][] | null {
+  if (Math.abs(ay - by) < 1e-9) {
+    return rowClear(inField, ax, bx, ay, xStep) ? [[bx, by]] : null;
+  }
+  // L-link: along the source row to bx, then up the column to by.
+  if (rowClear(inField, ax, bx, ay, xStep) && colClear(inField, bx, ay, by, yStep)) {
+    return [[bx, ay], [bx, by]];
+  }
+  // L-link the other way: up the source column to by, then along to bx.
+  if (colClear(inField, ax, ay, by, yStep) && rowClear(inField, ax, bx, by, xStep)) {
+    return [[ax, by], [bx, by]];
+  }
+  return null;
 }
 
 /**
@@ -645,6 +866,23 @@ export function buildCutout(hm: Heightmap, params: CutoutParams, toolRadius: num
   }
   if (cutRings.length === 0) return result;
 
+  // CUT-ORDER SAFETY: when one cut ring is fully nested inside another (e.g. an
+  // inner island's outline sitting inside a surrounding part's outline, or a
+  // smaller rectangle inside a larger one), the INNER ring must be profiled free
+  // BEFORE the outer one — otherwise cutting the outer ring first frees the
+  // surrounding stock and the still-attached inner piece can wander while its own
+  // perimeter is being cut. Reorder the rings inside-out (children before parents)
+  // via the shared containment-tree ordering; siblings stay nearest-neighbour so
+  // travel is unchanged where there is no nesting. Both the optional area-clear
+  // (3a) and the perimeter profile (3b) iterate this same reordered array, so the
+  // clearing and the freeing cuts agree on the inside-out sequence.
+  if (cutRings.length > 1) {
+    const order = orderLoopsInsideOut(cutRings);
+    const reordered = order.map((i) => cutRings[i]);
+    cutRings.length = 0;
+    cutRings.push(...reordered);
+  }
+
   // 3. Depth levels + tabs.
   const tp = new Toolpath();
   tp.name = params.shape === 'rect' ? 'Cutout (rectangle)' : 'Cutout (part outline)';
@@ -666,18 +904,35 @@ export function buildCutout(hm: Heightmap, params: CutoutParams, toolRadius: num
   // 3a. Optional area-clear (pocket) BEFORE the perimeter, so the freed part is
   //     left standing on a cleared floor. Keep-out = the part outline grown
   //     outward by the tool radius (tool edge must clear the part).
-  if (params.clearAround) {
+  //
+  //     Field-clearing only makes sense for the RECTANGLE shape, where there is a
+  //     well-defined empty rectangular field around the part to flatten. For the
+  //     'outline' shape the cut already hugs the part perimeter (there is no field
+  //     between the boundary and the part), so clearing is a no-op by design — the
+  //     panel keeps clearAround off there; we additionally guard it here so an old
+  //     saved 'outline' job with clearAround set can't error or emit stray moves.
+  if (params.clearAround && params.shape === 'rect') {
     const keepOuts = outlines
       .map((o) => (radius > 1e-6 ? offsetPolygon(o, radius) : o.clone()))
       .filter((k) => k.points.length >= 3);
     const stepover = Math.max(radius, 0.5); // ~ tool diameter would be 2*radius; half-overlap
+    const tanRamp = Math.tan((Math.max(1, Math.min(30, params.rampAngleDeg ?? 3)) * Math.PI) / 180);
+    const maxStraightMm = Math.max(0, params.maxStraightPlungeMm ?? 0.5);
     // The clear boundary is the cut ring inset by the tool radius so the cleared
     // region stays inside the profile cut (the perimeter takes the outer edge).
     for (const ring of cutRings) {
       const clearBoundary = radius > 1e-6 ? offsetPolygon(ring, -radius) : ring.clone();
       if (clearBoundary.points.length < 3) continue;
       for (const level of levels) {
-        emitClearLevel(tp, clearBoundary, keepOuts, level, safeZ, radius, stepover);
+        // Each level's field was cleared one stepdown above (or the stock top for
+        // the first level), so the span-entry ramp descends from there — never a
+        // deep straight plunge.
+        const startZ = Math.min(0, level + stepdown);
+        emitClearLevel(tp, clearBoundary, keepOuts, level, safeZ, radius, stepover, {
+          startZ,
+          tanRamp,
+          maxStraightMm,
+        });
       }
     }
   }
@@ -690,6 +945,9 @@ export function buildCutout(hm: Heightmap, params: CutoutParams, toolRadius: num
     tabTopZ,
     tabsCount: params.tabs.count,
     tabsLengthMm: params.tabs.lengthMm,
+    topZ: 0, // stock top = work Z 0 (relief convention); ramps descend from here
+    rampAngleDeg: params.rampAngleDeg ?? 3,
+    maxStraightPlungeMm: params.maxStraightPlungeMm ?? 0.5,
   };
   let anyTabs = false;
   for (const ring of cutRings) {

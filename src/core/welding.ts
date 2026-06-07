@@ -402,12 +402,24 @@ export function isDegenerate(obj: WeldObject): boolean {
 
 // ─────────────────────────── G-code ───────────────────────────
 
+/**
+ * Clamp a decimals value into the range `toFixed()` accepts (0..6 here, well
+ * within the spec's 0..100). An out-of-range value reaching `toFixed()` throws
+ * a RangeError; when that happens inside a render-phase useMemo it white-screens
+ * the panel. Clamping here is defence-in-depth alongside the UI input/load guards.
+ */
+function clampDecimals(decimals: number): number {
+  if (!Number.isFinite(decimals)) return 3;
+  return Math.min(6, Math.max(0, Math.floor(decimals)));
+}
+
 /** Formatted number, never "-0.000" — mirrors the emitter's fmt(). */
 function fmt(value: number, decimals: number): string {
-  const snap = 0.5 * Math.pow(10, -decimals);
+  const d = clampDecimals(decimals);
+  const snap = 0.5 * Math.pow(10, -d);
   if (Math.abs(value) < snap) value = 0;
   if (value === 0) value = 0; // collapse a residual signed zero
-  return value.toFixed(decimals);
+  return value.toFixed(d);
 }
 
 /**
@@ -515,4 +527,48 @@ export function countLines(objects: WeldObject[]): number {
   let n = 0;
   for (const obj of objects) if (obj.kind === 'line') n += 1;
   return n;
+}
+
+/**
+ * Total welded arc-length (mm) of the SAMPLED woven path across all objects —
+ * i.e. the real distance the torch travels (longer than the centreline when a
+ * weave is applied). Skips degenerate objects.
+ */
+export function totalWovenLength(objects: WeldObject[], params: Partial<WeldingParams> = {}): number {
+  const p = defaultWeldingParams(params);
+  let total = 0;
+  for (const obj of objects) {
+    if (isDegenerate(obj)) continue;
+    const path = sampleObjectPath(obj, p);
+    for (let i = 1; i < path.length; i++) total += len3(sub(path[i], path[i - 1]));
+  }
+  return total;
+}
+
+/**
+ * Rough cycle-time estimate (seconds) for a welding run. Sums, per non-degenerate
+ * object: the woven-path travel time (sampled arc-length ÷ travel/peripheral
+ * feed) plus the gas pre/post-flow dwells (when the arc is enabled). Rapids and
+ * the plunge are ignored (small vs the weave travel); the result is a
+ * conservative estimate the operator can use to gauge run length.
+ */
+export function estimateWeldingSeconds(
+  objects: WeldObject[],
+  params: Partial<WeldingParams> = {},
+): number {
+  const p = defaultWeldingParams(params);
+  let seconds = 0;
+  for (const obj of objects) {
+    if (isDegenerate(obj)) continue;
+    const path = sampleObjectPath(obj, p);
+    let len = 0;
+    for (let i = 1; i < path.length; i++) len += len3(sub(path[i], path[i - 1]));
+    const feed = Math.max(0, objectFeed(obj)); // mm/min
+    if (feed > 1e-9) seconds += (len / feed) * 60;
+    if (p.useArc) {
+      seconds += Math.max(0, p.preFlowSeconds);
+      seconds += Math.max(0, p.postFlowSeconds);
+    }
+  }
+  return seconds;
 }

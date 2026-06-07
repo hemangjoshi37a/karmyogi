@@ -26,19 +26,28 @@ export type LayerRole =
   | 'Ignore'
   | 'Unknown';
 
-/** All roles the UI offers in its dropdown, with human labels. */
-export const LAYER_ROLES: { role: LayerRole; label: string }[] = [
-  { role: 'CopperTop', label: 'Copper Top' },
-  { role: 'CopperBottom', label: 'Copper Bottom' },
-  { role: 'Drill', label: 'Drill' },
-  { role: 'BoardOutline', label: 'Board Outline' },
-  { role: 'Ignore', label: 'Ignore' },
-  { role: 'Unknown', label: 'Unknown' },
+/**
+ * All roles the UI offers in its dropdown. `label` is the English fallback;
+ * `labelKey` is the stable i18n key. This module stays UI-independent (no React
+ * imports), so callers localise with `t(role.labelKey, role.label)`.
+ */
+export const LAYER_ROLES: { role: LayerRole; label: string; labelKey: string }[] = [
+  { role: 'CopperTop', label: 'Copper Top', labelKey: 'pcb.role.copperTop' },
+  { role: 'CopperBottom', label: 'Copper Bottom', labelKey: 'pcb.role.copperBottom' },
+  { role: 'Drill', label: 'Drill', labelKey: 'pcb.role.drill' },
+  { role: 'BoardOutline', label: 'Board Outline', labelKey: 'pcb.role.boardOutline' },
+  { role: 'Ignore', label: 'Ignore', labelKey: 'pcb.role.ignore' },
+  { role: 'Unknown', label: 'Unknown', labelKey: 'pcb.role.unknown' },
 ];
 
-/** Human-readable label for a role. */
+/** English-fallback label for a role (callers localise via the labelKey). */
 export function layerRoleLabel(role: LayerRole): string {
   return LAYER_ROLES.find((r) => r.role === role)?.label ?? role;
+}
+
+/** i18n key for a role's label (pair with {@link layerRoleLabel} as fallback). */
+export function layerRoleLabelKey(role: LayerRole): string {
+  return LAYER_ROLES.find((r) => r.role === role)?.labelKey ?? `pcb.role.${role}`;
 }
 
 /** One file extracted from the package. */
@@ -55,7 +64,9 @@ export interface PackageEntry {
 
 // File extensions / name fragments that mark a non-CAM ancillary layer. These
 // are recognised so they can be listed and skipped rather than left Unknown.
-const MASK_EXT = /\.(gts|gbs|sts|ssb|smt|smb)$/i;
+// Solder-mask layers (top/bottom). `.smt`/`.smb` = Protel solder-mask top/bottom.
+const MASK_EXT = /\.(gts|gbs|sts|smt|smb)$/i;
+// Silkscreen / overlay layers. `.sst`/`.ssb` = silkscreen top/bottom (EAGLE/Protel).
 const SILK_EXT = /\.(gto|gbo|plc|pls|sst|ssb)$/i;
 const PASTE_EXT = /\.(gtp|gbp|crc|crs|spt|spb)$/i;
 

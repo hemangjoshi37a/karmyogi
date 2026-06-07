@@ -21,13 +21,67 @@ import { useProgram, usePersistentState } from '../store'
 import { useT } from '../i18n'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { IconButton } from '../components/IconButton'
+import { Icon } from '../components/Icons'
+import type { StatusNote } from '../core/fontLibrary'
 import '../styles/writing.css'
 
-const ALIGN_OPTIONS: { value: TextAlign; key: string; label: string; glyph: string }[] = [
-  { value: TextAlign.Left, key: 'writing.align.left', label: 'Left', glyph: '⬅' },
-  { value: TextAlign.Center, key: 'writing.align.center', label: 'Center', glyph: '⬛' },
-  { value: TextAlign.Right, key: 'writing.align.right', label: 'Right', glyph: '➡' },
+const ALIGN_OPTIONS: { value: TextAlign; key: string; label: string; align: 'left' | 'center' | 'right' }[] = [
+  { value: TextAlign.Left, key: 'writing.align.left', label: 'Left', align: 'left' },
+  { value: TextAlign.Center, key: 'writing.align.center', label: 'Center', align: 'center' },
+  { value: TextAlign.Right, key: 'writing.align.right', label: 'Right', align: 'right' },
 ]
+
+/**
+ * Parse a numeric input value, clamping to [min,max] and falling back to
+ * `fallback` for any non-finite result (empty field, '-', 'e', etc.). This is
+ * the P0 SAFETY guard: a NaN must never reach the emitter (it would print
+ * literal 'F NaN' / 'Z NaN' into the streamed G-code).
+ */
+function clampNum(v: string, fallback: number, min: number, max: number): number {
+  const n = parseFloat(v)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(Math.max(n, min), max)
+}
+
+/** The i18n translate function shape (key, English fallback, optional vars). */
+type TFunc = (key: string, english: string, vars?: Record<string, string | number>) => string
+
+/**
+ * Tiny inline "text alignment" glyph (three lines, the middle offset per side).
+ * Local to this panel because the shared Icon set has no alignment glyphs — and
+ * unlike the old ⬅ ⬛ ➡ emoji these render identically across platforms and
+ * recolor with the theme (currentColor).
+ */
+function AlignGlyph({ align }: { align: 'left' | 'center' | 'right' }) {
+  // y2 line is short and anchored per the alignment; the rest span full width.
+  const short =
+    align === 'left' ? { x1: 3, x2: 14 } : align === 'right' ? { x1: 10, x2: 21 } : { x1: 6, x2: 18 }
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={2} strokeLinecap="round" aria-hidden="true" focusable="false">
+      <path d="M3 6h18" />
+      <path d={`M${short.x1} 12h${short.x2 - short.x1}`} />
+      <path d="M3 18h18" />
+    </svg>
+  )
+}
+
+/** Translate a font-library status note (stable code + params) for display. */
+function noteText(t: TFunc, note: StatusNote): string {
+  const p = note.params
+  switch (note.code) {
+    case 'httpError':
+      return t('writing.fontNote.httpError', 'Font manifest unavailable (HTTP {status}).', { status: p?.status ?? '?' })
+    case 'noList':
+      return t('writing.fontNote.noList', 'Font manifest has no font list.')
+    case 'skipped':
+      return t('writing.fontNote.skipped', '{count} font(s) skipped (no file).', { count: p?.count ?? 0 })
+    case 'unavailable':
+      return t('writing.fontNote.unavailable', 'Font library unavailable (offline).')
+    default:
+      return ''
+  }
+}
 
 /** G-code generation mode. Stroke = centerlines; Outline = glyph contours. */
 type GenMode = 'stroke' | 'outline'
@@ -169,7 +223,9 @@ export function WritingPanel() {
       setCatalog(entries)
       if (note) {
         setInfo(
-          t('writing.info.libraryNote', 'Font library: {note}. Built-in font available.', { note }),
+          t('writing.info.libraryNote', 'Font library: {note}. Built-in font available.', {
+            note: noteText(t, note),
+          }),
         )
       }
     })()
@@ -242,6 +298,10 @@ export function WritingPanel() {
 
   const generate = useCallback((): string => {
     if (text.trim().length === 0) {
+      // Nothing to draw — REMOVE the stale 'text — pen' section (pushing '' to a
+      // name removes it) so the Program tab / Visualizer don't keep showing the
+      // last text after the field is cleared.
+      setProgram('text — pen', '')
       setInfo(t('writing.info.enterText', 'Enter some text first.'))
       return ''
     }
@@ -301,7 +361,11 @@ export function WritingPanel() {
     )
     if (effectiveMode !== genMode)
       msg += ' ' + t('writing.info.modeFallback', '(font has no {wanted} data — fell back)', {
-        wanted: genMode === 'outline' ? 'outline' : 'stroke',
+        // Localize the inserted token too (it previously leaked English).
+        wanted:
+          genMode === 'outline'
+            ? t('writing.mode.outline', 'Outline')
+            : t('writing.mode.stroke', 'Stroke'),
       })
     if (missing.length > 0)
       msg +=
@@ -319,15 +383,24 @@ export function WritingPanel() {
   ])
 
   // Live G-code: always regenerate ~300ms after the last change and push to the
-  // program store so the Visualizer updates without a manual Generate step.
+  // program store so the Visualizer updates without a manual Generate step. When
+  // the text is empty, clear the section right away (no debounce) so stale
+  // output doesn't linger — but never reset an active stream.
   useEffect(() => {
-    if (text.trim().length === 0) return
+    if (text.trim().length === 0) {
+      if (liveTimer.current) clearTimeout(liveTimer.current)
+      if (!useProgram.getState().streaming) {
+        setProgram('text — pen', '')
+        setInfo(t('writing.info.enterText', 'Enter some text first.'))
+      }
+      return
+    }
     if (liveTimer.current) clearTimeout(liveTimer.current)
     liveTimer.current = setTimeout(() => generate(), 300)
     return () => {
       if (liveTimer.current) clearTimeout(liveTimer.current)
     }
-  }, [generate, text])
+  }, [generate, text, setProgram, t])
 
   // Upload a custom font file: JSON single-stroke, or TTF/OTF outline.
   const loadUpload = useCallback(
@@ -374,6 +447,28 @@ export function WritingPanel() {
     [t, setFontId, setGenMode],
   )
 
+  // Translate a system-fonts status note (stable code + params) for display.
+  const systemNoteText = useCallback(
+    (note: StatusNote): string => {
+      const p = note.params
+      switch (note.code) {
+        case 'unsupported':
+          return t('writing.sysNote.unsupported', 'System fonts need a Chromium browser (Chrome/Edge) over HTTPS or localhost.')
+        case 'denied':
+          return t('writing.sysNote.denied', 'System-font access was denied. Allow the "Fonts" permission and try again.')
+        case 'error':
+          return t('writing.sysNote.error', 'Could not read system fonts: {message}.', { message: p?.message ?? '' })
+        case 'loaded':
+          return t('writing.sysNote.loaded', 'Loaded {count} system font(s).', { count: p?.count ?? 0 })
+        case 'empty':
+          return t('writing.sysNote.empty', 'No system fonts were returned.')
+        default:
+          return ''
+      }
+    },
+    [t],
+  )
+
   // Enumerate the user's local (client) system fonts via the Local Font Access
   // API. Must run from a user gesture (the button click). Degrades gracefully:
   // on an unsupported browser or denied permission it shows a friendly note and
@@ -387,11 +482,11 @@ export function WritingPanel() {
     try {
       const { entries, ok, note } = await loadSystemFonts()
       if (ok && entries.length > 0) setLocalFonts(entries)
-      setInfo(note)
+      setInfo(systemNoteText(note))
     } finally {
       setLoadingSystem(false)
     }
-  }, [loadingSystem, t])
+  }, [loadingSystem, t, systemNoteText])
 
   // Whether the active font supports each mode (for disabling/coloring toggles).
   const canOutline = fontKind === 'outline'
@@ -467,6 +562,9 @@ export function WritingPanel() {
               saveTitle={t('writing.save', 'Save writing document')}
               loadTitle={t('writing.load', 'Load writing document')}
               onError={setInfo}
+              parseErrorMessage={(name) =>
+                t('writing.info.parseError', 'Could not read {name} — expected a .kwrite (JSON) writing document.', { name })
+              }
             />
           </h3>
           <div className="wr-card-body">
@@ -515,19 +613,22 @@ export function WritingPanel() {
               <div className="wr-font-tools" role="toolbar" aria-label={t('writing.font.tools', 'Font sources')}>
                 <IconButton
                   className="wr-icon"
-                  icon="⤒"
+                  iconName="upload"
+                  iconSize={15}
                   label={t('writing.font.uploadTip', 'Upload a custom font: single-stroke JSON, or a TrueType/OpenType .ttf/.otf for outline mode.')}
                   onClick={() => fileRef.current?.click()}
                 />
                 <IconButton
                   className="wr-icon"
-                  icon="⌂"
+                  iconName="home"
+                  iconSize={15}
                   label={t('writing.font.builtinTip', 'Use the built-in Hershey single-stroke font (always available, works offline).')}
                   onClick={() => setFontId(BUILTIN_ENTRY.id)}
                 />
                 <IconButton
                   className={'wr-icon' + (loadingSystem ? ' is-busy' : '')}
-                  icon="🖥"
+                  iconName="download"
+                  iconSize={15}
                   label={
                     systemFontsSupported()
                       ? t('writing.font.systemTip', 'Load all fonts installed on this computer (asks for the browser "Fonts" permission).')
@@ -607,7 +708,7 @@ export function WritingPanel() {
                 <span>{t('writing.size', 'Size')}</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" min={0.5} step={0.5} value={charHeight}
-                    onChange={(e) => setCharHeight(Number(e.target.value))} />
+                    onChange={(e) => setCharHeight(clampNum(e.target.value, charHeight, 0.5, 1000))} />
                   <em>mm</em>
                 </span>
               </label>
@@ -627,9 +728,9 @@ export function WritingPanel() {
         <section className="wr-card">
           <h3>{t('writing.penLayout.title', 'Pen & Layout')}</h3>
           <div className="wr-card-body">
-            {/* Alignment as icon toggle buttons (⬅ ⬛ ➡). */}
+            {/* Alignment as icon toggle buttons (left / center / right). */}
             <div className="wr-field" title={t('writing.alignment.tip', 'Horizontal alignment of each line of text.')}>
-              <span className="wr-ic-label" aria-hidden="true">⬌</span>
+              <span className="wr-ic-label" aria-hidden="true"><AlignGlyph align="center" /></span>
               <div className="wr-align" role="group" aria-label={t('writing.alignment', 'Alignment')}>
                 {ALIGN_OPTIONS.map((o) => (
                   <button
@@ -640,40 +741,53 @@ export function WritingPanel() {
                     onClick={() => setAlign(o.value)}
                     title={t(o.key, o.label)}
                     aria-label={t(o.key, o.label)}
-                  >{o.glyph}</button>
+                  ><AlignGlyph align={o.align} /></button>
                 ))}
               </div>
             </div>
 
             <div className="wr-grid">
               <label className="wr-field wr-ic" title={t('writing.penUpZ.tip', 'Pen-up Z — height the pen lifts to for travel moves (safe-Z), in mm.')}>
-                <span className="wr-ic-label" aria-hidden="true">⤒ Z</span>
+                <span className="wr-ic-label" aria-hidden="true"><Icon name="upload" size={13} /> Z</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penUpZ}
-                    onChange={(e) => setPenUpZ(Number(e.target.value))}
+                    onChange={(e) => setPenUpZ(clampNum(e.target.value, penUpZ, -1000, 1000))}
                     aria-label={t('writing.penUpZ', 'Pen up Z')} />
                   <em>mm</em>
                 </span>
               </label>
               <label className="wr-field wr-ic" title={t('writing.penDownZ.tip', 'Pen-down Z — height the pen drops to while drawing, in mm.')}>
-                <span className="wr-ic-label" aria-hidden="true">⤓ Z</span>
+                <span className="wr-ic-label" aria-hidden="true"><Icon name="download" size={13} /> Z</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penDownZ}
-                    onChange={(e) => setPenDownZ(Number(e.target.value))}
+                    onChange={(e) => setPenDownZ(clampNum(e.target.value, penDownZ, -1000, 1000))}
                     aria-label={t('writing.penDownZ', 'Pen down Z')} />
                   <em>mm</em>
                 </span>
               </label>
               <label className="wr-field wr-ic" title={t('writing.feed.tip', 'Feed — drawing (pen-down) feed rate, in mm per minute.')}>
-                <span className="wr-ic-label" aria-hidden="true">⏱</span>
+                <span className="wr-ic-label" aria-hidden="true">{t('writing.feed.glyph', 'F')}</span>
                 <span className="wr-input">
                   <input type="number" inputMode="decimal" min={1} step={50} value={feed}
-                    onChange={(e) => setFeed(Number(e.target.value))}
+                    onChange={(e) => setFeed(clampNum(e.target.value, feed, 1, 100000))}
                     aria-label={t('writing.feed', 'Feed')} />
                   <em>mm/min</em>
                 </span>
               </label>
             </div>
+
+            {/* SAFETY: pen-down must sit BELOW pen-up (which is the safe-Z). If it
+                doesn't, the pen never lifts for travel and drags across the work. */}
+            {penDownZ >= penUpZ && (
+              <p className="wr-warn" role="alert">
+                <Icon name="warning" size={13} />{' '}
+                {t(
+                  'writing.warn.penZ',
+                  'Pen-down Z ({down}) is not below pen-up Z ({up}) — the pen will not lift for travel.',
+                  { down: penDownZ, up: penUpZ },
+                )}
+              </p>
+            )}
           </div>
         </section>
 
@@ -686,7 +800,9 @@ export function WritingPanel() {
               onClick={() => setShowAdvanced(!showAdvanced)}
               aria-expanded={showAdvanced}
             >
-              <span className="wr-caret">{showAdvanced ? '▾' : '▸'}</span>
+              <span className="wr-caret">
+                <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={12} />
+              </span>
               {t('writing.advanced', 'Advanced')}
               <span className="wr-toggle-note">{t('writing.advanced.note', 'spacing & origin')}</span>
             </button>
@@ -698,7 +814,7 @@ export function WritingPanel() {
                   <span>{t('writing.lineSpacing', 'Line spacing')}</span>
                   <span className="wr-input">
                     <input type="number" inputMode="decimal" min={0.5} step={0.1} value={lineSpacing}
-                      onChange={(e) => setLineSpacing(Number(e.target.value))} />
+                      onChange={(e) => setLineSpacing(clampNum(e.target.value, lineSpacing, 0.1, 100))} />
                     <em>×</em>
                   </span>
                 </label>
@@ -706,7 +822,7 @@ export function WritingPanel() {
                   <span>{t('writing.letterSpacing', 'Letter spacing')}</span>
                   <span className="wr-input">
                     <input type="number" inputMode="decimal" min={0} step={0.5} value={letterSpacing}
-                      onChange={(e) => setLetterSpacing(Number(e.target.value))} />
+                      onChange={(e) => setLetterSpacing(clampNum(e.target.value, letterSpacing, 0, 1000))} />
                     <em>mm</em>
                   </span>
                 </label>
@@ -714,7 +830,7 @@ export function WritingPanel() {
                   <span>{t('writing.originX', 'Origin X')}</span>
                   <span className="wr-input">
                     <input type="number" inputMode="decimal" step={1} value={originX}
-                      onChange={(e) => setOriginX(Number(e.target.value))} />
+                      onChange={(e) => setOriginX(clampNum(e.target.value, originX, -100000, 100000))} />
                     <em>mm</em>
                   </span>
                 </label>
@@ -722,7 +838,7 @@ export function WritingPanel() {
                   <span>{t('writing.originY', 'Origin Y')}</span>
                   <span className="wr-input">
                     <input type="number" inputMode="decimal" step={1} value={originY}
-                      onChange={(e) => setOriginY(Number(e.target.value))} />
+                      onChange={(e) => setOriginY(clampNum(e.target.value, originY, -100000, 100000))} />
                     <em>mm</em>
                   </span>
                 </label>

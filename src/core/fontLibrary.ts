@@ -75,31 +75,60 @@ export const BUILTIN_ENTRY: FontCatalogEntry = {
   builtin: true,
 };
 
-const MANIFEST_URL = 'fonts/index.json';
+// ABSOLUTE so it always resolves against the site root, never the current
+// route/origin. A relative 'fonts/index.json' resolved against e.g.
+// localhost:5185/<route> and 404-spammed the dev server.
+const MANIFEST_URL = '/fonts/index.json';
 
 /** A loaded font ready for layout — exactly one of the two is set. */
 export type LoadedFont = { kind: 'stroke'; font: StrokeFont } | { kind: 'outline'; font: OutlineFont };
 
 /**
+ * Stable, language-neutral status codes returned alongside results so the UI
+ * can translate them (the core stays English-free / UI-independent). Each code
+ * maps 1:1 to an i18n key + optional interpolation params in `noteParams`.
+ */
+export type FontCatalogCode =
+  | 'httpError' // manifest fetch returned non-2xx (params: { status })
+  | 'noList' // manifest body had no font array
+  | 'skipped' // some manifest entries dropped (params: { count })
+  | 'unavailable'; // network/parse failure (offline)
+
+export type SystemFontsCode =
+  | 'unsupported' // Local Font Access API not available
+  | 'denied' // permission denied / dismissed
+  | 'error' // other failure reading fonts (params: { message })
+  | 'loaded' // success (params: { count })
+  | 'empty'; // API returned an empty list
+
+/** A translatable status: a stable `code` plus optional interpolation params. */
+export interface StatusNote {
+  code: FontCatalogCode | SystemFontsCode;
+  /** Interpolation params for the matching i18n message (status, count, …). */
+  params?: Record<string, string | number>;
+}
+
+/**
  * Fetch the bundled font manifest and return the catalog the picker shows. The
  * built-in is always first; manifest entries follow. Network/parse failures are
  * swallowed (returns just the built-in) so the panel never breaks offline — the
- * caller can surface a note. Malformed entries are skipped, not fatal.
+ * caller can surface a translatable `note` (stable code + params). Malformed
+ * entries are skipped, not fatal.
  */
 export async function loadFontCatalog(
   signal?: AbortSignal,
-): Promise<{ entries: FontCatalogEntry[]; note?: string }> {
+): Promise<{ entries: FontCatalogEntry[]; note?: StatusNote }> {
   const entries: FontCatalogEntry[] = [BUILTIN_ENTRY];
   try {
     const res = await fetch(MANIFEST_URL, { signal, cache: 'no-cache' });
-    if (!res.ok) return { entries, note: `manifest HTTP ${res.status}` };
+    if (!res.ok) return { entries, note: { code: 'httpError', params: { status: res.status } } };
     const raw: unknown = await res.json();
     const list: unknown = Array.isArray(raw)
       ? raw
       : raw && typeof raw === 'object' && Array.isArray((raw as { fonts?: unknown }).fonts)
         ? (raw as { fonts: unknown[] }).fonts
         : [];
-    if (!Array.isArray(list)) return { entries, note: 'manifest has no font list' };
+    if (!Array.isArray(list)) return { entries, note: { code: 'noList' } };
 
     let skipped = 0;
     list.forEach((item, i) => {
@@ -116,16 +145,19 @@ export async function loadFontCatalog(
         id,
         name,
         kind,
-        // Resolve relative to the fonts dir (manifest lives there).
-        file: file.includes('/') ? file : `fonts/${file}`,
+        // Resolve a bare filename against the absolute fonts dir (the manifest
+        // lives at /fonts/index.json), so the URL never depends on the route.
+        file: file.includes('/') ? file : `/fonts/${file}`,
       });
     });
-    const note = skipped > 0 ? `${skipped} manifest entr(y/ies) skipped (no file)` : undefined;
+    const note: StatusNote | undefined =
+      skipped > 0 ? { code: 'skipped', params: { count: skipped } } : undefined;
     return { entries, note };
   } catch (e) {
     // AbortError is expected on unmount — not worth surfacing.
-    const msg = (e as Error)?.name === 'AbortError' ? undefined : `manifest unavailable`;
-    return { entries, note: msg };
+    const note: StatusNote | undefined =
+      (e as Error)?.name === 'AbortError' ? undefined : { code: 'unavailable' };
+    return { entries, note };
   }
 }
 
@@ -163,8 +195,8 @@ export function detectKindByName(filename: string): FontKind {
 export interface SystemFontsResult {
   /** Catalog entries for every enumerated local font (id 'local:...', kind 'outline'). */
   entries: FontCatalogEntry[];
-  /** Human note describing what happened (unsupported / denied / count). */
-  note: string;
+  /** Stable, translatable status (unsupported / denied / loaded count / …). */
+  note: StatusNote;
   /** True only when the browser actually returned a (possibly empty) font list. */
   ok: boolean;
 }
@@ -189,11 +221,7 @@ export function systemFontsSupported(): boolean {
  */
 export async function loadSystemFonts(): Promise<SystemFontsResult> {
   if (!systemFontsSupported()) {
-    return {
-      entries: [],
-      ok: false,
-      note: 'Loading system fonts needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.',
-    };
+    return { entries: [], ok: false, note: { code: 'unsupported' } };
   }
   let fonts: LocalFontData[];
   try {
@@ -206,8 +234,8 @@ export async function loadSystemFonts(): Promise<SystemFontsResult> {
       entries: [],
       ok: false,
       note: denied
-        ? 'System-font access was denied. Allow the "Fonts" permission and try again.'
-        : `Could not read system fonts: ${err?.message || 'unknown error'}.`,
+        ? { code: 'denied' }
+        : { code: 'error', params: { message: err?.message || 'unknown error' } },
     };
   }
 
@@ -233,8 +261,8 @@ export async function loadSystemFonts(): Promise<SystemFontsResult> {
     entries,
     ok: true,
     note: entries.length
-      ? `Loaded ${entries.length} system font(s).`
-      : 'No system fonts were returned.',
+      ? { code: 'loaded', params: { count: entries.length } }
+      : { code: 'empty' },
   };
 }
 

@@ -38,8 +38,10 @@ export interface MaterialPreset {
   stepdownFraction: number;
   /** Sideways stepover as a fraction of bit diameter (0..1). */
   stepoverFraction: number;
-  /** One-line beginner tip. */
+  /** One-line beginner tip (English source-of-truth; translate via {@link notesKey}). */
   notes: string;
+  /** i18n lookup key for {@link notes}, e.g. 'mat.softwood.notes'. */
+  notesKey: string;
 }
 
 /**
@@ -62,6 +64,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.5, // ~1.6mm/pass with a 3.175mm bit
     stepoverFraction: 0.4,
     notes: 'Easy and forgiving — a great first material. Watch for fuzzy grain.',
+    notesKey: 'mat.softwood.notes',
   },
   {
     id: 'hardwood',
@@ -76,6 +79,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.35,
     stepoverFraction: 0.35,
     notes: 'Denser than softwood — slow down and take lighter passes.',
+    notesKey: 'mat.hardwood.notes',
   },
   {
     id: 'plywood',
@@ -90,6 +94,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.4,
     stepoverFraction: 0.4,
     notes: 'Glue layers dull bits fast; expect tear-out on the bottom veneer.',
+    notesKey: 'mat.plywood.notes',
   },
   {
     id: 'mdf',
@@ -104,6 +109,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.5,
     stepoverFraction: 0.45,
     notes: 'Cuts cleanly but makes fine dust — use dust extraction and a mask.',
+    notesKey: 'mat.mdf.notes',
   },
   // ---- Plastics ------------------------------------------------------------
   {
@@ -119,6 +125,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.25,
     stepoverFraction: 0.35,
     notes: 'Melts if it rubs — keep moving, lower RPM, single-flute bit helps.',
+    notesKey: 'mat.acrylic.notes',
   },
   {
     id: 'pvc',
@@ -133,6 +140,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.3,
     stepoverFraction: 0.4,
     notes: 'Soft and gummy — keep RPM modest so chips clear instead of melting.',
+    notesKey: 'mat.pvc.notes',
   },
   // ---- PCB -----------------------------------------------------------------
   {
@@ -148,6 +156,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.1, // isolation cuts are very shallow
     stepoverFraction: 0.4,
     notes: 'Use a V-bit for isolation routing; FR-4 is abrasive — cut shallow.',
+    notesKey: 'mat.pcb.notes',
   },
   // ---- Metals --------------------------------------------------------------
   {
@@ -163,6 +172,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.1, // very light — a 3018 lacks rigidity for metal
     stepoverFraction: 0.3,
     notes: 'Hard on a hobby rig: tiny passes, slow feed, and use cutting fluid.',
+    notesKey: 'mat.aluminium.notes',
   },
   {
     id: 'brass',
@@ -177,6 +187,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.08,
     stepoverFraction: 0.3,
     notes: 'Machines nicely but heavy — feather-light passes; light oil helps.',
+    notesKey: 'mat.brass.notes',
   },
   // ---- Soft / fast ---------------------------------------------------------
   {
@@ -192,6 +203,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.8, // foam clears easily, go deep & fast
     stepoverFraction: 0.5,
     notes: 'Very fast and easy. Static cling makes a mess — extraction helps.',
+    notesKey: 'mat.foam.notes',
   },
   {
     id: 'wax',
@@ -206,6 +218,7 @@ export const MATERIALS: MaterialPreset[] = [
     stepdownFraction: 0.6,
     stepoverFraction: 0.45,
     notes: 'Great for practice and casting masters — soft, clean, forgiving.',
+    notesKey: 'mat.wax.notes',
   },
 ];
 

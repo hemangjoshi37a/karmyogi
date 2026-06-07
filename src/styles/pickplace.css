@@ -135,6 +135,17 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Buttons that pair a leading icon with a text label keep them on one line and
+   vertically centered. */
+.pp-add,
+.pp-clear,
+.pp-set,
+.pp-play {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  justify-content: center;
+}
 
 /* --- compact field grid: fields pack left tightly and wrap naturally, never
    stretching one-per-huge-column across the card. --- */
@@ -209,6 +220,12 @@
   text-align: right;
   color: var(--fg-muted);
 }
+/* The localized "Op" prefix is hidden in the wide table (the "#" column header
+   already labels it) and revealed in the narrow stacked layout below, where it
+   replaces the old CSS-injected (non-localizable) ::before label. */
+.pp-idx-label {
+  display: none;
+}
 .pp-table input {
   width: 100%;
   min-width: 0;
@@ -254,9 +271,49 @@
   color: var(--bg);
 }
 
+/* Flip a chevron-down icon to point up (re-used as the "move up" glyph since the
+   shared icon set has no dedicated chevron-up). */
+.pp-flip-y {
+  transform: scaleY(-1);
+}
+
+/* --- out-of-range / unsafe warnings --- */
+.pp-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+.pp-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  font-size: var(--fs-body);
+  line-height: 1.35;
+  color: var(--warn, #d97706);
+}
+.pp-warning svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+/* Flag rows / preview ops whose pick or place point falls outside the bed. */
+.pp-row-oob td {
+  box-shadow: inset 2px 0 0 var(--warn, #d97706);
+}
+.pp-op-oob .pp-pick,
+.pp-op-oob .pp-place {
+  stroke: var(--warn, #d97706);
+}
+.pp-op-oob .pp-move {
+  stroke: var(--warn, #d97706);
+}
+
 /* --- 2D bed preview --- */
 .pp-preview2d-body {
   padding: var(--sp-2);
+}
+.pp-preview-size {
+  align-self: flex-start;
 }
 .pp-preview2d {
   width: 100%;
@@ -370,6 +427,15 @@
   min-height: var(--ctl-h-lg);
   font-weight: 600;
 }
+/* Stop swaps in while a program is streaming — danger-colored. */
+.pp-stop {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--bg);
+}
+.pp-stop:hover {
+  filter: brightness(1.08);
+}
 
 /* --- raw G-code (collapsible) --- */
 .pp-raw-toggle {
@@ -462,8 +528,8 @@
     text-align: left;
     font-size: var(--fs-label);
   }
-  .pp-idx::before {
-    content: 'Op ';
+  .pp-idx-label {
+    display: inline;
   }
   .pp-actions {
     justify-content: flex-start;

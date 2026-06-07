@@ -28,6 +28,13 @@ export type PnpHeadType = 'vacuum' | 'gripper';
 
 /** One pick→place operation in absolute machine coordinates (mm). */
 export interface PnpOp {
+  /**
+   * Stable per-op identity used only as a React list key in the UI; it keeps the
+   * key tied to the row's data (not its array index) so reordering / deletion
+   * don't reuse keys and remount the wrong input mid-edit. Ignored by the
+   * generator. Optional so older saved docs (without it) still load.
+   */
+  id?: string;
   /** Where to pick the part up. */
   pickX: number;
   pickY: number;
@@ -41,9 +48,19 @@ export interface PnpOp {
   rotation?: number;
 }
 
+/** Monotonic counter + random suffix → a collision-free per-op id. */
+let pnpOpSeq = 0;
+export function newPnpOpId(): string {
+  pnpOpSeq += 1;
+  return `op-${Date.now().toString(36)}-${pnpOpSeq.toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+}
+
 /** Defaults for a fresh pick&place operation. */
 export function defaultPnpOp(overrides: Partial<PnpOp> = {}): PnpOp {
   return {
+    id: newPnpOpId(),
     pickX: 0,
     pickY: 0,
     placeX: 0,

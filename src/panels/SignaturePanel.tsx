@@ -17,14 +17,45 @@ import {
 } from '../core/vectorize'
 import { Toolpath } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
-import { useProgram, usePersistentState } from '../store'
+import { useProgram, useMachine, usePersistentState } from '../store'
+import { grbl } from '../serial/controller'
 import { IconButton } from '../components/IconButton'
+import { Icon } from '../components/Icons'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import '../styles/signature.css'
+
+/** Named program section this panel owns in the combined program. */
+const SECTION = 'signature — pen'
 
 /** Split G-code into non-empty lines (used for the raw line count). */
 function gcodeLines(gcode: string): string[] {
   return gcode.split(/\r?\n/).filter((l) => l.trim().length > 0)
+}
+
+/**
+ * Parse a numeric input value, clamping to [min,max] and falling back to
+ * `fallback` for any non-finite result. P0 SAFETY: a NaN must never reach the
+ * emitter (it would print literal 'F NaN' / 'Z NaN' into the streamed G-code).
+ */
+function clampNum(v: string, fallback: number, min: number, max: number): number {
+  const n = parseFloat(v)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(Math.max(n, min), max)
+}
+
+/**
+ * Small inline "undo" glyph (curved arrow). Local because the shared Icon set
+ * has no undo glyph; uses currentColor so it recolors with the theme like the
+ * rest, unlike the old ⎌ emoji.
+ */
+function UndoGlyph() {
+  return (
+    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M9 7L4 12l5 5" />
+      <path d="M4 12h11a5 5 0 0 1 0 10h-1" />
+    </svg>
+  )
 }
 
 /** Decoded image pixels handed to the pure tracer. */
@@ -35,7 +66,14 @@ interface Raster {
   name: string
 }
 
-/** A freehand stroke captured in surface-pixel coordinates (screen y-down). */
+/**
+ * A freehand stroke captured in NORMALIZED 0..1 surface coordinates (x right,
+ * y down). Normalizing at capture (dividing by the live surface size the moment
+ * each point lands) makes a saved `.ksig` resolution-independent AND fixes the
+ * "signature zeroes out" bug: if the panel is hidden/resized the surface can
+ * report width/height 0, so dividing LATER (at generate time) produced NaN/0 —
+ * here every stored point is already a stable fraction.
+ */
 interface ScreenStroke {
   points: Point[]
 }
@@ -45,9 +83,10 @@ type Mode = 'draw' | 'image'
 
 /**
  * The serializable Signature document saved to / loaded from a `.ksig` file
- * (plain JSON): the freehand strokes (surface-pixel space) plus the draw-size,
- * pen, origin and feed params. Image-trace state is not saved (the source image
- * isn't embedded); only the freehand drawing is portable.
+ * (plain JSON): the freehand strokes (NORMALIZED 0..1 space, so the file is
+ * resolution-independent) plus the draw-size, pen, origin and feed params.
+ * Image-trace state is not saved (the source image isn't embedded); only the
+ * freehand drawing is portable.
  */
 interface SignatureDoc {
   mode: Mode
@@ -65,12 +104,17 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
-/** Narrow an arbitrary value to a ScreenStroke ({ points: {x,y}[] }). */
+/**
+ * Narrow an arbitrary value to a ScreenStroke ({ points: {x,y}[] }). Points are
+ * NORMALIZED 0..1; clamp to that range so a hand-edited or out-of-range file
+ * can't push the drawing off-box (and a stray NaN coordinate is dropped).
+ */
 function parseStroke(v: unknown): ScreenStroke | null {
   if (!isObj(v) || !Array.isArray(v.points)) return null
+  const clamp01 = (n: number) => Math.min(Math.max(n, 0), 1)
   const points: Point[] = []
   for (const p of v.points) {
-    if (isObj(p) && isNum(p.x) && isNum(p.y)) points.push({ x: p.x, y: p.y })
+    if (isObj(p) && isNum(p.x) && isNum(p.y)) points.push({ x: clamp01(p.x), y: clamp01(p.y) })
   }
   return points.length >= 2 ? { points } : null
 }
@@ -129,25 +173,21 @@ function polysBounds(polys: Polyline[]): { w: number; h: number } {
 }
 
 /**
- * Convert captured freehand strokes (surface-pixel space, y-down) into mm-space
+ * Convert captured freehand strokes (NORMALIZED 0..1 space, y-down) into mm-space
  * polylines anchored at the origin. The signature is scaled to fit the target
  * `drawW × drawH` mm box and the Y axis is flipped (screen +Y is down, machine
- * +Y is up) so it plots the right way up.
+ * +Y is up) so it plots the right way up. Because the input is already 0..1, the
+ * conversion no longer depends on the live surface pixel size (which can be 0 if
+ * the panel is hidden/resized) — eliminating the "signature collapses to 0" bug.
  */
-function strokesToPolylines(
-  strokes: ScreenStroke[],
-  surface: { w: number; h: number },
-  draw: { w: number; h: number },
-): Polyline[] {
-  const sx = surface.w > 0 ? draw.w / surface.w : 0
-  const sy = surface.h > 0 ? draw.h / surface.h : 0
+function strokesToPolylines(strokes: ScreenStroke[], draw: { w: number; h: number }): Polyline[] {
   const polys: Polyline[] = []
   for (const s of strokes) {
     if (s.points.length < 2) continue
     const pl = new Polyline()
     for (const p of s.points) {
-      // Scale into the mm box and flip Y so up-on-screen is up-on-machine.
-      pl.add({ x: p.x * sx, y: draw.h - p.y * sy })
+      // Scale the 0..1 fraction into the mm box and flip Y (screen-down → up).
+      pl.add({ x: p.x * draw.w, y: draw.h - p.y * draw.h })
     }
     polys.push(pl)
   }
@@ -164,6 +204,10 @@ function strokesToPolylines(
 export function SignaturePanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
+  // Subscribe so the live-push effect re-runs (and pushes the latest) the moment
+  // a stream ends, and so the Send button enables/disables with connection.
+  const streaming = useProgram((s) => s.streaming)
+  const connected = useMachine((s) => s.connection === 'connected')
 
   // ---- Mode ----
   const [mode, setMode] = usePersistentState<Mode>('karmyogi.sig.mode', 'draw')
@@ -231,7 +275,9 @@ export function SignaturePanel() {
       const imageData = ctx.getImageData(0, 0, w, h)
       URL.revokeObjectURL(url)
       setRaster({ data: imageData.data, width: w, height: h, name: file.name })
-      setInfo(t('sig.info.loaded', 'Loaded "{name}" ({w}×{h}px). Adjust threshold and size below.', { name: file.name, w, h }))
+      // Distinct key from the document-load message — the two collided on the
+      // shared `sig.info.loaded` key (image text vs. "document loaded").
+      setInfo(t('sig.info.imgLoaded', 'Loaded "{name}" ({w}×{h}px). Adjust threshold and size below.', { name: file.name, w, h }))
     } catch (e) {
       setInfo(t('sig.info.loadFailed', 'Failed to load image: {msg}', { msg: (e as Error).message }))
     }
@@ -241,10 +287,9 @@ export function SignaturePanel() {
   // it to the store. Returns the polylines (empty if there's nothing to plot).
   const buildPolys = useCallback((): Polyline[] => {
     if (mode === 'draw') {
-      const surface = drawSurfaceRef.current
-      const w = surface?.clientWidth ?? 1
-      const h = surface?.clientHeight ?? 1
-      return strokesToPolylines(strokes, { w, h }, { w: drawW, h: drawH })
+      // Strokes are already normalized 0..1, so the mm conversion no longer
+      // reads the (possibly-zero) live surface size — just scales into the box.
+      return strokesToPolylines(strokes, { w: drawW, h: drawH })
     }
     if (!raster) return []
     const contours = traceBitmap(raster.data, raster.width, raster.height, {
@@ -263,61 +308,82 @@ export function SignaturePanel() {
     raster, threshold, invert, tolerance, targetW, targetH, lockAspect,
   ])
 
-  // Generate G-code for the current state and push it to the store.
-  const generate = useCallback((): string => {
-    const polys = buildPolys()
-    if (polys.length === 0) {
-      setProgram('signature — pen', '')
-      setPreview('')
-      setPreviewPolys([])
-      if (mode === 'draw') {
-        setInfo(t('sig.info.draw', 'Sign in the box above with your mouse, stylus, or finger.'))
-      } else if (raster) {
-        setInfo(t('sig.info.noInk', 'No ink detected — try adjusting the threshold or toggling Invert.'))
+  // Generate G-code for the current state. Local preview state (the SVG + raw
+  // text) always updates; the SHARED program store is only written when `push`
+  // is true AND no stream is running — a live debounce must never reset an
+  // active stream (setProgram resets cursor/streaming) nor push '' (which would
+  // remove the running section out from under the streamer).
+  const generate = useCallback(
+    (push: boolean): string => {
+      const streaming = useProgram.getState().streaming
+      const polys = buildPolys()
+      if (polys.length === 0) {
+        // Only clear the shared section when nothing is streaming; never yank a
+        // section the machine is actively running.
+        if (push && !streaming) setProgram(SECTION, '')
+        setPreview('')
+        setPreviewPolys([])
+        if (mode === 'draw') {
+          setInfo(t('sig.info.draw', 'Sign in the box above with your mouse, stylus, or finger.'))
+        } else if (raster) {
+          setInfo(t('sig.info.noInk', 'No ink detected — try adjusting the threshold or toggling Invert.'))
+        }
+        return ''
       }
-      return ''
-    }
 
-    const gcode = polylinesToGcode(
-      polys,
-      { x: originX, y: originY },
-      { penUpZ, penDownZ, feedXY: feed },
-    )
-    setProgram('signature — pen', gcode)
-    setPreview(gcode)
-    setPreviewPolys(polys)
+      const gcode = polylinesToGcode(
+        polys,
+        { x: originX, y: originY },
+        { penUpZ, penDownZ, feedXY: feed },
+      )
+      if (push && !streaming) setProgram(SECTION, gcode)
+      setPreview(gcode)
+      setPreviewPolys(polys)
 
-    const pts = countPoints(polys)
-    const b = polysBounds(polys)
-    setInfo(
-      t('sig.info.result', '{strokes} stroke(s), {points} point(s) — {w}×{h} mm → Visualizer.', {
-        strokes: polys.length,
-        points: pts,
-        w: b.w.toFixed(1),
-        h: b.h.toFixed(1),
-      }),
-    )
-    return gcode
-  }, [
-    buildPolys, mode, raster, originX, originY, penUpZ, penDownZ, feed, setProgram, t,
-  ])
+      const pts = countPoints(polys)
+      const b = polysBounds(polys)
+      setInfo(
+        streaming
+          ? t('sig.info.streaming', 'Streaming — edits apply after the current run.')
+          : t('sig.info.result', '{strokes} stroke(s), {points} point(s) — {w}×{h} mm → Visualizer.', {
+              strokes: polys.length,
+              points: pts,
+              w: b.w.toFixed(1),
+              h: b.h.toFixed(1),
+            }),
+      )
+      return gcode
+    },
+    [buildPolys, mode, raster, originX, originY, penUpZ, penDownZ, feed, setProgram, t],
+  )
 
   // Live G-code: regenerate ~300ms after the last change and push to the store
-  // so the Visualizer updates without a manual step.
+  // so the Visualizer updates without a manual step (skipped while streaming).
   useEffect(() => {
     if (liveTimer.current) clearTimeout(liveTimer.current)
-    liveTimer.current = setTimeout(() => generate(), 300)
+    liveTimer.current = setTimeout(() => generate(true), 300)
     return () => {
       if (liveTimer.current) clearTimeout(liveTimer.current)
     }
-  }, [generate])
+    // `streaming` is in the deps so when a run finishes the latest edit is pushed.
+  }, [generate, streaming])
 
   // ---- Freehand pointer handlers (mouse + stylus + touch via Pointer Events) ----
+  // Capture each point as a NORMALIZED 0..1 fraction of the surface (clamped, so
+  // a point captured just outside the box during a drag stays in range). This is
+  // the fix for the resize/hidden-tab zeroing AND makes a saved .ksig
+  // resolution-independent.
   const localPoint = useCallback((e: ReactPointerEvent<SVGSVGElement>): Point => {
     const el = drawSurfaceRef.current
     if (!el) return { x: 0, y: 0 }
     const r = el.getBoundingClientRect()
-    return { x: e.clientX - r.left, y: e.clientY - r.top }
+    if (r.width <= 0 || r.height <= 0) return { x: 0, y: 0 }
+    const nx = (e.clientX - r.left) / r.width
+    const ny = (e.clientY - r.top) / r.height
+    return {
+      x: Math.min(Math.max(nx, 0), 1),
+      y: Math.min(Math.max(ny, 0), 1),
+    }
   }, [])
 
   const onDrawPointerDown = useCallback((e: ReactPointerEvent<SVGSVGElement>) => {
@@ -379,15 +445,18 @@ export function SignaturePanel() {
     }
   }, [previewPolys])
 
-  // Committed + in-progress strokes as SVG paths in surface-pixel space (y-down,
-  // no flip — this is the live drawing canvas, not the machine preview).
+  // Committed + in-progress strokes as SVG paths in a fixed 0..100 viewBox (the
+  // stored points are NORMALIZED 0..1, multiplied by 100 here; y-down, no flip —
+  // this is the live drawing canvas, not the machine preview). A fixed viewBox +
+  // non-scaling stroke means the drawing maps to the box at any pixel size, so a
+  // resize / hidden tab can never collapse it (the old pixel-space render did).
   const drawPaths = useMemo(() => {
     void liveStrokeTick // re-render while a stroke is in progress
     const toPath = (points: Point[]): string =>
       points.length < 2
         ? ''
         : points
-            .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+            .map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x * 100).toFixed(2)} ${(p.y * 100).toFixed(2)}`)
             .join(' ')
     const committed = strokes.map((s) => toPath(s.points)).filter(Boolean)
     const live = liveStroke.current ? toPath(liveStroke.current) : ''
@@ -398,6 +467,20 @@ export function SignaturePanel() {
     () => (preview.length > 0 ? gcodeLines(preview).length : 0),
     [preview],
   )
+
+  // Send the generated program to the machine. Regenerate fresh (no stale
+  // closure), push it to the shared program store so the Visualizer also shows
+  // it, then stream from the controller. No-op (with a hint) when disconnected
+  // or there's nothing to plot.
+  const onSend = useCallback(() => {
+    const gcode = generate(true)
+    if (!gcode) return
+    if (!connected) {
+      setInfo(t('sig.send.live', 'Preview is live; connect a machine to send.'))
+      return
+    }
+    grbl.startProgram(gcodeLines(gcode))
+  }, [generate, connected, t])
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -448,7 +531,7 @@ export function SignaturePanel() {
       liveStroke.current = null
       setStrokes(loaded)
     }
-    setInfo(t('sig.info.loaded', 'Loaded signature document — preview updated.'))
+    setInfo(t('sig.info.docLoaded', 'Loaded signature document — preview updated.'))
   }
 
   // Nothing to save when there are no committed freehand strokes.
@@ -477,7 +560,7 @@ export function SignaturePanel() {
           className={'sig-mode' + (mode === 'draw' ? ' active' : '')}
           onClick={() => setMode('draw')}
         >
-          ✎ {t('sig.mode.draw', 'Draw')}
+          {t('sig.mode.draw', 'Draw')}
         </button>
         <button
           type="button"
@@ -486,7 +569,7 @@ export function SignaturePanel() {
           className={'sig-mode' + (mode === 'image' ? ' active' : '')}
           onClick={() => setMode('image')}
         >
-          🖼 {t('sig.mode.image', 'From image')}
+          <Icon name="camera" size={14} /> {t('sig.mode.image', 'From image')}
         </button>
       </div>
 
@@ -500,14 +583,15 @@ export function SignaturePanel() {
                 <div className="sig-draw-tools">
                   <IconButton
                     type="button"
-                    icon="⎌"
+                    icon={<UndoGlyph />}
                     label={t('sig.draw.undo', 'Undo last stroke')}
                     onClick={undoStroke}
                     disabled={strokes.length === 0}
                   />
                   <IconButton
                     type="button"
-                    icon="✕"
+                    iconName="trash"
+                    iconSize={15}
                     label={t('sig.draw.clear', 'Clear all strokes')}
                     onClick={clearStrokes}
                     disabled={strokes.length === 0 && !liveStroke.current}
@@ -521,12 +605,17 @@ export function SignaturePanel() {
                     saveTitle={t('sig.save', 'Save signature')}
                     loadTitle={t('sig.load', 'Load signature')}
                     onError={setInfo}
+                    parseErrorMessage={(name) =>
+                      t('sig.info.parseError', 'Could not read {name} — expected a .ksig (JSON) signature.', { name })
+                    }
                   />
                 </div>
               </div>
               <svg
                 ref={drawSurfaceRef}
                 className="sig-draw-surface"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
                 role="application"
                 aria-label={t('sig.draw.aria', 'Freehand signature drawing area')}
                 onPointerDown={onDrawPointerDown}
@@ -555,7 +644,7 @@ export function SignaturePanel() {
                   <span>{t('sig.drawW', 'Draw area width')}</span>
                   <span className="sig-input">
                     <input type="number" inputMode="decimal" min={1} step={1} value={drawW}
-                      onChange={(e) => setDrawW(Number(e.target.value))} />
+                      onChange={(e) => setDrawW(clampNum(e.target.value, drawW, 1, 100000))} />
                     <em>mm</em>
                   </span>
                 </label>
@@ -563,7 +652,7 @@ export function SignaturePanel() {
                   <span>{t('sig.drawH', 'Draw area height')}</span>
                   <span className="sig-input">
                     <input type="number" inputMode="decimal" min={1} step={1} value={drawH}
-                      onChange={(e) => setDrawH(Number(e.target.value))} />
+                      onChange={(e) => setDrawH(clampNum(e.target.value, drawH, 1, 100000))} />
                     <em>mm</em>
                   </span>
                 </label>
@@ -662,7 +751,7 @@ export function SignaturePanel() {
                   <span>{t('sig.targetW', 'Target width')}</span>
                   <span className="sig-input">
                     <input type="number" inputMode="decimal" min={1} step={1} value={targetW}
-                      onChange={(e) => setTargetW(Number(e.target.value))} />
+                      onChange={(e) => setTargetW(clampNum(e.target.value, targetW, 1, 100000))} />
                     <em>mm</em>
                   </span>
                 </label>
@@ -671,7 +760,7 @@ export function SignaturePanel() {
                   <span className="sig-input">
                     <input type="number" inputMode="decimal" min={1} step={1} value={targetH}
                       disabled={lockAspect}
-                      onChange={(e) => setTargetH(Number(e.target.value))} />
+                      onChange={(e) => setTargetH(clampNum(e.target.value, targetH, 1, 100000))} />
                     <em>mm</em>
                   </span>
                 </label>
@@ -706,7 +795,9 @@ export function SignaturePanel() {
             onClick={() => setShowAdvanced(!showAdvanced)}
             aria-expanded={showAdvanced}
           >
-            <span className="sig-caret">{showAdvanced ? '▾' : '▸'}</span> {t('sig.advanced', 'Advanced')}
+            <span className="sig-caret">
+              <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={12} />
+            </span> {t('sig.advanced', 'Advanced')}
           </button>
           {showAdvanced && (
             <div className="sig-fields sig-advanced">
@@ -715,7 +806,7 @@ export function SignaturePanel() {
                   <span>{t('sig.tolerance', 'Simplify tolerance')}</span>
                   <span className="sig-input">
                     <input type="number" inputMode="decimal" min={0} step={0.5} value={tolerance}
-                      onChange={(e) => setTolerance(Number(e.target.value))} />
+                      onChange={(e) => setTolerance(clampNum(e.target.value, tolerance, 0, 1000))} />
                     <em>px</em>
                   </span>
                 </label>
@@ -724,7 +815,7 @@ export function SignaturePanel() {
                 <span>{t('sig.originX', 'Origin X')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" step={1} value={originX}
-                    onChange={(e) => setOriginX(Number(e.target.value))} />
+                    onChange={(e) => setOriginX(clampNum(e.target.value, originX, -100000, 100000))} />
                   <em>mm</em>
                 </span>
               </label>
@@ -732,7 +823,7 @@ export function SignaturePanel() {
                 <span>{t('sig.originY', 'Origin Y')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" step={1} value={originY}
-                    onChange={(e) => setOriginY(Number(e.target.value))} />
+                    onChange={(e) => setOriginY(clampNum(e.target.value, originY, -100000, 100000))} />
                   <em>mm</em>
                 </span>
               </label>
@@ -740,7 +831,7 @@ export function SignaturePanel() {
                 <span>{t('sig.penUpZ', 'Pen up Z')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penUpZ}
-                    onChange={(e) => setPenUpZ(Number(e.target.value))} />
+                    onChange={(e) => setPenUpZ(clampNum(e.target.value, penUpZ, -1000, 1000))} />
                   <em>mm</em>
                 </span>
               </label>
@@ -748,7 +839,7 @@ export function SignaturePanel() {
                 <span>{t('sig.penDownZ', 'Pen down Z')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" step={0.5} value={penDownZ}
-                    onChange={(e) => setPenDownZ(Number(e.target.value))} />
+                    onChange={(e) => setPenDownZ(clampNum(e.target.value, penDownZ, -1000, 1000))} />
                   <em>mm</em>
                 </span>
               </label>
@@ -756,11 +847,45 @@ export function SignaturePanel() {
                 <span>{t('sig.feed', 'Feed')}</span>
                 <span className="sig-input">
                   <input type="number" inputMode="decimal" min={1} step={50} value={feed}
-                    onChange={(e) => setFeed(Number(e.target.value))} />
+                    onChange={(e) => setFeed(clampNum(e.target.value, feed, 1, 100000))} />
                   <em>mm/min</em>
                 </span>
               </label>
+              {/* SAFETY: pen-down must sit BELOW pen-up (the safe-Z) or the pen
+                  never lifts for travel and drags across the work. */}
+              {penDownZ >= penUpZ && (
+                <p className="sig-warn" role="alert">
+                  <Icon name="warning" size={13} />{' '}
+                  {t(
+                    'sig.warn.penZ',
+                    'Pen-down Z ({down}) is not below pen-up Z ({up}) — the pen will not lift for travel.',
+                    { down: penDownZ, up: penUpZ },
+                  )}
+                </p>
+              )}
             </div>
+          )}
+        </section>
+
+        {/* ---- Send action bar (Send to machine / Open in Visualizer) ---- */}
+        <section className="sig-card sig-card-wide">
+          <div className="sig-actions">
+            <button
+              type="button"
+              className="sig-btn primary sig-play"
+              onClick={onSend}
+              disabled={rawLineCount === 0 || streaming}
+              title={
+                connected
+                  ? t('sig.send.title.on', 'Stream this program to the machine')
+                  : t('sig.send.title.off', 'Connect to a machine to send')
+              }
+            >
+              <Icon name="play" size={14} /> {t('sig.send', 'Send to machine')}
+            </button>
+          </div>
+          {!connected && rawLineCount > 0 && (
+            <p className="sig-info">{t('sig.send.live', 'Preview is live; connect a machine to send.')}</p>
           )}
         </section>
 
@@ -772,7 +897,9 @@ export function SignaturePanel() {
             onClick={() => setShowRaw(!showRaw)}
             aria-expanded={showRaw}
           >
-            <span className="sig-caret">{showRaw ? '▾' : '▸'}</span>{' '}
+            <span className="sig-caret">
+              <Icon name={showRaw ? 'chevron-down' : 'chevron-right'} size={12} />
+            </span>{' '}
             {rawLineCount > 0
               ? t('sig.raw.count', 'Raw G-code ({n} lines)', { n: rawLineCount })
               : t('sig.raw', 'Raw G-code')}

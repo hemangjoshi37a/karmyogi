@@ -95,6 +95,13 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* Icon-only mc-btn (override +/−/reset): center the glyph in the button. */
+.mc-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mc-btn-icon > svg { flex: 0 0 auto; }
 
 /* ---- type-icon buttons ----
    Stacked (icon ABOVE label) for the Machine card — easy to recognise at a
@@ -220,10 +227,9 @@
 .mc-seg button.has-kbd { position: relative; }
 .mc-seg button .kbd-hint { top: 1px; right: 2px; }
 
-/* center the jog pad within its card */
-.jogpad { justify-content: center; }
-
 /* ---- connection / state badge ---- */
+/* The state badge sits above the DRO; keep it left-aligned and tight. */
+.mc-state-row { margin-bottom: 4px; }
 .mc-badge {
   display: inline-flex;
   align-items: center;
@@ -262,6 +268,35 @@
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   word-break: break-word;
 }
+/* Non-error success feedback (e.g. "Set X/Y/Z work zero"). */
+.mc-feedback {
+  color: var(--fg);
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--ok);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  word-break: break-word;
+}
+
+/* ---- WCS chips (Coordinates): compact label + the GRBL code beneath ---- */
+.coord-wcs-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.05;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.coord-wcs-chip .coord-wcs-label { font-weight: 600; }
+.coord-wcs-chip .coord-wcs-code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 9px;
+  opacity: 0.7;
+}
+.coord-wcs-chip.primary .coord-wcs-code { opacity: 0.85; }
 
 /* ---- DRO ---- */
 .dro {
@@ -394,6 +429,8 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  /* Center the pad within its card. */
+  justify-content: center;
 }
 .jog-grid {
   display: grid;

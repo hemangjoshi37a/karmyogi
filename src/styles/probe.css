@@ -261,6 +261,28 @@
   line-height: 1.35;
   color: var(--fg-muted);
 }
+/* Warning sub-label (e.g. plate thickness = 0). */
+.pr-sub.warn { color: var(--warn); }
+.pr-input[aria-invalid='true'] { border-color: var(--warn); }
+
+/* ---- inline last-probe [PRB:…] result ---- */
+.pr-prb {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: var(--fs-body);
+}
+.pr-prb.ok { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.pr-prb.caution { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.pr-prb .pr-sub {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
 
 .pr-input {
   height: var(--ctl-h);

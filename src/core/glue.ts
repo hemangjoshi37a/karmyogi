@@ -133,10 +133,14 @@ function trajectoryPoints(shape: GlueShape): Point[] {
 
 /** Formatted number, never "-0.000" — mirrors the soldering/emitter fmt(). */
 function fmt(value: number, decimals: number): string {
-  const snap = 0.5 * Math.pow(10, -decimals);
+  // Defensive clamp: a corrupt/loaded `decimals` (negative or >100) would make
+  // Number.toFixed throw a RangeError inside the render-phase useMemo and
+  // white-screen the panel. The UI offers 0–6; clamp to an integer in [0,8].
+  const d = Number.isFinite(decimals) ? Math.max(0, Math.min(8, Math.floor(decimals))) : 3;
+  const snap = 0.5 * Math.pow(10, -d);
   if (Math.abs(value) < snap) value = 0;
   if (value === 0) value = 0; // collapse a residual signed zero
-  return value.toFixed(decimals);
+  return value.toFixed(d);
 }
 
 /** Convert a dwell in milliseconds to a G4 P<seconds> word. */

@@ -1,4 +1,6 @@
 import { useRef } from 'react'
+import { useT } from '../i18n'
+import { Icon } from './Icons'
 import '../styles/saveload.css'
 
 /**
@@ -14,6 +16,12 @@ import '../styles/saveload.css'
  *
  * Content is JSON regardless of the extension, so a `.kglue`/`.kweld`/… file is
  * just JSON a human can read. Parse failures call `onError` (or are ignored).
+ *
+ * All user-visible strings (button titles AND the internal parse/read-error
+ * messages) are localized via i18n with English fallbacks, so panels stop
+ * leaking English. Callers may still override `saveTitle`/`loadTitle`, and may
+ * pass pre-translated `parseErrorMessage(filename)` / `readErrorMessage(filename)`
+ * builders to fully customize the error text.
  */
 export function SaveLoadButtons(props: {
   /** Current value to serialize when Save is pressed. */
@@ -31,17 +39,24 @@ export function SaveLoadButtons(props: {
   className?: string
   /** Called with a human-readable message when a load fails to parse. */
   onError?: (message: string) => void
+  /** Override the parse-failure message (already-translated). Gets the filename. */
+  parseErrorMessage?: (filename: string) => string
+  /** Override the read-failure message (already-translated). Gets the filename. */
+  readErrorMessage?: (filename: string) => string
 }) {
+  const t = useT()
   const {
     value,
     onLoad,
     fileBase,
     ext,
-    saveTitle = 'Save to file',
-    loadTitle = 'Load from file',
+    saveTitle = t('io.save', 'Save to file'),
+    loadTitle = t('io.load', 'Load from file'),
     saveDisabled,
     className = '',
     onError,
+    parseErrorMessage,
+    readErrorMessage,
   } = props
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -62,10 +77,21 @@ export function SaveLoadButtons(props: {
       try {
         onLoad(JSON.parse(String(reader.result ?? '')))
       } catch {
-        onError?.(`Could not read ${file.name} — expected a ${ext} (JSON) file.`)
+        onError?.(
+          parseErrorMessage?.(file.name) ??
+            t(
+              'io.parseError',
+              'Could not read {name} — expected a {ext} (JSON) file.',
+              { name: file.name, ext },
+            ),
+        )
       }
     }
-    reader.onerror = () => onError?.(`Could not read ${file.name}.`)
+    reader.onerror = () =>
+      onError?.(
+        readErrorMessage?.(file.name) ??
+          t('io.readError', 'Could not read {name}.', { name: file.name }),
+      )
     reader.readAsText(file)
   }
 
@@ -79,7 +105,7 @@ export function SaveLoadButtons(props: {
         title={`${saveTitle} (.${ext})`}
         aria-label={saveTitle}
       >
-        <span aria-hidden="true">⭳</span>
+        <Icon name="download" size={15} />
       </button>
       <button
         type="button"
@@ -88,7 +114,7 @@ export function SaveLoadButtons(props: {
         title={`${loadTitle} (.${ext})`}
         aria-label={loadTitle}
       >
-        <span aria-hidden="true">⭱</span>
+        <Icon name="upload" size={15} />
       </button>
       <input
         ref={inputRef}

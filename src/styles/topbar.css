@@ -265,6 +265,17 @@
 .km-farm-hint { font-size: 10px; color: var(--fg-muted); line-height: 1.4; }
 .km-farm-mock { align-self: flex-start; font-size: 12px; }
 
+/* ---- Modal content pane (Motion / Probe shown in the top-bar modals) ----
+   The modal itself caps at 88vh and its body scrolls (overflow:auto). The pane
+   asks for 72vh of height when the viewport allows, but never less than 320px,
+   so on a SHORT viewport it overflows the body and scrolls instead of being
+   crushed to nothing. The min() keeps it from ever exceeding the available
+   space and forcing a double scrollbar on tall screens. */
+.km-modal-pane {
+  height: min(72vh, 720px);
+  min-height: 320px;
+}
+
 /* ---- About modal ---- */
 .km-about { display: flex; flex-direction: column; gap: 14px; }
 .km-about-brand { display: flex; align-items: center; gap: 12px; }
@@ -290,12 +301,241 @@
 }
 .km-about-link:hover { border-color: var(--accent); }
 
-/* Touch-friendly on small screens: keep icon buttons + menu items >= 36px. */
+/* ============================================================
+   MOBILE TOP BAR — a clean single row that never wraps:
+       [brand]  ·spacer·  [🔔]  [● status ▾]  [⋯]
+   The whole connection cluster collapses into the connect SHEET,
+   and the secondary actions collapse into the "⋯" menu, so the
+   bar stays a tight 3-control strip at every phone width. Desktop
+   (no data-mobile) keeps the full inline layout untouched.
+   ============================================================ */
+.topbar[data-mobile='true'] {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.topbar[data-mobile='true'] .topbar-actions--mobile {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+/* Compact connection trigger (status dot + connection word + caret). */
+.km-mconn { position: relative; display: inline-flex; }
+.km-mconn-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  max-width: 44vw;
+  padding: 0 11px;
+  border-radius: 13px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+.km-mconn-trigger[data-conn='connected'] { border-color: var(--ok); }
+.km-mconn-trigger[data-conn='connecting'] { border-color: var(--warn); }
+.km-mconn-trigger .km-conn-dot { flex: 0 0 auto; }
+.km-mconn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+.km-mconn-caret { display: inline-flex; flex: 0 0 auto; opacity: 0.65; }
+
+/* Narrowest phones: tighten the strip so the single row never overflows. */
+@media (max-width: 400px) {
+  .topbar[data-mobile='true'] { gap: 6px; }
+  .topbar[data-mobile='true'] .topbar-actions--mobile { gap: 5px; }
+  .km-mconn-trigger { max-width: 40vw; padding: 0 9px; gap: 6px; font-size: 11.5px; }
+}
+/* Very small phones (<360px): the status WORD no longer fits alongside the brand,
+   so collapse the connect pill to just the colour-coded dot + caret (the dot still
+   conveys connected/connecting/disconnected; tapping still opens the sheet). */
+@media (max-width: 359px) {
+  .km-mconn-label { display: none; }
+  .km-mconn-trigger { max-width: none; padding: 0 10px; }
+}
+
+/* CRITICAL: on mobile the bell/connect/⋯ triggers sit in the middle/right of the
+   bar, so a popover anchored to its trigger (right: 0) spills off the LEFT edge.
+   Re-anchor every top-bar dropdown to the VIEWPORT — fixed, full width with 8px
+   gutters, capped height with its own scroll — so nothing ever leaves the screen. */
+.topbar[data-mobile='true'] .notif-popover,
+.topbar[data-mobile='true'] .km-mconn-sheet,
+.topbar[data-mobile='true'] .topbar-more-pop,
+.topbar[data-mobile='true'] .km-farm-pop {
+  position: fixed;
+  top: 56px;
+  left: 8px;
+  right: 8px;
+  width: auto;
+  max-width: none;
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+}
+
+/* The connect SHEET: a dropdown panel under the bar holding the full
+   ConnectionControl, re-flowed into a clean vertical stack. */
+.km-mconn-sheet {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: min(340px, calc(100vw - 16px));
+  padding: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+}
+/* Re-flow the reused ConnectionControl: wrap, with the primary controls each
+   taking a full row and the small action icons clustering on the final row. */
+.km-mconn-sheet .km-conn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+}
+.km-mconn-sheet .km-conn-select,
+.km-mconn-sheet .km-cx,
+.km-mconn-sheet .km-conn-btn,
+.km-mconn-sheet .km-farm { flex: 1 1 100%; }
+.km-mconn-sheet .km-conn-select { max-width: none; min-height: 42px; border-radius: 9px; }
+.km-mconn-sheet .km-conn-btn { min-height: 42px; border-radius: 9px; }
+.km-mconn-sheet .km-cx-toggle,
+.km-mconn-sheet .km-farm-toggle {
+  width: 100%;
+  max-width: none;
+  min-height: 42px;
+  justify-content: center;
+  border-radius: 9px;
+}
+/* The status word + dot live in the trigger pill, so hide the duplicate inside
+   the sheet; the small action icons (bridge/probe/settings) share one row. */
+.km-mconn-sheet .km-conn-dot,
+.km-mconn-sheet .km-conn-state,
+.km-mconn-sheet .km-conn-sep { display: none; }
+.km-mconn-sheet .km-conn-icon {
+  flex: 0 0 auto;
+  min-width: 46px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+/* ---- Mobile "⋯" menu — secondary actions as labelled rows ---- */
+.topbar-overflow { position: relative; display: inline-flex; }
+.topbar-more-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: min(256px, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+}
+.topbar-more-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--fg);
+  font-size: 13px;
+}
+.topbar-more-item:hover { background: var(--bg-input); }
+.topbar-more-ico { width: 20px; text-align: center; font-size: 15px; flex: 0 0 auto; }
+.topbar-more-sep { height: 1px; background: var(--border); margin: 5px 2px; }
+/* Language + account rows: let the embedded controls fill the row width. */
+.topbar-more-row,
+.topbar-more-user { display: flex; width: 100%; padding: 3px 2px; }
+.topbar-more-row .lang-switcher { width: 100%; }
+.topbar-more-row .lang-switcher-select { max-width: none; flex: 1 1 auto; }
+.topbar-more-user:empty { display: none; }
+.topbar-more-user .km-userchip,
+.topbar-more-user .km-userchip-signin { width: 100%; }
+.topbar-overflow-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+}
+.topbar-overflow-zoom { justify-content: space-between; }
+/* Inside the popover the zoom controls get comfortable touch sizing. */
+.topbar-overflow-zoom .icon-btn { min-width: 40px; min-height: 40px; }
+.topbar-overflow-zoom button:nth-child(2) {
+  min-width: 56px;
+  min-height: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Touch-friendly on small screens: keep icon buttons + menu items >= 40px so
+   every tap target clears the recommended minimum, with a slimmer gap so the
+   icon-only action strip stays compact. */
 @media (max-width: 768px) {
-  .icon-btn { min-width: 38px; min-height: 38px; }
-  .launcher-item { min-height: 38px; }
-  .notif-clear { min-height: 32px; }
-  .topbar .topbar-actions { gap: 4px; }
+  .icon-btn { min-width: 40px; min-height: 40px; }
+  .launcher-item { min-height: 40px; }
+  .notif-clear { min-height: 34px; }
+  /* The action cluster can be wider than a phone; let it wrap to a new row
+     (right-aligned) instead of forcing horizontal page overflow. */
+  .topbar .topbar-actions {
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 4px;
+  }
+  /* The brand subtitle ("CAD/CAM workbench") is redundant on phones — the
+     wordmark + About modal already carry it; drop it to reclaim width. */
+  .topbar .brand-subtitle { display: none; }
   .km-farm-toggle { max-width: 120px; }
-  .km-farm-pick, .km-farm-del { min-height: 38px; }
+  .km-farm-pick, .km-farm-del { min-height: 40px; }
+  /* The connection cluster may gain extra connect buttons (USB / WiFi / BT);
+     never assume a fixed count — let every km-conn* button/select wrap and
+     keep a 36px+ touch height regardless of how many there are. */
+  .km-conn { flex-wrap: wrap; row-gap: 4px; }
+  .km-conn-icon { min-width: 38px; min-height: 38px; }
+}
+
+/* Phones (~400px and below): the action strip is icon-only, the connection
+   cluster spans the full bar width and wraps any number of buttons, and the
+   firmware select + Machines dropdown shrink to fit without overflowing. */
+@media (max-width: 400px) {
+  .topbar .topbar-actions { gap: 3px; }
+  .icon-btn { min-width: 38px; min-height: 38px; padding: 4px; }
+  /* Make the action strip own its own row so it can right-align cleanly under
+     the brand + connection rows without crowding them. */
+  .topbar .topbar-actions { flex: 1 1 100%; }
+  /* Connection cluster takes the full width and wraps its buttons; the status
+     dot + label stay on the first row next to the firmware select. */
+  .km-conn { width: 100%; gap: 4px; }
+  .km-conn-select { max-width: none; flex: 1 1 110px; min-width: 0; }
+  .km-conn-state { min-width: 0; flex: 0 0 auto; }
+  .km-conn-btn { flex: 1 1 auto; }
+  /* Machines dropdown: full row + don't let its popover exceed the viewport. */
+  .km-farm { flex: 1 1 100%; }
+  .km-farm-toggle { max-width: none; width: 100%; }
+  .km-farm-pop { max-width: calc(100vw - 16px); right: 0; }
 }

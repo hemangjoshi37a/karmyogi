@@ -6,6 +6,7 @@ import {
 } from '../camera/autoCalib'
 import { grbl } from '../serial/controller'
 import { useT } from '../i18n'
+import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { useCameraCalib, useCameraLive, useMachine } from '../store'
 import { useBed } from '../store/bed'
@@ -100,6 +101,17 @@ interface AutoRunState {
   kinematics: KinematicsInfo | null
 }
 
+/**
+ * The "Camera → server bridge" (auto-POSTing live JPEGs to the dev server's
+ * `/__camera_frame` endpoint so a developer/agent on the server can SEE the
+ * camera while tuning calibration) is a DEVELOPMENT-ONLY aid. In a production
+ * build that endpoint does not exist, so the auto-stream would 404-spam while
+ * uploading the user's webcam — a privacy problem. Gate every bit of it (UI +
+ * the auto-POST effect) behind Vite's `import.meta.env.DEV`, which is statically
+ * `false` in prod builds and lets the bundler drop the whole branch.
+ */
+const FEED_BRIDGE_ENABLED = import.meta.env.DEV
+
 /** Pick a supported webm mime type for MediaRecorder, falling back gracefully. */
 function pickMime(): string | undefined {
   if (typeof MediaRecorder === 'undefined') return undefined
@@ -185,6 +197,11 @@ export function CameraPanel() {
 
   const seqRef = useRef(0)
 
+  // Mirror of `clips` so the unmount cleanup can revoke their blob URLs without
+  // re-subscribing the cleanup effect to every clips change (which would tear
+  // down + rebuild all the camera cleanup each time a clip is added/removed).
+  const clipsRef = useRef<Clip[]>([])
+
   // Empty-bed reference grayscale frames per slot (transient — for visual hull).
   const refGrayRef = useRef<[GrayImage | null, GrayImage | null]>([null, null])
 
@@ -200,6 +217,8 @@ export function CameraPanel() {
 
   const [recording, setRecording] = useState(false)
   const [recElapsed, setRecElapsed] = useState(0)
+  // Surfaced when MediaRecorder is missing or a recording/timelapse fails to start.
+  const [recError, setRecError] = useState<string | null>(null)
 
   const [tlActive, setTlActive] = useState(false)
   const [tlInterval, setTlInterval] = useState('5')
@@ -250,6 +269,8 @@ export function CameraPanel() {
   const [refCaptured, setRefCaptured] = useState<[boolean, boolean]>([false, false])
 
   const qrSupported = barcodeDetectorAvailable()
+  // MediaRecorder is needed for both Record and Timelapse (which assemble webm).
+  const recorderSupported = typeof MediaRecorder !== 'undefined'
 
   const live = (s: SlotIdx) => status[s].kind === 'live'
 
@@ -356,6 +377,9 @@ export function CameraPanel() {
   // exercised end-to-end without any webcam. Great for testing on either side.
   const startTestPattern = useCallback(
     (s: SlotIdx) => {
+      // The synthetic test pattern only feeds the DEV server bridge — no-op (and
+      // drop its body) in production via the literal `import.meta.env.DEV` guard.
+      if (!import.meta.env.DEV) return
       stopStream(s)
       setSlotStatus(s, { kind: 'starting' })
       const canvas = document.createElement('canvas')
@@ -424,14 +448,22 @@ export function CameraPanel() {
 
   const startRecording = useCallback(() => {
     const stream = streamRefs.current[0]
-    if (!stream || typeof MediaRecorder === 'undefined') return
+    if (!stream) return
+    if (typeof MediaRecorder === 'undefined') {
+      setRecError(
+        t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).'),
+      )
+      return
+    }
     const mime = pickMime()
     let rec: MediaRecorder
     try {
       rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream)
     } catch {
+      setRecError(t('cam.capture.recFailed', 'Could not start recording — the camera format may be unsupported.'))
       return
     }
+    setRecError(null)
     recChunksRef.current = []
     rec.ondataavailable = (ev: BlobEvent) => {
       if (ev.data && ev.data.size > 0) recChunksRef.current.push(ev.data)
@@ -456,7 +488,7 @@ export function CameraPanel() {
     recTimerRef.current = window.setInterval(() => {
       setRecElapsed(Date.now() - startedAt)
     }, 250)
-  }, [])
+  }, [t])
 
   // ---- snapshot (slot 0) ----
   const snapshot = useCallback(() => {
@@ -499,7 +531,13 @@ export function CameraPanel() {
   const startTimelapse = useCallback(() => {
     const stream = streamRefs.current[0]
     const v = videoRefs.current[0]
-    if (!stream || !v || typeof MediaRecorder === 'undefined') return
+    if (!stream || !v) return
+    if (typeof MediaRecorder === 'undefined') {
+      setRecError(
+        t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).'),
+      )
+      return
+    }
     const intervalS = Math.max(0.2, parseFloat(tlInterval) || 5)
     const fps = Math.max(1, Math.min(60, Math.round(parseFloat(tlFps) || 10)))
 
@@ -528,8 +566,10 @@ export function CameraPanel() {
         ? new MediaRecorder(canvasStream, { mimeType: mime })
         : new MediaRecorder(canvasStream)
     } catch {
+      setRecError(t('cam.capture.tlFailed', 'Could not start the timelapse — the recorder format may be unsupported.'))
       return
     }
+    setRecError(null)
     tlChunksRef.current = []
     rec.ondataavailable = (ev: BlobEvent) => {
       if (ev.data && ev.data.size > 0) tlChunksRef.current.push(ev.data)
@@ -575,7 +615,7 @@ export function CameraPanel() {
         tlDrawIdxRef.current = idx + 1
       }
     }, Math.round(1000 / fps))
-  }, [tlInterval, tlFps])
+  }, [tlInterval, tlFps, t])
 
   // ---- power toggle per slot ----
   const toggleLive = useCallback(
@@ -614,6 +654,30 @@ export function CameraPanel() {
     [status, startStream, stopRecording, stopTimelapse],
   )
 
+  // Seed the picker from the PERSISTED per-slot deviceId (so the chosen camera
+  // survives a reload). Runs once on mount; only fills slots the user hasn't
+  // already touched this session, and only if the store actually has an id.
+  // enumerate() afterwards reconciles against the cameras present right now.
+  useEffect(() => {
+    const persisted = useCameraCalib.getState().cameras
+    const id0 = persisted[0]?.deviceId ?? ''
+    const id1 = persisted[1]?.deviceId ?? ''
+    if (!id0 && !id1) return
+    setDeviceIds((prev) => [prev[0] || id0, prev[1] || id1])
+    // Mount-only seed; the live store is read imperatively, not subscribed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Persist each slot's chosen deviceId so the selection survives reload (read
+  // back by the mount-seed effect above). Only write when it actually changes.
+  useEffect(() => {
+    for (const s of [0, 1] as const) {
+      if (deviceIds[s] && deviceIds[s] !== calib.cameras[s].deviceId) {
+        calib.setCamera(s, { deviceId: deviceIds[s] })
+      }
+    }
+  }, [deviceIds, calib])
+
   // Initial enumeration + device-change listener.
   useEffect(() => {
     if (!supported) return
@@ -628,13 +692,21 @@ export function CameraPanel() {
     }
   }, [supported, enumerate])
 
-  // Stop the secondary feed when the secondary slot is disabled.
+  // Stop the secondary feed when the secondary slot is disabled. Also force the
+  // calibration target back to Cam 1 — otherwise the whole calibration block
+  // would keep operating on a now-disabled (dead) camera slot.
   useEffect(() => {
     if (!secondaryEnabled) {
       stopStream(1)
       setSlotStatus(1, { kind: 'idle' })
+      setCalibSlot(0)
     }
   }, [secondaryEnabled, stopStream, setSlotStatus])
+
+  // Keep the unmount cleanup's clip mirror current.
+  useEffect(() => {
+    clipsRef.current = clips
+  }, [clips])
 
   // Full cleanup on unmount.
   useEffect(() => {
@@ -670,6 +742,9 @@ export function CameraPanel() {
         const v = videoEls[i]
         if (v) v.srcObject = null
       }
+      // Revoke any saved-clip blob URLs so they don't leak after unmount.
+      for (const c of clipsRef.current) URL.revokeObjectURL(c.url)
+      clipsRef.current = []
       // Detach from the live bus on unmount.
       setVideoEl(0, null)
       setVideoEl(1, null)
@@ -702,7 +777,7 @@ export function CameraPanel() {
       const rms = reprojectionRMS(H, imgPts, worldPts)
       calib.setCamera(s, { H: [...H], rmsMm: rms, frameW, frameH })
       setCalibMsg(
-        t('cam.bt.calibrated', 'Calibrated slot {n} — RMS {rms} mm', {
+        t('cam.bt.calibrated', 'Calibrated Cam {n} — RMS {rms} mm', {
           n: s + 1,
           rms: rms.toFixed(2),
         }),
@@ -743,6 +818,44 @@ export function CameraPanel() {
   const autoPtsPerSide = Math.max(2, Math.floor(parseFloat(autoPts) || 3))
   const autoPointCount = autoPtsPerSide * autoPtsPerSide
   const autoSpreadMm = Math.max(0, parseFloat(autoSpread) || 0)
+
+  // Translate a stable auto-calibration progress code (emitted by the pure
+  // driver) into a localized status line. Keeping the copy here means autoCalib
+  // stays i18n-free and the panel owns all user-facing strings (task 5).
+  const progressLabel = useCallback(
+    (p: AutoCalibProgress): string => {
+      const x = p.params ?? {}
+      switch (p.code) {
+        case 'probeCapturing':
+          return t('cam.bt.auto.p.probeCapturing', 'Probing {axis} kinematics — capturing…', x)
+        case 'probeJogging':
+          return t('cam.bt.auto.p.probeJogging', 'Probing {axis} kinematics — jogging +{delta} mm…', x)
+        case 'probeInconclusive':
+          return t('cam.bt.auto.p.probeInconclusive', 'Kinematics probe inconclusive — falling back to tool-grid tracking…')
+        case 'probeFailed':
+          return t('cam.bt.auto.p.probeFailed', 'Kinematics probe failed — falling back to tool-grid tracking…')
+        case 'moving':
+          return t('cam.bt.auto.p.moving', 'Point {n}/{total} — moving…', x)
+        case 'capturing':
+          return t('cam.bt.auto.p.capturing', 'Point {n}/{total} — capturing…', x)
+        case 'solving':
+          return t('cam.bt.auto.p.solving', 'Detecting the tool and solving the homography…')
+        case 'doneKinematics':
+          return t('cam.bt.auto.p.doneKinematics', 'Calibrated (kinematics: X→{kx}, Y→{ky}) — RMS {rms} mm.', x)
+        case 'doneGrid':
+          return t('cam.bt.auto.p.doneGrid', 'Calibrated — RMS {rms} mm, used {used}/{total} points.', x)
+        case 'aborted':
+          return t('cam.bt.auto.aborted', 'Auto-calibration aborted — machine stopped.')
+        case 'failed':
+          return x.detail != null
+            ? String(x.detail)
+            : t('cam.bt.auto.failed', 'Auto-calibration failed.')
+        default:
+          return ''
+      }
+    },
+    [t],
+  )
 
   const runAuto = useCallback(async () => {
     const video = videoRefs.current[calibSlot]
@@ -845,6 +958,11 @@ export function CameraPanel() {
   // the developer/agent on the server can see this client's camera.
   const sendFrameToServer = useCallback(
     async (name: string, slot: SlotIdx): Promise<boolean> => {
+      // Belt-and-braces: even though every caller is DEV-gated, hard-guard the
+      // upload itself with the literal `import.meta.env.DEV` so the bundler folds
+      // it to `false` and DROPS the fetch (and the `/__camera_frame` URL) from
+      // production output entirely — no live-webcam JPEG ever leaves the browser.
+      if (!import.meta.env.DEV) return false
       const v = videoRefs.current[slot]
       // Only capture a REAL, decoded frame: needs current data (readyState ≥ 2)
       // and non-zero dimensions, else we'd post a blank/0-byte image.
@@ -893,6 +1011,10 @@ export function CameraPanel() {
   // ONLY manual step browsers require is the one-time "Start + allow camera"
   // permission grant; after that this runs hands-off until the camera stops.
   useEffect(() => {
+    // PRIVACY: only ever run in dev. In a prod build `FEED_BRIDGE_ENABLED` is a
+    // static `false`, so this effect short-circuits and the bundler can drop the
+    // upload code entirely — no live-webcam JPEGs are POSTed anywhere.
+    if (!FEED_BRIDGE_ENABLED) return
     const liveSlots: SlotIdx[] = []
     if (status[0].kind === 'live') liveSlots.push(0)
     if (status[1].kind === 'live') liveSlots.push(1)
@@ -1074,17 +1196,21 @@ export function CameraPanel() {
     )
   }, [calib, bed.width, bed.depth, t])
 
-  // ---- job: detect from stock QR (slot 0) ----
+  // ---- job: detect from stock QR ----
+  // The 3D bed plane is textured from Cam 1 (slot 0), so stock-pixel→mm must go
+  // through the SAME slot's homography to land in the right place. Always use the
+  // actually-bed-calibrated slot 0 (and say so in the copy).
+  const JOB_SLOT: SlotIdx = 0
   const detectJobFromQr = useCallback(async () => {
-    const v = videoRefs.current[0]
+    const v = videoRefs.current[JOB_SLOT]
     const frame = captureFrame(v)
     if (!frame) {
       setCalibMsg(t('cam.bt.err.noFrame', 'No live frame — start this camera first.'))
       return
     }
-    const cam = calib.cameras[0]
+    const cam = calib.cameras[JOB_SLOT]
     if (!cam.H || cam.H.length !== 9) {
-      setCalibMsg(t('cam.bt.job.needCalib', 'Calibrate slot 1 first so stock pixels map to mm.'))
+      setCalibMsg(t('cam.bt.job.needCalib', 'Calibrate Cam 1 first so stock pixels map to mm.'))
       return
     }
     const codes = await detectQrCodes(frame)
@@ -1187,8 +1313,36 @@ export function CameraPanel() {
     calib.cameras[0].H.length === 9 &&
     !!calib.cameras[1].H &&
     calib.cameras[1].H.length === 9
-  const canHull = bothCalibrated && refCaptured[0] && refCaptured[1] && live(0) && live(1)
   const spreadTooSmall = mmPairs.length >= 2 && minPairwiseDist(mmPairs.map((p) => p.px)) < 20
+
+  // ---- VISIBLE "why is this disabled?" reasons (not just tooltips) ----
+  // Each returns a localized one-liner when the action can't run, else null.
+  const autoReason: string | null =
+    machineConn !== 'connected'
+      ? t('cam.bt.auto.btnNeedConn', 'Connect the machine first (Controller tab).')
+      : !live(calibSlot)
+        ? t('cam.bt.auto.btnNeedCam', 'Start this camera first.')
+        : !(autoSpreadMm > 0)
+          ? t('cam.bt.auto.btnNeedSpread', 'Enter a spread greater than zero.')
+          : null
+
+  const detectQrReason: string | null = !qrSupported
+    ? t('cam.bt.m.qrUnavailable', 'BarcodeDetector unavailable in this browser.')
+    : !calib.cameras[0].H
+      ? t('cam.bt.job.needCam1Calib', 'Calibrate Cam 1 first (its homography maps stock pixels to mm).')
+      : !live(0)
+        ? t('cam.bt.job.needCam1Live', 'Start Camera 1 first.')
+        : null
+
+  const hullReason: string | null = !secondaryEnabled
+    ? t('cam.bt.hull.needSecond', 'Enable the second camera (a different angle is needed for height).')
+    : !bothCalibrated
+      ? t('cam.bt.hull.needBothCalib', 'Calibrate both cameras first.')
+      : !(live(0) && live(1))
+        ? t('cam.bt.hull.needBothLive', 'Start both cameras first.')
+        : !(refCaptured[0] && refCaptured[1])
+          ? t('cam.bt.hull.needRefs', 'Capture an empty-bed reference for both cameras.')
+          : null
 
   // Quality label for the currently-edited slot.
   const slotCam = calib.cameras[calibSlot]
@@ -1295,9 +1449,10 @@ export function CameraPanel() {
             onClick={() => captureRef(s)}
             title={t('cam.bt.ref.tip', 'Store an empty-bed reference frame for this camera (used by height estimation)')}
           >
+            <Icon name={refCaptured[s] ? 'eye' : 'camera'} size={14} />
             {refCaptured[s]
-              ? t('cam.bt.ref.have', '✓ Empty-bed reference set')
-              : t('cam.bt.ref.set', '⌖ Capture empty-bed reference')}
+              ? t('cam.bt.ref.have', 'Empty-bed reference set')
+              : t('cam.bt.ref.set', 'Capture empty-bed reference')}
           </button>
         </div>
       </section>
@@ -1333,7 +1488,8 @@ export function CameraPanel() {
               download="karmyogi-calibration-sheet.pdf"
               title={t('cam.calib.downloadTip', 'Download the printable A4 calibration sheet (PDF)')}
             >
-              {t('cam.calib.download', '⬇ Download sheet (PDF)')}
+              <Icon name="download" size={14} />
+              {t('cam.calib.download', 'Download sheet (PDF)')}
             </a>
             <a
               className="cam-btn cam-icon"
@@ -1343,7 +1499,7 @@ export function CameraPanel() {
               title={t('cam.calib.openTip', 'Open the calibration sheet in a new tab to print')}
               aria-label={t('cam.calib.open', 'Print calibration sheet')}
             >
-              ⎙
+              <Icon name="frame" size={16} />
             </a>
           </div>
         </section>
@@ -1374,21 +1530,33 @@ export function CameraPanel() {
         </section>
         {secondaryEnabled && renderSlot(1)}
 
-        {/* ---- capture controls ---- */}
+        {/* ---- capture controls (slot 0 / Camera 1 only) ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
             <h4>{t('cam.capture.title', 'Capture')}</h4>
+            <span className="cam-raw">{t('cam.capture.cam1only', 'Camera 1 only')}</span>
           </header>
+          {!recorderSupported && (
+            <p className="cam-warn">
+              {t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).')}
+            </p>
+          )}
+          {!canCapture && recorderSupported && (
+            <p className="cam-hint">
+              {t('cam.capture.needCam1', 'Start Camera 1 above to record, snapshot, or capture a timelapse.')}
+            </p>
+          )}
           <div className="cam-row">
             {!recording ? (
               <button
                 type="button"
                 className="cam-btn cam-grow"
-                disabled={!canCapture}
+                disabled={!canCapture || !recorderSupported}
                 onClick={startRecording}
                 title={t('cam.capture.recordTip', 'Start recording the live feed to a WebM clip')}
               >
-                {t('cam.capture.record', '● Record')}
+                <span className="cam-rec-dot cam-btn-dot" aria-hidden="true" />
+                {t('cam.capture.record', 'Record')}
               </button>
             ) : (
               <button
@@ -1397,7 +1565,8 @@ export function CameraPanel() {
                 onClick={stopRecording}
                 title={t('cam.capture.stopRecTip', 'Stop recording and download the clip')}
               >
-                {t('cam.capture.stopRec', '■ Stop ({elapsed})', { elapsed: fmtElapsed(recElapsed) })}
+                <Icon name="stop" size={13} />
+                {t('cam.capture.stopRec', 'Stop ({elapsed})', { elapsed: fmtElapsed(recElapsed) })}
               </button>
             )}
             <button
@@ -1407,24 +1576,33 @@ export function CameraPanel() {
               onClick={snapshot}
               title={t('cam.capture.snapshotTip', 'Capture the current frame as a PNG and download it')}
             >
-              {t('cam.capture.snapshot', '⧉ Snapshot')}
+              <Icon name="camera" size={14} />
+              {t('cam.capture.snapshot', 'Snapshot')}
             </button>
           </div>
+          {recError && <p className="cam-warn">{recError}</p>}
         </section>
 
-        {/* ---- timelapse ---- */}
+        {/* ---- timelapse (slot 0 / Camera 1 only) ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
             <h4>{t('cam.timelapse.title', 'Timelapse')}</h4>
-            {tlActive && (
+            {tlActive ? (
               <span className="cam-raw" data-on={true}>
                 {t('cam.timelapse.frames', '{count} frame(s)', { count: tlCount })}
               </span>
+            ) : (
+              <span className="cam-raw">{t('cam.capture.cam1only', 'Camera 1 only')}</span>
             )}
           </header>
           <p className="cam-hint">
             {t('cam.timelapse.hint', 'Grab a frame every interval, play them back fast into one webm.')}
           </p>
+          {!recorderSupported && (
+            <p className="cam-warn">
+              {t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).')}
+            </p>
+          )}
           <div className="cam-fields">
             <label htmlFor="cam-tl-interval">
               <span className="cam-flabel">{t('cam.timelapse.interval', 'Interval (s)')}</span>
@@ -1453,16 +1631,22 @@ export function CameraPanel() {
               />
             </label>
           </div>
+          {!canCapture && recorderSupported && (
+            <p className="cam-hint">
+              {t('cam.capture.needCam1', 'Start Camera 1 above to record, snapshot, or capture a timelapse.')}
+            </p>
+          )}
           <div className="cam-row">
             {!tlActive ? (
               <button
                 type="button"
                 className="cam-btn cam-grow"
-                disabled={!canCapture}
+                disabled={!canCapture || !recorderSupported}
                 onClick={startTimelapse}
                 title={t('cam.timelapse.startTip', 'Start capturing a timelapse')}
               >
-                {t('cam.timelapse.start', '◷ Start timelapse')}
+                <Icon name="play" size={13} />
+                {t('cam.timelapse.start', 'Start timelapse')}
               </button>
             ) : (
               <button
@@ -1471,10 +1655,12 @@ export function CameraPanel() {
                 onClick={stopTimelapse}
                 title={t('cam.timelapse.stopTip', 'Stop the timelapse, assemble the webm and download it')}
               >
-                {t('cam.timelapse.stop', '■ Stop & save ({count})', { count: tlCount })}
+                <Icon name="stop" size={13} />
+                {t('cam.timelapse.stop', 'Stop & save ({count})', { count: tlCount })}
               </button>
             )}
           </div>
+          {recError && <p className="cam-warn">{recError}</p>}
         </section>
 
         {/* ================= BED TRACKING (3D) ================= */}
@@ -1554,7 +1740,7 @@ export function CameraPanel() {
             {slotCam.H && (
               <IconButton
                 className="cam-icon-btn"
-                icon="✕"
+                iconName="trash"
                 label={t('cam.bt.clearCalib', 'Clear this camera’s calibration')}
                 onClick={() => {
                   calib.clearCamera(calibSlot)
@@ -1564,51 +1750,57 @@ export function CameraPanel() {
             )}
           </div>
 
-          <div className="cam-feed-dev">
-            <span className="cam-seg-label">
-              {t('cam.bt.feed.title', 'Camera → server bridge')}
-              {(live(0) || live(1)) && (
-                <span className={`cam-feed-dot${feedAuto ? ' on' : ''}`} title={feedAuto ? t('cam.bt.feed.autoOn', 'Auto-streaming frames to the server') : t('cam.bt.feed.autoWait', 'Waiting for frames…')}>
-                  {feedAuto ? t('cam.bt.feed.autoLabel', '● auto-streaming') : t('cam.bt.feed.autoLabelWait', '○ connecting…')}
-                </span>
-              )}
-            </span>
-            <p className="cam-hint">
-              {live(0) || live(1)
-                ? t('cam.bt.feed.autoNote', 'Live frames stream to the server automatically — no clicking needed.')
-                : t('cam.bt.feed.startNote', 'Start a camera above (allow the permission) and frames stream to the server automatically.')}
-            </p>
-            <div className="cam-row">
-              <button
-                type="button"
-                className="cam-btn"
-                onClick={() => startTestPattern(calibSlot)}
-                title={t('cam.bt.feed.testTip', 'Start a synthetic in-app camera (no webcam / no permission) and stream it to the server — for testing the whole pipeline')}
-              >
-                {t('cam.bt.feed.test', '🎞 Use test pattern (no camera)')}
-              </button>
+          {FEED_BRIDGE_ENABLED && (
+            <div className="cam-feed-dev">
+              <span className="cam-seg-label cam-feed-title">
+                <span className="cam-dev-badge">{t('cam.bt.feed.devBadge', 'DEV')}</span>
+                {t('cam.bt.feed.title', 'Camera → server bridge')}
+                {(live(0) || live(1)) && (
+                  <span className={`cam-feed-dot${feedAuto ? ' on' : ''}`} title={feedAuto ? t('cam.bt.feed.autoOn', 'Auto-streaming frames to the server') : t('cam.bt.feed.autoWait', 'Waiting for frames…')}>
+                    <span className="cam-feed-dot-mark" aria-hidden="true" />
+                    {feedAuto ? t('cam.bt.feed.autoLabel', 'auto-streaming') : t('cam.bt.feed.autoLabelWait', 'connecting…')}
+                  </span>
+                )}
+              </span>
+              <p className="cam-hint">
+                {live(0) || live(1)
+                  ? t('cam.bt.feed.autoNote', 'Dev-only: live frames stream to the local dev server automatically — no clicking needed. This never runs in a production build.')
+                  : t('cam.bt.feed.startNote', 'Dev-only: start a camera above (allow the permission) and frames stream to the local dev server automatically. This never runs in a production build.')}
+              </p>
+              <div className="cam-row">
+                <button
+                  type="button"
+                  className="cam-btn"
+                  onClick={() => startTestPattern(calibSlot)}
+                  title={t('cam.bt.feed.testTip', 'Start a synthetic in-app camera (no webcam / no permission) and stream it to the server — for testing the whole pipeline')}
+                >
+                  <Icon name="camera" size={14} />
+                  {t('cam.bt.feed.test', 'Use test pattern (no camera)')}
+                </button>
+              </div>
+              <div className="cam-row">
+                <input
+                  className="cam-feed-name"
+                  type="text"
+                  value={feedLabel}
+                  onChange={(e) => setFeedLabel(e.target.value)}
+                  placeholder={t('cam.bt.feed.name', 'name (e.g. rest, x20)')}
+                  title={t('cam.bt.feed.nameTip', 'Optional: save a one-off labelled frame as .camera-frames/<name>.png')}
+                />
+                <button
+                  type="button"
+                  className="cam-btn"
+                  onClick={sendOneFrame}
+                  disabled={!live(calibSlot)}
+                  title={t('cam.bt.feed.sendTip', 'Save a one-off labelled frame (the live feed already streams automatically)')}
+                >
+                  <Icon name="upload" size={14} />
+                  {t('cam.bt.feed.send', 'Save labelled frame')}
+                </button>
+              </div>
+              {feedMsg && <p className="cam-hint">{feedMsg}</p>}
             </div>
-            <div className="cam-row">
-              <input
-                className="cam-feed-name"
-                type="text"
-                value={feedLabel}
-                onChange={(e) => setFeedLabel(e.target.value)}
-                placeholder={t('cam.bt.feed.name', 'name (e.g. rest, x20)')}
-                title={t('cam.bt.feed.nameTip', 'Optional: save a one-off labelled frame as .camera-frames/<name>.png')}
-              />
-              <button
-                type="button"
-                className="cam-btn"
-                onClick={sendOneFrame}
-                disabled={!live(calibSlot)}
-                title={t('cam.bt.feed.sendTip', 'Save a one-off labelled frame (the live feed already streams automatically)')}
-              >
-                {t('cam.bt.feed.send', '📤 Save labelled frame')}
-              </button>
-            </div>
-            {feedMsg && <p className="cam-hint">{feedMsg}</p>}
-          </div>
+          )}
 
           <div className="cam-seg-row">
             <span className="cam-seg-label">{t('cam.bt.method', 'Method')}</span>
@@ -1660,21 +1852,23 @@ export function CameraPanel() {
           {/* --- method bodies --- */}
           {method === 'auto' && (
             <div className="cam-method">
-              {machineConn !== 'connected' ? (
+              {machineConn !== 'connected' && (
                 <p className="cam-warn">
                   {t(
                     'cam.bt.auto.notConnectedHint',
                     'Machine not connected. Connect in the Controller tab — auto-calibration jogs the tool to a grid of known points.',
                   )}
                 </p>
-              ) : (
+              )}
+              <details className="cam-guide">
+                <summary>{t('cam.bt.howItWorks', 'How this works')}</summary>
                 <p className="cam-hint">
                   {t(
                     'cam.bt.auto.guide',
                     'Aim a camera at the bed so the tool is visible in the feed above and raise the tool clear of the work. Then press Auto-calibrate: the machine jogs to a small XY grid around the current position, snaps a frame at each, and finds the tool automatically (no clicking).',
                   )}
                 </p>
-              )}
+              </details>
               <div className="cam-fields">
                 <label htmlFor="cam-auto-spread">
                   <span className="cam-flabel">{t('cam.bt.auto.spread', 'Spread (mm)')}</span>
@@ -1705,24 +1899,22 @@ export function CameraPanel() {
                   />
                 </label>
               </div>
+              {!autoRun.running && autoReason && (
+                <p className="cam-warn cam-disabled-why">{autoReason}</p>
+              )}
               <div className="cam-row">
                 {!autoRun.running ? (
                   <button
                     type="button"
                     className="cam-btn cam-primary cam-grow"
-                    disabled={machineConn !== 'connected' || !live(calibSlot) || !(autoSpreadMm > 0)}
+                    disabled={!!autoReason}
                     onClick={() => {
                       runAuto().catch(() => {})
                     }}
-                    title={
-                      machineConn !== 'connected'
-                        ? t('cam.bt.auto.btnNeedConn', 'Connect the machine first')
-                        : !live(calibSlot)
-                          ? t('cam.bt.auto.btnNeedCam', 'Start this camera first')
-                          : t('cam.bt.auto.btnTip', 'Jog a grid, auto-detect the tool, and solve the calibration')
-                    }
+                    title={autoReason ?? t('cam.bt.auto.btnTip', 'Jog a grid, auto-detect the tool, and solve the calibration')}
                   >
-                    {t('cam.bt.auto.btn', '⟳ Auto-calibrate ({n} pts)', { n: autoPointCount })}
+                    <Icon name="jog" size={14} />
+                    {t('cam.bt.auto.btn', 'Auto-calibrate ({n} pts)', { n: autoPointCount })}
                   </button>
                 ) : (
                   <button
@@ -1731,13 +1923,14 @@ export function CameraPanel() {
                     onClick={abortAuto}
                     title={t('cam.bt.auto.abortTip', 'Stop the calibration and cancel the jog')}
                   >
-                    {t('cam.bt.auto.abort', '■ Abort')}
+                    <Icon name="stop" size={13} />
+                    {t('cam.bt.auto.abort', 'Abort')}
                   </button>
                 )}
               </div>
               {autoRun.running && autoRun.progress && (
                 <p className="cam-hint cam-pending cam-auto-progress" role="status">
-                  {autoRun.progress.message}
+                  {progressLabel(autoRun.progress)}
                 </p>
               )}
               {!autoRun.running && autoRun.done && (
@@ -1781,21 +1974,23 @@ export function CameraPanel() {
 
           {method === 'machine' && (
             <div className="cam-method">
-              {!machineReady ? (
+              {!machineReady && (
                 <p className="cam-warn">
                   {t(
                     'cam.bt.mm.notConnected',
                     'Machine not connected. Connect in the Controller tab to use machine-motion calibration — it reads live work X/Y as you jog.',
                   )}
                 </p>
-              ) : (
+              )}
+              <details className="cam-guide">
+                <summary>{t('cam.bt.howItWorks', 'How this works')}</summary>
                 <p className="cam-hint">
                   {t(
                     'cam.bt.mm.guide',
                     'Aim a camera at the bed so the machine’s tool is visible in the feed above. Then, for ≥4 spread-out spots: jog the tool there (Controller jog pad), press “Add point”, and click the tool’s tip in the image. Then “Solve”.',
                   )}
                 </p>
-              )}
+              </details>
               <div className="cam-row">
                 <button
                   type="button"
@@ -1804,7 +1999,8 @@ export function CameraPanel() {
                   onClick={addMachinePoint}
                   title={t('cam.bt.mm.addTip', 'Record the current machine work X/Y, then click the tool tip')}
                 >
-                  {t('cam.bt.mm.add', '＋ Add point (X{x} Y{y})', {
+                  <Icon name="add" size={14} />
+                  {t('cam.bt.mm.add', 'Add point (X{x} Y{y})', {
                     x: wpos.x.toFixed(1),
                     y: wpos.y.toFixed(1),
                   })}
@@ -1816,11 +2012,11 @@ export function CameraPanel() {
                   onClick={solveMachine}
                   title={t('cam.bt.mm.solveTip', 'Solve the camera↔machine homography from the collected pairs')}
                 >
-                  {t('cam.bt.mm.solve', '✓ Solve ({n}/4)', { n: mmPairs.length })}
+                  {t('cam.bt.mm.solve', 'Solve ({n}/4)', { n: mmPairs.length })}
                 </button>
                 <IconButton
                   className="cam-icon-btn"
-                  icon="↺"
+                  iconName="close"
                   label={t('cam.bt.mm.clear', 'Clear collected points')}
                   disabled={mmPairs.length === 0 && !pendingWorld}
                   onClick={clearMachinePoints}
@@ -1830,7 +2026,7 @@ export function CameraPanel() {
                 <p className="cam-hint cam-pending">
                   {t(
                     'cam.bt.mm.pending',
-                    '↳ Now click your tool’s TIP in the camera image above — the very end of the bit / pen / nozzle, where it touches near the bed. That pairs that pixel with the machine position X{x} Y{y} you just recorded. Then jog elsewhere and repeat.',
+                    'Now click your tool’s TIP in the camera image above — the very end of the bit / pen / nozzle, where it touches near the bed. That pairs that pixel with the machine position X{x} Y{y} you just recorded. Then jog elsewhere and repeat.',
                     {
                       x: pendingWorld[0].toFixed(1),
                       y: pendingWorld[1].toFixed(1),
@@ -1857,12 +2053,20 @@ export function CameraPanel() {
                 </p>
               ) : (
                 <>
-                  <p className="cam-hint">
-                    {t(
-                      'cam.bt.qr.guide',
-                      'Lay the printed sheet flat on the bed with all 4 TARGET codes visible, then scan.',
-                    )}
-                  </p>
+                  <details className="cam-guide">
+                    <summary>{t('cam.bt.howItWorks', 'How this works')}</summary>
+                    <p className="cam-hint">
+                      {t(
+                        'cam.bt.qr.guide',
+                        'Lay the printed sheet flat on the bed with all 4 TARGET codes visible, then scan.',
+                      )}
+                    </p>
+                  </details>
+                  {!live(calibSlot) && (
+                    <p className="cam-warn cam-disabled-why">
+                      {t('cam.bt.qr.needCam', 'Start this camera first.')}
+                    </p>
+                  )}
                   <div className="cam-row">
                     <button
                       type="button"
@@ -1873,7 +2077,8 @@ export function CameraPanel() {
                       }}
                       title={t('cam.bt.qr.scanTip', 'Scan the frame for the 4 TARGET QR codes and solve')}
                     >
-                      {t('cam.bt.qr.scan', '⛶ Scan QR & calibrate')}
+                      <Icon name="frame" size={14} />
+                      {t('cam.bt.qr.scan', 'Scan QR & calibrate')}
                     </button>
                     {qrFound != null && (
                       <span className="cam-raw" data-on={qrFound >= 4}>
@@ -1888,13 +2093,16 @@ export function CameraPanel() {
 
           {method === 'manual' && (
             <div className="cam-method">
-              <p className="cam-hint">
-                {t(
-                  'cam.bt.manual.guide',
-                  'Click the 4 bed corners in the frame above in this order: top-left, top-right, bottom-right, bottom-left. World corners come from the bed size ({w}×{d} mm).',
-                  { w: bed.width, d: bed.depth },
-                )}
-              </p>
+              <details className="cam-guide">
+                <summary>{t('cam.bt.howItWorks', 'How this works')}</summary>
+                <p className="cam-hint">
+                  {t(
+                    'cam.bt.manual.guide',
+                    'Click the 4 bed corners in the frame above in this order: top-left, top-right, bottom-right, bottom-left. World corners come from the bed size ({w}×{d} mm).',
+                    { w: bed.width, d: bed.depth },
+                  )}
+                </p>
+              </details>
               <div className="cam-corner-dots">
                 {BED_CORNER_ORDER.map((label, i) => (
                   <span
@@ -1913,11 +2121,11 @@ export function CameraPanel() {
                   onClick={solveManual}
                   title={t('cam.bt.manual.solveTip', 'Solve the homography from the 4 clicked bed corners')}
                 >
-                  {t('cam.bt.manual.solve', '✓ Solve ({n}/4)', { n: cornerClicks.length })}
+                  {t('cam.bt.manual.solve', 'Solve ({n}/4)', { n: cornerClicks.length })}
                 </button>
                 <IconButton
                   className="cam-icon-btn"
-                  icon="↺"
+                  iconName="close"
                   label={t('cam.bt.manual.clear', 'Clear clicked corners')}
                   disabled={cornerClicks.length === 0}
                   onClick={clearCorners}
@@ -1936,21 +2144,19 @@ export function CameraPanel() {
               'Tell karmyogi where the workpiece sits so it can fit-check the design. Detect it from STOCK stickers, or set the size by hand.',
             )}
           </p>
+          {detectQrReason && <p className="cam-warn cam-disabled-why">{detectQrReason}</p>}
           <div className="cam-row">
             <button
               type="button"
               className="cam-btn cam-grow"
-              disabled={!qrSupported || !calib.cameras[0].H || !live(0)}
+              disabled={!!detectQrReason}
               onClick={() => {
                 detectJobFromQr().catch(() => {})
               }}
-              title={
-                qrSupported
-                  ? t('cam.bt.job.detectTip', 'Detect the workpiece from STOCK QR stickers (needs Cam 1 calibrated)')
-                  : t('cam.bt.m.qrUnavailable', 'BarcodeDetector unavailable in this browser')
-              }
+              title={detectQrReason ?? t('cam.bt.job.detectTip', 'Detect the workpiece from STOCK QR stickers (needs Cam 1 calibrated)')}
             >
-              {t('cam.bt.job.detect', '⛶ Detect from stock QR')}
+              <Icon name="frame" size={14} />
+              {t('cam.bt.job.detect', 'Detect from stock QR')}
             </button>
           </div>
           <div className="cam-fields">
@@ -1998,22 +2204,21 @@ export function CameraPanel() {
               onClick={applyManualJob}
               title={t('cam.bt.job.setTip', 'Place a job of this size at the bed center')}
             >
-              {t('cam.bt.job.setBtn', '▣ Set job size')}
+              <Icon name="frame" size={14} />
+              {t('cam.bt.job.setBtn', 'Set job size')}
             </button>
             <button
               type="button"
               className="cam-btn cam-grow"
-              disabled={!canHull}
+              disabled={!!hullReason}
               onClick={estimateHeight}
-              title={
-                canHull
-                  ? t('cam.bt.hull.tip', 'Estimate stock height by two-camera shape-from-silhouette')
-                  : t('cam.bt.hull.need', 'Needs both cameras calibrated + live with empty-bed references')
-              }
+              title={hullReason ?? t('cam.bt.hull.tip', 'Estimate stock height by two-camera shape-from-silhouette')}
             >
-              {t('cam.bt.hull.btn', '⛰ Estimate height (visual hull)')}
+              <Icon name="probe" size={14} />
+              {t('cam.bt.hull.btn', 'Estimate height (visual hull)')}
             </button>
           </div>
+          {hullReason && <p className="cam-warn cam-disabled-why">{hullReason}</p>}
           {calib.jobRect && (
             <p className="cam-hint cam-job-readout">
               {t('cam.bt.job.current', 'Current job: {w}×{d} mm{h}', {
@@ -2045,17 +2250,17 @@ export function CameraPanel() {
                   </span>
                   <span className="cam-clip-size">{fmtBytes(c.bytes)}</span>
                   <a
-                    className="cam-btn cam-mini"
+                    className="cam-btn cam-mini cam-clip-dl"
                     href={c.url}
                     download={c.name}
                     title={t('cam.clips.download', 'Download {name}', { name: c.name })}
                     aria-label={t('cam.clips.download', 'Download {name}', { name: c.name })}
                   >
-                    ↓
+                    <Icon name="download" size={14} />
                   </a>
                   <IconButton
                     className="cam-icon-btn cam-mini"
-                    icon="✕"
+                    iconName="trash"
                     label={t('cam.clips.remove', 'Remove from this list (does not delete a downloaded file)')}
                     onClick={() => removeClip(c.id)}
                   />

@@ -15,6 +15,7 @@
 import {
   sliceMesh,
   sliceToGcode,
+  estimatePrint,
   SliceCancelled,
   type StlMesh,
   type SliceWorkerInbound,
@@ -80,7 +81,8 @@ ctx.onmessage = (e: MessageEvent<SliceWorkerInbound>) => {
     let lines = 0;
     for (let i = 0, n = gcode.length; i < n; i++) if (gcode.charCodeAt(i) === 10) lines++;
 
-    post({ type: 'done', gcode, layers: slice.layerCount, lines, warnings: slice.warnings });
+    const estimate = estimatePrint(slice, data.gcodeParams);
+    post({ type: 'done', gcode, layers: slice.layerCount, lines, warnings: slice.warnings, estimate });
   } catch (err) {
     if (err instanceof SliceCancelled || cancelled) {
       post({ type: 'error', message: 'Slicing cancelled.', cancelled: true });

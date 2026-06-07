@@ -126,6 +126,28 @@ textarea { min-height: auto; }
   backdrop-filter: blur(4px);
 }
 
+/* ---- Skip link (keyboard a11y) ----
+   Lets keyboard / screen-reader users jump straight to the main panel content,
+   past the top bar + tab strip. Visually hidden until focused. The shell can
+   render `<a class="skip-link" href="#km-main">…` ahead of the chrome and tag
+   the panel host with `id="km-main"`. */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 2000;
+  padding: 8px 14px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 0 0 6px 6px;
+  text-decoration: none;
+  transition: top 0.12s ease;
+}
+.skip-link:focus { top: 0; outline: 2px solid var(--accent-fg); outline-offset: 2px; }
+
 /* Mobile / narrow layout: stacked panel with a tab strip (same panels) */
 .mobile-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .mobile-tabs {
@@ -133,35 +155,77 @@ textarea { min-height: auto; }
   gap: 4px;
   padding: 6px 8px;
   overflow-x: auto;
+  overflow-y: hidden;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
   -webkit-overflow-scrolling: touch;
+  /* Keep the scroll thumb out of the way on touch (the strip itself scrolls). */
+  scrollbar-width: none;
 }
+.mobile-tabs::-webkit-scrollbar { height: 0; }
 .mobile-tab {
   flex: 0 0 auto;
+  /* >=36px touch target on every axis (height via min-height, width via padding). */
   min-height: 38px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px 14px;
   border-radius: 18px;
   white-space: nowrap;
   background: var(--bg-input);
 }
 .mobile-tab.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.mobile-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mobile-panel { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
 .mobile-panel > * { height: 100%; }
 
-/* Touch-friendly controls on small screens — restore ≥36px tap targets */
+/* The active mobile panel is a tab panel for the selected `.mobile-tab` — when
+   the shell wires `role="tabpanel"` + `aria-labelledby`, give it a focus ring so
+   keyboard users see where focus landed after switching tabs. */
+.mobile-panel[role='tabpanel']:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Touch-friendly controls on small screens — restore ≥40px tap targets */
 @media (max-width: 768px) {
-  button, input, select { min-height: 38px; }
+  button, input, select { min-height: 40px; }
   textarea { min-height: auto; }
   /* Let the bar wrap to multiple rows instead of overflowing horizontally —
-     the connection cluster (firmware/Connect/Mock/Machines/bridge…) is wide. */
-  .topbar { gap: 8px; padding: 6px 8px; flex-wrap: wrap; }
-  .topbar .brand { font-size: 15px; }
+     the connection cluster (firmware/Connect/Mock/Machines/bridge…) is wide.
+     Brand stays on row 1; the spacer pushes the connection + action clusters to
+     wrap onto following rows rather than clip. */
+  .topbar {
+    gap: 8px;
+    padding: 6px 8px;
+    flex-wrap: wrap;
+    /* never let a child force the page wider than the viewport */
+    max-width: 100vw;
+  }
+  .topbar .brand { font-size: 15px; flex: 0 0 auto; }
   .km-conn { flex-wrap: wrap; }
-  /* The "by hjLabs · MIT" credit is in the About modal too — drop it on phones
-     to reclaim top-bar width. */
-  .topbar .brand-by { display: none; }
+  /* The "by hjLabs · MIT" credit and the "CAD/CAM workbench" subtitle are in the
+     About modal too — drop both on phones to reclaim top-bar width. */
+  .topbar .brand-by,
+  .topbar .brand-subtitle { display: none; }
+}
+
+/* Phones (~400px and below): tighten spacing further so the brand + connection +
+   action rows reflow without any horizontal overflow. The spacer collapses so the
+   clusters can use the full width. */
+@media (max-width: 400px) {
+  .topbar { gap: 6px; padding: 5px 6px; }
+  .topbar .brand { font-size: 14px; }
+  /* Drop the flex:1 spacer to zero so it doesn't eat a whole wrapped row. */
+  .topbar .spacer { flex: 0 0 0; width: 0; }
+  /* Shared horizontal button rows wrap instead of overflowing the viewport. */
+  .km-btn-row,
+  .btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .mobile-tab { padding: 6px 10px; }
 }
 
 /* Bind dockview theme vars to our tokens */
@@ -232,3 +296,27 @@ textarea { min-height: auto; }
   .dockview-theme-karmyogi .dv-tab { padding: 0 10px; }
   .dockview-theme-karmyogi .dv-tab .dv-default-tab .dv-default-tab-action { padding: 6px; }
 }
+
+/* ---- Panel lazy-load (Suspense) indicator: spinner + label ---- */
+.km-panel-loading {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--fg-muted, #9aa0a6);
+  font-size: 13px;
+  padding: 16px;
+}
+.km-panel-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid var(--border, #2a2f36);
+  border-top-color: var(--accent, #2dd4bf);
+  animation: km-panel-spin 0.8s linear infinite;
+}
+.km-panel-loading-label { letter-spacing: 0.02em; }
+@keyframes km-panel-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .km-panel-spinner { animation-duration: 1.8s; } }

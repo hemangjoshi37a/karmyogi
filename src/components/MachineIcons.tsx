@@ -125,6 +125,40 @@ export function SpindleCcwIcon(p: IconProps) {
   )
 }
 
+/* ---------------- Controller — Overrides ---------------- */
+
+/** Plus — increase an override by a step. */
+export function PlusIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </Svg>
+  )
+}
+
+/** Minus — decrease an override by a step. */
+export function MinusIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </Svg>
+  )
+}
+
+/**
+ * Reset-to-100% — a small circular arrow (reuse of the restart loop, smaller)
+ * for the "back to 100%" override buttons. Pairs visually with Plus/Minus.
+ */
+export function OvResetIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M19 12a7 7 0 1 1-2-4.9" />
+      <path d="M17.5 3.5V7.2h-3.7" />
+    </Svg>
+  )
+}
+
 /* ---------------- Coordinates panel ---------------- */
 
 /**

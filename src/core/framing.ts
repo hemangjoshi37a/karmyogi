@@ -195,9 +195,13 @@ export function buildFrameProgram(
       `(bounds X${f(bounds.min.x)}..${f(bounds.max.x)} Y${f(bounds.min.y)}..${f(bounds.max.y)})`,
     );
   }
-  // Modal setup: mm, absolute. (No spindle / no laser — pure framing.)
+  // Modal setup: mm, absolute, feed/min, XY plane. (No spindle / no laser —
+  // pure framing.) G94 G17 match every other emitter so a stray G93/non-XY
+  // modal state from a prior program can't misread the trace feed.
   out.push('G21');
   out.push('G90');
+  out.push('G94');
+  out.push('G17');
   // Guaranteed safe-Z lift BEFORE any XY travel.
   out.push(`G0 Z${f(o.safeZ)}`);
   // Rapid to the first corner at safe height.
@@ -288,6 +292,8 @@ export function frameProgram(bbox: BBox, opts: FrameOptions): string {
   // ---- Header -----------------------------------------------------------
   o.push('G21'); // mm
   o.push('G90'); // absolute
+  o.push('G94'); // feed per minute
+  o.push('G17'); // XY plane
   o.push('M5 S0'); // beam OFF at start (safety)
 
   // Position at the first corner with the beam OFF regardless of mode.

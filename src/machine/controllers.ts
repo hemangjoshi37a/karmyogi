@@ -270,6 +270,32 @@ export const CONTROLLER_LIST: ControllerProfile[] = [
 
 export const DEFAULT_CONTROLLER_KIND: ControllerKind = 'grbl'
 
+/**
+ * i18n keys for each profile's `notes` string. Kept here (not on the profile
+ * objects) because the shared `ControllerProfile` type lives in another module
+ * and the English `notes` field stays the source-of-truth + fallback. Resolve at
+ * the UI boundary with `t(notesKeyFor(kind), profile.notes)`.
+ */
+const CONTROLLER_NOTES_KEYS: Record<ControllerKind, string> = {
+  grbl: 'controller.grbl.notes',
+  fluidnc: 'controller.fluidnc.notes',
+  grblhal: 'controller.grblhal.notes',
+  marlin: 'controller.marlin.notes',
+  smoothieware: 'controller.smoothieware.notes',
+  masso: 'controller.masso.notes',
+  ruida: 'controller.ruida.notes',
+  ezcad: 'controller.ezcad.notes',
+  fscut: 'controller.fscut.notes',
+}
+
+/** i18n key for a controller's `notes`, falling back to GRBL's for unknown kinds. */
+export function notesKeyFor(kind: ControllerKind | string | null | undefined): string {
+  if (kind && kind in CONTROLLER_NOTES_KEYS) {
+    return CONTROLLER_NOTES_KEYS[kind as ControllerKind]
+  }
+  return CONTROLLER_NOTES_KEYS[DEFAULT_CONTROLLER_KIND]
+}
+
 /** Resolve a (possibly unknown / corrupted) kind to a profile, falling back to GRBL. */
 export function profileFor(kind: ControllerKind | string | null | undefined): ControllerProfile {
   if (kind && kind in CONTROLLER_PROFILES) {

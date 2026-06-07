@@ -73,12 +73,48 @@ export function defaultSolderingParams(overrides: Partial<SolderingParams> = {})
   };
 }
 
+/**
+ * Clamp a decimals value into the range `toFixed()` accepts (0..6 here, well
+ * within the spec's 0..100). An out-of-range value passed to `toFixed()` throws
+ * a RangeError, which — reached from a render-phase useMemo — white-screens the
+ * panel. Clamping here is defence-in-depth alongside the UI input/load guards.
+ */
+function clampDecimals(decimals: number): number {
+  if (!Number.isFinite(decimals)) return 3;
+  return Math.min(6, Math.max(0, Math.floor(decimals)));
+}
+
 /** Formatted number, never "-0.000" — mirrors the C++ fmt() and the emitter. */
 function fmt(value: number, decimals: number): string {
-  const snap = 0.5 * Math.pow(10, -decimals);
+  const d = clampDecimals(decimals);
+  const snap = 0.5 * Math.pow(10, -d);
   if (Math.abs(value) < snap) value = 0;
   if (value === 0) value = 0; // collapse a residual signed zero
-  return value.toFixed(decimals);
+  return value.toFixed(d);
+}
+
+/**
+ * Rough cycle-time estimate (seconds) for a soldering run. Sums the per-point
+ * plunge time (Free-Z → Touch-Z at the plunge feed), the feeder ON dwell, and
+ * the optional settle dwell. Rapids/XY travel are ignored (negligible vs the
+ * dwells on a desktop machine); the result is a conservative lower bound the
+ * operator can use to gauge run length. Pure (no rounding side effects).
+ */
+export function estimateSolderingSeconds(
+  points: SolderPoint[],
+  params: Partial<SolderingParams> = {},
+): number {
+  const p = defaultSolderingParams(params);
+  const plungeFeed = Math.max(0, p.plungeFeed); // mm/min
+  const settle = Math.max(0, p.settleSeconds);
+  let seconds = 0;
+  for (const pt of points) {
+    const drop = Math.abs(pt.freeZ - pt.touchZ); // mm lowered + raised
+    if (plungeFeed > 1e-9) seconds += (drop / plungeFeed) * 60; // plunge (down)
+    seconds += Math.max(0, pt.feedSeconds); // feeder ON
+    seconds += settle; // settle dwell
+  }
+  return seconds;
 }
 
 /**
@@ -104,15 +140,21 @@ export function generateSoldering(points: SolderPoint[], params: Partial<Solderi
   let n = 0;
   for (const pt of points) {
     ++n;
+    // Pre-travel raise must clear the SAFE height: travel XY at max(freeZ,safeZ)
+    // so a per-point freeZ set BELOW safeZ never drags the tip across the board
+    // under the guaranteed-clear height. freeZ stays the post-solder retract.
+    const travelZ = Math.max(pt.freeZ, p.safeZ);
     const xy = `G0 X${fmt(pt.x, d)} Y${fmt(pt.y, d)}`;
     const feedOn = `M3 S${fmt(p.feederRPM, d)}`;
     const feed = `G4 P${fmt(pt.feedSeconds, d)}`;
-    const touch = `G1 Z${fmt(pt.touchZ, d)} F${fmt(p.plungeFeed, d)}`;
+    // Plunge feed floored to >= 1 mm/min: an F0 (plungeFeed 0) errors/stalls GRBL.
+    const touch = `G1 Z${fmt(pt.touchZ, d)} F${fmt(Math.max(1, p.plungeFeed), d)}`;
+    const preRaise = `G0 Z${fmt(travelZ, d)}`;
     const raise = `G0 Z${fmt(pt.freeZ, d)}`;
 
     if (pt.type === SolderFeedType.PreSolder) {
       o.push(`(Point ${n}: pre-solder, feed ${fmt(pt.feedSeconds, d)}s)`);
-      o.push(raise); // ensure raised to free Z
+      o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
       o.push(xy); // move above pad at free Z
       o.push(feedOn); // pre-feed wire onto tip
       o.push(feed);
@@ -123,7 +165,7 @@ export function generateSoldering(points: SolderPoint[], params: Partial<Solderi
     } else {
       // TouchDown
       o.push(`(Point ${n}: touch-down, feed ${fmt(pt.feedSeconds, d)}s)`);
-      o.push(raise); // ensure raised to free Z
+      o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
       o.push(xy); // move above pad at free Z
       o.push(touch); // touch pad first
       o.push(feedOn); // feed wire while in contact

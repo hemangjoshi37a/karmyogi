@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AiError,
   buildSystemPrompt,
+  DEFAULT_RELAY_URL,
   extractGcode,
   generate,
   lintGcode,
   parseCookieFile,
+  type AiErrorCode,
   type ChatMessage,
+  type LintWarning,
   type Provider,
 } from '../core/aiGcode'
 import {
@@ -19,6 +23,7 @@ import { useBed } from '../store/bed'
 import { useProgram } from '../store'
 import { useT } from '../i18n'
 import { IconButton } from '../components/IconButton'
+import { Icon } from '../components/Icons'
 import '../styles/ai.css'
 
 /**
@@ -70,6 +75,88 @@ const EXAMPLE_PROMPT =
   'Engrave the text "HELLO" 20mm tall centered on the bed, 0.3mm deep, single-stroke. ' +
   'Use a 1mm engraving bit, feed 400 mm/min, plunge 150 mm/min.'
 
+/** The `t()` translator returned by useT(). */
+type T = (key: string, english: string, vars?: Record<string, string | number>) => string
+
+/** Is a relay actually configured for this deployment? Session/cookie mode only
+ *  works through a relay (CORS + HttpOnly cookies make the in-browser path
+ *  impossible), so the whole mode is hidden unless one is present. */
+const RELAY_CONFIGURED = DEFAULT_RELAY_URL.trim().length > 0
+
+/**
+ * Translate an AI-core error (an {@link AiError} carries a stable `code` +
+ * interpolation params; plain Errors fall through to their raw message).
+ */
+function translateError(t: T, err: unknown): string {
+  if (err instanceof AiError) {
+    const p = err.params ?? {}
+    const byCode: Record<AiErrorCode, string> = {
+      cancelled: t('ai.err.cancelled', 'Request cancelled.'),
+      network: t(
+        'ai.err.network',
+        'Could not reach {where}. This is usually no internet connection, a browser extension blocking the request, or a CORS block. Check your connection and try again.',
+        p,
+      ),
+      authRejected: t(
+        'ai.err.authRejected',
+        '{where} rejected the credentials (HTTP {status}). Check your API key — or, in session mode, that the pasted cookie is fresh (re-export it; sessions expire) and the proxy forwards it correctly.',
+        p,
+      ),
+      rateLimit: t(
+        'ai.err.rateLimit',
+        '{where} rate-limit / quota exceeded (HTTP 429). You may be out of credits or sending too fast. {detail}',
+        p,
+      ),
+      httpError: t('ai.err.httpError', '{where} API error (HTTP {status}). {detail}', p),
+      emptyResponse: t('ai.err.emptyResponse', '{where} returned an empty response.', p),
+      noCookie: t('ai.err.noCookie', 'Paste your session cookie first.'),
+      noKey: t('ai.err.noKeyShort', 'Add your API key first.'),
+      noRelay: t(
+        'ai.err.noRelay',
+        'Session mode needs a relay/proxy URL — configure VITE_AI_RELAY_URL or enter a proxy URL.',
+      ),
+    }
+    return byCode[err.code]
+  }
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** Translate a lint warning by its stable code (falls back to the English message). */
+function translateWarning(t: T, w: LintWarning): string {
+  const p = w.params ?? {}
+  switch (w.code) {
+    case 'preamble':
+      return t('ai.lint.preamble', 'Prepended missing safety preamble: {codes}.', p)
+    case 'xRange':
+      return t('ai.lint.xRange', 'X{v} is outside the bed (X must be {lo}..{hi} mm): {line}', p)
+    case 'yRange':
+      return t('ai.lint.yRange', 'Y{v} is outside the bed (Y must be {lo}..{hi} mm): {line}', p)
+    case 'zMax':
+      return t('ai.lint.zMax', 'Z{v} is above the work height (Z max {hi} mm): {line}', p)
+    case 'feedHigh':
+      return t('ai.lint.feedHigh', 'Feed F{feed} mm/min looks very high — verify it is safe: {line}', p)
+    case 'feedNonPositive':
+      return t('ai.lint.feedNonPositive', 'Feed F{feed} is not positive: {line}', p)
+    case 'rapidLowZ':
+      return t(
+        'ai.lint.rapidLowZ',
+        'A rapid XY travel happens while Z may be at/below the surface — make sure the tool retracts to a safe Z before rapids.',
+      )
+    case 'noSafeRetract':
+      return t(
+        'ai.lint.noSafeRetract',
+        'No safe-Z retract (a positive Z move) found — verify the tool lifts above the stock before/after travel.',
+      )
+    case 'endLowZ':
+      return t(
+        'ai.lint.endLowZ',
+        'Program may end with Z below the surface — add a safe-Z retract at the end.',
+      )
+    default:
+      return w.message
+  }
+}
+
 export function AiGcodePanel() {
   const t = useT()
 
@@ -84,6 +171,7 @@ export function AiGcodePanel() {
   const setApiKey = useAiGcode((s) => s.setApiKey)
   const setModel = useAiGcode((s) => s.setModel)
   const setSessionCookie = useAiGcode((s) => s.setSessionCookie)
+  const setProxyUrl = useAiGcode((s) => s.setProxyUrl)
   const setLastPrompt = useAiGcode((s) => s.setLastPrompt)
   const pushHistory = useAiGcode((s) => s.pushHistory)
   const storedPrompt = useAiGcode((s) => s.lastPrompt)
@@ -106,9 +194,17 @@ export function AiGcodePanel() {
   const [showConfig, setShowConfig] = useState(chat.length === 0)
   const [loadedId, setLoadedId] = useState<string | null>(null)
   const [cookieImportNote, setCookieImportNote] = useState<string | null>(null)
+  const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const cookieFileRef = useRef<HTMLInputElement | null>(null)
   const threadRef = useRef<HTMLDivElement | null>(null)
+  // Monotonic counter so each "Load into Program" gets its OWN program section
+  // (the store upserts by name) and multiple loads don't overwrite each other.
+  const loadSeqRef = useRef(0)
+
+  // Session/cookie auth can ONLY work through a configured relay; if none is set
+  // for this deployment, the mode is hidden and we hard-pin to key mode.
+  const effectiveAuthMode: AuthMode = RELAY_CONFIGURED ? authMode : 'key'
 
   const info = PROVIDER_INFO[provider]
   const apiKey = apiKeys[provider]
@@ -116,11 +212,11 @@ export function AiGcodePanel() {
   const sessionCookie = sessionCookies[provider]
   const proxyUrl = proxyUrls[provider]
   const hasKey = apiKey.trim().length > 0
-  // Session mode just needs a pasted cookie — the relay is configured for the
-  // deployment, the user doesn't set it.
   const hasSession = sessionCookie.trim().length > 0
   /** Are the credentials for the current auth mode present? */
-  const ready = authMode === 'key' ? hasKey : hasSession
+  const ready = effectiveAuthMode === 'key' ? hasKey : hasSession
+  /** The model dropdown is on "Custom…" (free-text id not in the preset list). */
+  const isCustomModel = !MODEL_OPTIONS[provider].includes(model)
 
   const bed = useMemo(
     () => ({ width: bedW, depth: bedD, height: bedH }),
@@ -136,12 +232,15 @@ export function AiGcodePanel() {
   const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 
   const run = async (overridePrompt?: string) => {
+    // Hard re-entrancy guard: a double-click (or Enter + click) must not fire
+    // two concurrent requests.
+    if (busy) return
     const p = (overridePrompt ?? prompt).trim()
     setError(null)
     setLoadedId(null)
     if (!ready) {
       setError(
-        authMode === 'key'
+        effectiveAuthMode === 'key'
           ? t(
               'ai.err.noKey',
               'Add your {provider} API key above first — the app needs it to call the model.',
@@ -186,7 +285,7 @@ export function AiGcodePanel() {
         system,
         messages: priorMessages,
         signal: ctrl.signal,
-        mode: authMode,
+        mode: effectiveAuthMode,
         sessionCookie,
         proxyUrl,
       })
@@ -202,7 +301,13 @@ export function AiGcodePanel() {
       })
       pushHistory({ prompt: p, provider, model, at: Date.now() })
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(translateError(t, err))
+      // On a CANCELLED request, restore the prompt into the composer so the
+      // user doesn't lose what they typed.
+      if (err instanceof AiError && err.code === 'cancelled') {
+        setPrompt(p)
+        setLastPrompt(p)
+      }
     } finally {
       setBusy(false)
       abortRef.current = null
@@ -246,8 +351,24 @@ export function AiGcodePanel() {
 
   const loadIntoProgram = (turn: ChatTurn) => {
     if (!turn.gcode || !turn.gcode.trim()) return
-    setProgram(t('ai.programName', 'AI G-code'), turn.gcode)
+    // Give each load a UNIQUE section name (the program store upserts by name),
+    // so loading several AI replies keeps each as its own section instead of
+    // overwriting the previous one.
+    const n = ++loadSeqRef.current
+    setProgram(t('ai.programName.n', 'AI G-code {n}', { n }), turn.gcode)
     setLoadedId(turn.id)
+  }
+
+  /** Copy G-code to the clipboard and surface a transient confirmation/failure. */
+  const copyGcode = async (turn: ChatTurn) => {
+    const code = turn.gcode ?? ''
+    try {
+      if (!navigator.clipboard) throw new Error('no clipboard')
+      await navigator.clipboard.writeText(code)
+      setCopyState({ id: turn.id, ok: true })
+    } catch {
+      setCopyState({ id: turn.id, ok: false })
+    }
   }
 
   // Keep the newest message in view as the conversation grows.
@@ -256,13 +377,18 @@ export function AiGcodePanel() {
     if (el) el.scrollTop = el.scrollHeight
   }, [chat.length, busy])
 
+  // Auto-clear the "Copied" / copy-failed confirmation after a moment.
+  useEffect(() => {
+    if (!copyState) return
+    const id = window.setTimeout(() => setCopyState(null), 2200)
+    return () => window.clearTimeout(id)
+  }, [copyState])
+
   return (
     <div className="ai-panel" aria-label={t('ai.aria.panel', 'AI G-code generator')}>
       {/* PROMINENT safety banner — AI output can be wrong/unsafe. */}
       <div className="ai-safety" role="note">
-        <span className="ai-safety-icon" aria-hidden="true">
-          ⚠
-        </span>
+        <Icon name="warning" className="ai-safety-icon" size={16} />
         <span>
           {t(
             'ai.safety',
@@ -304,40 +430,45 @@ export function AiGcodePanel() {
           </div>
         </div>
 
-        {/* Auth-mode toggle: API key (recommended) vs session cookie (advanced). */}
-        <div className="ai-field-block">
-          <label className="ai-label ai-auth-label">
-            {t('ai.auth.methodLabel', 'Authentication Method')}
-          </label>
-          <div className="ai-seg ai-seg-sub" role="tablist" aria-label={t('ai.authAria', 'Authentication method')}>
-            {(['key', 'session'] as AuthMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                role="tab"
-                aria-selected={authMode === m}
-                className="ai-seg-btn"
-                data-on={authMode === m ? 'true' : 'false'}
-                onClick={() => {
-                  setAuthMode(m)
-                  setError(null)
-                }}
-                title={
-                  m === 'key'
-                    ? t('ai.auth.keyTip', 'Use your own API key (recommended)')
-                    : t('ai.auth.sessionTip', 'Paste a logged-in session cookie via your own relay (advanced)')
-                }
-              >
-                {m === 'key'
-                  ? t('ai.auth.key', 'API key')
-                  : t('ai.auth.session', 'Login session')}
-              </button>
-            ))}
+        {/* Auth-mode toggle: API key (recommended) vs session cookie (advanced).
+            Session/cookie mode only works through a configured relay (CORS +
+            HttpOnly cookies make the in-browser path impossible), so the toggle
+            is shown ONLY when a relay is configured for this deployment. */}
+        {RELAY_CONFIGURED && (
+          <div className="ai-field-block">
+            <label className="ai-label ai-auth-label">
+              {t('ai.auth.methodLabel', 'Authentication Method')}
+            </label>
+            <div className="ai-seg ai-seg-sub" role="tablist" aria-label={t('ai.authAria', 'Authentication method')}>
+              {(['key', 'session'] as AuthMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="tab"
+                  aria-selected={authMode === m}
+                  className="ai-seg-btn"
+                  data-on={authMode === m ? 'true' : 'false'}
+                  onClick={() => {
+                    setAuthMode(m)
+                    setError(null)
+                  }}
+                  title={
+                    m === 'key'
+                      ? t('ai.auth.keyTip', 'Use your own API key (recommended)')
+                      : t('ai.auth.sessionTip', 'Paste a logged-in session cookie via your own relay (advanced)')
+                  }
+                >
+                  {m === 'key'
+                    ? t('ai.auth.key', 'API key')
+                    : t('ai.auth.session', 'Login session')}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </section>
 
-      {authMode === 'key' ? (
+      {effectiveAuthMode === 'key' ? (
         /* API key — masked. */
         <section className="ai-card">
           <label className="ai-label" htmlFor="ai-key">
@@ -358,7 +489,7 @@ export function AiGcodePanel() {
             <IconButton
               type="button"
               className="ai-icon-btn"
-              icon={showKey ? '🙈' : '👁'}
+              iconName={showKey ? 'eye-off' : 'eye'}
               onClick={() => setShowKey((v) => !v)}
               label={showKey ? t('ai.key.hide', 'Hide key') : t('ai.key.show', 'Show key')}
             />
@@ -366,7 +497,7 @@ export function AiGcodePanel() {
               <IconButton
                 type="button"
                 className="ai-icon-btn ai-icon-danger"
-                icon="✕"
+                iconName="close"
                 onClick={() => clearCredentials(provider)}
                 label={t('ai.creds.clearTip', 'Remove the stored {provider} key from this browser', {
                   provider: info.label,
@@ -409,7 +540,8 @@ export function AiGcodePanel() {
               rel="noreferrer noopener"
               title={t('ai.session.openTip', 'Open {site} in a new tab and log in', { site: info.site })}
             >
-              {t('ai.session.openLogin', '↗ Open {site}', { site: info.site })}
+              <Icon name="upload" size={14} />
+              {t('ai.session.openLogin', 'Open {site}', { site: info.site })}
             </a>
             <button
               type="button"
@@ -420,7 +552,8 @@ export function AiGcodePanel() {
                 'Import a cookie file you saved from a cookie extension (.txt or .json)',
               )}
             >
-              {t('ai.session.import', '⤓ Import cookie file')}
+              <Icon name="download" size={14} />
+              {t('ai.session.import', 'Import cookie file')}
             </button>
             <input
               ref={cookieFileRef}
@@ -465,6 +598,31 @@ export function AiGcodePanel() {
               'Your cookie stays in this browser (localStorage). If the session expires, paste a fresh one.',
             )}
           </p>
+
+          {/* Relay/proxy URL — required for session mode (the cookie is forwarded
+              to it as X-Session-Cookie; a direct browser call is CORS-blocked).
+              Defaults to the build-time VITE_AI_RELAY_URL; override for self-host. */}
+          <label className="ai-label ai-sublabel" htmlFor="ai-proxy">
+            {t('ai.session.proxyLabel', 'Relay / proxy URL')}
+          </label>
+          <input
+            id="ai-proxy"
+            className="ai-input ai-mono"
+            type="url"
+            value={proxyUrl}
+            placeholder={DEFAULT_RELAY_URL || 'https://your-relay.example.com'}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => setProxyUrl(provider, e.target.value)}
+            aria-label={t('ai.session.proxyAria', 'Relay / proxy URL')}
+          />
+          <p className="ai-note">
+            {t(
+              'ai.session.proxyNote',
+              'The pasted cookie is sent to this relay as X-Session-Cookie; it re-attaches it server-side. Leave blank to use the deployment default.',
+            )}
+          </p>
+
           {sessionCookie.trim() && (
             <div className="ai-row">
               <button
@@ -477,7 +635,8 @@ export function AiGcodePanel() {
                   { site: info.site },
                 )}
               >
-                {t('ai.creds.clearSession', '✕ Clear stored cookie')}
+                <Icon name="close" size={13} />
+                {t('ai.creds.clearSession', 'Clear stored cookie')}
               </button>
             </div>
           )}
@@ -493,7 +652,7 @@ export function AiGcodePanel() {
         onClick={() => setShowConfig((v) => !v)}
         title={t('ai.setup.tip', 'Model and machine-context settings')}
       >
-        <span aria-hidden="true">{showConfig ? '▾' : '▸'}</span>{' '}
+        <Icon name={showConfig ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
         {t('ai.setup.title', 'Model & context — {model} · bed {w}×{d} mm', {
           model,
           w: bedW,
@@ -508,7 +667,7 @@ export function AiGcodePanel() {
           <select
             id="ai-model"
             className="ai-input"
-            value={MODEL_OPTIONS[provider].includes(model) ? model : '__custom__'}
+            value={isCustomModel ? '__custom__' : model}
             onChange={(e) => {
               const v = e.target.value
               if (v !== '__custom__') setModel(provider, v)
@@ -524,18 +683,21 @@ export function AiGcodePanel() {
             <option value="__custom__">{t('ai.model.custom', 'Custom…')}</option>
           </select>
         </label>
-        <label>
-          {t('ai.model.custom', 'Custom…')}
-          <input
-            className="ai-input ai-mono"
-            type="text"
-            value={model}
-            placeholder={t('ai.model.customPlaceholder', 'custom model id')}
-            spellCheck={false}
-            onChange={(e) => setModel(provider, e.target.value)}
-            aria-label={t('ai.model.customAria', 'Custom model id')}
-          />
-        </label>
+        {/* The free-text model id only appears when "Custom…" is selected. */}
+        {isCustomModel && (
+          <label>
+            {t('ai.model.custom', 'Custom…')}
+            <input
+              className="ai-input ai-mono"
+              type="text"
+              value={model}
+              placeholder={t('ai.model.customPlaceholder', 'custom model id')}
+              spellCheck={false}
+              onChange={(e) => setModel(provider, e.target.value)}
+              aria-label={t('ai.model.customAria', 'Custom model id')}
+            />
+          </label>
+        )}
 
         {/* Read-only machine context summary. */}
         <div className="ai-context ai-fields-wide" role="group" aria-label={t('ai.ctx.aria', 'Machine context')}>
@@ -583,7 +745,7 @@ export function AiGcodePanel() {
             <IconButton
               type="button"
               className="ai-icon-btn ai-icon-danger"
-              icon="🗑"
+              iconName="trash"
               disabled={chat.length === 0 || busy}
               onClick={() => {
                 clearChat()
@@ -618,10 +780,8 @@ export function AiGcodePanel() {
                   <ul className="ai-warnings" aria-label={t('ai.out.warnAria', 'Safety lint warnings')}>
                     {m.warnings.map((w, i) => (
                       <li key={i} className={`ai-warn-item ${w.level}`}>
-                        <span aria-hidden="true">
-                          {w.level === 'error' ? '⛔' : w.level === 'warn' ? '⚠' : 'ℹ'}
-                        </span>{' '}
-                        {w.message}
+                        <Icon name={w.level === 'info' ? 'info' : 'warning'} size={13} className="ai-warn-icon" />{' '}
+                        {translateWarning(t, w)}
                       </li>
                     ))}
                   </ul>
@@ -641,23 +801,34 @@ export function AiGcodePanel() {
                           'Load this G-code into the Program tab so it shows in the Visualizer for review',
                         )}
                       >
-                        {t('ai.load', '↗ Load into Program')}
+                        <Icon name="upload" size={14} />
+                        {t('ai.load', 'Load into Program')}
                       </button>
                       <IconButton
                         type="button"
                         className="ai-icon-btn"
-                        icon="⧉"
-                        onClick={() => navigator.clipboard?.writeText(m.gcode ?? '').catch(() => {})}
+                        iconName="copy"
+                        onClick={() => copyGcode(m)}
                         label={t('ai.copyTip', 'Copy the G-code to the clipboard')}
                       />
                     </div>
                     {loadedId === m.id && (
                       <p className="ai-note ai-ok" role="status" aria-live="polite">
-                        ✓{' '}
                         {t(
                           'ai.loadedNote',
                           'Loaded into Program — open the Visualizer to review the toolpath before cutting.',
                         )}
+                      </p>
+                    )}
+                    {copyState?.id === m.id && (
+                      <p
+                        className={`ai-note ${copyState.ok ? 'ai-ok' : 'ai-error'}`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {copyState.ok
+                          ? t('ai.copied', 'Copied to clipboard.')
+                          : t('ai.copyFail', 'Could not copy — select the code and copy it manually.')}
                       </p>
                     )}
                   </>
@@ -681,7 +852,7 @@ export function AiGcodePanel() {
         {error && (
           <p className="ai-note ai-error" role="alert">
             {error}
-            {authMode === 'key' && !hasKey && (
+            {effectiveAuthMode === 'key' && !hasKey && (
               <>
                 {' '}
                 <a href={info.keyUrl} target="_blank" rel="noreferrer noopener">
@@ -716,7 +887,8 @@ export function AiGcodePanel() {
               onClick={cancel}
               title={t('ai.cancelTip', 'Cancel the in-flight request')}
             >
-              {t('ai.cancel', '■ Cancel')}
+              <Icon name="stop" size={13} />
+              {t('ai.cancel', 'Cancel')}
             </button>
           ) : (
             <button
@@ -725,9 +897,10 @@ export function AiGcodePanel() {
               onClick={() => run()}
               title={t('ai.sendTip', 'Send to {provider} (Enter)', { provider: info.label })}
             >
+              <Icon name={chat.length === 0 ? 'play' : 'chevron-right'} size={14} />
               {chat.length === 0
-                ? t('ai.generate', '✦ Generate G-code')
-                : t('ai.send', '➤ Send')}
+                ? t('ai.generate', 'Generate G-code')
+                : t('ai.send', 'Send')}
             </button>
           )}
         </div>

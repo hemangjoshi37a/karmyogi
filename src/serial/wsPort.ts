@@ -28,6 +28,68 @@ export interface WsPortOptions {
   connectTimeoutMs?: number
 }
 
+/**
+ * MIXED-CONTENT GUARD — a browser BLOCKS an insecure `ws://` connection from a
+ * page served over `https:` (mixed active content). Networked GRBL bridges
+ * (ESP3D / FluidNC / MKS DLC32) almost always expose plain `ws://` (no TLS), so
+ * the deployed (HTTPS) app simply cannot reach them — the socket fails with an
+ * opaque error and no console hint. Detect this up front and explain it clearly.
+ *
+ * Returns a human-readable reason string if `url` would be blocked from the
+ * current page, else null. `localhost`/`127.0.0.1` are exempt (browsers treat
+ * loopback as a secure context even over ws://).
+ */
+export function mixedContentReason(url: string): string | null {
+  if (typeof location === 'undefined') return null
+  const pageSecure = location.protocol === 'https:'
+  if (!pageSecure) return null
+  if (!/^ws:\/\//i.test(url)) return null // wss:// is fine from https
+  // Loopback is a secure context; ws:// to it is allowed.
+  let host = ''
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    host = ''
+  }
+  if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') {
+    return null
+  }
+  return (
+    'This controller uses ws:// (insecure), which the browser blocks from a secure ' +
+    '(https) page. Use USB or Bluetooth, connect to a wss:// controller, or run ' +
+    'karmyogi over http on your LAN to reach it.'
+  )
+}
+
+/**
+ * Normalize a user-typed endpoint into a `ws://`/`wss://` URL.
+ *
+ * Accepts: a bare host (`192.168.1.50`), host:port (`192.168.1.50:81`), a path
+ * (`esp32.local/ws`), or a full `ws(s)://…` URL. When no scheme is given we pick
+ * `wss://` if the page is https (so it isn't instantly blocked as mixed content)
+ * and `ws://` otherwise. `defaultPort` (ESP3D/FluidNC commonly 81) is appended
+ * when the input has no explicit port. A trailing `/` path is kept as-is.
+ */
+export function normalizeWsUrl(input: string, defaultPort = 81): string {
+  const raw = input.trim()
+  if (!raw) throw new Error('Enter a host or IP address.')
+  // Already a full ws(s):// URL — pass through untouched.
+  if (/^wss?:\/\//i.test(raw)) return raw
+  // Strip an accidental http(s):// the user may have pasted from a browser bar.
+  let rest = raw.replace(/^https?:\/\//i, '')
+  const scheme =
+    typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws'
+  // Split off a path (first '/').
+  const slash = rest.indexOf('/')
+  let authority = slash >= 0 ? rest.slice(0, slash) : rest
+  const path = slash >= 0 ? rest.slice(slash) : ''
+  // Append the default port if the authority has none (ignore IPv6 brackets).
+  const hasPort = /]:\d+$/.test(authority) || (!authority.includes(']') && /:\d+$/.test(authority))
+  if (!hasPort) authority = `${authority}:${defaultPort}`
+  rest = authority + path
+  return `${scheme}://${rest}`
+}
+
 export class WsPort implements PortLike {
   readable: ReadableStream<Uint8Array> | null = null
   writable: WritableStream<Uint8Array> | null = null
@@ -48,6 +110,11 @@ export class WsPort implements PortLike {
           `Telnet/raw-TCP controllers need a ws↔telnet bridge.`,
       )
     }
+    // Fail fast (with a clear explanation) if this ws:// would be blocked as
+    // mixed content from the current https page, rather than letting the socket
+    // throw an opaque error after the connect attempt.
+    const blocked = mixedContentReason(url)
+    if (blocked) throw new Error(blocked)
   }
 
   /** Open the WebSocket. `baudRate` is accepted for interface parity but ignored. */

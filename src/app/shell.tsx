@@ -14,7 +14,11 @@ import { NotificationBell } from '../components/NotificationBell'
 import { PanelLauncher } from '../components/PanelLauncher'
 import { LanguageSwitcher } from '../components/LanguageSwitcher'
 import { ConnectionControl } from '../components/ConnectionControl'
+import { UserChip } from '../auth/UserChip'
+import { setActiveTab } from '../track/activity'
 import { AboutModal } from '../components/AboutModal'
+import { Icon } from '../components/Icons'
+import { useMachine } from '../store'
 import { useT } from '../i18n'
 import { Modal } from '../components/Modal'
 import { MotionPanel } from '../panels/MotionPanel'
@@ -27,7 +31,7 @@ import '../styles/shell-extra.css'
 
 // CAM-mode + utility panels that share the left group as tabs by default.
 const LEFT_TABS = [
-  { id: 'cadcam', title: '3D Carving' },
+  { id: 'cadcam', title: '2D/3D Carving' },
   { id: 'writing', title: 'Writing' },
   { id: 'soldering', title: 'Soldering' },
   { id: 'pcb', title: 'PCB' },
@@ -217,6 +221,10 @@ export function Shell() {
         event.api.getPanel(spec.id)?.api.setTitle(t('tab.' + spec.id, spec.title))
       }
       event.api.onDidLayoutChange(scheduleSave)
+      // Report the active tab to the activity tracker for per-tab dwell time.
+      // (No-ops unless tracking is live.)
+      setActiveTab(event.api.activePanel?.id)
+      event.api.onDidActivePanelChange((panel) => setActiveTab(panel?.id))
       // Persist the reconciled layout so the add/remove sticks immediately.
       if (restored) scheduleSave()
     },
@@ -261,7 +269,7 @@ export function Shell() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
+      <header className="topbar" data-mobile={isMobile ? 'true' : undefined}>
         <span className="brand">
           <img
             className="brand-mark"
@@ -273,7 +281,7 @@ export function Shell() {
           />
           <span className="brand-word">karm<span className="accent">yogi</span></span>
         </span>
-        <span style={{ color: 'var(--fg-muted)' }}>{t('app.subtitle', 'CAD/CAM workbench')}</span>
+        <span className="brand-subtitle">{t('app.subtitle', 'CAD/CAM workbench')}</span>
         <span className="brand-by">
           by <a href="https://hjLabs.in" target="_blank" rel="noopener noreferrer">hjLabs.in</a>
           {' · '}
@@ -287,33 +295,66 @@ export function Shell() {
           </a>
         </span>
         <span className="spacer" />
-        <ConnectionControl
-          onOpenSettings={() => setShowMotion(true)}
-          onOpenProbe={() => setShowProbe(true)}
-        />
-        <span className="topbar-actions">
-          <PanelLauncher onOpenPanel={onOpenPanel} isPanelOpen={isPanelOpen} />
-          {!isMobile && <IconButton icon="↺" label="Reset dock layout to default" onClick={onReset} />}
-          <span className="zoom-group" title="UI zoom">
-            <IconButton icon="−" label="Zoom out" onClick={zoomOut} />
-            <button onClick={resetZoom} aria-label="Reset zoom" title="Reset zoom to 100%">
-              {Math.round(uiScale * 100)}%
-            </button>
-            <IconButton icon="+" label="Zoom in" onClick={zoomIn} />
+        {isMobile ? (
+          /* Mobile: a tight, single-row action strip — notifications, one compact
+             connection control (opens a sheet with the full ConnectionControl), and
+             a "⋯" menu for everything secondary. Nothing wraps to a second row. */
+          <span className="topbar-actions topbar-actions--mobile">
+            <NotificationBell />
+            <MobileConnectSheet
+              onOpenSettings={() => setShowMotion(true)}
+              onOpenProbe={() => setShowProbe(true)}
+            />
+            <MobileMore
+              moreLabel={t('topbar.more', 'More')}
+              zoomLabel={t('topbar.zoom', 'UI zoom')}
+              themeLabel={
+                theme === 'dark'
+                  ? t('topbar.theme.light', 'Light theme')
+                  : t('topbar.theme.dark', 'Dark theme')
+              }
+              aboutLabel={t('topbar.about', 'About karmyogi')}
+              theme={theme}
+              uiScale={uiScale}
+              onZoomIn={zoomIn}
+              onZoomOut={zoomOut}
+              onResetZoom={resetZoom}
+              onToggleTheme={toggleTheme}
+              onAbout={() => setShowAbout(true)}
+            />
           </span>
-          <NotificationBell />
-          <LanguageSwitcher />
-          <IconButton
-            icon="ⓘ"
-            label="About karmyogi (source, license, report a bug)"
-            onClick={() => setShowAbout(true)}
-          />
-          <IconButton
-            icon={theme === 'dark' ? '☀' : '☾'}
-            label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            onClick={toggleTheme}
-          />
-        </span>
+        ) : (
+          <>
+            <ConnectionControl
+              onOpenSettings={() => setShowMotion(true)}
+              onOpenProbe={() => setShowProbe(true)}
+            />
+            <span className="topbar-actions">
+              <PanelLauncher onOpenPanel={onOpenPanel} isPanelOpen={isPanelOpen} />
+              <IconButton icon="↺" label="Reset dock layout to default" onClick={onReset} />
+              <span className="zoom-group" title="UI zoom">
+                <IconButton icon="−" label="Zoom out" onClick={zoomOut} />
+                <button onClick={resetZoom} aria-label="Reset zoom" title="Reset zoom to 100%">
+                  {Math.round(uiScale * 100)}%
+                </button>
+                <IconButton icon="+" label="Zoom in" onClick={zoomIn} />
+              </span>
+              <NotificationBell />
+              <UserChip />
+              <LanguageSwitcher />
+              <IconButton
+                icon="ⓘ"
+                label="About karmyogi (source, license, report a bug)"
+                onClick={() => setShowAbout(true)}
+              />
+              <IconButton
+                icon={theme === 'dark' ? '☀' : '☾'}
+                label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                onClick={toggleTheme}
+              />
+            </span>
+          </>
+        )}
       </header>
       {isMobile ? (
         <MobileShell />
@@ -327,12 +368,15 @@ export function Shell() {
         </div>
       )}
       <Modal open={showMotion} title="Motion / GRBL Settings" onClose={() => setShowMotion(false)}>
-        <div style={{ height: '72vh' }}>
+        {/* Tall but bounded: 72vh of the modal body when there's room, and at
+            least 320px so the panel stays usable on short viewports — the modal
+            body (overflow:auto) scrolls anything that doesn't fit. */}
+        <div className="km-modal-pane">
           <MotionPanel />
         </div>
       </Modal>
       <Modal open={showProbe} title="Probe & Limits" onClose={() => setShowProbe(false)}>
-        <div style={{ height: '72vh' }}>
+        <div className="km-modal-pane">
           <ProbePanel />
         </div>
       </Modal>
@@ -342,6 +386,158 @@ export function Shell() {
         repoUrl={REPO_URL}
         issuesUrl={ISSUES_URL}
       />
+    </div>
+  )
+}
+
+/**
+ * Small hook: close `open` on outside-click / Escape. Shared by the mobile
+ * connect sheet and the "⋯" menu so they behave like the other top-bar popovers.
+ */
+function useDismissable(open: boolean, close: () => void) {
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (ev: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(ev.target as Node)) close()
+    }
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, close])
+  return wrapRef
+}
+
+interface MobileConnectSheetProps {
+  onOpenSettings: () => void
+  onOpenProbe: () => void
+}
+
+/**
+ * Mobile connection control: a compact pill (status dot + connection word + caret)
+ * that opens a dropdown SHEET holding the full `ConnectionControl` stacked
+ * vertically. This keeps the whole connect/firmware/Mock/Machines/Probe/Settings
+ * feature set reachable on a phone WITHOUT spilling a row of buttons across the
+ * top bar (the old layout wrapped onto 2–3 lines). Desktop is unaffected — it
+ * still renders `ConnectionControl` inline.
+ */
+function MobileConnectSheet({ onOpenSettings, onOpenProbe }: MobileConnectSheetProps) {
+  const t = useT()
+  const connection = useMachine((s) => s.connection)
+  const [open, setOpen] = useState(false)
+  const wrapRef = useDismissable(open, useCallback(() => setOpen(false), []))
+
+  return (
+    <div className="km-mconn" ref={wrapRef}>
+      <button
+        className="km-mconn-trigger"
+        data-conn={connection}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((o) => !o)}
+        title={t('conn.connect.menu', 'Connect to the controller — USB, Wi-Fi, or Bluetooth')}
+      >
+        <span className="km-conn-dot" data-conn={connection} />
+        <span className="km-mconn-label">{t(`conn.status.${connection}`, connection)}</span>
+        <span className="km-mconn-caret" aria-hidden="true">
+          <Icon name="chevron-down" size={12} />
+        </span>
+      </button>
+      {open && (
+        <div className="km-mconn-sheet" role="dialog" aria-label={t('conn.connect.how', 'Connect to machine')}>
+          <ConnectionControl onOpenSettings={onOpenSettings} onOpenProbe={onOpenProbe} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface MobileMoreProps {
+  moreLabel: string
+  zoomLabel: string
+  themeLabel: string
+  aboutLabel: string
+  theme: 'dark' | 'light'
+  uiScale: number
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onResetZoom: () => void
+  onToggleTheme: () => void
+  onAbout: () => void
+}
+
+/**
+ * Mobile "⋯" menu for SECONDARY top-bar actions — language, account, theme,
+ * About, and UI-zoom — as clear labelled rows. Keeping these in one menu lets the
+ * mobile bar stay a tight 3-control strip (bell · connect · ⋯) that never wraps.
+ * Closes on outside-click / Escape.
+ */
+function MobileMore({
+  moreLabel,
+  zoomLabel,
+  themeLabel,
+  aboutLabel,
+  theme,
+  uiScale,
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
+  onToggleTheme,
+  onAbout,
+}: MobileMoreProps) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useDismissable(open, useCallback(() => setOpen(false), []))
+
+  return (
+    <div className="topbar-overflow" ref={wrapRef}>
+      <IconButton
+        icon="⋯"
+        label={moreLabel}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((v) => !v)}
+      />
+      {open && (
+        <div className="topbar-more-pop" role="menu" aria-label={moreLabel}>
+          <div className="topbar-more-row">
+            <LanguageSwitcher />
+          </div>
+          {/* UserChip renders nothing when signed out on the gated app. */}
+          <div className="topbar-more-user">
+            <UserChip />
+          </div>
+          <button className="topbar-more-item" role="menuitem" onClick={onToggleTheme}>
+            <span className="topbar-more-ico">{theme === 'dark' ? '☀' : '☾'}</span>
+            <span>{themeLabel}</span>
+          </button>
+          <button
+            className="topbar-more-item"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              onAbout()
+            }}
+          >
+            <span className="topbar-more-ico">ⓘ</span>
+            <span>{aboutLabel}</span>
+          </button>
+          <div className="topbar-more-sep" />
+          <div className="topbar-overflow-head">{zoomLabel}</div>
+          <div className="topbar-overflow-zoom zoom-group">
+            <IconButton icon="−" label="Zoom out" onClick={onZoomOut} />
+            <button onClick={onResetZoom} aria-label="Reset zoom" title="Reset zoom to 100%">
+              {Math.round(uiScale * 100)}%
+            </button>
+            <IconButton icon="+" label="Zoom in" onClick={onZoomIn} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

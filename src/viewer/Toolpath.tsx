@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import type { Segment } from './gcodeToPolylines'
 import { useSettings } from '../store'
@@ -115,8 +115,10 @@ export function Toolpath({
     [split],
   )
 
-  // Dispose old geometries when they change / on unmount.
-  useMemo(() => {
+  // Dispose old geometries when they change / on unmount. MUST be useEffect:
+  // useMemo never runs its returned cleanup, so the GPU buffers would leak
+  // (a contributor to WebGL context loss / the 3D white-screen).
+  useEffect(() => {
     return () => {
       cutGeom?.dispose()
       rapidGeom?.dispose()
@@ -189,7 +191,7 @@ function RapidLines({
     return obj
   }, [geometry, color, opacity])
 
-  useMemo(() => {
+  useEffect(() => {
     return () => {
       ;(lines.material as THREE.Material).dispose()
     }

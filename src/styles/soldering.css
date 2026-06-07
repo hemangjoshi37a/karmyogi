@@ -83,6 +83,12 @@
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
+/* center the icon/glyph (svg or text) inside the square button */
+.sp-ico > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .sp-ico:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);

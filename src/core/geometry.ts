@@ -413,6 +413,134 @@ export function pointInPolygon(poly: Polyline, p: Point): boolean {
   return inside;
 }
 
+// ----------------------------------------------------------------------------
+// Inside-out (containment) ordering of closed loops
+// ----------------------------------------------------------------------------
+//
+// CUT-ORDER SAFETY: when one closed cutout loop is fully NESTED inside another,
+// the inner loop must be cut BEFORE the outer one. Cutting the outer loop first
+// would free the surrounding stock (and anything nested in it) so an inner cut
+// would then chase a part that can wander. We build a CONTAINMENT TREE of the
+// loops (loop B is a child of loop A when B lies inside A) and emit it in
+// POST-ORDER (deepest/innermost first, parents last). Among loops at the same
+// nesting level (siblings with no containment relation) we order by greedy
+// nearest-neighbour from the previous loop's exit point to keep rapid travel
+// small — but ONLY subject to the hard containment constraint.
+
+/** A representative interior point of a closed loop, used for containment tests. */
+function loopRepresentativePoint(poly: Polyline): Point {
+  // The centroid is inside for convex loops; for concave loops it may fall
+  // outside, so fall back to scanning vertex midpoints until one tests inside.
+  const n = poly.points.length;
+  let cx = 0;
+  let cy = 0;
+  for (const p of poly.points) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= n;
+  cy /= n;
+  if (pointInPolygon(poly, { x: cx, y: cy })) return { x: cx, y: cy };
+  // Fall back: midpoint between each vertex and the centroid, then edge midpoints.
+  for (const p of poly.points) {
+    const m = { x: (p.x + cx) / 2, y: (p.y + cy) / 2 };
+    if (pointInPolygon(poly, m)) return m;
+  }
+  for (let i = 0; i < n; i++) {
+    const a = poly.points[i];
+    const b = poly.points[(i + 1) % n];
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (pointInPolygon(poly, m)) return m;
+  }
+  return { x: cx, y: cy };
+}
+
+/** True when closed loop `inner` lies inside closed loop `outer` (by an interior point). */
+function loopInside(inner: Polyline, outer: Polyline): boolean {
+  if (outer.points.length < 3 || inner.points.length < 3) return false;
+  return pointInPolygon(outer, loopRepresentativePoint(inner));
+}
+
+/**
+ * Order a set of CLOSED loops INSIDE-OUT for safe cut sequencing: every loop is
+ * emitted only AFTER all loops contained within it. Returns the loops' indices in
+ * the order they should be cut.
+ *
+ * Algorithm:
+ *   1. Build a containment tree — loop B's parent is the SMALLEST loop that
+ *      contains B (so directly-nested loops attach to their immediate encloser,
+ *      not every ancestor). Loops contained by nobody are roots.
+ *   2. Post-order traverse: children before their parent (innermost-first).
+ *   3. Among siblings (and among roots), pick the next loop greedily by
+ *      nearest-neighbour from the previous loop's reference point so inter-loop
+ *      rapid travel stays small — subject only to the containment constraint.
+ *
+ * `startPoint` seeds the nearest-neighbour choice (e.g. the tool's current XY).
+ */
+export function orderLoopsInsideOut(loops: Polyline[], startPoint?: Point): number[] {
+  const n = loops.length;
+  if (n <= 1) return loops.map((_, i) => i);
+
+  const reps = loops.map(loopRepresentativePoint);
+  const areas = loops.map((l) => Math.abs(l.signedArea()));
+
+  // parent[i] = index of the SMALLEST loop strictly containing loop i, or -1.
+  const parent = new Array<number>(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    let best = -1;
+    let bestArea = Infinity;
+    for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      // j must contain i, and be larger than i (a container has greater area).
+      if (areas[j] <= areas[i]) continue;
+      if (!loopInside(loops[i], loops[j])) continue;
+      if (areas[j] < bestArea) {
+        bestArea = areas[j];
+        best = j;
+      }
+    }
+    parent[i] = best;
+  }
+
+  const children: number[][] = Array.from({ length: n }, () => []);
+  const roots: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (parent[i] >= 0) children[parent[i]].push(i);
+    else roots.push(i);
+  }
+
+  // Post-order walk: emit a node's children (nearest-neighbour ordered) before
+  // the node itself. Track the previous reference point so siblings are picked
+  // to minimise travel.
+  const order: number[] = [];
+  let prev: Point = startPoint ?? { x: 0, y: 0 };
+
+  const visitSiblings = (group: number[]): void => {
+    const remaining = group.slice();
+    while (remaining.length) {
+      // Nearest unused sibling to `prev` by squared distance to its rep point.
+      let bestK = 0;
+      let bestD = Infinity;
+      for (let k = 0; k < remaining.length; k++) {
+        const r = reps[remaining[k]];
+        const d = (r.x - prev.x) ** 2 + (r.y - prev.y) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          bestK = k;
+        }
+      }
+      const node = remaining.splice(bestK, 1)[0];
+      // Children FIRST (recursively), then the node — post-order = inside-out.
+      visitSiblings(children[node]);
+      order.push(node);
+      prev = reps[node];
+    }
+  };
+
+  visitSiblings(roots);
+  return order;
+}
+
 /**
  * Convert a DXF "bulge" value between two vertices into an arc and append the
  * flattened points (excluding p0, including p1) to `out`. bulge==0 -> straight.

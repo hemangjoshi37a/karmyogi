@@ -1,0 +1,37 @@
+name = "karmyogi-devlogs"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# ---------------------------------------------------------------------------
+# KV namespace — primary report storage. Each report is stored under a
+# timestamped key `report:<ISO-ts>:<id>`.
+#
+# Create it once, then paste the returned id below:
+#   wrangler kv namespace create REPORTS
+#   wrangler kv namespace create REPORTS --preview   # optional, for `wrangler dev`
+# ---------------------------------------------------------------------------
+[[kv_namespaces]]
+binding = "REPORTS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"          # <- output of `wrangler kv namespace create REPORTS`
+# preview_id = "REPLACE_WITH_PREVIEW_KV_ID"  # <- optional, for local `wrangler dev`
+
+# ---------------------------------------------------------------------------
+# Non-secret vars. ALLOWED_ORIGIN is a comma-separated allow-list of app origins
+# that may call this backend (used for CORS). Use the exact deployed origin(s).
+# GITHUB_REPO is non-secret; the matching GITHUB_TOKEN is a secret (see below).
+# ---------------------------------------------------------------------------
+[vars]
+ALLOWED_ORIGIN = "https://karmyogi.hjlabs.in"
+# Add more origins comma-separated if needed, e.g.:
+# ALLOWED_ORIGIN = "https://karmyogi.hjlabs.in,https://karmyogi.pages.dev,http://localhost:5185"
+#
+# Optional GitHub mirroring (the token below is a SECRET — do NOT put it here):
+# GITHUB_REPO = "hemangjoshi37a/karmyogi"
+
+# ---------------------------------------------------------------------------
+# SECRETS — never commit these. Set them with `wrangler secret put <NAME>`:
+#
+#   wrangler secret put ADMIN_TOKEN     # required to use the GET list endpoint
+#   wrangler secret put GITHUB_TOKEN    # optional — PAT w/ repo (issues) scope
+#   wrangler secret put GITHUB_REPO     # optional — or set as a [vars] entry above
+# ---------------------------------------------------------------------------

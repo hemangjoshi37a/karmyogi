@@ -90,10 +90,20 @@
 
 .chat-search .mc-grow { flex: 1 1 auto; }
 
+/* Wrapper holds the scrolling thread + the absolutely-positioned jump chip; it
+   is the flex-growing region between the search bar and composer. */
+.chat-thread-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 52px;
+  display: flex;
+  min-width: 0;
+}
+
 /* ---- message thread (main area, scrolls vertically only) ---- */
 .chat-thread {
   flex: 1 1 auto;
-  min-height: 52px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -186,6 +196,28 @@
   text-align: center;
 }
 
+/* ---- jump-to-latest chip (floats over the thread when scrolled up) ---- */
+.chat-jump {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+.chat-jump:hover { filter: brightness(1.08); }
+
 /* ---- advisory note ---- */
 .chat-note {
   flex: 0 0 auto;
@@ -218,6 +250,34 @@
 }
 .chat-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .chat-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.chat-chip-add { border-style: dashed; color: var(--fg-muted); }
+.chat-chip-add:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---- macro editing row ---- */
+.chat-macro-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+.chat-macro-input {
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: 11px;
+  outline: none;
+}
+.chat-macro-input:focus { border-color: var(--accent); }
+.chat-macro-label { width: 64px; }
+.chat-macro-cmd { width: 96px; }
+.chat-macro-edit-toggle { margin-left: 2px; }
 
 /* ---- composer (pinned bottom) ---- */
 .chat-composer {
@@ -286,6 +346,8 @@
   .chat-search-input { min-height: 36px; }
   .chat-icon-btn { min-width: 36px; min-height: 36px; }
   .chat-chip { min-height: 36px; padding: 6px 12px; }
+  .chat-macro-input { min-height: 36px; }
+  .chat-jump { min-height: 36px; padding: 6px 14px; font-size: 12px; }
   .chat-input { min-height: 40px; }
   .chat-send-btn { width: 40px; height: 40px; font-size: 16px; }
 }

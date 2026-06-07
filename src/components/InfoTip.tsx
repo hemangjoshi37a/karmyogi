@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { EXPLAINERS } from '../core/explainers'
 import { useT } from '../i18n'
 import '../styles/infotip.css'
@@ -48,9 +49,12 @@ export function InfoTip({ topic, title, body, className }: InfoTipProps) {
   const popRef = useRef<HTMLDivElement>(null)
   const popId = useId()
 
-  // Vertical/horizontal placement flags, recomputed when the popover opens.
+  // Fixed-viewport placement, recomputed when the popover opens (and on
+  // scroll/resize). The popover is PORTALED to <body> so it floats above all
+  // panels — a dockview panel's `overflow`/stacking can no longer clip it.
   const [placeAbove, setPlaceAbove] = useState(false)
   const [shiftX, setShiftX] = useState(0)
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
 
   const fallback = EXPLAINERS[topic]
   const headingText = title ?? t(`explain.${topic}.title`, fallback?.title ?? topic)
@@ -114,30 +118,52 @@ export function InfoTip({ topic, title, body, className }: InfoTipProps) {
     }
   }, [open, closeAll])
 
-  // Position so the popover stays inside the viewport: flip above if it would
-  // overflow the bottom, and shift horizontally so it doesn't clip an edge.
-  useLayoutEffect(() => {
-    if (!open) return
+  // Position (fixed/viewport coords) so the popover stays inside the viewport:
+  // flip above if it would overflow the bottom, and shift horizontally so it
+  // doesn't clip an edge. Recomputed on open and while scrolling/resizing.
+  const reposition = useCallback(() => {
     const btn = btnRef.current
     const pop = popRef.current
     if (!btn || !pop) return
     const margin = 8
+    const gap = 7
     const br = btn.getBoundingClientRect()
     const pr = pop.getBoundingClientRect()
+
     const spaceBelow = window.innerHeight - br.bottom
-    const above = spaceBelow < pr.height + margin && br.top > spaceBelow
+    const above = spaceBelow < pr.height + gap + margin && br.top > spaceBelow
     setPlaceAbove(above)
 
-    // The popover is centred on the icon (translateX(-50%)); compute how far it
-    // would overflow either edge and shift it back on-screen.
-    const center = br.left + br.width / 2
+    const iconCenter = br.left + br.width / 2
     const half = pr.width / 2
-    let dx = 0
-    if (center - half < margin) dx = margin - (center - half)
-    else if (center + half > window.innerWidth - margin)
-      dx = window.innerWidth - margin - (center + half)
-    setShiftX(dx)
-  }, [open])
+    let left = iconCenter - half
+    left = Math.max(margin, Math.min(left, window.innerWidth - margin - pr.width))
+    const top = above ? br.top - gap - pr.height : br.bottom + gap
+    setCoords({ top, left })
+
+    // Keep the caret pointing at the icon despite the horizontal clamp (and clamp
+    // it so the arrow stays on the popover body).
+    const popCenter = left + half
+    let shift = popCenter - iconCenter
+    const limit = Math.max(0, half - 12)
+    shift = Math.max(-limit, Math.min(limit, shift))
+    setShiftX(shift)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setCoords(null)
+      return
+    }
+    reposition()
+    const onScrollResize = () => reposition()
+    window.addEventListener('scroll', onScrollResize, true)
+    window.addEventListener('resize', onScrollResize)
+    return () => {
+      window.removeEventListener('scroll', onScrollResize, true)
+      window.removeEventListener('resize', onScrollResize)
+    }
+  }, [open, reposition, headingText, bodyText])
 
   return (
     <span
@@ -172,20 +198,28 @@ export function InfoTip({ topic, title, body, className }: InfoTipProps) {
           <rect x="7.2" y="6.7" width="1.6" height="5" rx="0.8" fill="currentColor" />
         </svg>
       </button>
-      {open && (
-        <div
-          ref={popRef}
-          id={popId}
-          role="tooltip"
-          className={`infotip-pop${placeAbove ? ' above' : ''}`}
-          style={{ ['--infotip-shift' as string]: `${shiftX}px` }}
-          onMouseEnter={openHover}
-          onMouseLeave={closeHoverSoon}
-        >
-          <div className="infotip-title">{headingText}</div>
-          <div className="infotip-body">{bodyText}</div>
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={popRef}
+            id={popId}
+            role="tooltip"
+            className={`infotip-pop infotip-pop--portal${placeAbove ? ' above' : ''}`}
+            style={{
+              ['--infotip-shift' as string]: `${shiftX}px`,
+              // Hidden until the first measure lands, so it never flashes at 0,0.
+              top: coords ? `${coords.top}px` : undefined,
+              left: coords ? `${coords.left}px` : undefined,
+              visibility: coords ? 'visible' : 'hidden',
+            }}
+            onMouseEnter={openHover}
+            onMouseLeave={closeHoverSoon}
+          >
+            <div className="infotip-title">{headingText}</div>
+            <div className="infotip-body">{bodyText}</div>
+          </div>,
+          document.body,
+        )}
     </span>
   )
 }

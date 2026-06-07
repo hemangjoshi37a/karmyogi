@@ -27,54 +27,17 @@
   gap: var(--sp-3);
 }
 
-/* --- intro + flow stepper --- */
-.cc-intro {
-  margin: 0;
-  font-size: var(--fs-body);
-  line-height: 1.4;
-  color: var(--fg-muted);
-}
-.cc-intro b { color: var(--fg); }
-
-.cc-flow {
-  list-style: none;
+/* --- panel heading (with an InfoTip carrying the explainer) --- */
+.cc-heading {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: var(--sp-2);
   margin: 0;
-  padding: 0;
-  font-size: var(--fs-label);
-}
-.cc-flow li {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 1 1 auto;
-  justify-content: center;
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  color: var(--fg-muted);
-  white-space: nowrap;
-}
-.cc-flow li.done {
-  border-color: var(--accent);
-  color: var(--fg);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.cc-flow-n {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  font-size: 10px;
+  font-size: var(--fs-section);
   font-weight: 700;
-  background: var(--bg-input);
-  color: var(--fg-muted);
+  letter-spacing: 0.3px;
+  color: var(--fg);
 }
-.cc-flow li.done .cc-flow-n { background: var(--accent); color: var(--accent-fg); }
 
 /* --- card pack (tile to fill width) ---
    A responsive auto-fill grid: the control/param cards flow into 2–3 columns at
@@ -115,8 +78,13 @@
   gap: var(--sp-2);
 }
 
-/* the Output card carries the live-preview status — subtle accent edge */
-.cc-output { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+/* the Output card carries the live-preview status — subtle accent edge.
+   It is a PLAIN card at the END of the panel (NOT sticky/pinned) per the
+   operator's request: every section scrolls normally and Output simply sits
+   last. */
+.cc-output {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
 
 /* --- carving progress bar (3D carve runs in a Web Worker; this shows it's
    working without freezing the UI) --- */
@@ -408,9 +376,14 @@
   color: var(--fg);
 }
 .cc-warn-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
   color: var(--warn);
   font-size: var(--fs-body);
+  line-height: 1.35;
 }
+.cc-warn-line svg { flex: 0 0 auto; margin-top: 1px; }
 
 /* --- parameter grid (compact field-grid) --- */
 /* align-items:start so the label scan-line is flush across the row even when
@@ -481,6 +454,9 @@
 .cc-advanced .cc-section-body { border-top: 1px solid var(--border); }
 .cc-adv-toggle {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   text-align: left;
   min-height: var(--ctl-h-lg);
   padding: 6px 8px;
@@ -493,6 +469,7 @@
   border-radius: 0;
   cursor: pointer;
 }
+.cc-adv-toggle svg { flex: 0 0 auto; }
 .cc-adv-toggle:hover { color: var(--fg); border-color: transparent; }
 .cc-check {
   display: flex;
@@ -512,9 +489,52 @@
   align-items: center;
   gap: var(--sp-2);
 }
+/* status row (live state + line count + carve progress) — a subtle readout
+   strip so the live state reads as a distinct line above the toolbar. */
+.cc-out-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+/* action toolbar: the primary action (Regenerate) on the left, secondary
+   action groups (Save/Load, Frame) aligned to the right. Each cluster lays out
+   as a flex row with a tight gap so related buttons read as a single group;
+   on narrow widths the clusters wrap and stretch to full width. */
+.cc-out-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.cc-out-actions-primary,
+.cc-out-actions-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.cc-out-actions-secondary { margin-left: auto; }
+/* Equal-height controls across the whole toolbar so nothing looks staggered:
+   the Regenerate icon-btn, the Save/Load buttons, and the Frame button all
+   share one consistent height (--ctl-h-lg). */
+.cc-out-actions .icon-btn,
+.cc-out-actions .km-io-btn,
+.cc-out-actions .frame-btn {
+  min-height: var(--ctl-h-lg);
+  height: var(--ctl-h-lg);
+}
+.cc-out-actions .km-io-btn { width: var(--ctl-h-lg); }
 .cc-regen {
-  min-height: var(--icon-btn);
-  min-width: var(--icon-btn);
+  min-height: var(--ctl-h-lg);
+  min-width: var(--ctl-h-lg);
   flex: 0 0 auto;
 }
 .cc-gen-meta {
@@ -570,16 +590,43 @@
   min-height: var(--ctl-h);
   font-variant-numeric: tabular-nums;
 }
+.frame-opt-unit {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
 
 @container cadcampanel (max-width: 420px) {
   .frame-ctl { width: 100%; }
   .frame-btn { min-height: var(--ctl-h-touch); flex: 1 1 auto; justify-content: center; }
   .frame-opt input { min-height: var(--ctl-h-touch); }
+  /* On phones the two action clusters stack and span the full width so the
+     buttons stay finger-sized and never crowd onto one cramped line. */
+  .cc-out-actions { flex-direction: column; align-items: stretch; }
+  .cc-out-actions-primary,
+  .cc-out-actions-secondary { width: 100%; margin-left: 0; }
+  .cc-out-actions .cc-regen { flex: 1 1 auto; }
 }
 
 /* --- collapsible raw G-code --- */
+/* header row: the expand toggle on the left, copy + download on the right */
+.cc-raw-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.cc-raw-acts {
+  margin-left: auto;
+  display: inline-flex;
+  gap: var(--sp-1);
+  flex: 0 0 auto;
+}
 .cc-raw-toggle {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   min-height: var(--ctl-h);
   padding: 4px 8px;
   font-size: var(--fs-label);
@@ -678,6 +725,27 @@
   min-width: 0;
 }
 .cc-prim-matlbl { margin-top: 1px; }
+
+/* Material as a compact dropdown: swatch + select + info icon on one row,
+   replacing the old button grid to save vertical space. */
+.cc-matfield { margin-top: 1px; }
+.cc-matrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cc-matrow .cc-pick-swatch,
+.cc-matrow .cc-pick-icon {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cc-matselect { flex: 1 1 auto; min-width: 0; }
+.cc-matinfo-btn { flex: 0 0 auto; font-size: 13px; }
 
 /* --- Advanced (auto) read-only rows --- */
 .cc-autoadv { border-color: color-mix(in srgb, var(--ok) 30%, var(--border)); }
@@ -1036,3 +1104,34 @@
     .cc-cutout-toggle { min-height: var(--ctl-h-touch); }
   }
 }
+
+/* Stock-from-camera row in the selected-job card (Phase 1: camera → carving job).
+   A detected-dimensions chip + an apply button, sitting under the manual stock
+   fields. Plain flow (NOT sticky) like the rest of the panel. */
+.cc-camstock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 2px 0 4px;
+}
+.cc-camstock-dims {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--fg);
+}
+.cc-camstock-apply {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 4px 12px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 1px solid var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.cc-camstock-apply:hover { filter: brightness(1.06); }

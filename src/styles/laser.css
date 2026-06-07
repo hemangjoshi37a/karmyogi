@@ -316,3 +316,45 @@
 .lp-head .lp-frame {
   margin-left: auto;
 }
+
+/* Buttons that pair the shared <Icon> with a text label align them inline. */
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  justify-content: center;
+}
+
+/* Status-strip pills with an inline icon (streaming / sync) line up neatly. */
+.lp-status-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Collapsible Advanced (piercing + focus) toggle — full-width row. */
+.lp-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.lp-advanced-toggle:hover {
+  color: var(--fg);
+}
+
+/* A warning hint that leads with the shared warning glyph. */
+.lp-hint.is-warn {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+}

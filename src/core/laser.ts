@@ -125,10 +125,12 @@ export function percentFromPower(power: number, sMax: number): number {
 
 /** Formatted number, never "-0.000" — mirrors the emitter's fmt(). */
 function fmt(value: number, decimals: number): string {
-  const snap = 0.5 * Math.pow(10, -decimals);
+  // Defensive clamp so a bad `decimals` can't throw RangeError in toFixed.
+  const d = Number.isFinite(decimals) ? Math.max(0, Math.min(8, Math.floor(decimals))) : 3;
+  const snap = 0.5 * Math.pow(10, -d);
   if (Math.abs(value) < snap) value = 0;
   if (value === 0) value = 0; // collapse a residual signed zero
-  return value.toFixed(decimals);
+  return value.toFixed(d);
 }
 
 /** A single contour to cut, in placed (post-nesting) work coordinates. */
@@ -254,10 +256,12 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
   o.push('G17'); // XY plane
   o.push('M5 S0'); // laser OFF to start (safe)
 
-  // Focus-Z at program start (Z used only for focus, never as on/off).
+  // Focus-Z at program start (Z used only for focus, never as on/off). Clamp to
+  // >= 0 in the CORE (not just the UI) so a loaded/edited file with a negative
+  // focusZ can never emit a downward `G0 Z-…` as the first motion.
   if (p.useFocusZ) {
     o.push(`(Focus height)`);
-    o.push(`G0 Z${fmt(p.focusZ, d)}`);
+    o.push(`G0 Z${fmt(Math.max(0, p.focusZ), d)}`);
   }
 
   // ---- Body ---------------------------------------------------------------
@@ -275,9 +279,11 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
     // BEFORE the cut begins. The pierce uses the same on-code; we drop to cut
     // power right after the dwell.
     if (p.pierce && p.pierceTime > 0) {
-      o.push(`(Pierce ${fmt(p.pierceTime, d)}s @ S${sPierce})`);
+      // Dwell uses its OWN time precision (3 dp), not the coordinate `decimals`:
+      // at decimals=0 `fmt(0.3,0)` would round to "0" and the pierce would vanish.
+      o.push(`(Pierce ${fmt(p.pierceTime, 3)}s @ S${sPierce})`);
       o.push(`${onCode} S${sPierce}`);
-      o.push(`G4 P${fmt(p.pierceTime, d)}`);
+      o.push(`G4 P${fmt(p.pierceTime, 3)}`);
     }
 
     // Turn the beam on at cut power and run the cut passes.
@@ -316,7 +322,7 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
 
   // ---- Footer -------------------------------------------------------------
   o.push('M5 S0'); // laser OFF at program end
-  if (p.useFocusZ) o.push(`G0 Z${fmt(p.focusZ, d)}`); // keep at focus height
+  if (p.useFocusZ) o.push(`G0 Z${fmt(Math.max(0, p.focusZ), d)}`); // keep at focus height
   o.push('M30');
 
   return o.join('\n') + '\n';

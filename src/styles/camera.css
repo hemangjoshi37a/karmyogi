@@ -606,6 +606,126 @@
   color: var(--fg);
 }
 
+/* ---- inline button icons (shared <Icon/> SVGs) ---- */
+.cam-btn > svg {
+  flex: 0 0 auto;
+}
+/* A small accent/danger dot used inside the Record button (no emoji). */
+.cam-btn-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger);
+  flex: 0 0 auto;
+}
+
+/* ---- collapsible "How this works" guide (progressive disclosure) ---- */
+.cam-guide {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.cam-guide > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-label);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  min-height: var(--ctl-h);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.cam-guide > summary::-webkit-details-marker {
+  display: none;
+}
+.cam-guide > summary::before {
+  content: '▸';
+  color: var(--fg-muted);
+  transition: transform 100ms ease;
+}
+.cam-guide[open] > summary::before {
+  transform: rotate(90deg);
+}
+.cam-guide > summary:hover {
+  color: var(--fg);
+}
+.cam-guide > .cam-hint {
+  padding: 0 var(--sp-2) var(--sp-2);
+}
+
+/* A visible "why is this disabled?" line just above a disabled action. */
+.cam-disabled-why {
+  margin: 0;
+}
+
+/* Download link inside a clip row — keep the SVG centred. */
+.cam-clip-dl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---- DEV-only "camera → server bridge" block (never shipped in prod) ---- */
+.cam-feed-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  min-width: auto;
+}
+.cam-dev-badge {
+  font-family: ui-monospace, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+}
+.cam-feed-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.cam-feed-dot.on {
+  color: var(--ok);
+}
+.cam-feed-dot-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+.cam-feed-dot.on .cam-feed-dot-mark {
+  opacity: 1;
+  box-shadow: 0 0 6px currentColor;
+}
+.cam-feed-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-ctl);
+}
+.cam-feed-name:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* ---- recorded clips list ---- */
 .cam-clips {
   list-style: none;

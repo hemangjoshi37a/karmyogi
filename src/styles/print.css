@@ -268,6 +268,51 @@
   gap: var(--sp-3);
 }
 
+/* Buttons in the action rows align their icon with the label. */
+.print-actions .print-btn,
+.print-drop .print-btn.primary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* Live stream controls sit on their own row, visually separated. */
+.print-stream-ctl {
+  padding-top: var(--sp-1);
+  border-top: 1px dashed var(--border);
+}
+
+/* --- filament / time estimate --- */
+.print-estimate {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-body);
+  color: var(--fg);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-variant-numeric: tabular-nums;
+}
+.print-estimate-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* Warning glyph in the fit readout aligns with the text baseline. */
+.print-fit-ico {
+  vertical-align: -2px;
+}
+
+/* Toggle buttons line up their chevron with the label. */
+.print-advanced-toggle,
+.print-gcode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
 /* --- progress --- */
 .print-progress-wrap {
   display: flex;

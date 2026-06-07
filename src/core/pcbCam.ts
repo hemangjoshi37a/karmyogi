@@ -111,25 +111,31 @@ export function offsetOpenPolyline(line: Polyline, dist: number): Polyline {
  * individually (overlapping copper is not merged into single nets in v1).
  *   safeZ   retract height (mm), cutZ engraving depth (negative into copper).
  *   passes  number of isolation passes (>=1); spacing = one tool width (step).
+ *
+ * UNIT CONTRACT: the per-pass lateral spacing is taken from `stepoverMm` — an
+ * EXPLICIT metric (mm) value. When omitted/non-positive it defaults to one tool
+ * radius. This is intentionally NOT `tool.stepover` (which the `Tool` interface
+ * documents as a 0..1 fraction of diameter for pocketing); the PCB UI exposes a
+ * "Pass stepover (mm)" field, so we keep the contract metric and unambiguous.
  */
 export function isolationRoutes(
   gerber: GerberData,
   tool: Tool,
   safeZ: number,
   cutZ: number,
-  passes: number
+  passes: number,
+  stepoverMm?: number
 ): Toolpath {
   const tp = new Toolpath();
   tp.name = 'Isolation';
   if (passes < 1) passes = 1;
 
   const r = toolRadius(tool);
-  // tool.stepover is a fraction (0..1) of the diameter; resolve to a metric step
-  // (the lateral spacing between successive isolation passes).
-  let step = tool.stepover;
-  if (step <= 0.0) step = 0.5;
-  if (step <= 1.0) step = step * tool.diameter; // <=1 is a fraction of Ø
-  else step = step; // already metric
+  // Lateral spacing between successive isolation passes, in mm. Caller passes an
+  // explicit metric value (the "Pass stepover (mm)" field); fall back to one
+  // tool radius when not supplied so passes don't overlap to zero.
+  let step = stepoverMm != null && Number.isFinite(stepoverMm) ? stepoverMm : 0;
+  if (step <= 0.0) step = r > 0 ? r : 0.5;
 
   // ---- Open traces: offset the centreline to each side. ----
   for (const t of gerber.traces) {

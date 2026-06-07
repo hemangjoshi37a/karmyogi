@@ -98,22 +98,59 @@ export type Lang = string
 
 /**
  * Auto-discover every translation map under ./locales (one JSON per language,
- * keyed by dot-keys). Vite inlines these eagerly at build time, so there is no
- * async load and no flash of untranslated text. English has no file — it is the
- * inline fallback supplied at each call site.
+ * keyed by dot-keys) as LAZY dynamic imports.
+ *
+ * Performance: with 53 locales × ~1683 keys, eagerly inlining every map bloated
+ * the entry bundle massively even though a user only ever views ONE language.
+ * `import.meta.glob` WITHOUT `eager` gives one code-split chunk per locale that
+ * we fetch on demand — only the active language is ever downloaded.
+ *
+ * English needs NO file and NO fetch: it is the inline fallback supplied at each
+ * call site (`useT(key, english)`), so `lang === 'en'` is instant and the UI
+ * never flashes raw keys. When switching to another language, `useT` keeps
+ * returning the English fallback until that locale's chunk has loaded, then a
+ * version bump re-renders consumers with the translated strings.
  */
-const modules = import.meta.glob('./locales/*.json', {
-  eager: true,
+const localeLoaders = import.meta.glob('./locales/*.json', {
   import: 'default',
-}) as Record<string, Record<string, string>>
+}) as Record<string, () => Promise<Record<string, string>>>
 
-const translations: Record<string, Record<string, string>> = {}
-for (const path in modules) {
+/** code → dynamic-import loader (resolved from the glob path). */
+const loaderByCode: Record<string, () => Promise<Record<string, string>>> = {}
+for (const path in localeLoaders) {
   const m = /\/([a-z]+)\.json$/i.exec(path)
-  if (m) translations[m[1]] = modules[path]
+  if (m) loaderByCode[m[1]] = localeLoaders[path]
 }
 
+/** Lazily-loaded translation maps, keyed by language code (filled on demand). */
+const translations: Record<string, Record<string, string>> = {}
+/** In-flight loads, deduped so a language is fetched at most once. */
+const inflight: Record<string, Promise<void>> = {}
+
 const KNOWN_CODES = new Set(LANGUAGES.map((l) => l.code))
+
+/**
+ * Fetch a locale's translation map (once) and, on success, bump the store's
+ * version so every `useT` consumer re-renders with the now-available strings.
+ * No-ops for English (inline fallback) and for codes with no locale file.
+ */
+function ensureLocale(lang: string): void {
+  if (lang === 'en' || lang in translations || lang in inflight) return
+  const loader = loaderByCode[lang]
+  if (!loader) return
+  inflight[lang] = loader()
+    .then((map) => {
+      translations[lang] = map
+      // Re-render consumers now that the active locale is available.
+      useLocale.setState((s) => ({ version: s.version + 1 }))
+    })
+    .catch(() => {
+      // Network/parse failure → stay on the inline English fallback silently.
+    })
+    .finally(() => {
+      delete inflight[lang]
+    })
+}
 
 /** Reflect the active language onto <html> (lang + direction). */
 function applyDocumentLang(lang: string): void {
@@ -125,36 +162,52 @@ function applyDocumentLang(lang: string): void {
 
 interface LocaleState {
   lang: Lang
+  /**
+   * Bumped whenever a lazily-loaded locale map becomes available, forcing every
+   * `useT` consumer to re-render with the now-present translations. (`lang`
+   * alone can't do this: it changes BEFORE the async locale chunk arrives.)
+   */
+  version: number
   setLang: (l: Lang) => void
 }
 
 /**
  * Persisted language store. Changing `lang` re-renders every component that
- * reads it (via `useLocale`/`useT`), so the whole UI re-translates live.
+ * reads it (via `useLocale`/`useT`), so the whole UI re-translates live. The
+ * matching locale chunk is fetched lazily (see `ensureLocale`); until it lands,
+ * the inline English fallback is shown — no flash of raw keys.
  */
 export const useLocale = create<LocaleState>()(
   persist(
     (set) => ({
       lang: 'en',
+      version: 0,
       setLang: (lang) => {
         applyDocumentLang(lang)
+        ensureLocale(lang)
         set({ lang })
       },
     }),
     {
       name: 'karmyogi.lang',
+      // `version` is derived runtime state, not persisted.
+      partialize: (s) => ({ lang: s.lang }),
       onRehydrateStorage: () => (state) => {
         if (!state) return
         // Guard against a stored code we no longer ship.
         if (!KNOWN_CODES.has(state.lang)) state.lang = 'en'
         applyDocumentLang(state.lang)
+        // Begin fetching the restored language's locale chunk immediately.
+        ensureLocale(state.lang)
       },
     },
   ),
 )
 
-// Apply the (possibly restored) language at module load.
+// Apply the (possibly restored) language at module load, and start loading its
+// locale chunk (no-op for English).
 applyDocumentLang(useLocale.getState().lang)
+ensureLocale(useLocale.getState().lang)
 
 /** Replace `{name}` tokens in `template` with values from `vars`. */
 function interpolate(template: string, vars?: Record<string, string | number>): string {
@@ -180,6 +233,9 @@ export function useT(): (
   vars?: Record<string, string | number>,
 ) => string {
   const lang = useLocale((s) => s.lang)
+  // Subscribe to `version` so that when the active locale's chunk finishes
+  // loading asynchronously, this component re-renders with the translations.
+  useLocale((s) => s.version)
   return (key, english, vars) => {
     if (lang === 'en') return interpolate(english, vars)
     const map = translations[lang]

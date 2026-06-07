@@ -1,0 +1,51 @@
+rules_version = '2';
+
+// karmyogi Cloud Storage security rules (HARDENED).
+//
+// Uploaded design files (STL/DXF/Gerber/images, etc.) live under
+// userfiles/{uid}/{fileId}/{filename}. A user may read/write only their OWN
+// files; the single super-admin may read every user's files for the admin
+// console. Uploads are capped at 25 MB AND restricted to expected content types
+// (so the bucket can't be used to host arbitrary binaries / illicit content).
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // MUST stay in sync with adminEmail() in src/auth/firebase.ts.
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'hemangjoshi37a@gmail.com';
+    }
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    // uploadUserFile() sets the File's MIME or 'application/octet-stream' for
+    // DXF/STL/Gerber/Excellon bytes, and image/* for camera captures. Reject
+    // anything outside this allowlist.
+    function allowedType() {
+      return request.resource.contentType == null
+        || request.resource.contentType.matches('image/.*')
+        || request.resource.contentType.matches('text/.*')
+        || request.resource.contentType == 'application/octet-stream'
+        || request.resource.contentType == 'application/dxf'
+        || request.resource.contentType == 'application/sla'
+        || request.resource.contentType == 'model/stl'
+        || request.resource.contentType == 'application/zip'
+        || request.resource.contentType == 'application/pdf'
+        || request.resource.contentType == 'application/json';
+    }
+
+    match /userfiles/{uid}/{allPaths=**} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow write: if isOwner(uid)
+        && request.resource.size > 0
+        && request.resource.size < 25 * 1024 * 1024
+        && allowedType();
+      allow delete: if isAdmin() || isOwner(uid);
+    }
+
+    // Default deny.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

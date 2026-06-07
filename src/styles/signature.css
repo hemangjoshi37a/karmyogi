@@ -76,7 +76,11 @@
 .sig-draw-surface path {
   fill: none;
   stroke: var(--accent);
+  /* The surface uses a fixed 0..100 viewBox (preserveAspectRatio:none) so the
+     stored 0..1 strokes map to the box at any pixel size; non-scaling-stroke
+     keeps the 2px line crisp regardless of the (non-uniform) scale. */
   stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
 }
 .sig-draw-surface .sig-draw-live {
   stroke: color-mix(in srgb, var(--accent) 70%, var(--fg));
@@ -84,7 +88,8 @@
 .sig-draw-placeholder {
   fill: var(--fg-muted);
   stroke: none;
-  font-size: var(--fs-body);
+  /* In the 0..100 viewBox, sized in user units so it reads ~13px on screen. */
+  font-size: 7px;
   pointer-events: none;
 }
 .sig-draw-tools {
@@ -349,23 +354,12 @@
 }
 .sig-play {
   flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
   min-height: var(--ctl-h-lg);
   font-weight: 600;
-}
-/* Regenerate is a compact icon button beside the primary send action. */
-.sig-regen.icon-btn {
-  flex: 0 0 auto;
-  min-width: var(--ctl-h-lg);
-  min-height: var(--ctl-h-lg);
-  color: var(--fg-muted);
-}
-.sig-regen.icon-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--fg);
-}
-.sig-regen.icon-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* collapsible disclosure header (Advanced / Raw G-code) */
@@ -390,7 +384,8 @@
   color: var(--fg);
 }
 .sig-caret {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   width: 12px;
   color: var(--accent);
 }
@@ -403,6 +398,26 @@
   font-size: var(--fs-body);
   line-height: 1.4;
   color: var(--fg-muted);
+}
+
+/* Safety warning (pen-down ≥ pen-up): warning color, icon aligned with text. */
+.sig-warn {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  color: var(--warn);
+}
+.sig-warn svg {
+  flex: 0 0 auto;
+}
+
+/* Mode-toggle icon sits inline with its label. */
+.sig-mode svg {
+  vertical-align: -2px;
 }
 
 .sig-preview-text {
@@ -442,10 +457,6 @@
   .sig-play {
     min-height: var(--ctl-h-touch);
   }
-  .sig-regen.icon-btn {
-    min-width: var(--ctl-h-touch);
-    min-height: var(--ctl-h-touch);
-  }
   .sig-disclosure {
     min-height: var(--ctl-h-touch);
   }
@@ -476,10 +487,6 @@
       min-height: var(--ctl-h-touch);
     }
     .sig-play {
-      min-height: var(--ctl-h-touch);
-    }
-    .sig-regen.icon-btn {
-      min-width: var(--ctl-h-touch);
       min-height: var(--ctl-h-touch);
     }
     .sig-disclosure {

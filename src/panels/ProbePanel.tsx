@@ -1,11 +1,46 @@
 import { useEffect, useRef, useState } from 'react'
 import { grbl } from '../serial/controller'
-import { useGrblSettings, useMachine, usePersistentState } from '../store'
+import { useConsole, useGrblSettings, useMachine, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
 import { InfoTip } from '../components/InfoTip'
 import { IconButton } from '../components/IconButton'
 import { useT } from '../i18n'
 import '../styles/probe.css'
+
+/** Parsed GRBL `[PRB:x,y,z:s]` probe result. `success` is the trailing flag. */
+interface ProbeResult {
+  x: number
+  y: number
+  z: number
+  success: boolean
+}
+
+/** Parse a GRBL `[PRB:0.000,0.000,1.234:1]` line; undefined if it isn't one. */
+function parsePrbLine(line: string): ProbeResult | undefined {
+  const m = /^\[PRB:(-?\d+\.?\d*),(-?\d+\.?\d*),(-?\d+\.?\d*):([01])\]$/.exec(line.trim())
+  if (!m) return undefined
+  return {
+    x: parseFloat(m[1]),
+    y: parseFloat(m[2]),
+    z: parseFloat(m[3]),
+    success: m[4] === '1',
+  }
+}
+
+/**
+ * Read the configured per-axis max travel ($130–$132) from the settings store
+ * AT CALL TIME (not via a render-time closure), so a freshly-synced value is
+ * used. Returns undefined per axis if absent / non-numeric / ≤0.
+ */
+function readTravel(): { x?: number; y?: number; z?: number } {
+  const values = useGrblSettings.getState().values
+  const pick = (n: number) => {
+    const v = values[n]
+    if (!v || !Number.isFinite(v.numeric) || v.numeric <= 0) return undefined
+    return v.numeric
+  }
+  return { x: pick(130), y: pick(131), z: pick(132) }
+}
 
 /**
  * Probe & Limits panel.
@@ -23,13 +58,23 @@ import '../styles/probe.css'
  *     and the caution notes. Novices use detection + probe; experts open this.
  */
 
-/** Letters GRBL reports in `Pn:` and how we label them. */
-const PIN_DEFS: { letter: string; label: string; sub: string; door?: boolean }[] = [
-  { letter: 'X', label: 'X', sub: 'limit' },
-  { letter: 'Y', label: 'Y', sub: 'limit' },
-  { letter: 'Z', label: 'Z', sub: 'limit' },
-  { letter: 'P', label: 'Probe', sub: 'P' },
-  { letter: 'D', label: 'Door', sub: 'D', door: true },
+/**
+ * Letters GRBL reports in `Pn:` and how we label them. `lk`/`sk` are translation
+ * keys for the label / sub-label (resolved at render time with the fallbacks).
+ */
+const PIN_DEFS: {
+  letter: string
+  label: string
+  lk: string
+  sub: string
+  sk: string
+  door?: boolean
+}[] = [
+  { letter: 'X', label: 'X', lk: 'probe.pin.x', sub: 'limit', sk: 'probe.pin.limit' },
+  { letter: 'Y', label: 'Y', lk: 'probe.pin.y', sub: 'limit', sk: 'probe.pin.limit' },
+  { letter: 'Z', label: 'Z', lk: 'probe.pin.z', sub: 'limit', sk: 'probe.pin.limit' },
+  { letter: 'P', label: 'Probe', lk: 'probe.pin.probe', sub: 'P', sk: 'probe.pin.probeSub' },
+  { letter: 'D', label: 'Door', lk: 'probe.pin.door', sub: 'D', sk: 'probe.pin.doorSub', door: true },
 ]
 
 /** A 0/1 GRBL boolean setting wired to a labelled toggle. */
@@ -108,17 +153,24 @@ export function ProbePanel() {
 
   const connected = connection === 'connected'
 
-  // Probe parameters (persisted so they survive a refresh).
+  // Probe parameters (persisted so they survive a refresh). Thickness defaults
+  // to a common 1 mm touch-plate so a first-time probe doesn't silently zero at
+  // the tool tip instead of the plate surface.
   const [feed, setFeed] = usePersistentState<string>('karmyogi.probe.feed', '50')
   const [dist, setDist] = usePersistentState<string>('karmyogi.probe.dist', '20')
   const [thickness, setThickness] = usePersistentState<string>(
     'karmyogi.probe.thickness',
-    '0',
+    '1',
   )
   // Advanced section is collapsed by default — novices stay in detection + probe.
   const [advOpen, setAdvOpen] = usePersistentState<boolean>('karmyogi.probe.advOpen', false)
   // Cheap UX state for the last probe action (not persisted).
   const [probed, setProbed] = useState(false)
+  // True while a G38 probe move is in flight (between send and its ok/PRB) — used
+  // to disable Probe Z / Set Z zero so a second probe can't be fired mid-move.
+  const [probing, setProbing] = useState(false)
+  // Last parsed [PRB:…] result, shown inline.
+  const [probeResult, setProbeResult] = useState<ProbeResult | null>(null)
 
   // Auto-sync settings when opened while connected with nothing cached yet, so
   // the limit/homing toggles show real values.
@@ -141,16 +193,76 @@ export function ProbePanel() {
   const probeDist = Math.abs(num(dist, 20))
   const probeFeed = Math.abs(num(feed, 50))
   const plateT = num(thickness, 0)
+  const thicknessZero = plateT === 0
   const probeCmd = `G38.2 Z-${probeDist} F${probeFeed}`
   const zeroCmd = `G10 L20 P0 Z${plateT}`
 
   const doProbe = (mode: '2' | '3') => {
-    grbl.send(`G38.${mode} Z-${probeDist} F${probeFeed}`).then(() => setProbed(true)).catch(() => {})
+    if (probing) return
+    setProbing(true)
+    setProbeResult(null)
+    grbl
+      .send(`G38.${mode} Z-${probeDist} F${probeFeed}`)
+      .then(() => setProbed(true))
+      .catch(() => setProbing(false))
   }
 
   const setZeroWithPlate = () => {
     grbl.send(zeroCmd).catch(() => {})
   }
+
+  // Watch the console for the `[PRB:…]` reply GRBL emits after a G38 probe and
+  // surface it inline. Subscribing to the console store keeps the parsing in the
+  // serial layer's single source of truth (the controller already pushes the
+  // bracketed report there as a `recv` line). We only react to entries newer
+  // than the time we mounted/last-probed so stale lines don't re-trigger.
+  const lastSeenId = useRef(0)
+  useEffect(() => {
+    // Start past whatever is already in the log.
+    const entries = useConsole.getState().entries
+    lastSeenId.current = entries.length ? entries[entries.length - 1].id : 0
+    const unsub = useConsole.subscribe((s) => {
+      for (const e of s.entries) {
+        if (e.id <= lastSeenId.current) continue
+        lastSeenId.current = e.id
+        if (e.dir !== 'recv') continue
+        const prb = parsePrbLine(e.text)
+        if (prb) {
+          setProbeResult(prb)
+          setProbing(false)
+        }
+      }
+    })
+    return unsub
+  }, [])
+
+  // A probe move ends (for the in-flight guard) on any non-Run/Jog state — the
+  // PRB line resolves the success case, but Alarm (no contact within distance)
+  // or a return to Idle must also clear the guard so the buttons re-enable.
+  useEffect(() => {
+    if (!probing) return
+    if (state === 'Idle' || state === 'Alarm' || state === 'Door') setProbing(false)
+  }, [state, probing])
+
+  // Reset the sticky "probed" flag + in-flight guard whenever the machine
+  // alarms (a stale "last probe sent" hint is misleading) — but KEEP the parsed
+  // [PRB:…] result: GRBL alarms on a no-contact G38.2 right after sending PRB,
+  // and that result is exactly what the operator needs to see.
+  useEffect(() => {
+    if (state === 'Alarm') {
+      setProbed(false)
+      setProbing(false)
+    }
+  }, [state])
+
+  // A dropped connection clears everything — the result no longer applies.
+  useEffect(() => {
+    if (!connected) {
+      setProbed(false)
+      setProbeResult(null)
+      setProbing(false)
+    }
+  }, [connected])
 
   // --- Auto-detect workspace ---------------------------------------------
   // Relevant GRBL settings: $22 homing enable, $21 hard limits, and the
@@ -188,23 +300,26 @@ export function ProbePanel() {
   const homeFallback = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /**
-   * Copy the configured max-travel ($130–$132) into the bed store. Skips any
-   * axis whose value is missing or 0 (uncalibrated), warning if it had to.
-   * Returns the size that was actually written.
+   * Copy the configured max-travel ($130–$132) into the bed store. Reads the
+   * travel from the settings store AT CALL TIME (not via a render-time closure),
+   * so a value synced moments earlier — e.g. by the `$$` read kicked off when
+   * homing started — is the one applied. Skips any axis whose value is missing
+   * or 0 (uncalibrated), warning if it had to. Returns the size written.
    */
   const applyTravelToBed = (): {
     width?: number
     depth?: number
     height?: number
   } => {
+    const travel = readTravel()
     const size: { width?: number; depth?: number; height?: number } = {}
     const skipped: string[] = []
-    if ((travelX ?? 0) > 0) size.width = travelX
-    else skipped.push('X ($130)')
-    if ((travelY ?? 0) > 0) size.depth = travelY
-    else skipped.push('Y ($131)')
-    if ((travelZ ?? 0) > 0) size.height = travelZ
-    else skipped.push('Z ($132)')
+    if ((travel.x ?? 0) > 0) size.width = travel.x
+    else skipped.push(t('probe.axis.x130', 'X ($130)'))
+    if ((travel.y ?? 0) > 0) size.depth = travel.y
+    else skipped.push(t('probe.axis.y131', 'Y ($131)'))
+    if ((travel.z ?? 0) > 0) size.height = travel.z
+    else skipped.push(t('probe.axis.z132', 'Z ($132)'))
     if (size.width !== undefined || size.depth !== undefined || size.height !== undefined) {
       useBed.getState().setSize(size)
     }
@@ -317,7 +432,10 @@ export function ProbePanel() {
       )
       return
     }
-    if (state === 'Home' || state === 'Run' || state === 'Jog') {
+    // Only HOMING-related busy states count as "our cycle is running". A manual
+    // Jog while we wait must NOT mark us busy — otherwise the Jog→Idle that
+    // follows would false-finish the auto-home before homing ever started.
+    if (state === 'Home' || state === 'Run') {
       sawBusy.current = true
       return
     }
@@ -354,21 +472,23 @@ export function ProbePanel() {
         <div className="pr-lights" role="group" aria-label={t('probe.switch.pinsAria', 'Input pin states')}>
           {PIN_DEFS.map((p) => {
             const on = pinSet.has(p.letter)
+            const label = t(p.lk, p.label)
+            const sub = t(p.sk, p.sub)
             return (
               <div
                 key={p.letter}
                 className={`pr-light${p.door ? ' door' : ''}`}
                 data-on={on}
                 title={t('probe.switch.lightTip', '{label} {sub} — {state} (Pn:{letter})', {
-                  label: p.label,
-                  sub: p.sub,
+                  label,
+                  sub,
                   state: on ? t('probe.switch.triggered', 'TRIGGERED') : t('probe.switch.open', 'open'),
                   letter: p.letter,
                 })}
               >
                 <span className="pr-dot" aria-hidden="true" />
-                <span className="pr-lbl">{p.label}</span>
-                <span className="pr-sub">{on ? t('probe.switch.on', 'on') : p.sub}</span>
+                <span className="pr-lbl">{label}</span>
+                <span className="pr-sub">{on ? t('probe.switch.on', 'on') : sub}</span>
               </div>
             )
           })}
@@ -436,24 +556,29 @@ export function ProbePanel() {
               disabled={!connected}
               onChange={(e) => setThickness(e.target.value)}
               aria-label={t('probe.z.plateAria', 'Plate thickness (mm)')}
+              aria-invalid={thicknessZero || undefined}
             />
-            <span className="pr-sub">{t('probe.z.plateSub', 'thickness of the probe / touch plate')}</span>
+            <span className={`pr-sub${thicknessZero ? ' warn' : ''}`}>
+              {thicknessZero
+                ? t('probe.z.plateZeroWarn', 'thickness is 0 — Z will zero at the tool tip, not the plate surface')
+                : t('probe.z.plateSub', 'thickness of the probe / touch plate')}
+            </span>
           </label>
         </div>
         <div className="pr-row">
           <button
             type="button"
             className="pr-btn primary pr-grow"
-            disabled={!connected}
+            disabled={!connected || probing}
             onClick={() => doProbe('2')}
             title={t('probe.z.probeTip', 'G38.2 Z- F — lower the tool until it touches the plate. Alarms if no contact within the max distance.')}
           >
-            {t('probe.z.probe', 'Probe Z')}
+            {probing ? t('probe.z.probing', 'Probing…') : t('probe.z.probe', 'Probe Z')}
           </button>
           <button
             type="button"
             className="pr-btn pr-grow"
-            disabled={!connected}
+            disabled={!connected || probing}
             onClick={setZeroWithPlate}
             title={t('probe.z.setZeroTip', 'G10 L20 P0 Z<thickness> — set work Z=0 at the plate surface. Run after a successful probe.')}
           >
@@ -465,7 +590,7 @@ export function ProbePanel() {
             className="pr-icon-btn"
             icon="⤓"
             label={`${t('probe.z.noAlarm', 'Probe (no alarm)')} — ${t('probe.z.noAlarmTip', 'G38.3 Z- F — probe toward the workpiece, but do NOT alarm if no contact is made.')}`}
-            disabled={!connected}
+            disabled={!connected || probing}
             onClick={() => doProbe('3')}
           />
           <IconButton
@@ -484,6 +609,29 @@ export function ProbePanel() {
           {zeroCmd}
           <span className="pr-code-cmt">{'  ; Set Z zero'}</span>
         </code>
+        {/* Inline last-probe result, parsed from GRBL's [PRB:…] reply. */}
+        {probeResult && (
+          <p
+            className={`pr-note pr-prb${probeResult.success ? ' ok' : ' caution'}`}
+            role="status"
+            aria-live="polite"
+          >
+            {probeResult.success
+              ? t('probe.z.prbOk', 'Probe contact at Z {z} (machine).', {
+                  z: probeResult.z.toFixed(3),
+                })
+              : t('probe.z.prbFail', 'No probe contact (PRB reported failure) at Z {z}.', {
+                  z: probeResult.z.toFixed(3),
+                })}
+            <span className="pr-sub">
+              {t('probe.z.prbCoords', 'X {x}  Y {y}  Z {z}', {
+                x: probeResult.x.toFixed(3),
+                y: probeResult.y.toFixed(3),
+                z: probeResult.z.toFixed(3),
+              })}
+            </span>
+          </p>
+        )}
         <p className="pr-note caution">
           {t('probe.z.safetyLead', 'Safety:')} <b>{t('probe.z.probe', 'Probe Z')}</b>{' '}
           {t('probe.z.safety1', 'lowers the tool — clip the probe clip to the tool and rest the plate on the workpiece first. 1) Place the plate. 2)')}{' '}

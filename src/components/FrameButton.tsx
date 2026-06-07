@@ -8,6 +8,7 @@ import {
   type BuildFrameOptions,
 } from '../core/framing'
 import { BBox } from '../core/geometry'
+import { Icon } from './Icons'
 
 /**
  * Reusable "Frame" (perimeter-trace) control.
@@ -140,7 +141,7 @@ export function FrameButton({
         aria-label={tip}
       >
         <span className="frame-btn-ico" aria-hidden>
-          ⛶
+          <Icon name="frame" size={15} />
         </span>
         <span className="frame-btn-lbl">
           {running ? t('vp.frame.framing', 'Framing…') : frameLabel}
@@ -153,7 +154,7 @@ export function FrameButton({
             className="frame-opt"
             title={t('vp.frame.feed.title', 'Feed rate for the perimeter trace (mm/min)')}
           >
-            <span>{t('vp.frame.feed', 'Feed')}</span>
+            <span>{t('vp.frame.speed', 'Frame speed')}</span>
             <input
               type="number"
               min={1}
@@ -161,6 +162,7 @@ export function FrameButton({
               value={String(feed)}
               onChange={(e) => setFeed(Math.max(1, num(+e.target.value)))}
             />
+            <i className="frame-opt-unit">{t('cc.unitMmMin', 'mm/min')}</i>
           </label>
           <label
             className="frame-opt"

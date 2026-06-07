@@ -29,6 +29,30 @@
   color: var(--fg);
 }
 
+/* --- inline status banners (load error / degenerate-Z warning) --- */
+.gp-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  border-bottom: 1px solid var(--border);
+}
+.gp-banner svg {
+  flex: 0 0 auto;
+}
+.gp-banner-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.gp-banner-warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+
 /* --- body: canvas stage + controls column --- */
 .gp-body {
   flex: 1 1 auto;
@@ -100,8 +124,29 @@
   padding: 0;
 }
 .gp-tool-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 15px;
   line-height: 1;
+}
+.gp-tool-svg {
+  display: block;
+}
+/* Undo shares the toolbar icon-button sizing; muted until there is an action. */
+.gp-undo.icon-btn {
+  flex: 0 0 auto;
+  min-width: var(--ctl-h-lg);
+  min-height: var(--ctl-h-lg);
+  color: var(--fg-muted);
+}
+.gp-undo.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.gp-undo.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .gp-tool.gp-tool-on {
   border-color: var(--accent);
@@ -382,6 +427,9 @@
 }
 .gp-adv-toggle {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   min-height: var(--ctl-h);
   padding: 0 var(--sp-3);
   font-size: var(--fs-label);
@@ -405,9 +453,37 @@
   margin: 0;
 }
 
+/* Primary action: push the program to the Program tab. */
+.gp-send-btn {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.gp-send-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.gp-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* --- raw preview (collapsible) --- */
 .gp-raw-toggle {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   min-height: var(--ctl-h);
   padding: 0 var(--sp-3);
   font-size: var(--fs-label);
@@ -471,8 +547,10 @@
 @container gluepanel (max-width: 360px) {
   .gp-tool,
   .gp-clear.icon-btn,
+  .gp-undo.icon-btn,
   .gp-raw-toggle,
   .gp-adv-toggle,
+  .gp-send-btn,
   .gp-list-pick {
     min-height: var(--ctl-h-touch);
   }
@@ -481,7 +559,8 @@
     min-width: var(--ctl-h-touch);
     height: var(--ctl-h-touch);
   }
-  .gp-clear.icon-btn {
+  .gp-clear.icon-btn,
+  .gp-undo.icon-btn {
     min-width: var(--ctl-h-touch);
   }
   .gp-del.icon-btn {
@@ -523,8 +602,10 @@
   @media (max-width: 768px) {
     .gp-tool,
     .gp-clear.icon-btn,
+    .gp-undo.icon-btn,
     .gp-raw-toggle,
     .gp-adv-toggle,
+    .gp-send-btn,
     .gp-list-pick {
       min-height: var(--ctl-h-touch);
     }
@@ -533,7 +614,8 @@
       min-width: var(--ctl-h-touch);
       height: var(--ctl-h-touch);
     }
-    .gp-clear.icon-btn {
+    .gp-clear.icon-btn,
+    .gp-undo.icon-btn {
       min-width: var(--ctl-h-touch);
     }
     .gp-del.icon-btn {

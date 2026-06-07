@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { useStock } from '../store/stock'
 import { stockBounds } from '../core/stock'
@@ -46,8 +46,9 @@ export function StockBlock({ visible = true }: StockBlockProps) {
     return { box, edges, center: [cx, cy, cz] as [number, number, number] }
   }, [width, depth, height, xyOrigin, zRef])
 
-  // Dispose geometries when they change / on unmount.
-  useMemo(() => {
+  // Dispose geometries when they change / on unmount. MUST be useEffect — a
+  // useMemo never runs its returned cleanup, so the box/edges would leak.
+  useEffect(() => {
     return () => {
       geom?.box.dispose()
       geom?.edges.dispose()

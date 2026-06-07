@@ -1,16 +1,37 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMachine, useProgram } from '../store'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMachine, useProgram, useNotifications, usePersistentState } from '../store'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
+import { Icon } from '../components/Icons'
 import {
   SolderFeedType,
   defaultSolderPoint,
   defaultSolderingParams,
+  estimateSolderingSeconds,
   generateSoldering,
   type SolderPoint,
   type SolderingParams,
 } from '../core/soldering'
 import '../styles/soldering.css'
+
+/** Clamp decimals to the range toFixed() accepts (0..6) — guards the
+ * render-phase useMemo from a RangeError that would white-screen the panel. */
+function clampDecimals(n: number): number {
+  if (!Number.isFinite(n)) return 3
+  return Math.min(6, Math.max(0, Math.floor(n)))
+}
+
+/** Human-readable duration from seconds (e.g. "1 m 30 s", "12 s"). */
+function fmtDuration(totalSeconds: number, t: ReturnType<typeof useT>): string {
+  const s = Math.max(0, Math.round(totalSeconds))
+  if (s < 60) return t('time.seconds', '{s} s', { s })
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  if (m < 60) return t('time.minSec', '{m} m {s} s', { m, s: rem })
+  const h = Math.floor(m / 60)
+  const mm = m % 60
+  return t('time.hourMin', '{h} h {m} m', { h, m: mm })
+}
 
 /** Split G-code into non-empty lines for the line count shown to the operator. */
 function gcodeLines(gcode: string): string[] {
@@ -86,7 +107,7 @@ function csvToPoints(text: string): SolderPoint[] {
  * self-documenting.
  */
 function ToolButton(props: {
-  glyph: string
+  glyph: ReactNode
   title: string
   body: string
   onClick: () => void
@@ -158,6 +179,8 @@ export function SolderingPanel() {
   const wpos = useMachine((s) => s.wpos)
   const connected = useMachine((s) => s.connection === 'connected')
   const setProgram = useProgram((s) => s.setProgram)
+  const removeSection = useProgram((s) => s.removeSection)
+  const notify = useNotifications((s) => s.notify)
 
   const [defaults, setDefaults] = useState<RowDefaults>({
     freeZ: 5.0,
@@ -168,7 +191,10 @@ export function SolderingPanel() {
 
   const [points, setPoints] = useState<SolderPoint[]>([])
   const [selected, setSelected] = useState(-1)
-  const [showSettings, setShowSettings] = useState(false)
+  const [showSettings, setShowSettings] = usePersistentState<boolean>(
+    'karmyogi.soldering.showSettings',
+    false,
+  )
   // Hidden <input type=file> trigger for "Load CSV".
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -180,7 +206,8 @@ export function SolderingPanel() {
       feederRPM: d.feederRPM,
       plungeFeed: d.plungeFeed,
       settleSeconds: d.settleSeconds,
-      decimals: d.decimals,
+      // Clamp on load so an out-of-range value can never reach toFixed().
+      decimals: clampDecimals(d.decimals),
     }
   })
 
@@ -196,8 +223,12 @@ export function SolderingPanel() {
   }
 
   function addRow() {
-    setPoints((p) => [...p, newRow()])
-    setSelected(points.length)
+    // Compute the new index from the functional updater so it never reads a
+    // stale `points` from this closure (which would select the wrong row).
+    setPoints((p) => {
+      setSelected(p.length)
+      return [...p, newRow()]
+    })
   }
 
   function deleteRow(i: number) {
@@ -229,19 +260,46 @@ export function SolderingPanel() {
     a.download = 'solder-points.csv'
     a.click()
     URL.revokeObjectURL(url)
+    notify('success', t('solder.csv.saved', 'Saved {n} solder point(s) to CSV.', { n: points.length }))
   }
 
   // Read a CSV chosen from the local PC and REPLACE the current point list.
+  // Confirms before discarding a non-empty list; toasts the imported count and
+  // warns when the file held no usable rows.
   function loadCsvFile(file: File) {
     const reader = new FileReader()
     reader.onload = () => {
       const parsed = csvToPoints(String(reader.result ?? ''))
-      if (parsed.length > 0) {
-        setPoints(parsed)
-        setSelected(-1)
+      if (parsed.length === 0) {
+        notify('warn', t('solder.csv.empty', 'No usable solder points found in that CSV.'))
+        return
       }
+      if (
+        points.length > 0 &&
+        !window.confirm(
+          t('solder.csv.replaceConfirm', 'Replace the current {n} point(s) with {m} from the CSV?', {
+            n: points.length,
+            m: parsed.length,
+          }),
+        )
+      ) {
+        return
+      }
+      setPoints(parsed)
+      setSelected(-1)
+      notify('success', t('solder.csv.loaded', 'Loaded {n} solder point(s) from CSV.', { n: parsed.length }))
     }
     reader.readAsText(file)
+  }
+
+  // Clear all points (confirm first when non-empty), and drop the synced section
+  // so the Visualizer / Program tab don't keep showing a stale toolpath.
+  function clearAll() {
+    if (points.length === 0) return
+    if (!window.confirm(t('solder.clearConfirm', 'Remove all {n} solder point(s)?', { n: points.length })))
+      return
+    setPoints([])
+    setSelected(-1)
   }
 
   // Record the live machine work-position. If a row is selected, fill its X/Y;
@@ -251,22 +309,59 @@ export function SolderingPanel() {
     if (selected >= 0 && selected < points.length) {
       updatePoint(selected, { x: wpos.x, y: wpos.y })
     } else {
-      setPoints((p) => [...p, newRow(wpos.x, wpos.y)])
-      setSelected(points.length)
+      // Append at the live position and select it via the functional updater so
+      // the new index is computed from the current list, not a stale closure.
+      setPoints((p) => {
+        setSelected(p.length)
+        return [...p, newRow(wpos.x, wpos.y)]
+      })
     }
   }
 
-  // Live G-code preview, recomputed whenever points/params change.
-  const gcode = useMemo(() => generateSoldering(points, { ...params }), [points, params])
+  // Live G-code preview, recomputed whenever points/params change. The core
+  // clamps decimals internally, but we also clamp here so the preview + the
+  // estimate share one safe value. Times/feeds are clamped >= 0 so a typed
+  // negative never produces an inverted dwell or backwards feed.
+  const safeParams = useMemo(
+    () => ({
+      ...params,
+      decimals: clampDecimals(params.decimals),
+      plungeFeed: Math.max(0, params.plungeFeed),
+      settleSeconds: Math.max(0, params.settleSeconds),
+    }),
+    [params],
+  )
+  const safePoints = useMemo(
+    () => points.map((p) => ({ ...p, feedSeconds: Math.max(0, p.feedSeconds) })),
+    [points],
+  )
+  const gcode = useMemo(() => generateSoldering(safePoints, safeParams), [safePoints, safeParams])
   const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
+  const estSeconds = useMemo(
+    () => estimateSolderingSeconds(safePoints, safeParams),
+    [safePoints, safeParams],
+  )
+
+  // Warn when a point's Touch-Z is at or above its Free-Z: the tip would never
+  // descend to make contact (an inverted/degenerate move). Lists the 1-based
+  // point indices so the operator can fix them.
+  const invertedPoints = useMemo(
+    () => points.map((p, i) => (p.touchZ >= p.freeZ ? i + 1 : -1)).filter((i) => i > 0),
+    [points],
+  )
 
   // Live generation: push the freshly-computed program to the store (debounced)
   // so the Visualizer + Program tab pick it up without a manual Generate step.
+  // When the list is emptied (Clear-all), DROP the section instead of leaving a
+  // stale toolpath in the Visualizer / Program tab.
   useEffect(() => {
-    if (points.length === 0) return
+    if (points.length === 0) {
+      removeSection('soldering')
+      return
+    }
     const id = window.setTimeout(() => setProgram('soldering', gcode), 300)
     return () => window.clearTimeout(id)
-  }, [gcode, points.length, setProgram])
+  }, [gcode, points.length, setProgram, removeSection])
 
   return (
     <div className="sp-panel">
@@ -286,13 +381,13 @@ export function SolderingPanel() {
         <div className="sp-tools">
           <ToolButton
             className="sp-ico-primary"
-            glyph="+"
+            glyph={<Icon name="add" />}
             onClick={addRow}
             title={t('solder.toolbar.add', 'Add point')}
             body={t('solder.toolbar.add.body', 'Append a soldering point prefilled from the defaults in Settings.')}
           />
           <ToolButton
-            glyph="⌖"
+            glyph={<Icon name="probe" />}
             onClick={recordPosition}
             disabled={!connected}
             title={t('solder.toolbar.record', 'Record position')}
@@ -306,22 +401,22 @@ export function SolderingPanel() {
           />
           <ToolButton
             className="sp-ico-danger"
-            glyph="🗑"
-            onClick={() => setPoints([])}
+            glyph={<Icon name="trash" />}
+            onClick={clearAll}
             disabled={points.length === 0}
             title={t('solder.toolbar.clear', 'Clear all')}
             body={t('solder.toolbar.clear.body', 'Remove every soldering point and start over.')}
           />
           <span className="sp-tools-sep" aria-hidden="true" />
           <ToolButton
-            glyph="⭳"
+            glyph={<Icon name="download" />}
             onClick={saveCsv}
             disabled={points.length === 0}
             title={t('solder.toolbar.saveCsv', 'Save CSV')}
             body={t('solder.toolbar.saveCsv.body', 'Download the current solder-point list as a CSV file you can re-load later.')}
           />
           <ToolButton
-            glyph="⭱"
+            glyph={<Icon name="upload" />}
             onClick={() => fileInputRef.current?.click()}
             title={t('solder.toolbar.loadCsv', 'Load CSV')}
             body={t('solder.toolbar.loadCsv.body', 'Load a solder-point list from a CSV file on your PC (replaces the current list).')}
@@ -340,7 +435,7 @@ export function SolderingPanel() {
           <span className="sp-tools-sep" aria-hidden="true" />
           <ToolButton
             className={showSettings ? 'is-active' : ''}
-            glyph="⚙"
+            glyph={<Icon name="settings" />}
             onClick={() => setShowSettings((v) => !v)}
             ariaExpanded={showSettings}
             title={t('solder.toolbar.settings', 'Settings')}
@@ -358,10 +453,27 @@ export function SolderingPanel() {
         <span className="sp-status-pill">
           <b>{lineCount}</b> {t('solder.status.lines', 'G-code lines')}
         </span>
+        <span className="sp-status-sep" aria-hidden="true">·</span>
+        <span
+          className="sp-status-pill"
+          title={t('solder.status.est.title', 'Estimated cycle time (plunge + feeder + settle dwells; travel ignored)')}
+        >
+          <b>{fmtDuration(estSeconds, t)}</b> {t('solder.status.est', 'est.')}
+        </span>
         <span className="sp-status-sync" title={t('solder.live.title', 'Lines auto-synced to the Program tab')}>
           → {t('solder.status.program', 'Program')}
         </span>
       </div>
+
+      {invertedPoints.length > 0 && (
+        <p className="sp-warn">
+          {t(
+            'solder.warn.inverted',
+            'Touch-Z ≥ Free-Z on point(s) {list} — the tip will not descend to make contact. Lower Touch-Z below Free-Z.',
+            { list: invertedPoints.join(', ') },
+          )}
+        </p>
+      )}
 
       {!connected && points.length > 0 && (
         <p className="sp-warn">
@@ -384,7 +496,7 @@ export function SolderingPanel() {
             <div className="sp-fields">
               <NumField
                 label={t('solder.field.freeZ', 'Free-Z')}
-                unit="mm"
+                unit={t('unit.mm', 'mm')}
                 value={defaults.freeZ}
                 onChange={(n) => setDefaults((d) => ({ ...d, freeZ: n }))}
                 info={{
@@ -394,7 +506,7 @@ export function SolderingPanel() {
               />
               <NumField
                 label={t('solder.field.touchZ', 'Touch-Z')}
-                unit="mm"
+                unit={t('unit.mm', 'mm')}
                 value={defaults.touchZ}
                 onChange={(n) => setDefaults((d) => ({ ...d, touchZ: n }))}
                 info={{
@@ -404,7 +516,7 @@ export function SolderingPanel() {
               />
               <NumField
                 label={t('solder.field.feed', 'Feed')}
-                unit="s"
+                unit={t('unit.s', 's')}
                 min="0"
                 value={defaults.feedSeconds}
                 onChange={(n) => setDefaults((d) => ({ ...d, feedSeconds: n }))}
@@ -445,7 +557,7 @@ export function SolderingPanel() {
             <div className="sp-fields">
               <NumField
                 label={t('solder.field.safeZ', 'Safe-Z')}
-                unit="mm"
+                unit={t('unit.mm', 'mm')}
                 value={params.safeZ}
                 onChange={(n) => setParams((p) => ({ ...p, safeZ: n }))}
                 info={{
@@ -455,7 +567,7 @@ export function SolderingPanel() {
               />
               <NumField
                 label={t('solder.field.feederS', 'Feeder')}
-                unit="S"
+                unit={t('unit.sWord', 'S')}
                 step="100"
                 min="0"
                 value={params.feederRPM}
@@ -467,7 +579,7 @@ export function SolderingPanel() {
               />
               <NumField
                 label={t('solder.field.plungeF', 'Plunge')}
-                unit="mm/min"
+                unit={t('unit.mmPerMin', 'mm/min')}
                 step="10"
                 min="0"
                 value={params.plungeFeed}
@@ -479,7 +591,7 @@ export function SolderingPanel() {
               />
               <NumField
                 label={t('solder.field.settle', 'Settle')}
-                unit="s"
+                unit={t('unit.s', 's')}
                 min="0"
                 value={params.settleSeconds}
                 onChange={(n) => setParams((p) => ({ ...p, settleSeconds: n }))}
@@ -494,11 +606,11 @@ export function SolderingPanel() {
                 min="0"
                 max="6"
                 value={params.decimals}
-                parse={intNum}
-                onChange={(n) => setParams((p) => ({ ...p, decimals: n }))}
+                parse={(v, fb) => clampDecimals(intNum(v, fb))}
+                onChange={(n) => setParams((p) => ({ ...p, decimals: clampDecimals(n) }))}
                 info={{
                   title: t('solder.field.decimals', 'Decimals'),
-                  body: t('solder.field.decimals.body', 'Number of decimal places in the emitted coordinates.'),
+                  body: t('solder.field.decimals.body', 'Number of decimal places in the emitted coordinates (0–6).'),
                 }}
               />
             </div>
@@ -516,9 +628,9 @@ export function SolderingPanel() {
           <table className="sp-table">
             <thead>
               <tr>
-                <th className="sp-idx">#</th>
-                <th>X</th>
-                <th>Y</th>
+                <th className="sp-idx">{t('solder.table.num', '#')}</th>
+                <th>{t('solder.table.x', 'X')}</th>
+                <th>{t('solder.table.y', 'Y')}</th>
                 <th>{t('solder.table.freeZ', 'Free-Z')}</th>
                 <th>{t('solder.table.touchZ', 'Touch-Z')}</th>
                 <th>{t('solder.table.feedType', 'Type')}</th>
@@ -544,7 +656,7 @@ export function SolderingPanel() {
                   onClick={() => setSelected(i)}
                 >
                   <td className="sp-idx">{i + 1}</td>
-                  <td data-label="X">
+                  <td data-label={t('solder.table.x', 'X')}>
                     <input
                       type="number"
                       step="0.1"
@@ -552,7 +664,7 @@ export function SolderingPanel() {
                       onChange={(e) => updatePoint(i, { x: num(e.target.value, pt.x) })}
                     />
                   </td>
-                  <td data-label="Y">
+                  <td data-label={t('solder.table.y', 'Y')}>
                     <input
                       type="number"
                       step="0.1"
@@ -630,7 +742,7 @@ export function SolderingPanel() {
                         deleteRow(i)
                       }}
                     >
-                      ✕
+                      <Icon name="close" size={14} />
                     </button>
                   </td>
                 </tr>
@@ -696,14 +808,14 @@ export function SolderingPanel() {
                       deleteRow(i)
                     }}
                   >
-                    ✕
+                    <Icon name="close" size={14} />
                   </button>
                 </div>
               </div>
 
               <div className="sp-pcard-grid">
                 <label className="sp-mini">
-                  <span>X</span>
+                  <span>{t('solder.table.x', 'X')}</span>
                   <input
                     type="number"
                     step="0.1"
@@ -713,7 +825,7 @@ export function SolderingPanel() {
                   />
                 </label>
                 <label className="sp-mini">
-                  <span>Y</span>
+                  <span>{t('solder.table.y', 'Y')}</span>
                   <input
                     type="number"
                     step="0.1"

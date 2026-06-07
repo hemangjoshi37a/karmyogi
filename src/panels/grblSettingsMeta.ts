@@ -342,7 +342,7 @@ export function settingGroup(number: number): GrblSettingGroup {
 
 /** Combined label+units (from serial) for a number, with a raw fallback. */
 export function settingMeta(number: number): GrblSettingMeta {
-  return GRBL_SETTING_META[number] ?? { label: `$${number}` }
+  return GRBL_SETTING_META[number] ?? { label: `$${number}`, labelKey: `set.${number}.label` }
 }
 
 /**
@@ -403,19 +403,35 @@ export interface SettingValidation {
   bad: boolean
   /** Worst-case severity for styling. */
   severity: 'ok' | 'warn' | 'danger'
-  /** Human hint shown next to the field when bad. */
+  /**
+   * English hint shown next to the field when bad — also the i18n fallback. This
+   * module stays pure (no React/i18n imports); the panel resolves the translated
+   * string via `t(hintKey, hint, hintParams)` at the UI boundary.
+   */
   hint?: string
+  /** i18n key for {@link hint}. */
+  hintKey?: string
+  /** Interpolation params for the i18n hint (e.g. the sane min/max). */
+  hintParams?: Record<string, string | number>
 }
 
 /**
  * Validate a numeric setting value against its sane range + corruption rules.
  * `danger` = almost-certainly-corrupt (sentinel / impossible). `warn` =
  * out of the sane range but not obviously garbage.
+ *
+ * Hints are returned as English text + an i18n key (and optional params) so the
+ * panel can translate them with `t()` without this pure module importing React.
  */
 export function validateSetting(number: number, numeric: number): SettingValidation {
   // Non-numeric / NaN -> can't be trusted.
   if (!Number.isFinite(numeric)) {
-    return { bad: true, severity: 'danger', hint: 'not a number — looks corrupted, consider factory reset' }
+    return {
+      bad: true,
+      severity: 'danger',
+      hint: 'not a number — looks corrupted, consider factory reset',
+      hintKey: 'motion.validate.nan',
+    }
   }
 
   // The int32 overflow sentinel (either sign) — unambiguous corruption.
@@ -424,6 +440,7 @@ export function validateSetting(number: number, numeric: number): SettingValidat
       bad: true,
       severity: 'danger',
       hint: 'int32 overflow value — EEPROM corrupted, consider factory reset ($RST=$)',
+      hintKey: 'motion.validate.sentinel',
     }
   }
 
@@ -435,21 +452,39 @@ export function validateSetting(number: number, numeric: number): SettingValidat
 
   // Physically must be > 0 (steps/mm, max rate, accel, max travel).
   if (meta.mustBePositive && numeric <= 0) {
-    return {
-      bad: true,
-      severity: 'danger',
-      hint: numeric === 0
-        ? 'zero is invalid here — axis cannot move; looks corrupted, consider factory reset'
-        : 'negative is invalid here — looks corrupted, consider factory reset',
-    }
+    return numeric === 0
+      ? {
+          bad: true,
+          severity: 'danger',
+          hint: 'zero is invalid here — axis cannot move; looks corrupted, consider factory reset',
+          hintKey: 'motion.validate.zero',
+        }
+      : {
+          bad: true,
+          severity: 'danger',
+          hint: 'negative is invalid here — looks corrupted, consider factory reset',
+          hintKey: 'motion.validate.negative',
+        }
   }
 
   // Generic sane-range check.
   if (meta.min !== undefined && numeric < meta.min) {
-    return { bad: true, severity: 'warn', hint: `below sane minimum (${meta.min})` }
+    return {
+      bad: true,
+      severity: 'warn',
+      hint: `below sane minimum (${meta.min})`,
+      hintKey: 'motion.validate.belowMin',
+      hintParams: { min: meta.min },
+    }
   }
   if (meta.max !== undefined && numeric > meta.max) {
-    return { bad: true, severity: 'warn', hint: `above sane maximum (${meta.max})` }
+    return {
+      bad: true,
+      severity: 'warn',
+      hint: `above sane maximum (${meta.max})`,
+      hintKey: 'motion.validate.aboveMax',
+      hintParams: { max: meta.max },
+    }
   }
 
   return { bad: false, severity: 'ok' }

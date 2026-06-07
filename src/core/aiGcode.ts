@@ -91,8 +91,55 @@ export interface AuthOptions {
 export interface LintWarning {
   /** Coarse class — drives the icon/severity in the UI. */
   level: 'error' | 'warn' | 'info'
+  /**
+   * Stable code so the UI can translate the warning via i18n. The pre-formatted
+   * English `message` is the fallback when no translation exists.
+   */
+  code: LintCode
+  /** Interpolation params for the translated string (and used to build `message`). */
+  params?: Record<string, string | number>
   message: string
 }
+
+/** Stable lint-warning codes — the UI maps these through t(). */
+export type LintCode =
+  | 'preamble'
+  | 'xRange'
+  | 'yRange'
+  | 'zMax'
+  | 'feedHigh'
+  | 'feedNonPositive'
+  | 'rapidLowZ'
+  | 'noSafeRetract'
+  | 'endLowZ'
+
+/**
+ * A user-facing error from the AI core. Carries a stable `code` so the UI can
+ * translate it via i18n; `message` (English) is the fallback. Errors with no
+ * meaningful code (e.g. raw provider text) are thrown as plain `Error`.
+ */
+export class AiError extends Error {
+  code: AiErrorCode
+  params?: Record<string, string | number>
+  constructor(code: AiErrorCode, message: string, params?: Record<string, string | number>) {
+    super(message)
+    this.name = 'AiError'
+    this.code = code
+    this.params = params
+  }
+}
+
+/** Stable AI-core error codes — the UI maps these through t(). */
+export type AiErrorCode =
+  | 'cancelled'
+  | 'network'
+  | 'authRejected'
+  | 'rateLimit'
+  | 'httpError'
+  | 'emptyResponse'
+  | 'noCookie'
+  | 'noKey'
+  | 'noRelay'
 
 /** Result of the safety lint pass. */
 export interface LintResult {
@@ -170,32 +217,44 @@ async function explainHttpError(provider: Provider, res: Response): Promise<Erro
   }
   const where = provider === 'openai' ? 'OpenAI' : 'Anthropic'
   if (res.status === 401 || res.status === 403) {
-    return new Error(
+    return new AiError(
+      'authRejected',
       `${where} rejected the credentials (HTTP ${res.status}). Check your API key — ` +
         `or, in session mode, that the pasted cookie is fresh (re-export it; sessions ` +
         `expire) and the proxy forwards it correctly.`,
+      { where, status: res.status },
     )
   }
   if (res.status === 429) {
-    return new Error(
+    return new AiError(
+      'rateLimit',
       `${where} rate-limit / quota exceeded (HTTP 429). You may be out of credits or sending too fast. ${detail}`.trim(),
+      { where, detail },
     )
   }
-  return new Error(`${where} API error (HTTP ${res.status}). ${detail}`.trim())
+  return new AiError('httpError', `${where} API error (HTTP ${res.status}). ${detail}`.trim(), {
+    where,
+    status: res.status,
+    detail,
+  })
 }
 
 /** Map a thrown fetch error (network/CORS/abort) to a clearer message. */
 function explainNetworkError(provider: Provider, err: unknown): Error {
   if (err instanceof DOMException && err.name === 'AbortError') {
-    return new Error('Request cancelled.')
+    return new AiError('cancelled', 'Request cancelled.')
   }
+  // An AiError already carries a code — pass it straight through.
+  if (err instanceof AiError) return err
   const where = provider === 'openai' ? 'OpenAI' : 'Anthropic'
   // A TypeError from fetch with no HTTP status is almost always a network /
   // CORS / offline failure (the browser hides the real cause for security).
   if (err instanceof TypeError) {
-    return new Error(
+    return new AiError(
+      'network',
       `Could not reach ${where}. This is usually no internet connection, a browser ` +
         `extension blocking the request, or a CORS block. Check your connection and try again.`,
+      { where },
     )
   }
   return err instanceof Error ? err : new Error(String(err))
@@ -218,10 +277,17 @@ function resolveEndpoint(
   if (auth.mode === 'session') {
     const cookie = (auth.sessionCookie ?? '').trim()
     if (!cookie) {
-      throw new Error('Paste your session cookie first.')
+      throw new AiError('noCookie', 'Paste your session cookie first.')
     }
-    // Default to the local proxy URL (http://localhost:3000) if no custom URL or default build-time URL is set.
-    const base = ((auth.proxyUrl ?? '').trim() || DEFAULT_RELAY_URL || 'http://localhost:3000').replace(/\/+$/, '')
+    // session mode REQUIRES a configured relay — a browser cannot post a pasted
+    // cross-origin cookie straight to the provider (CORS + forbidden `Cookie`).
+    const base = ((auth.proxyUrl ?? '').trim() || DEFAULT_RELAY_URL).replace(/\/+$/, '')
+    if (!base) {
+      throw new AiError(
+        'noRelay',
+        'Session mode needs a relay/proxy URL — configure VITE_AI_RELAY_URL or enter a proxy URL.',
+      )
+    }
     return {
       url: `${base}${path}`,
       headers: { ...baseHeaders, 'X-Session-Cookie': cookie },
@@ -229,7 +295,7 @@ function resolveEndpoint(
   }
   // key mode → official endpoint + key header.
   if (!apiKey.trim()) {
-    throw new Error('Add your API key first.')
+    throw new AiError('noKey', 'Add your API key first.')
   }
   const host = provider === 'openai' ? 'https://api.openai.com' : 'https://api.anthropic.com'
   return { url: `${host}${path}`, headers: baseHeaders }
@@ -239,128 +305,10 @@ function resolveEndpoint(
 export async function callOpenAI(args: CallArgs & AuthOptions): Promise<string> {
   const { apiKey, model, system, messages, signal } = args
 
-  if (args.mode === 'session') {
-    const cookie = (args.sessionCookie ?? '').trim()
-    let accessToken: string;
-    try {
-      const headers: Record<string, string> = {
-        'Accept': 'application/json',
-      }
-      if (cookie) {
-        headers['X-Session-Cookie'] = cookie;
-      }
-      const sessionRes = await fetch('https://chatgpt.com/api/auth/session', {
-        headers,
-        credentials: 'include',
-        signal,
-      });
-
-      if (!sessionRes.ok) {
-        throw new Error(`Failed to authenticate session: HTTP ${sessionRes.status}`);
-      }
-
-      const sessionData: any = await sessionRes.json();
-      accessToken = sessionData.accessToken;
-      if (!accessToken) {
-        throw new Error('No access token returned in session. Make sure you are logged in to chatgpt.com.');
-      }
-    } catch (err: any) {
-      throw new Error(`Session auth error: ${err.message}`);
-    }
-
-    try {
-      const systemMessage = messages.find((m: any) => m.role === 'system')?.content || '';
-      const userMessages = messages.filter((m: any) => m.role === 'user');
-      const lastUserMessage = userMessages[userMessages.length - 1]?.content || '';
-      const prompt = systemMessage ? `${systemMessage}\n\nUser request: ${lastUserMessage}` : lastUserMessage;
-
-      const modelName = model === 'gpt-4o-mini' ? 'gpt-4o-mini' : 'auto';
-      const uuid1 = crypto.randomUUID();
-      const uuid2 = crypto.randomUUID();
-
-      const chatRes = await fetch('https://chatgpt.com/backend-api/conversation', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          action: 'next',
-          messages: [
-            {
-              id: uuid1,
-              author: { role: 'user' },
-              content: { content_type: 'text', parts: [prompt] },
-              metadata: {},
-            },
-          ],
-          parent_message_id: uuid2,
-          model: modelName,
-          timezone_offset_min: -330,
-          suggestions: [],
-          history_and_training_disabled: true,
-          conversation_mode: 'kindle',
-        }),
-        signal,
-      });
-
-      if (!chatRes.ok) {
-        const errText = await chatRes.text();
-        throw new Error(`ChatGPT API error: HTTP ${chatRes.status}. ${errText}`);
-      }
-
-      const reader = chatRes.body?.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      let responseText = '';
-      let done = false;
-
-      if (!reader) {
-        throw new Error('Response body is empty');
-      }
-
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          buffer += decoder.decode(value, { stream: !done });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data:')) continue;
-            const dataStr = trimmed.slice(5).trim();
-            if (dataStr === '[DONE]') {
-              done = true;
-              break;
-            }
-            try {
-              const parsed = JSON.parse(dataStr);
-              const part = parsed?.message?.content?.parts?.[0];
-              if (typeof part === 'string') {
-                responseText = part;
-              }
-            } catch {
-              // Ignore intermediate parse errors
-            }
-          }
-        }
-      }
-
-      if (!responseText) {
-        throw new Error('ChatGPT returned an empty response.');
-      }
-
-      return responseText;
-    } catch (err: any) {
-      throw explainNetworkError('openai', err);
-    }
-  }
-
-  // Official API key mode
+  // Both 'key' and 'session' modes use the same OpenAI Chat Completions shape.
+  // In 'session' mode resolveEndpoint() routes through the configured relay and
+  // forwards the pasted cookie as `X-Session-Cookie`; the relay re-attaches it
+  // server-side (an in-browser direct call would be CORS-blocked).
   const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
   if (args.mode === 'key') baseHeaders.Authorization = `Bearer ${apiKey}`
   const { url, headers } = resolveEndpoint(
@@ -390,7 +338,7 @@ export async function callOpenAI(args: CallArgs & AuthOptions): Promise<string> 
   const data = await res.json()
   const text: unknown = data?.choices?.[0]?.message?.content
   if (typeof text !== 'string' || !text.trim()) {
-    throw new Error('OpenAI returned an empty response.')
+    throw new AiError('emptyResponse', 'OpenAI returned an empty response.', { where: 'OpenAI' })
   }
   return text
 }
@@ -399,130 +347,10 @@ export async function callOpenAI(args: CallArgs & AuthOptions): Promise<string> 
 export async function callAnthropic(args: CallArgs & AuthOptions): Promise<string> {
   const { apiKey, model, system, messages, signal } = args
 
-  if (args.mode === 'session') {
-    let orgId: string;
-    try {
-      const orgRes = await fetch('https://claude.ai/api/organizations', {
-        headers: {
-          'Accept': 'application/json',
-        },
-        credentials: 'include',
-        signal,
-      });
-
-      if (!orgRes.ok) {
-        throw new Error(`Failed to fetch Claude organizations: HTTP ${orgRes.status}`);
-      }
-
-      const orgs: any = await orgRes.json();
-      if (!Array.isArray(orgs) || orgs.length === 0) {
-        throw new Error('No organizations found for this Claude session. Make sure you are logged in to claude.ai.');
-      }
-      orgId = orgs[0].uuid;
-    } catch (err: any) {
-      throw new Error(`Claude org fetch error: ${err.message}`);
-    }
-
-    let conversationId: string;
-    try {
-      const convUuid = crypto.randomUUID();
-      const convRes = await fetch(`https://claude.ai/api/organizations/${orgId}/chat_conversations`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          uuid: convUuid,
-          name: '',
-        }),
-        signal,
-      });
-
-      if (!convRes.ok) {
-        throw new Error(`Failed to create Claude conversation: HTTP ${convRes.status}`);
-      }
-
-      const convData: any = await convRes.json();
-      conversationId = convData.uuid;
-    } catch (err: any) {
-      throw new Error(`Claude conversation creation error: ${err.message}`);
-    }
-
-    try {
-      const systemMessage = system || '';
-      const userMessages = messages.filter((m: any) => m.role === 'user');
-      const lastUserMessage = userMessages[userMessages.length - 1]?.content || '';
-      const prompt = systemMessage ? `${systemMessage}\n\nUser request: ${lastUserMessage}` : lastUserMessage;
-
-      const modelName = model || 'claude-3-5-sonnet-latest';
-
-      const chatRes = await fetch(`https://claude.ai/api/organizations/${orgId}/chat_conversations/${conversationId}/completion`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          prompt: prompt,
-          timezone: 'UTC',
-          model: modelName,
-          rendering_mode: 'raw',
-        }),
-        signal,
-      });
-
-      if (!chatRes.ok) {
-        const errText = await chatRes.text();
-        throw new Error(`Claude Web API error: HTTP ${chatRes.status}. ${errText}`);
-      }
-
-      const reader = chatRes.body?.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      let responseText = '';
-      let done = false;
-
-      if (!reader) {
-        throw new Error('Response body is empty');
-      }
-
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          buffer += decoder.decode(value, { stream: !done });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data:')) continue;
-            const dataStr = trimmed.slice(5).trim();
-            try {
-              const parsed = JSON.parse(dataStr);
-              if (typeof parsed?.completion === 'string') {
-                responseText += parsed.completion;
-              }
-            } catch {
-              // Ignore parse errors on intermediate lines
-            }
-          }
-        }
-      }
-
-      if (!responseText) {
-        throw new Error('Claude returned an empty response.');
-      }
-
-      return responseText;
-    } catch (err: any) {
-      throw explainNetworkError('anthropic', err);
-    }
-  }
-
-  // Official API key mode
+  // Both modes use the Anthropic Messages API shape. In 'session' mode
+  // resolveEndpoint() routes through the configured relay with the pasted
+  // cookie forwarded as `X-Session-Cookie` (a direct in-browser call to
+  // claude.ai is CORS-blocked and cannot set the cookie).
   const baseHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
@@ -561,7 +389,10 @@ export async function callAnthropic(args: CallArgs & AuthOptions): Promise<strin
       }
     }
   }
-  if (!text.trim()) throw new Error('Anthropic returned an empty response.')
+  if (!text.trim())
+    throw new AiError('emptyResponse', 'Anthropic returned an empty response.', {
+      where: 'Anthropic',
+    })
   return text
 }
 
@@ -736,6 +567,8 @@ export function lintGcode(
     ]
     warnings.push({
       level: 'info',
+      code: 'preamble',
+      params: { codes: missing.join(' ') },
       message: `Prepended missing safety preamble: ${missing.join(' ')}.`,
     })
   }
@@ -759,18 +592,24 @@ export function lintGcode(
     if (x !== undefined && (x < -halfW - 1e-6 || x > halfW + 1e-6)) {
       warnings.push({
         level: 'error',
+        code: 'xRange',
+        params: { v: x, lo: -halfW, hi: halfW, line: raw.trim() },
         message: `X${x} is outside the bed (X must be ${-halfW}..${halfW} mm): ${raw.trim()}`,
       })
     }
     if (y !== undefined && (y < -halfD - 1e-6 || y > halfD + 1e-6)) {
       warnings.push({
         level: 'error',
+        code: 'yRange',
+        params: { v: y, lo: -halfD, hi: halfD, line: raw.trim() },
         message: `Y${y} is outside the bed (Y must be ${-halfD}..${halfD} mm): ${raw.trim()}`,
       })
     }
     if (z !== undefined && z > height + 1e-6) {
       warnings.push({
         level: 'error',
+        code: 'zMax',
+        params: { v: z, hi: height, line: raw.trim() },
         message: `Z${z} is above the work height (Z max ${height} mm): ${raw.trim()}`,
       })
     }
@@ -782,11 +621,15 @@ export function lintGcode(
       if (feed > 5000) {
         warnings.push({
           level: 'warn',
+          code: 'feedHigh',
+          params: { feed, line: raw.trim() },
           message: `Feed F${feed} mm/min looks very high — verify it is safe: ${raw.trim()}`,
         })
       } else if (feed <= 0) {
         warnings.push({
           level: 'warn',
+          code: 'feedNonPositive',
+          params: { feed, line: raw.trim() },
           message: `Feed F${feed} is not positive: ${raw.trim()}`,
         })
       }
@@ -801,6 +644,7 @@ export function lintGcode(
       if (rapid && (lastZ === undefined || lastZ < 0) && !unsafeTravelReported) {
         warnings.push({
           level: 'warn',
+          code: 'rapidLowZ',
           message:
             'A rapid XY travel happens while Z may be at/below the surface — make sure the tool retracts to a safe Z before rapids.',
         })
@@ -815,6 +659,7 @@ export function lintGcode(
   if (sawLateral && !sawSafeRetract) {
     warnings.push({
       level: 'warn',
+      code: 'noSafeRetract',
       message:
         'No safe-Z retract (a positive Z move) found — verify the tool lifts above the stock before/after travel.',
     })
@@ -824,6 +669,7 @@ export function lintGcode(
   if (sawLateral && lastZ !== undefined && lastZ < 0) {
     warnings.push({
       level: 'warn',
+      code: 'endLowZ',
       message: 'Program may end with Z below the surface — add a safe-Z retract at the end.',
     })
   }

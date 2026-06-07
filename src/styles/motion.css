@@ -208,6 +208,64 @@
 }
 .mo-reset:disabled { opacity: 0.3; }
 
+/* ---- buttons with a leading icon ---- */
+.mo-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.mo-iconbtn svg { flex: none; }
+
+/* ---- search / filter row ---- */
+.mo-filter { gap: 8px; }
+.mo-search {
+  flex: 1 1 180px;
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+.mo-search:focus { outline: none; border-color: var(--accent); }
+.mo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mo-toggle input { cursor: pointer; }
+
+/* ---- confirm / import dialogs (inside shared <Modal>) ---- */
+.mo-confirm-msg {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--fg);
+}
+.mo-confirm-actions { margin-top: 12px; }
+.mo-import {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.mo-import:focus { outline: none; border-color: var(--accent); }
+
 /* ---- mobile: stack label over value, full-width controls, ≥36px tap ---- */
 @media (max-width: 540px) {
   .mo-rowitem {

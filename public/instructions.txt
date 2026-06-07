@@ -1,0 +1,109 @@
+================================================================================
+ karmyogi — USER LOGIN + ACTIVITY-TRACKING SETUP INSTRUCTIONS
+================================================================================
+ Fill in every line that ends with  =   (after the equals sign), save this file,
+ and send it back. I'll drop the values into a gitignored `.env` and your Google
+ login + per-user activity tracking + bug reporting will go live automatically.
+
+ App URLs (already configured on my side):
+   Production : https://karmyogi.hjlabs.in
+   Local LAN  : https://192.168.3.200:5185
+
+ IMPORTANT SECURITY NOTES (please read):
+   • Everything below is the PUBLIC Firebase "web app config" — it is safe to put
+     in a browser app (security comes from the Firestore rules + authorized
+     domains, NOT from hiding these values). Do NOT send any "service account"
+     JSON / private key / Admin SDK secret — those are real secrets and must
+     never go into a browser app or this file.
+   • This file is for filling values only; it is gitignored on my side so it
+     won't be published to GitHub.
+
+================================================================================
+ PART 1 — CREATE THE FIREBASE PROJECT
+================================================================================
+ 1. Go to:  https://console.firebase.google.com/
+ 2. Click "Add project" (or "Create a project").
+ 3. Name it (e.g. "karmyogi"). Google Analytics: ENABLE it (recommended, gives
+    you GA4 funnels in addition to the detailed Firestore tracking). Accept and
+    create. Wait for it to finish provisioning.
+
+================================================================================
+ PART 2 — REGISTER A WEB APP + COPY THE CONFIG
+================================================================================
+ 1. In the project, click the gear icon (top-left) -> "Project settings".
+ 2. Scroll to "Your apps" -> click the Web icon  </>  ("Add app").
+ 3. App nickname: "karmyogi web". (Do NOT enable Firebase Hosting — we host on
+    Cloudflare.) Click "Register app".
+ 4. It shows a `firebaseConfig = { ... }` object. Copy each value into the
+    matching line below (just the value inside the quotes):
+
+    FIREBASE_API_KEY=
+    FIREBASE_AUTH_DOMAIN=
+    FIREBASE_PROJECT_ID=
+    FIREBASE_STORAGE_BUCKET=
+    FIREBASE_MESSAGING_SENDER_ID=
+    FIREBASE_APP_ID=
+    FIREBASE_MEASUREMENT_ID=
+
+    (MEASUREMENT_ID only exists if you enabled Analytics in Part 1 — leave blank
+     if absent.)
+
+================================================================================
+ PART 3 — ENABLE GOOGLE SIGN-IN
+================================================================================
+ 1. Left sidebar -> "Build" -> "Authentication" -> click "Get started".
+ 2. Tab "Sign-in method" -> "Add new provider" -> choose "Google" -> toggle
+    "Enable".
+ 3. Pick a "Project support email" (your email) -> Save.
+ 4. Still in Authentication -> tab "Settings" -> "Authorized domains" -> click
+    "Add domain" and add EACH of these (one at a time):
+         karmyogi.hjlabs.in
+         192.168.3.200
+         localhost
+    (localhost is usually already present.)
+
+ NOTE: Firebase auto-creates the underlying Google OAuth client + consent screen.
+ If Google asks you to configure the OAuth consent screen separately
+ (console.cloud.google.com -> APIs & Services -> OAuth consent screen):
+   - User type: External
+   - App name: karmyogi ;  support email: your email
+   - Authorized domains: hjlabs.in
+   - Save (you can leave it in "Testing" mode, or Publish to allow any Google
+     account). If you keep it in Testing, add tester emails under "Test users".
+
+================================================================================
+ PART 4 — CREATE FIRESTORE (the per-user activity log store)
+================================================================================
+ 1. Left sidebar -> "Build" -> "Firestore Database" -> "Create database".
+ 2. Start in "Production mode" (we ship locked-down rules). Pick a location
+    closest to your users (e.g. asia-south1 for India). Enable.
+ 3. After it's created, go to the "Rules" tab. I'm shipping a `firestore.rules`
+    file in the repo (each signed-in user can write ONLY their own events).
+    Either paste that file's contents into the Rules editor and Publish, or run
+    `firebase deploy --only firestore:rules` if you use the Firebase CLI.
+    -> Tell me which you prefer and I'll guide you; for now just confirm:
+    FIRESTORE_CREATED (yes/no) =
+
+================================================================================
+ PART 5 — (OPTIONAL) dev-logs BUG-REPORT BACKEND
+================================================================================
+ The in-app bug-report widget (Ctrl+D) can post reports to a dev-logs server.
+   - Easiest: run `npx @hemangjoshi37a/dev-logs` somewhere reachable and put its
+     URL below (default is http://localhost:4445). Leave blank to use the local
+     default in dev / hide it in production.
+    DEVLOGS_ENDPOINT=
+
+================================================================================
+ PART 6 — ANYTHING ELSE
+================================================================================
+ - Do you want login to be REQUIRED for everyone immediately, or should I keep a
+   switch so you can flip it on later? (currently: required once config is
+   present)         LOGIN_REQUIRED (yes/keep-switch) =
+ - Notes / questions for me:
+   NOTES=
+
+================================================================================
+ WHEN DONE: save this file and send it back. I'll create `.env` from it, verify
+ the build, and your Google login + activity tracking + bug reporting will be
+ live. Nothing here gets committed to GitHub.
+================================================================================

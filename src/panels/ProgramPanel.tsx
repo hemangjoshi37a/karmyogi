@@ -9,6 +9,7 @@ import {
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
 import { ProgramProgressBar } from '../components/ProgramProgressBar'
+import { ProgramList } from '../components/ProgramList'
 import {
   computeProgress,
   estimateProgramSeconds,
@@ -22,11 +23,13 @@ const ACCEPT = '.nc,.gcode,.tap,.txt,.cnc,.ngc'
 /**
  * Program panel (W5): load a G-code program (button or drag-drop), edit it in an
  * editable monospace view, see a rough ETA, and stream it to the machine with
- * progress + pause/resume/abort + a start/current-line field.
+ * progress + pause/resume(merged toggle)/abort + a start/current-line field.
  *
- * Two cards: a full-width Run card (start-line input + 4 transport buttons +
- * progress + ETA) and a Program-text card (editable / collapsible / resizable,
- * with Load + Clear in its header).
+ * Feed-from-line: the start-line field is a FULL-program 1-based line number.
+ * On Stream we record that index and call `controller.startProgram(slice,
+ * { startIndex })` so the streamer reports progress + current-line in
+ * FULL-program indices — the progress bar and the highlighted read-view row
+ * therefore always track the real line in the whole program, never the slice.
  */
 export function ProgramPanel() {
   const t = useT()
@@ -42,6 +45,7 @@ export function ProgramPanel() {
 
   const connected = useMachine((s) => s.connection === 'connected')
   const machineState = useMachine((s) => s.state)
+  const machineError = useMachine((s) => s.error)
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -55,8 +59,10 @@ export function ProgramPanel() {
     260,
   )
 
-  // Start line to stream from (1-based). Doubles as a live "current line"
-  // readout while streaming. Default 1; clamped to 1..lines.length on use.
+  // Start line to stream from (1-based, FULL-program index). Doubles as a live
+  // "current line" readout while streaming. Default 1; clamped to 1..lines.length
+  // on use. Reset back to 1 when a stream ends (streaming → false), so the next
+  // run starts from the top unless the user picks a new line.
   const [startLine, setStartLine] = useState('1')
 
   // Which section cards are expanded (collapsed by default), keyed by id.
@@ -77,9 +83,18 @@ export function ProgramPanel() {
   }, [storeText])
 
   // While streaming, the start-line field becomes a live current-line readout
-  // (1-based) that tracks the program cursor.
+  // (1-based, full-program). The store's `cursor` is already a FULL-program
+  // index (the streamer adds the startIndex), so cursor+1 is the line number.
+  // When the stream ends (streaming flips false), reset the field back to 1.
+  const prevStreaming = useRef(streaming)
   useEffect(() => {
-    if (streaming) setStartLine(String(cursor + 1))
+    if (streaming) {
+      setStartLine(String(cursor + 1))
+    } else if (prevStreaming.current) {
+      // Just finished/aborted → restore the default start line.
+      setStartLine('1')
+    }
+    prevStreaming.current = streaming
   }, [streaming, cursor])
 
   const hasProgram = lines.length > 0
@@ -87,11 +102,20 @@ export function ProgramPanel() {
   const held = machineState === 'Hold'
 
   // Rough ETA. Total when idle, remaining (× 1 − progress) while streaming.
+  // ALWAYS rendered (shows an em-dash when there is no program / zero estimate)
+  // so the layout never jumps as the program loads/empties.
   const totalSeconds = useMemo(() => estimateProgramSeconds(lines), [lines])
   const etaSeconds = streaming
     ? totalSeconds * Math.max(0, 1 - progress.fraction)
     : totalSeconds
-  const etaLabel = hasProgram ? formatDuration(etaSeconds) : null
+  const etaLabel = hasProgram && etaSeconds > 0 ? formatDuration(etaSeconds) : null
+
+  // Mid-program failure surfaced in-panel: the controller records the last error
+  // on the machine store (e.g. "error on \"G1 …\": error:33"). Show it while the
+  // machine is in an Alarm state or there's a recorded error during a run so the
+  // operator isn't left guessing why a stream stopped.
+  const showError =
+    !!machineError && (machineState === 'Alarm' || held || streaming)
 
   async function loadFile(file: File) {
     const text = await file.text()
@@ -138,12 +162,55 @@ export function ProgramPanel() {
     if (h && Math.abs(h - editorH) > 1) setEditorH(h)
   }, [editorH, setEditorH])
 
+  // Resolve the clamped, FULL-program 1-based start line (1..lines.length).
+  const startIndex1 = useMemo(() => {
+    const n = parseInt(startLine, 10)
+    if (!Number.isFinite(n)) return 1
+    return Math.min(Math.max(1, n), Math.max(1, lines.length))
+  }, [startLine, lines.length])
+
   function onStream() {
     if (!connected || !hasProgram) return
-    // Clamp the typed start line to 1..lines.length and stream from there.
-    const n = parseInt(startLine, 10)
-    const start = Number.isFinite(n) ? Math.min(Math.max(1, n), lines.length) : 1
-    grbl.startProgram(lines.slice(start - 1))
+    // Stream the slice from the (clamped) start line, telling the streamer the
+    // FULL-program offset of that slice so progress + current-line are reported
+    // in full-program indices (startIndex + completed-within-slice).
+    const startIndex0 = startIndex1 - 1
+    grbl.startProgram(lines.slice(startIndex0), { startIndex: startIndex0 })
+  }
+
+  // Pause/Resume merged into ONE toggle: it pauses (feed hold) while running and
+  // resumes when held. Disabled when not streaming.
+  function onPauseResume() {
+    if (held) grbl.resume()
+    else grbl.feedHold()
+  }
+
+  // Destructive Clear asks for confirmation so a loaded program isn't lost on a
+  // stray click.
+  function onClear() {
+    if (
+      window.confirm(
+        t(
+          'prog.clearConfirm',
+          'Clear the loaded program? This cannot be undone.',
+        ),
+      )
+    ) {
+      clear()
+    }
+  }
+
+  // Confirm before removing a section (it discards that source's generated code).
+  function onRemoveSection(sectionName: string) {
+    if (
+      window.confirm(
+        t('prog.sectionDeleteConfirm', 'Delete the “{name}” section?', {
+          name: sectionName,
+        }),
+      )
+    ) {
+      removeSection(sectionName)
+    }
   }
 
   const canStream = connected && hasProgram && !streaming
@@ -173,7 +240,9 @@ export function ProgramPanel() {
               ↺
             </button>
             <input
-              className="pp-line-input"
+              className={
+                'pp-line-input' + (streaming ? ' pp-line-input--readonly' : '')
+              }
               type="number"
               min={1}
               max={lines.length || 1}
@@ -181,6 +250,7 @@ export function ProgramPanel() {
               onChange={(e) => setStartLine(e.target.value)}
               disabled={!hasProgram}
               readOnly={streaming}
+              aria-readonly={streaming}
               aria-label={t('prog.startLineLabel', 'Start line / current line')}
               title={
                 streaming
@@ -208,23 +278,24 @@ export function ProgramPanel() {
             >
               ▶ {t('prog.stream', 'Stream')}
             </button>
+            {/* Merged Pause/Resume toggle: feed-hold while running, resume when held. */}
             <button
               className="pp-icon-btn"
-              onClick={() => grbl.feedHold()}
-              disabled={!streaming || held}
-              title={t('prog.pause', 'Pause (feed hold)')}
-              aria-label={t('prog.pauseAria', 'Pause')}
+              onClick={onPauseResume}
+              disabled={!streaming}
+              aria-pressed={held}
+              title={
+                held
+                  ? t('prog.resume', 'Resume')
+                  : t('prog.pause', 'Pause (feed hold)')
+              }
+              aria-label={
+                held
+                  ? t('prog.resume', 'Resume')
+                  : t('prog.pauseAria', 'Pause')
+              }
             >
-              ⏸
-            </button>
-            <button
-              className="pp-icon-btn"
-              onClick={() => grbl.resume()}
-              disabled={!streaming || !held}
-              title={t('prog.resume', 'Resume')}
-              aria-label={t('prog.resume', 'Resume')}
-            >
-              ⏵
+              {held ? '⏵' : '⏸'}
             </button>
             <button
               className="pp-icon-btn pp-btn-abort"
@@ -242,23 +313,43 @@ export function ProgramPanel() {
               progress={progress}
               color={held ? 'var(--warn)' : undefined}
             />
-            {etaLabel && (
-              <span
-                className="pp-eta"
-                title={
-                  streaming
-                    ? t('prog.etaRemaining', 'Estimated time remaining')
-                    : t('prog.etaTotal', 'Estimated total run time')
-                }
-              >
-                <span className="pp-eta-icon" aria-hidden="true">
-                  ⏱
-                </span>
-                {streaming ? '' : '~'}
-                {etaLabel}
+            <span
+              className="pp-eta"
+              title={
+                streaming
+                  ? t('prog.etaRemaining', 'Estimated time remaining')
+                  : t('prog.etaTotal', 'Estimated total run time')
+              }
+            >
+              <span className="pp-eta-icon" aria-hidden="true">
+                ⏱
               </span>
-            )}
+              {etaLabel ? (
+                <>
+                  {streaming ? '' : '~'}
+                  {etaLabel}
+                </>
+              ) : (
+                <span className="pp-eta-empty" aria-hidden="true">
+                  {t('common.emDash', '—')}
+                </span>
+              )}
+            </span>
           </div>
+
+          {/* Mid-program error / alarm surfaced in-panel. */}
+          {showError && (
+            <div className="pp-error" role="alert">
+              <span className="pp-error-icon" aria-hidden="true">
+                ⚠
+              </span>
+              <span className="pp-error-text">
+                {machineState === 'Alarm'
+                  ? t('prog.errorAlarm', 'Alarm: {msg}', { msg: machineError! })
+                  : t('prog.errorRun', '{msg}', { msg: machineError! })}
+              </span>
+            </div>
+          )}
         </section>
       </div>
 
@@ -313,7 +404,7 @@ export function ProgramPanel() {
                     </button>
                     <button
                       className="pp-icon-btn pp-btn-clear"
-                      onClick={() => removeSection(sec.id)}
+                      onClick={() => onRemoveSection(sec.name)}
                       disabled={streaming}
                       title={t('prog.sectionDelete', 'Delete this section')}
                       aria-label={t(
@@ -334,6 +425,35 @@ export function ProgramPanel() {
               )
             })}
           </ul>
+        </section>
+      )}
+
+      {/* --- Live read view: virtualized, line-numbered, cursor-highlighting.
+              Click a line to set the feed-from-line start (when not streaming).
+              Uses programWindow.ts windowing so huge programs stay smooth. --- */}
+      {hasProgram && (
+        <section className="pp-card pp-read-card">
+          <div className="pp-read-header">
+            <span className="pp-section-title">
+              {t('prog.readView', 'Program lines')}
+            </span>
+            <span className="pp-meta">
+              {streaming
+                ? t('prog.atLine', 'line {n} / {total}', {
+                    n: Math.max(0, cursor + 1),
+                    total: lines.length,
+                  })
+                : t('prog.startAtLine', 'start at line {n}', { n: startIndex1 })}
+            </span>
+          </div>
+          <ProgramList
+            lines={lines}
+            cursor={streaming ? cursor : -1}
+            selected={streaming ? -1 : startIndex1 - 1}
+            onSelect={(i) => {
+              if (!streaming) setStartLine(String(i + 1))
+            }}
+          />
         </section>
       )}
 
@@ -383,7 +503,7 @@ export function ProgramPanel() {
             {hasProgram && (
               <button
                 className="pp-icon-btn pp-btn-clear"
-                onClick={() => clear()}
+                onClick={onClear}
                 disabled={streaming}
                 title={t('prog.clear', 'Clear / unload program')}
                 aria-label={t('prog.clearAria', 'Clear program')}

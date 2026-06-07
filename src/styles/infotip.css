@@ -68,6 +68,19 @@
   bottom: calc(100% + 7px);
 }
 
+/* Portaled to <body>: fixed to the viewport (JS supplies top/left) so a dockview
+   panel's overflow/stacking can never clip it. Sits above all panels + overlays. */
+.infotip-pop--portal {
+  position: fixed;
+  left: 0;
+  top: 0;
+  transform: none;
+  z-index: 2147483000;
+}
+.infotip-pop--portal.above {
+  bottom: auto;
+}
+
 /* Little pointer arrow toward the icon. */
 .infotip-pop::before {
   content: '';

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from '../i18n'
-import { useProgram, usePersistentState } from '../store'
+import { useProgram, usePersistentState, useNotifications } from '../store'
 import { IconButton } from '../components/IconButton'
+import { Icon } from '../components/Icons'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import {
   defaultGlueParams,
@@ -30,16 +31,69 @@ const PAD = 6
 type Tool = 'select' | 'line' | 'triangle' | 'circle' | 'rect'
 
 /**
- * Tool buttons: glyph + label, in the order they appear in the toolbar. The
- * label/hint strings are the English fallbacks; `key` is the i18n key suffix so
- * render sites can translate (this array is module-level, outside any hook).
+ * Crisp inline-SVG glyphs for the drawing tools. The shared {@link Icon} set has
+ * no line/triangle/circle/rect shapes, so these live here — but they follow the
+ * same contract: 24×24 viewBox, 2px stroke, `currentColor`, round caps/joins, so
+ * they recolor with the theme exactly like the shared icons (no flat Unicode/
+ * emoji glyphs, which render inconsistently across platforms).
  */
-const TOOLS: { id: Tool; glyph: string; key: string; label: string; hint: string }[] = [
-  { id: 'select', glyph: '↖', key: 'select', label: 'Select', hint: 'Select / move a shape' },
-  { id: 'line', glyph: '╱', key: 'line', label: 'Line', hint: 'Draw a straight bead' },
-  { id: 'triangle', glyph: '△', key: 'triangle', label: 'Triangle', hint: 'Draw a triangle outline' },
-  { id: 'circle', glyph: '◯', key: 'circle', label: 'Circle', hint: 'Draw a circle' },
-  { id: 'rect', glyph: '▭', key: 'rect', label: 'Rect', hint: 'Draw a rectangle' },
+function ToolGlyph({ tool }: { tool: Tool }) {
+  return (
+    <svg
+      className="gp-tool-svg"
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {tool === 'select' && <path d="M5 4l6 16 2.5-6.5L20 11z" />}
+      {tool === 'line' && <path d="M5 19L19 5" />}
+      {tool === 'triangle' && <path d="M12 5l7 14H5z" />}
+      {tool === 'circle' && <circle cx="12" cy="12" r="7.5" />}
+      {tool === 'rect' && <rect x="5" y="6" width="14" height="12" rx="1" />}
+    </svg>
+  )
+}
+
+/** Inline "undo" (counter-clockwise arrow) glyph — no shared-icon equivalent. */
+function UndoGlyph() {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M4 9h11a5 5 0 0 1 0 10h-7" />
+      <path d="M8 5L4 9l4 4" />
+    </svg>
+  )
+}
+
+/**
+ * Tool buttons: id + label, in the order they appear in the toolbar. The
+ * label/hint strings are the English fallbacks; `key` is the i18n key suffix so
+ * render sites can translate (this array is module-level, outside any hook). The
+ * glyph is rendered from {@link ToolGlyph} keyed by `id`.
+ */
+const TOOLS: { id: Tool; key: string; label: string; hint: string }[] = [
+  { id: 'select', key: 'select', label: 'Select', hint: 'Select / move a shape' },
+  { id: 'line', key: 'line', label: 'Line', hint: 'Draw a straight bead' },
+  { id: 'triangle', key: 'triangle', label: 'Triangle', hint: 'Draw a triangle outline' },
+  { id: 'circle', key: 'circle', label: 'Circle', hint: 'Draw a circle' },
+  { id: 'rect', key: 'rect', label: 'Rect', hint: 'Draw a rectangle' },
 ]
 
 /** A point in machine (bed) coordinates: X right, Y up, origin bottom-left. */
@@ -53,6 +107,8 @@ interface Drag {
   tool: Exclude<Tool, 'select'>
   start: Pt
   current: Pt
+  /** Shift held at the latest pointer event → constrain (straight / square). */
+  shift: boolean
 }
 
 /**
@@ -69,6 +125,41 @@ interface MoveDrag {
 /** The defaults used when a shape has zero drag distance (a plain click). */
 const MIN_SIZE = 8
 
+/** Snap-to-grid step (mm). Pointer positions snap to this grid while drawing. */
+const SNAP_MM = 5
+
+/** Round a value to the nearest `SNAP_MM` grid line. */
+function snap(v: number): number {
+  return Math.round(v / SNAP_MM) * SNAP_MM
+}
+
+/** Snap a point to the grid (used for drawing/placement, not free-text edits). */
+function snapPt(p: Pt): Pt {
+  return { x: snap(p.x), y: snap(p.y) }
+}
+
+/**
+ * With Shift held, constrain the drag end `b` relative to start `a` so lines run
+ * along the nearest 45° axis and boxes stay square (equal width/height, sign
+ * preserved). Returns `b` unchanged when `shift` is false.
+ */
+function constrainDrag(tool: Exclude<Tool, 'select'>, a: Pt, b: Pt, shift: boolean): Pt {
+  if (!shift) return b
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  if (tool === 'line') {
+    // Snap the bead to the nearest 45° direction, keeping its length.
+    const len = Math.hypot(dx, dy)
+    if (len === 0) return b
+    const ang = (Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI) / 4
+    return { x: a.x + Math.cos(ang) * len, y: a.y + Math.sin(ang) * len }
+  }
+  if (tool === 'circle') return b // circle is already radius-symmetric
+  // rect / triangle → square the bounding box (equal magnitude, keep sign).
+  const s = Math.max(Math.abs(dx), Math.abs(dy))
+  return { x: a.x + Math.sign(dx || 1) * s, y: a.y + Math.sign(dy || 1) * s }
+}
+
 let shapeSeq = 0
 function nextId(): string {
   return `g${Date.now().toString(36)}_${(shapeSeq++).toString(36)}`
@@ -83,8 +174,19 @@ interface IdShape {
 /**
  * Build a shape from a drag (down → up) for the given drawing tool. The triangle
  * default is an isoceles triangle inscribed in the drag bounding-box.
+ *
+ * With `shift` held the drag is constrained (lines snap to 45°, rect/triangle
+ * become square); both endpoints are then snapped to the grid so drawn shapes
+ * land on clean coordinates.
  */
-function shapeFromDrag(tool: Exclude<Tool, 'select'>, a: Pt, b: Pt): GlueShape | null {
+function shapeFromDrag(
+  tool: Exclude<Tool, 'select'>,
+  rawA: Pt,
+  rawB: Pt,
+  shift = false,
+): GlueShape | null {
+  const a = snapPt(rawA)
+  const b = snapPt(constrainDrag(tool, rawA, rawB, shift))
   const dx = b.x - a.x
   const dy = b.y - a.y
   const dist = Math.hypot(dx, dy)
@@ -155,23 +257,31 @@ interface DimLabel {
   y: number
 }
 
-function shapeDim(shape: GlueShape): DimLabel {
+function shapeDim(shape: GlueShape, t: ReturnType<typeof useT>): DimLabel {
   switch (shape.kind) {
     case 'line': {
       const len = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1)
-      return { text: `L ${mm(len)}`, x: (shape.x1 + shape.x2) / 2, y: (shape.y1 + shape.y2) / 2 }
+      return {
+        text: t('glue.dim.line', 'L {v}', { v: mm(len) }),
+        x: (shape.x1 + shape.x2) / 2,
+        y: (shape.y1 + shape.y2) / 2,
+      }
     }
     case 'circle':
-      return { text: `r ${mm(shape.r)}`, x: shape.cx, y: shape.cy + shape.r }
+      return { text: t('glue.dim.circle', 'r {v}', { v: mm(shape.r) }), x: shape.cx, y: shape.cy + shape.r }
     case 'rect':
-      return { text: `${mm(shape.w)} × ${mm(shape.h)}`, x: shape.x + shape.w / 2, y: shape.y + shape.h }
+      return {
+        text: t('glue.dim.rect', '{w} × {h}', { w: mm(shape.w), h: mm(shape.h) }),
+        x: shape.x + shape.w / 2,
+        y: shape.y + shape.h,
+      }
     case 'triangle': {
       const xs = shape.points.map((p) => p.x)
       const ys = shape.points.map((p) => p.y)
       const minX = Math.min(...xs)
       const maxX = Math.max(...xs)
       const maxY = Math.max(...ys)
-      return { text: `△ ${mm(maxX - minX)}`, x: (minX + maxX) / 2, y: maxY }
+      return { text: t('glue.dim.triangle', '△ {v}', { v: mm(maxX - minX) }), x: (minX + maxX) / 2, y: maxY }
     }
   }
 }
@@ -276,6 +386,8 @@ function shapeSummary(shape: GlueShape, t: ReturnType<typeof useT>): string {
 export function GluePanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
+  const streaming = useProgram((s) => s.streaming)
+  const notify = useNotifications((s) => s.notify)
 
   const [shapes, setShapes] = usePersistentState<IdShape[]>('karmyogi.glue.shapes', [])
   const [storedParams, setParams] = usePersistentState<
@@ -316,7 +428,18 @@ export function GluePanel() {
   const [showRaw, setShowRaw] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // Snapshot of the shapes that existed before the last Clear / Load, so a single
+  // Undo button can restore them. `null` once nothing is undoable.
+  const [undoShapes, setUndoShapes] = useState<IdShape[] | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+
+  // Auto-dismiss the load error after a few seconds so a transient bad file
+  // doesn't leave a sticky red banner once the user has moved on.
+  useEffect(() => {
+    if (!loadError) return
+    const id = window.setTimeout(() => setLoadError(null), 6000)
+    return () => window.clearTimeout(id)
+  }, [loadError])
 
   // --- coordinate conversion (screen px ⇄ machine mm) ---
   // SVG viewBox is in mm with screen-down Y; we flip Y so bed [0,0] is bottom-left.
@@ -362,19 +485,21 @@ export function GluePanel() {
       setSelected(null)
       return
     }
-    setDrag({ tool, start: p, current: p })
+    setDrag({ tool, start: p, current: p, shift: e.shiftKey })
   }
   function onPointerMove(e: React.PointerEvent<SVGSVGElement>) {
     const p = screenToBed(e.clientX, e.clientY)
     if (moveDrag) {
-      const dx = p.x - moveDrag.start.x
-      const dy = p.y - moveDrag.start.y
+      // Snap the move delta to the grid so a dragged shape lands on clean
+      // coordinates (matches the snap applied when drawing).
+      const dx = snap(p.x - moveDrag.start.x)
+      const dy = snap(p.y - moveDrag.start.y)
       // Apply the delta to the snapshot taken at pointer-down, never to the
       // (already-translated) live shape — avoids drift/stale-state bugs.
       updateShape(moveDrag.id, translateShape(moveDrag.orig, dx, dy))
       return
     }
-    if (drag) setDrag({ ...drag, current: p })
+    if (drag) setDrag({ ...drag, current: p, shift: e.shiftKey })
   }
   function onPointerUp(e: React.PointerEvent<SVGSVGElement>) {
     svgRef.current?.releasePointerCapture?.(e.pointerId)
@@ -383,7 +508,7 @@ export function GluePanel() {
       return
     }
     if (!drag) return
-    const s = shapeFromDrag(drag.tool, drag.start, screenToBed(e.clientX, e.clientY))
+    const s = shapeFromDrag(drag.tool, drag.start, screenToBed(e.clientX, e.clientY), e.shiftKey)
     setDrag(null)
     if (s) addShape(s)
   }
@@ -405,9 +530,9 @@ export function GluePanel() {
     return segs.join(' ') + (pl.closed ? ' Z' : '')
   }
 
-  // Preview path for the in-progress drag.
+  // Preview path for the in-progress drag (with the same snap/constrain applied).
   const dragShape = useMemo(
-    () => (drag ? shapeFromDrag(drag.tool, drag.start, drag.current) : null),
+    () => (drag ? shapeFromDrag(drag.tool, drag.start, drag.current, drag.shift) : null),
     [drag],
   )
 
@@ -418,11 +543,25 @@ export function GluePanel() {
   )
   const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
 
+  // Degenerate dispense: with Dispense-Z at or above Travel-Z the head never
+  // descends below travel height, so no real bead is laid down.
+  const degenerateZ = params.dispenseZ >= params.travelZ
+
+  // Live generation: push the freshly-computed program to the store (debounced)
+  // so the Visualizer + Program tab pick it up without a manual step. When the
+  // bed is cleared, DROP the section (push '' → clear-on-empty) instead of
+  // early-returning, so a stale glue toolpath doesn't linger in the Visualizer /
+  // Program tab. While a job is streaming we skip the sync entirely so a fresh
+  // setProgram can't reset the running program/cursor mid-dispense.
   useEffect(() => {
-    if (shapes.length === 0) return
+    if (streaming) return
+    if (shapes.length === 0) {
+      setProgram('glue', '')
+      return
+    }
     const id = window.setTimeout(() => setProgram('glue', gcode), 300)
     return () => window.clearTimeout(id)
-  }, [gcode, shapes.length, setProgram])
+  }, [gcode, shapes.length, setProgram, streaming])
 
   // Keyboard delete for the selected shape.
   useEffect(() => {
@@ -446,7 +585,9 @@ export function GluePanel() {
 
   // Apply a loaded document. `data` is untrusted: validate the shapes array and
   // params, dropping anything malformed. Fresh ids are assigned so keys stay
-  // unique regardless of what the file contained.
+  // unique regardless of what the file contained. Before replacing a non-empty
+  // drawing we confirm, snapshot the current shapes for Undo, and toast the
+  // loaded count.
   function loadDoc(data: unknown) {
     if (!isObj(data) || !Array.isArray(data.shapes)) {
       setLoadError(t('glue.load.invalid', 'Could not load — file is not a valid glue document.'))
@@ -457,10 +598,54 @@ export function GluePanel() {
       const shape = parseShape(isObj(raw) && 'shape' in raw ? raw.shape : raw)
       if (shape) loaded.push({ id: nextId(), shape })
     }
+    if (
+      shapes.length > 0 &&
+      !window.confirm(
+        t('glue.load.replaceConfirm', 'Replace the current {n} shape(s) with {m} from the file?', {
+          n: shapes.length,
+          m: loaded.length,
+        }),
+      )
+    ) {
+      return
+    }
+    setUndoShapes(shapes) // snapshot for Undo
     setShapes(loaded)
     setParams(parseGlueParams(data.params))
     setSelected(null)
     setLoadError(null)
+    notify('success', t('glue.load.loaded', 'Loaded {n} shape(s).', { n: loaded.length }))
+  }
+
+  // Clear the bed. Confirms first when there is work to lose, snapshots the
+  // current shapes so the action is undoable, and toasts the result. The
+  // live-sync effect drops the synced section once shapes is empty.
+  function clearAll() {
+    if (shapes.length === 0) return
+    if (!window.confirm(t('glue.clearConfirm', 'Remove all {n} shape(s)?', { n: shapes.length })))
+      return
+    setUndoShapes(shapes)
+    setShapes([])
+    setSelected(null)
+    notify('info', t('glue.cleared', 'Cleared the bed.'))
+  }
+
+  // Restore the shapes snapshotted by the last Clear / Load.
+  function undoLast() {
+    if (!undoShapes) return
+    setShapes(undoShapes)
+    setUndoShapes(null)
+    setSelected(null)
+    notify('success', t('glue.undone', 'Restored {n} shape(s).', { n: undoShapes.length }))
+  }
+
+  // Push the current program to the shared store immediately (bypassing the
+  // debounce) and confirm — the program then appears in the Program tab /
+  // Visualizer, ready to stream. Un-dismisses the section if it was deleted there.
+  function sendToProgram() {
+    if (shapes.length === 0) return
+    setProgram('glue', gcode)
+    notify('success', t('glue.send.done', 'Sent {n} line(s) to the Program tab.', { n: lineCount }))
   }
 
   const hint =
@@ -480,8 +665,19 @@ export function GluePanel() {
         {t('glue.intro.post', 'The G-code updates live in the Program tab — run it from there.')}
       </p>
       {loadError && (
-        <p className="gp-intro" role="alert">
+        <p className="gp-banner gp-banner-error" role="alert">
+          <Icon name="warning" size={14} />
           {loadError}
+        </p>
+      )}
+      {degenerateZ && shapes.length > 0 && (
+        <p className="gp-banner gp-banner-warn" role="alert">
+          <Icon name="warning" size={14} />
+          {t(
+            'glue.warn.degenerateZ',
+            'Dispense Z ({dz}) ≥ Travel Z ({tz}) — the head never descends, so no bead is dispensed. Lower Dispense Z below Travel Z.',
+            { dz: params.dispenseZ, tz: params.travelZ },
+          )}
         </p>
       )}
 
@@ -503,17 +699,24 @@ export function GluePanel() {
                   title={`${label} · ${hint}`}
                 >
                   <span className="gp-tool-glyph" aria-hidden="true">
-                    {tl.glyph}
+                    <ToolGlyph tool={tl.id} />
                   </span>
                 </button>
               )
             })}
             <span className="gp-spacer" />
             <IconButton
+              className="gp-undo"
+              icon={<UndoGlyph />}
+              label={t('glue.undo.title', 'Undo the last Clear or Load')}
+              onClick={undoLast}
+              disabled={!undoShapes}
+            />
+            <IconButton
               className="gp-clear"
-              icon="🗑"
+              iconName="trash"
               label={`${t('glue.clear', 'Clear')} · ${t('glue.clear.title', 'Remove all shapes')}`}
-              onClick={() => setShapes([])}
+              onClick={clearAll}
               disabled={shapes.length === 0}
             />
             <SaveLoadButtons
@@ -559,7 +762,7 @@ export function GluePanel() {
                   move-drag (and is a fat invisible hit-target for easy grabbing). */}
               {shapes.map(({ id, shape }) => {
                 const isSel = id === selected
-                const dim = shapeDim(shape)
+                const dim = shapeDim(shape, t)
                 return (
                   <g key={id}>
                     {/* Wide transparent hit area so thin lines are easy to grab. */}
@@ -594,7 +797,7 @@ export function GluePanel() {
                 <>
                   <path className="gp-shape gp-shape-draft" d={shapePath(dragShape)} />
                   {(() => {
-                    const dim = shapeDim(dragShape)
+                    const dim = shapeDim(dragShape, t)
                     return (
                       <text className="gp-dim gp-dim-sel" x={dim.x} y={sy(dim.y) - 2} textAnchor="middle">
                         {dim.text}
@@ -641,13 +844,13 @@ export function GluePanel() {
                       title={t('glue.list.pick.title', 'Select this shape')}
                     >
                       <span className="gp-list-glyph" aria-hidden="true">
-                        {TOOLS.find((tl) => tl.id === shape.kind)?.glyph ?? '•'}
+                        <ToolGlyph tool={shape.kind} />
                       </span>
                       {shapeSummary(shape, t)}
                     </button>
                     <IconButton
                       className="gp-del"
-                      icon="✕"
+                      iconName="close"
                       label={t('glue.list.delete.title', 'Delete shape')}
                       onClick={() => deleteShape(id)}
                     />
@@ -667,10 +870,12 @@ export function GluePanel() {
                 {/* Compact dimension readout for the selected shape. */}
                 {(() => {
                   const o = shapeOrigin(selectedShape.shape)
-                  const dim = shapeDim(selectedShape.shape)
+                  const dim = shapeDim(selectedShape.shape, t)
                   return (
                     <span className="gp-dim-readout">
-                      <span className="gp-dim-xy">X {mm(o.x)} · Y {mm(o.y)}</span>
+                      <span className="gp-dim-xy">
+                        {t('glue.readout.xy', 'X {x} · Y {y}', { x: mm(o.x), y: mm(o.y) })}
+                      </span>
                       <span className="gp-dim-size">{dim.text}</span>
                     </span>
                   )
@@ -740,7 +945,8 @@ export function GluePanel() {
               aria-expanded={showAdvanced}
               title={t('glue.adv.title', 'Plunge feed, dwell times and G-code decimals')}
             >
-              {showAdvanced ? '▾' : '▸'} {t('glue.adv', 'Advanced')}
+              <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={14} />
+              {t('glue.adv', 'Advanced')}
             </button>
             {showAdvanced && (
               <div className="gp-fields gp-adv">
@@ -801,11 +1007,27 @@ export function GluePanel() {
           </section>
 
           {/* Generated program — auto-synced live to the Program tab / Visualizer.
-              Streaming to the machine happens from the Program tab, not here. */}
+              The button forces an immediate push (and re-adds a section that was
+              deleted in the Program tab); streaming itself happens there. */}
           <section className="gp-card gp-card-wide gp-send">
             <p className="gp-meta gp-send-note">
               {t('glue.send.meta', 'Live preview · {n} lines → Visualizer', { n: lineCount })}
             </p>
+
+            <button
+              type="button"
+              className="gp-send-btn"
+              onClick={sendToProgram}
+              disabled={shapes.length === 0 || streaming}
+              title={
+                streaming
+                  ? t('glue.send.streamingTitle', 'A job is streaming — sync is paused so it is not reset.')
+                  : t('glue.send.btn.title', 'Push this program to the Program tab, ready to stream')
+              }
+            >
+              <Icon name="play" size={14} />
+              {t('glue.send.btn', 'Send to Program tab')}
+            </button>
 
             {/* Raw G-code (collapsed by default) */}
             <button
@@ -814,7 +1036,8 @@ export function GluePanel() {
               aria-expanded={showRaw}
               title={t('glue.raw.title', 'Show the generated G-code text')}
             >
-              {showRaw ? '▾' : '▸'} {t('glue.raw', 'Raw G-code ({n} lines)', { n: lineCount })}
+              <Icon name={showRaw ? 'chevron-down' : 'chevron-right'} size={14} />
+              {t('glue.raw', 'Raw G-code ({n} lines)', { n: lineCount })}
             </button>
             {showRaw && <pre className="gp-preview">{gcode}</pre>}
           </section>
@@ -833,8 +1056,18 @@ function ShapeEditor(props: {
   clampY: (y: number) => number
 }) {
   const { shape, onChange, clampX, clampY } = props
-  const field = (label: string, value: number, set: (v: number) => void, step = 0.5) => (
-    <label key={label}>
+  const t = useT()
+  // `key` is a stable identity for React; `label` is the (localized) visible
+  // text. Field labels (X1/Y1/Cx/Cy/R/W/H…) are translated with an i18n key and
+  // the single-letter English fallback.
+  const field = (
+    key: string,
+    label: string,
+    value: number,
+    set: (v: number) => void,
+    step = 0.5,
+  ) => (
+    <label key={key}>
       {label}
       <input
         type="number"
@@ -844,32 +1077,35 @@ function ShapeEditor(props: {
       />
     </label>
   )
+  /** Translate a field label, e.g. tl('x1','X1') or tl('xn','X{n}',{n:1}). */
+  const tl = (k: string, fallback: string, vars?: Record<string, string | number>) =>
+    t(`glue.field.${k}`, fallback, vars)
 
   switch (shape.kind) {
     case 'line':
       return (
         <>
-          {field('X1', shape.x1, (v) => onChange({ ...shape, x1: clampX(v) }))}
-          {field('Y1', shape.y1, (v) => onChange({ ...shape, y1: clampY(v) }))}
-          {field('X2', shape.x2, (v) => onChange({ ...shape, x2: clampX(v) }))}
-          {field('Y2', shape.y2, (v) => onChange({ ...shape, y2: clampY(v) }))}
+          {field('x1', tl('x1', 'X1'), shape.x1, (v) => onChange({ ...shape, x1: clampX(v) }))}
+          {field('y1', tl('y1', 'Y1'), shape.y1, (v) => onChange({ ...shape, y1: clampY(v) }))}
+          {field('x2', tl('x2', 'X2'), shape.x2, (v) => onChange({ ...shape, x2: clampX(v) }))}
+          {field('y2', tl('y2', 'Y2'), shape.y2, (v) => onChange({ ...shape, y2: clampY(v) }))}
         </>
       )
     case 'circle':
       return (
         <>
-          {field('Cx', shape.cx, (v) => onChange({ ...shape, cx: clampX(v) }))}
-          {field('Cy', shape.cy, (v) => onChange({ ...shape, cy: clampY(v) }))}
-          {field('R', shape.r, (v) => onChange({ ...shape, r: Math.max(0.1, v) }))}
+          {field('cx', tl('cx', 'Cx'), shape.cx, (v) => onChange({ ...shape, cx: clampX(v) }))}
+          {field('cy', tl('cy', 'Cy'), shape.cy, (v) => onChange({ ...shape, cy: clampY(v) }))}
+          {field('r', tl('r', 'R'), shape.r, (v) => onChange({ ...shape, r: Math.max(0.1, v) }))}
         </>
       )
     case 'rect':
       return (
         <>
-          {field('X', shape.x, (v) => onChange({ ...shape, x: clampX(v) }))}
-          {field('Y', shape.y, (v) => onChange({ ...shape, y: clampY(v) }))}
-          {field('W', shape.w, (v) => onChange({ ...shape, w: Math.max(0.1, v) }))}
-          {field('H', shape.h, (v) => onChange({ ...shape, h: Math.max(0.1, v) }))}
+          {field('x', tl('x', 'X'), shape.x, (v) => onChange({ ...shape, x: clampX(v) }))}
+          {field('y', tl('y', 'Y'), shape.y, (v) => onChange({ ...shape, y: clampY(v) }))}
+          {field('w', tl('w', 'W'), shape.w, (v) => onChange({ ...shape, w: Math.max(0.1, v) }))}
+          {field('h', tl('h', 'H'), shape.h, (v) => onChange({ ...shape, h: Math.max(0.1, v) }))}
         </>
       )
     case 'triangle':
@@ -877,7 +1113,7 @@ function ShapeEditor(props: {
         <>
           {shape.points.map((p, i) => (
             <span className="gp-tri-pt" key={i}>
-              {field(`X${i + 1}`, p.x, (v) =>
+              {field(`x${i + 1}`, tl('xn', 'X{n}', { n: i + 1 }), p.x, (v) =>
                 onChange({
                   ...shape,
                   points: shape.points.map((q, j) =>
@@ -885,7 +1121,7 @@ function ShapeEditor(props: {
                   ) as [typeof p, typeof p, typeof p],
                 }),
               )}
-              {field(`Y${i + 1}`, p.y, (v) =>
+              {field(`y${i + 1}`, tl('yn', 'Y{n}', { n: i + 1 }), p.y, (v) =>
                 onChange({
                   ...shape,
                   points: shape.points.map((q, j) =>

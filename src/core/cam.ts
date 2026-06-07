@@ -1,7 +1,7 @@
 // Wood-carving CAM operations: profile / pocket / engrave — UI-independent.
 // Ported from the Qt/C++ reference cadcam/camoperations.{h,cpp}.
 
-import { Point, Polyline, kEpsilon } from './geometry';
+import { Point, Polyline, kEpsilon, orderLoopsInsideOut } from './geometry';
 import { Tool, Toolpath, defaultTool, toolRadius } from './toolpath';
 import { insetRings, offsetPolygon } from './offset';
 
@@ -125,6 +125,74 @@ export function profile(contour: Polyline, side: ProfileSide, p: CamParams): Too
   const levels = depthLevels(p);
   for (const z of levels) cutLoop(tp, path, z, p.safeZ);
   return tp;
+}
+
+/**
+ * Profile MANY closed contours into ONE toolpath, cut INSIDE-OUT so a contour is
+ * never freed while a contour nested inside it still has cuts pending.
+ *
+ * CUT-ORDER SAFETY: when a closed profile loop is fully nested inside another
+ * closed loop, cutting the OUTER first can detach the surrounding material so the
+ * inner piece (which still needs its own cut) is free to wander. We build a
+ * containment tree of the contours and emit them in POST-ORDER (innermost-first);
+ * siblings (and unrelated contours) are ordered nearest-neighbour from the
+ * previous contour so rapid travel stays minimal subject to that hard constraint.
+ *
+ * Open / non-closed contours carry no containment relation (they free nothing);
+ * they are appended after the closed ones in nearest-neighbour order.
+ *
+ * Each contour's own offset/direction/lead-in is unchanged — this is purely the
+ * order the closed contours are emitted in. Returns one merged {@link Toolpath}.
+ */
+export function profileContours(contours: Polyline[], side: ProfileSide, p: CamParams): Toolpath {
+  const tp = new Toolpath();
+  tp.name = 'Profile';
+
+  const closed = contours.filter((c) => c.closed && c.points.length >= 3);
+  const open = contours.filter((c) => !(c.closed && c.points.length >= 3));
+
+  // INSIDE-OUT order for the closed contours (children before parents).
+  const order = orderLoopsInsideOut(closed);
+  let last: Point | undefined;
+  for (const idx of order) {
+    const sub = profile(closed[idx], side, p);
+    appendMoves(tp, sub);
+    last = lastXY(sub) ?? last;
+  }
+
+  // Open paths: nearest-neighbour from the last position, no containment rule.
+  const remaining = open.slice();
+  while (remaining.length) {
+    let bestK = 0;
+    let bestD = Infinity;
+    const from = last ?? { x: 0, y: 0 };
+    for (let k = 0; k < remaining.length; k++) {
+      const s = remaining[k].points[0];
+      if (!s) continue;
+      const d = (s.x - from.x) ** 2 + (s.y - from.y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        bestK = k;
+      }
+    }
+    const path = remaining.splice(bestK, 1)[0];
+    const sub = profile(path, side, p);
+    appendMoves(tp, sub);
+    last = lastXY(sub) ?? last;
+  }
+  return tp;
+}
+
+/** Append every move of `src` onto `dst` (used to merge per-contour toolpaths). */
+function appendMoves(dst: Toolpath, src: Toolpath): void {
+  for (const m of src.moves) dst.moves.push(m);
+}
+
+/** Last XY position of a toolpath, or null if it has no moves. */
+function lastXY(tp: Toolpath): Point | null {
+  if (tp.moves.length === 0) return null;
+  const t = tp.moves[tp.moves.length - 1].target;
+  return { x: t.x, y: t.y };
 }
 
 /** Area-clear a closed boundary with concentric offset rings, multi-depth. */

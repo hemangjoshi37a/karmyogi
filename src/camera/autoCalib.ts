@@ -41,6 +41,24 @@ import {
 } from './motionDetect'
 import { videoToGray } from './bedTracking'
 
+/**
+ * Stable, language-agnostic progress code. The PANEL maps each code to a
+ * translated `t()` string (keeping i18n out of this pure driver). `params`
+ * carries the numbers/labels each message needs.
+ */
+export type AutoCalibCode =
+  | 'probeCapturing'
+  | 'probeJogging'
+  | 'probeInconclusive'
+  | 'probeFailed'
+  | 'moving'
+  | 'capturing'
+  | 'solving'
+  | 'doneKinematics'
+  | 'doneGrid'
+  | 'aborted'
+  | 'failed'
+
 /** A progress beat surfaced to the UI as the run advances. */
 export interface AutoCalibProgress {
   /** Current high-level phase. */
@@ -49,8 +67,13 @@ export interface AutoCalibProgress {
   index: number
   /** Total number of grid points. */
   total: number
-  /** Human-readable one-line status. */
-  message: string
+  /**
+   * Stable progress code — the UI translates it (see {@link AutoCalibCode}). This
+   * replaces a pre-baked English string so the panel owns all user-facing copy.
+   */
+  code: AutoCalibCode
+  /** Interpolation params for the translated message (axis label, mm, counts…). */
+  params?: Record<string, string | number>
 }
 
 /**
@@ -306,7 +329,8 @@ async function runKinematicsProbe(opts: {
       phase: 'probing',
       index: 0,
       total: 0,
-      message: `Probing ${label} kinematics — capturing…`,
+      code: 'probeCapturing',
+      params: { axis: label },
     })
     if (settleMs > 0) await delay(settleMs, signal)
     const frameA = grab()
@@ -316,7 +340,8 @@ async function runKinematicsProbe(opts: {
       phase: 'probing',
       index: 0,
       total: 0,
-      message: `Probing ${label} kinematics — jogging +${fmt(probeDeltaMm)} mm…`,
+      code: 'probeJogging',
+      params: { axis: label, delta: fmt(probeDeltaMm) },
     })
     await jogAxisTo(axis, start, axisStartVal + probeDeltaMm, feed, signal)
     if (settleMs > 0) await delay(settleMs, signal)
@@ -463,7 +488,8 @@ export async function runAutoCalibration(
             phase: 'done',
             index: total,
             total,
-            message: `Calibrated (kinematics: X→${probe.x.kind}, Y→${probe.y.kind}) — RMS ${mapping.rmsMm.toFixed(2)} mm.`,
+            code: 'doneKinematics',
+            params: { kx: probe.x.kind, ky: probe.y.kind, rms: mapping.rmsMm.toFixed(2) },
           })
           return {
             H: [...mapping.H],
@@ -483,7 +509,7 @@ export async function runAutoCalibration(
         phase: 'solving',
         index: 0,
         total,
-        message: 'Kinematics probe inconclusive — falling back to tool-grid tracking…',
+        code: 'probeInconclusive',
       })
     } catch (probeErr) {
       // Re-throw aborts; otherwise treat a probe failure as "fall back to grid".
@@ -492,7 +518,7 @@ export async function runAutoCalibration(
         phase: 'solving',
         index: 0,
         total,
-        message: 'Kinematics probe failed — falling back to tool-grid tracking…',
+        code: 'probeFailed',
       })
     }
 
@@ -508,7 +534,8 @@ export async function runAutoCalibration(
         phase: 'moving',
         index: i,
         total,
-        message: `Point ${i + 1}/${total} — moving…`,
+        code: 'moving',
+        params: { n: i + 1, total },
       })
 
       // Snapshot the position BEFORE the move so we can confirm motion began.
@@ -528,7 +555,8 @@ export async function runAutoCalibration(
         phase: 'capturing',
         index: i,
         total,
-        message: `Point ${i + 1}/${total} — capturing…`,
+        code: 'capturing',
+        params: { n: i + 1, total },
       })
 
       const gray = videoToGray(video)
@@ -540,7 +568,7 @@ export async function runAutoCalibration(
       phase: 'solving',
       index: total,
       total,
-      message: 'Detecting the tool and solving the homography…',
+      code: 'solving',
     })
 
     if (samples.length < 4) {
@@ -588,7 +616,8 @@ export async function runAutoCalibration(
       phase: 'done',
       index: total,
       total,
-      message: `Calibrated — RMS ${rmsMm.toFixed(2)} mm, used ${pixels.length}/${total} points.`,
+      code: 'doneGrid',
+      params: { rms: rmsMm.toFixed(2), used: pixels.length, total },
     })
 
     return {
@@ -609,11 +638,10 @@ export async function runAutoCalibration(
       phase: 'error',
       index: samples.length,
       total,
-      message: isAbort
-        ? 'Calibration aborted — machine stopped.'
-        : err instanceof Error
-          ? err.message
-          : 'Calibration failed.',
+      code: isAbort ? 'aborted' : 'failed',
+      // Surface the original message (if any) so the panel can show specifics
+      // for the generic 'failed' case (timeouts, soft-limit, lighting, …).
+      params: !isAbort && err instanceof Error ? { detail: err.message } : undefined,
     })
     throw err
   }

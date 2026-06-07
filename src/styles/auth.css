@@ -1,0 +1,754 @@
+/* ============================================================================
+   Sign-in landing — enterprise-grade gated login.
+   Matches the app's dark theme via the shared CSS vars (--bg/--fg/--accent…).
+   ========================================================================== */
+.auth-gate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--fg);
+  padding: clamp(16px, 4vw, 40px);
+  z-index: 100;
+  overflow: auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Animated procedural background (pointer-events: none) ---- */
+.auth-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.auth-bg-grid {
+  position: absolute;
+  inset: -40%;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--grid) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--grid) 55%, transparent) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 78%);
+  opacity: 0.5;
+  animation: auth-grid-pan 60s linear infinite;
+}
+@keyframes auth-grid-pan {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(46px, 46px, 0); }
+}
+.auth-bg-blob {
+  position: absolute;
+  width: 60vmax;
+  height: 60vmax;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.22;
+  will-change: transform;
+}
+.auth-bg-blob--1 {
+  top: -22vmax;
+  left: -14vmax;
+  background: radial-gradient(circle at 30% 30%, var(--accent), transparent 62%);
+  animation: auth-blob-1 22s ease-in-out infinite alternate;
+}
+.auth-bg-blob--2 {
+  bottom: -26vmax;
+  right: -18vmax;
+  background: radial-gradient(circle at 60% 40%, color-mix(in srgb, var(--accent) 55%, #6366f1 45%), transparent 62%);
+  animation: auth-blob-2 27s ease-in-out infinite alternate;
+}
+@keyframes auth-blob-1 {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(6vmax, 4vmax, 0) scale(1.12); }
+}
+@keyframes auth-blob-2 {
+  from { transform: translate3d(0, 0, 0) scale(1.05); }
+  to { transform: translate3d(-5vmax, -4vmax, 0) scale(0.95); }
+}
+.auth-bg-toolpath {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.55;
+}
+.auth-bg-path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 70%, transparent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: var(--len, 2600);
+  stroke-dashoffset: var(--len, 2600);
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 40%, transparent));
+  animation: auth-trace var(--dur, 14s) ease-in-out var(--delay, 0s) infinite;
+}
+@keyframes auth-trace {
+  0% { stroke-dashoffset: var(--len, 2600); }
+  50% { stroke-dashoffset: 0; }
+  82% { stroke-dashoffset: 0; }
+  /* draw off the far end so it loops cleanly without snapping */
+  100% { stroke-dashoffset: calc(var(--len, 2600) * -1); }
+}
+.auth-bg-cutter {
+  fill: var(--accent);
+  filter: drop-shadow(0 0 8px var(--accent));
+}
+.auth-bg-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 90% 80% at 50% 30%, transparent 40%, color-mix(in srgb, var(--bg) 80%, transparent) 100%);
+}
+
+/* ---- Hero layout ----
+   Desktop: two columns — pitch + feature showcase stacked on the left, the
+   sign-in card spanning the full height on the right. Mobile: a single column
+   ordered pitch → card → showcase (grid-template-areas swap in the media query)
+   so a returning user can sign in without scrolling past every feature. */
+.auth-hero {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.12fr 0.88fr;
+  grid-template-areas:
+    'pitch card'
+    'showcase card';
+  gap: clamp(18px, 2.4vw, 30px) clamp(28px, 4vw, 60px);
+  align-items: center;
+  width: min(1120px, 100%);
+  margin: auto;
+}
+
+.auth-pitch {
+  grid-area: pitch;
+  align-self: end;
+  animation: auth-rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Brand + eyebrow grouped as one lockup with a shared baseline. */
+.auth-lockup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 0 0 22px;
+}
+
+.auth-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.auth-brand--lg {
+  font-size: clamp(22px, 2.4vw, 28px);
+}
+.auth-brand img {
+  border-radius: 9px;
+  display: block;
+}
+.auth-brand-word .accent {
+  color: var(--accent);
+}
+
+.auth-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 5px 13px 5px 11px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 88%, var(--fg));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.auth-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
+  flex: 0 0 auto;
+}
+
+.auth-headline {
+  font-size: clamp(30px, 4.4vw, 47px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-weight: 800;
+  margin: 0 0 16px;
+  max-width: 16ch;
+  background: linear-gradient(180deg, var(--fg), color-mix(in srgb, var(--fg) 70%, var(--fg-muted)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.auth-lede {
+  font-size: clamp(14px, 1.4vw, 16px);
+  line-height: 1.6;
+  color: var(--fg-muted);
+  max-width: 48ch;
+  margin: 0 0 28px;
+}
+
+.auth-features {
+  grid-area: showcase;
+  align-self: start;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+.auth-feature {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+.auth-feature:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  transform: translateY(-1px);
+}
+.auth-feature-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+.auth-feature:hover .auth-feature-icon {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.auth-feature-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.auth-feature-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.auth-feature-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+/* ---- Sign-in card ---- */
+.auth-card {
+  grid-area: card;
+  align-self: center;
+  position: relative;
+  width: 100%;
+  max-width: 430px;
+  margin-inline: auto;
+  background: color-mix(in srgb, var(--bg-panel, var(--bg-elev)) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
+  border-radius: 20px;
+  padding: clamp(26px, 3vw, 38px);
+  text-align: center;
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.5),
+    0 1px 0 0 color-mix(in srgb, #fff 9%, transparent) inset,
+    0 0 0 1px color-mix(in srgb, var(--bg) 0%, transparent);
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+  overflow: hidden;
+  animation: auth-rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) 0.08s both;
+}
+/* A fine accent hairline across the very top of the card — the premium cue. */
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 75%, transparent),
+    transparent
+  );
+  pointer-events: none;
+}
+.auth-card-glow {
+  position: absolute;
+  top: -55%;
+  left: -10%;
+  width: 120%;
+  height: 90%;
+  background: radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 72%);
+  pointer-events: none;
+}
+
+.auth-title {
+  position: relative;
+  font-size: clamp(19px, 2vw, 23px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+
+.auth-sub {
+  position: relative;
+  color: var(--fg-muted);
+  margin: 0 0 22px;
+  font-size: 14px;
+}
+
+.auth-google-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f1f1f;
+  background: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+.auth-google-btn:hover {
+  background: #f7f8f8;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  transform: translateY(-1px);
+}
+.auth-google-btn:active {
+  transform: translateY(0);
+}
+.auth-google-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.auth-error {
+  position: relative;
+  color: var(--danger, #e5484d);
+  font-size: 13px;
+  margin: 14px 0 0;
+}
+
+.auth-trust {
+  position: relative;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 16px;
+  margin: 20px 0 0;
+  padding: 0;
+}
+.auth-trust li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.auth-trust svg {
+  color: var(--ok, #34d399);
+}
+
+.auth-fineprint {
+  position: relative;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  margin: 18px 0 0;
+  line-height: 1.5;
+}
+
+/* ---- Loading splash ---- */
+.auth-gate--splash {
+  flex-direction: column;
+}
+.auth-splash-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  animation: auth-rise 0.6s ease both;
+}
+.auth-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.auth-spinner-ring {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: auth-spin 0.8s linear infinite;
+}
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes auth-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Responsive: single clean column on mobile ---- */
+@media (max-width: 860px) {
+  .auth-hero {
+    grid-template-columns: 1fr;
+    /* Sign-in card sits right after the pitch — features become "learn more"
+       below it, so signing in never requires scrolling past the whole list. */
+    grid-template-areas:
+      'pitch'
+      'card'
+      'showcase';
+    gap: 22px;
+    width: min(480px, 100%);
+  }
+  .auth-pitch {
+    align-self: auto;
+    text-align: center;
+  }
+  .auth-lockup {
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .auth-headline {
+    max-width: 18ch;
+    margin-inline: auto;
+  }
+  .auth-lede {
+    margin-inline: auto;
+    margin-bottom: 4px;
+  }
+  .auth-features {
+    text-align: left;
+    grid-template-columns: 1fr;
+    max-width: 420px;
+    width: 100%;
+    margin-inline: auto;
+  }
+  .auth-card {
+    align-self: auto;
+  }
+}
+@media (max-width: 420px) {
+  .auth-google-btn {
+    min-height: 46px;
+  }
+  .auth-trust {
+    gap: 4px 12px;
+  }
+  .auth-eyebrow {
+    white-space: normal;
+    text-align: center;
+    letter-spacing: 0.05em;
+  }
+}
+
+/* ---- Reduced motion: kill all animation, static gradient bg ---- */
+@media (prefers-reduced-motion: reduce) {
+  .auth-bg-grid,
+  .auth-bg-blob--1,
+  .auth-bg-blob--2,
+  .auth-bg-path,
+  .auth-spinner-ring,
+  .auth-pitch,
+  .auth-card,
+  .auth-splash-card {
+    animation: none !important;
+  }
+  .auth-bg-path {
+    /* fully drawn, static */
+    stroke-dasharray: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+  .auth-bg-cutter {
+    /* animateMotion can't be paused via CSS reliably → hide the cutter dots */
+    display: none;
+  }
+  .auth-google-btn:hover,
+  .auth-feature:hover {
+    transform: none;
+  }
+}
+
+/* Top-bar signed-in user chip — a compact circular avatar; hover/focus reveals a
+   popover with the account + a sign-out button (keeps the bar from overflowing). */
+.km-userchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.km-userchip-avatarbtn {
+  display: inline-flex;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+}
+.km-userchip-avatarbtn:hover,
+.km-userchip-avatarbtn:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+.km-userchip-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+/* Hover/focus popover. */
+.km-userchip-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 2147483000;
+  display: none;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.km-userchip:hover .km-userchip-pop,
+.km-userchip:focus-within .km-userchip-pop {
+  display: block;
+}
+.km-userchip-pop-id {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 9px;
+}
+.km-userchip-pop-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.km-userchip-pop-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.km-userchip-pop-email {
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.km-userchip-signout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.km-userchip-signout:hover {
+  background: var(--danger, #e5484d);
+  border-color: var(--danger, #e5484d);
+  color: #fff;
+}
+.km-userchip-fallback-wrap {
+  display: inline-flex;
+}
+.km-userchip-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.km-userchip-name {
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.km-userchip-out {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+.km-userchip-out:hover {
+  background: var(--danger, #e5484d);
+  color: #fff;
+}
+
+/* ---- Policy acceptance (sign-in consent) ---- */
+.auth-consent {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 4px 0 2px;
+  text-align: left;
+}
+.auth-consent-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--fg-muted, #9aa3ad);
+  cursor: pointer;
+}
+.auth-consent-check input {
+  margin-top: 1px;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent, #2dd4bf);
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.auth-consent-links {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--fg-muted, #8b939c);
+}
+.auth-policy-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent, #2dd4bf);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.auth-policy-link:hover {
+  filter: brightness(1.15);
+}
+.auth-google-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+.auth-consent-hint {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--accent, #2dd4bf);
+}
+
+/* ============================================================================
+   Free-explore grace period — slim, on-theme banner above the app, plus the
+   "trial ended" line on the gated sign-in screen.
+   ========================================================================== */
+/* Wrapper makes the banner take a slim slice and the app fill the rest, so the
+   banner never overlaps the app's own top bar. */
+.auth-grace-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.auth-grace-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.auth-grace-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 34px;
+  padding: 4px 12px;
+  background: var(--bg-elev, #15181d);
+  color: var(--fg);
+  border-bottom: 1px solid var(--border, #2a2f37);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  box-sizing: border-box;
+}
+.auth-grace-banner-text {
+  opacity: 0.85;
+  text-align: center;
+}
+.auth-grace-banner-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 12px;
+  border: 1px solid var(--accent, #2dd4bf);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #2dd4bf) 14%, transparent);
+  color: var(--accent, #2dd4bf);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.auth-grace-banner-btn:hover {
+  background: color-mix(in srgb, var(--accent, #2dd4bf) 24%, transparent);
+}
+.auth-grace-expired {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent, #2dd4bf);
+}

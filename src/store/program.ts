@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import {
-  applyPlacement,
-  IDENTITY_PLACEMENT,
-  isIdentity,
-  type Placement,
+  applyJobPlacement,
+  IDENTITY_JOB_PLACEMENT,
+  isIdentityJob,
+  type JobPlacement,
 } from '../core/transform'
 
 // NOTE: Phase-0 stub. Workstream W5 (program panel + streaming) owns and expands
@@ -25,7 +25,9 @@ import {
 // baked into the combined `rawLines`. Consumers keep reading `lines`/`rawLines`
 // exactly as before.
 
-export type { Placement }
+export type { JobPlacement }
+// Back-compat alias: the program/visualizer "placement" is now a full-3D JobPlacement.
+export type { JobPlacement as Placement }
 
 /** One named program section (the output of a single source/tab). */
 export interface ProgramSection {
@@ -35,6 +37,13 @@ export interface ProgramSection {
   name: string
   /** The raw, untransformed G-code lines for this section. */
   rawLines: string[]
+  /**
+   * Per-section placement (move / rotate / scale, all 3 axes). Each toolpath
+   * carries its OWN placement so several jobs (a 2D carve, a PCB, a welding
+   * path…) can be positioned independently. `lines` bakes each section with its
+   * own placement; the gizmo edits the selected section only.
+   */
+  placement: JobPlacement
 }
 
 interface ProgramStore {
@@ -44,10 +53,10 @@ interface ProgramStore {
   sections: ProgramSection[]
   /** The placed (baked) combined program — displayed, simulated, and streamed. */
   lines: string[]
-  /** The raw, untransformed combined program. `lines` = rawLines + placement. */
+  /** The raw, untransformed combined program. `lines` = per-section placements baked in. */
   rawLines: string[]
-  /** Current placement applied to `rawLines` to produce `lines`. */
-  placement: Placement
+  /** The section currently selected for placement editing (gizmo target), or null. */
+  selectedSectionId: string | null
   /** Index of the line currently being sent, or -1 when idle. */
   cursor: number
   /** True while the program is actively streaming to the controller. */
@@ -59,21 +68,32 @@ interface ProgramStore {
    * combined-text editor). Collapses all sections into one named `name`.
    */
   setCombined: (name: string, gcode: string) => void
-  /** Remove a single section by id and recompute the combined program. */
-  removeSection: (id: string) => void
-  /** Merge a partial placement and re-bake `lines`. */
-  setPlacement: (p: Partial<Placement>) => void
-  /** Reset placement to identity (`lines` reverts to `rawLines`). */
-  resetPlacement: () => void
+  /**
+   * Remove a single section and recompute the combined program.
+   *
+   * CONTRACT (cross-workstream): callers identify a section by its `name` —
+   * feature tabs (soldering, glue, pick-place, writing, CAD/CAM, AI, …) call
+   * `removeSection(name)` to drop their own section without tracking its id.
+   * For backwards-compat with callers that already hold a section `id`, the
+   * argument is matched against the section NAME first, then falls back to the
+   * `id`, so passing either works. (Names and generated ids never collide.)
+   */
+  removeSection: (nameOrId: string) => void
+  /** Select a section for placement editing (or null to clear). */
+  selectSection: (id: string | null) => void
+  /** Merge a partial placement into ONE section and re-bake `lines`. */
+  setSectionPlacement: (id: string, p: Partial<JobPlacement>) => void
+  /** Reset ONE section's placement to identity. */
+  resetSectionPlacement: (id: string) => void
   setCursor: (i: number) => void
   setStreaming: (s: boolean) => void
   clear: () => void
 }
 
 /** Bake a placement into raw lines, returning the placed `lines` array. */
-function bake(rawLines: string[], placement: Placement): string[] {
-  if (isIdentity(placement)) return rawLines
-  return applyPlacement(rawLines.join('\n'), placement).split(/\r?\n/)
+function bake(rawLines: string[], placement: JobPlacement): string[] {
+  if (isIdentityJob(placement)) return rawLines
+  return applyJobPlacement(rawLines.join('\n'), placement).split(/\r?\n/)
 }
 
 /** Separator comment emitted before each section in the combined program. */
@@ -83,12 +103,22 @@ function sectionSeparator(name: string): string {
   return `(— ${safe} —)`
 }
 
-/** Concatenate all sections into a single combined rawLines array. */
+/** Concatenate all sections' RAW lines into a single combined array. */
 function combineSections(sections: ProgramSection[]): string[] {
   const out: string[] = []
   for (const s of sections) {
     out.push(sectionSeparator(s.name))
     for (const l of s.rawLines) out.push(l)
+  }
+  return out
+}
+
+/** Concatenate all sections, each baked with ITS OWN placement → the streamed program. */
+function combineBaked(sections: ProgramSection[]): string[] {
+  const out: string[] = []
+  for (const s of sections) {
+    out.push(sectionSeparator(s.name))
+    for (const l of bake(s.rawLines, s.placement)) out.push(l)
   }
   return out
 }
@@ -123,14 +153,13 @@ function nextSectionId(): string {
 const dismissedNames = new Set<string>()
 const lastGcodeByName = new Map<string, string>()
 
-/** Recompute the derived combined fields from a section list + placement. */
-function deriveFrom(sections: ProgramSection[], placement: Placement) {
-  const rawLines = combineSections(sections)
+/** Recompute the derived combined fields from a section list (per-section placement). */
+function deriveFrom(sections: ProgramSection[]) {
   return {
     sections,
     name: summaryName(sections),
-    rawLines,
-    lines: bake(rawLines, placement),
+    rawLines: combineSections(sections),
+    lines: combineBaked(sections),
   }
 }
 
@@ -139,12 +168,32 @@ export const useProgram = create<ProgramStore>((set, get) => ({
   sections: [],
   lines: [],
   rawLines: [],
-  placement: { ...IDENTITY_PLACEMENT },
+  selectedSectionId: null,
   cursor: -1,
   streaming: false,
   setProgram: (name, gcode) => {
-    const { sections, placement } = get()
+    const { sections, selectedSectionId } = get()
     const idx = sections.findIndex((s) => s.name === name)
+
+    // CLEAR-ON-EMPTY (cross-workstream contract): pushing an empty/whitespace-
+    // only program for a name REMOVES that section. Feature tabs re-push on a
+    // debounce; when a tab has nothing to emit it pushes '' and its section
+    // disappears instead of lingering as a stale, empty card. This is a true
+    // no-op when the section already doesn't exist.
+    if (gcode.trim() === '') {
+      lastGcodeByName.delete(name)
+      if (idx < 0) return
+      const removedId = sections[idx].id
+      const next = sections.filter((s) => s.name !== name)
+      set({
+        ...deriveFrom(next),
+        selectedSectionId: selectedSectionId === removedId ? null : selectedSectionId,
+        cursor: -1,
+        streaming: false,
+      })
+      return
+    }
+
     const unchanged = lastGcodeByName.get(name) === gcode
 
     // Two true no-op cases (early-return BEFORE any state change so streaming,
@@ -163,53 +212,79 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     const rawLines = gcode.split(/\r?\n/)
     let next: ProgramSection[]
     if (idx >= 0) {
-      // Replace this named section's body in place (keep its id + position).
+      // Replace this named section's body in place (keep its id, position AND
+      // its current placement — regenerating a tab must not move the job).
       next = sections.slice()
       next[idx] = { ...next[idx], rawLines }
     } else {
-      // New source → append a section.
-      next = [...sections, { id: nextSectionId(), name, rawLines }]
+      // New source → append a section with an identity placement.
+      next = [...sections, { id: nextSectionId(), name, rawLines, placement: { ...IDENTITY_JOB_PLACEMENT } }]
     }
     set({
-      ...deriveFrom(next, placement),
+      ...deriveFrom(next),
       cursor: -1,
       streaming: false,
     })
   },
   setCombined: (name, gcode) => {
-    const { placement } = get()
     const rawLines = gcode.split(/\r?\n/)
-    const next: ProgramSection[] = [{ id: nextSectionId(), name, rawLines }]
+    const next: ProgramSection[] = [
+      { id: nextSectionId(), name, rawLines, placement: { ...IDENTITY_JOB_PLACEMENT } },
+    ]
     set({
-      ...deriveFrom(next, placement),
+      ...deriveFrom(next),
+      selectedSectionId: null,
       cursor: -1,
       streaming: false,
     })
   },
-  removeSection: (id) => {
-    const { sections, placement } = get()
-    const removed = sections.find((s) => s.id === id)
-    const next = sections.filter((s) => s.id !== id)
+  removeSection: (nameOrId) => {
+    const { sections, selectedSectionId } = get()
+    // Match by NAME first (the documented contract), then fall back to id so
+    // legacy callers that hold a section id keep working. Names and generated
+    // ids never collide, so the resolution is unambiguous.
+    const removed =
+      sections.find((s) => s.name === nameOrId) ??
+      sections.find((s) => s.id === nameOrId)
+    if (!removed) return
+    const next = sections.filter((s) => s.id !== removed.id)
     if (next.length === sections.length) return
     // Mark the section's name as user-dismissed so the owning tab's next
     // (identical) re-push can't resurrect it. `lastGcodeByName` is retained so
     // the dismiss check has the content to compare against; a genuinely
     // changed push later will clear the dismissal.
-    if (removed) dismissedNames.add(removed.name)
+    dismissedNames.add(removed.name)
     set({
-      ...deriveFrom(next, placement),
+      ...deriveFrom(next),
+      selectedSectionId: selectedSectionId === removed.id ? null : selectedSectionId,
       cursor: -1,
       streaming: false,
     })
   },
-  setPlacement: (p) => {
-    const { rawLines, placement } = get()
-    const next = { ...placement, ...p }
-    set({ placement: next, lines: bake(rawLines, next) })
+  selectSection: (id) => {
+    if (id === null) {
+      set({ selectedSectionId: null })
+      return
+    }
+    // Ignore selection of a non-existent section.
+    if (!get().sections.some((s) => s.id === id)) return
+    set({ selectedSectionId: id })
   },
-  resetPlacement: () => {
-    const { rawLines } = get()
-    set({ placement: { ...IDENTITY_PLACEMENT }, lines: rawLines })
+  setSectionPlacement: (id, p) => {
+    const { sections } = get()
+    const idx = sections.findIndex((s) => s.id === id)
+    if (idx < 0) return
+    const next = sections.slice()
+    next[idx] = { ...next[idx], placement: { ...next[idx].placement, ...p } }
+    set(deriveFrom(next))
+  },
+  resetSectionPlacement: (id) => {
+    const { sections } = get()
+    const idx = sections.findIndex((s) => s.id === id)
+    if (idx < 0) return
+    const next = sections.slice()
+    next[idx] = { ...next[idx], placement: { ...IDENTITY_JOB_PLACEMENT } }
+    set(deriveFrom(next))
   },
   setCursor: (cursor) => set({ cursor }),
   setStreaming: (streaming) => set({ streaming }),
@@ -223,7 +298,7 @@ export const useProgram = create<ProgramStore>((set, get) => ({
       sections: [],
       lines: [],
       rawLines: [],
-      placement: { ...IDENTITY_PLACEMENT },
+      selectedSectionId: null,
       cursor: -1,
       streaming: false,
     })

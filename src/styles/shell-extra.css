@@ -104,3 +104,26 @@
   .km-conn .km-conn-icon { min-height: 36px; min-width: 36px; }
   .km-modal-overlay { padding: 3vh 6px; }
 }
+
+/* Phones (~360px): the connection cluster must wrap to multiple rows and never
+   force horizontal scroll. Let it span the full bar width, wrap its children,
+   and drop the controller-firmware select's max-width cap so it can shrink. */
+@media (max-width: 360px) {
+  .km-conn {
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 4px;
+    padding: 4px 6px;
+    border-radius: 10px;
+  }
+  /* Let the firmware selector flex down to share a row instead of overflowing. */
+  .km-conn-select { max-width: none; flex: 1 1 120px; }
+  /* The machine state label can shrink below its 64px desktop floor on phones. */
+  .km-conn-state { min-width: 0; }
+  /* Buttons grow to fill the row, keeping a comfortable touch target. */
+  .km-conn-btn { flex: 1 1 auto; }
+  .km-farm { flex: 1 1 100%; }
+  .km-farm-toggle { width: 100%; }
+  /* The farm popover should not exceed the viewport on tiny screens. */
+  .km-farm-pop { max-width: calc(100vw - 24px); }
+}

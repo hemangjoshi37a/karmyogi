@@ -172,9 +172,12 @@ export class OutlineFont {
           if (c.size() < 3) continue;
           const pl = new Polyline();
           pl.closed = true;
-          // opentype path y is already up; place at pen X + baseline.
+          // opentype's getPath emits screen coords (y DOWN: it returns `-point.y`).
+          // Negate y here to restore the +y-up convention StrokeFont uses, so
+          // outline-font text is upright (not mirrored about the baseline) — the
+          // bug that only affected system/uploaded fonts.
           for (const p of c.points) {
-            pl.add(pt(xStart + penUnits * scale + p.x * scale, baseline + p.y * scale));
+            pl.add(pt(xStart + penUnits * scale + p.x * scale, baseline - p.y * scale));
           }
           out.push(pl);
         }

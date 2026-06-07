@@ -1,8 +1,11 @@
 import { create } from 'zustand'
 import {
   parseStatusReport,
+  parseParserState,
   type StatusReport,
+  type ParserState,
   type GrblState,
+  type WorkCoordSystem,
   type Vec3 as SerialVec3,
 } from '../serial/status'
 
@@ -18,6 +21,9 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected'
 export type MachineState = GrblState
 
 export type Vec3 = SerialVec3
+
+/** Re-export so Coordinates/Controller can type the active-WCS field. */
+export type { WorkCoordSystem, ParserState } from '../serial/status'
 
 export interface Overrides {
   feed: number
@@ -47,6 +53,16 @@ interface MachineStore {
   /** Timestamp (ms) of the last status report applied. */
   lastStatusAt: number | null
 
+  // --- parser state ($G) ---
+  /**
+   * Last GRBL `$G` parser-state report (modal words + active WCS). null until a
+   * `$G` reply is seen. The Coordinates panel reads `activeWcs` to reflect the
+   * machine's REAL active work coordinate system rather than a guessed local one.
+   */
+  parserState: ParserState | null
+  /** Active work coordinate system (G54–G59) from `$G`, or null if unknown. */
+  activeWcs: WorkCoordSystem | null
+
   // --- actions ---
   setConnection: (c: ConnectionStatus) => void
   setError: (e: string | null) => void
@@ -56,6 +72,10 @@ interface MachineStore {
   applyStatus: (report: StatusReport) => void
   /** Parse a raw `<...>` line and apply it. Returns true if it was a report. */
   ingestStatusLine: (line: string) => boolean
+  /** Apply a parsed `$G` parser-state report (sets parserState + activeWcs). */
+  applyParserState: (ps: ParserState) => void
+  /** Parse a raw `[GC:...]` line and apply it. Returns true if it was one. */
+  ingestParserStateLine: (line: string) => boolean
   /** Reset machine status back to defaults (e.g. on disconnect). */
   resetMachine: () => void
 }
@@ -79,8 +99,19 @@ export const useMachine = create<MachineStore>((set, get) => ({
   buffer: null,
   lastStatusAt: null,
 
+  parserState: null,
+  activeWcs: null,
+
+  // Connecting clears any stale error so a retry starts clean; connected does
+  // too. Going to 'disconnected' PRESERVES the current error so a mid-job /
+  // unexpected disconnect message (set by the controller) survives the
+  // connection-state flip and stays visible to the operator (the dangerous
+  // CNC case — losing the link mid-cut).
   setConnection: (connection) =>
-    set({ connection, error: connection === 'connected' ? null : get().error }),
+    set({
+      connection,
+      error: connection === 'disconnected' ? get().error : null,
+    }),
   setError: (error) => set({ error }),
   setState: (state) => set({ state }),
   setPositions: ({ mpos, wpos }) =>
@@ -108,6 +139,16 @@ export const useMachine = create<MachineStore>((set, get) => ({
     return true
   },
 
+  applyParserState: (ps) =>
+    set({ parserState: ps, activeWcs: ps.wcs ?? get().activeWcs }),
+
+  ingestParserStateLine: (line) => {
+    const ps = parseParserState(line)
+    if (!ps) return false
+    get().applyParserState(ps)
+    return true
+  },
+
   resetMachine: () =>
     set({
       state: 'Unknown',
@@ -121,5 +162,7 @@ export const useMachine = create<MachineStore>((set, get) => ({
       pins: [],
       buffer: null,
       lastStatusAt: null,
+      parserState: null,
+      activeWcs: null,
     }),
 }))

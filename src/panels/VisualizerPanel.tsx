@@ -1,13 +1,33 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Viewer, type ViewerHandle } from '../viewer/Viewer'
 import { gcodeToPolylines, type Segment } from '../viewer/gcodeToPolylines'
-import { useProgram, useMachine, useCameraCalib } from '../store'
+import { reemitSafe, inferEmitOptions } from '../core/toolpathEdit'
+import { useProgram, useMachine, useCameraCalib, usePersistentState, useSettings } from '../store'
 import { useBed } from '../store/bed'
+import { useCarveJobs } from '../store/carveJobs'
 import { buildTimeline } from '../core/simulation'
 import { usePlayback } from '../store/playback'
 import { PlaybackTimeline } from '../components/PlaybackTimeline'
 import { useT } from '../i18n'
-import type { Placement } from '../core/transform'
+import {
+  applyJobPlacement,
+  isIdentityJob,
+  quaternionToEulerDeg,
+  type JobPlacement,
+} from '../core/transform'
+
+// Distinct per-section toolpath colours, tuned for legibility on each theme's
+// background (brighter on dark, deeper on light). Indexed by section order.
+const SECTION_COLORS_DARK = [
+  '#38bdf8', '#fbbf24', '#a78bfa', '#34d399', '#fb7185',
+  '#22d3ee', '#f472b6', '#a3e635', '#fb923c', '#e879f9',
+]
+const SECTION_COLORS_LIGHT = [
+  '#0284c7', '#b45309', '#6d28d9', '#047857', '#be123c',
+  '#0e7490', '#a21caf', '#4d7c0f', '#c2410c', '#9333ea',
+]
+import { useViewportShapes, type ShapeKind } from '../store/viewportShapes'
 
 /**
  * Visualizer panel: hosts the 3D viewport and feeds it the loaded G-code program
@@ -41,44 +61,107 @@ export function VisualizerPanel() {
   // Material-removal simulation: progressively carve the stock surface as the
   // toolpath reveals. On by default so the operator sees stock → finished part.
   const [carveSim, setCarveSim] = useState(true)
+  // Engineering-style 3D dimension annotations (X/Y/Z) around the program bbox.
+  // Persisted so the operator's preference survives reloads.
+  const [showDimensions, setShowDimensions] = usePersistentState(
+    'karmyogi.viewer.showDimensions',
+    true,
+  )
+
+  // Add a viewport primitive at the bed centre (0,0); it auto-selects so its
+  // inline transform gizmo appears immediately (replaces the old right-click).
+  const addShape = useViewportShapes((s) => s.addShape)
+  const onAddShape = (kind: ShapeKind) => addShape(kind, 0, 0)
 
   // Live camera → 3D bed overlay (persisted in the camera-calib store, so the
   // toggle survives refresh). The overlay components self-gate on `enabled`.
   const camOverlay = useCameraCalib((s) => s.enabled)
   const toggleCamOverlay = useCameraCalib((s) => s.toggleEnabled)
 
-  // Placement gizmo: toggle the in-scene move/rotate/scale handles.
+  // Placement gizmo: toggle the in-scene all-in-one move/rotate/scale handles
+  // (also turns on when the user clicks a toolpath in the 3D view). Placement is
+  // PER-SECTION: the gizmo edits whichever section is selected.
   const [gizmoOn, setGizmoOn] = useState(false)
-  const [gizmoMode, setGizmoMode] = useState<'translate' | 'rotate' | 'scale'>(
-    'translate',
-  )
-  const placement = useProgram((s) => s.placement)
+  const sections = useProgram((s) => s.sections)
+  const selectedSectionId = useProgram((s) => s.selectedSectionId)
+  const selectSection = useProgram((s) => s.selectSection)
+  const selectedSection =
+    sections.find((s) => s.id === selectedSectionId) ?? null
+  const placement = selectedSection?.placement ?? null
   const hasProgram = lines.some((l) => l.trim() !== '')
+
+  // Per-section baked geometry: segments (for distinctly-coloured rendering and
+  // independent live-drag groups) + bounds (for click-to-select hit regions). A
+  // theme-aware palette keeps every toolpath legible on dark AND light.
+  const theme = useSettings((s) => s.theme)
+  const sectionData = useMemo(() => {
+    const palette = theme === 'dark' ? SECTION_COLORS_DARK : SECTION_COLORS_LIGHT
+    return sections.map((s, i) => {
+      const raw = s.rawLines.join('\n')
+      const baked = isIdentityJob(s.placement) ? raw : applyJobPlacement(raw, s.placement)
+      const parsed = gcodeToPolylines(baked)
+      return {
+        id: s.id,
+        segments: parsed.segments,
+        bounds: parsed.bounds,
+        color: palette[i % palette.length],
+      }
+    })
+  }, [sections, theme])
+
+  const sectionBoxes = useMemo(
+    () =>
+      sectionData.flatMap((d) =>
+        d.bounds ? [{ id: d.id, bounds: { min: d.bounds.min, max: d.bounds.max } }] : [],
+      ),
+    [sectionData],
+  )
+  const sectionPaths = useMemo(
+    () =>
+      sectionData.flatMap((d) =>
+        d.segments.length ? [{ id: d.id, segments: d.segments, color: d.color }] : [],
+      ),
+    [sectionData],
+  )
+
+  // Turning the gizmo on with nothing selected picks the first section so the
+  // handles appear immediately.
+  const toggleGizmo = () => {
+    const next = !gizmoOn
+    setGizmoOn(next)
+    if (next && !selectedSectionId && sections.length > 0) selectSection(sections[0].id)
+  }
+
+  // Lasso-delete mode (mutually exclusive with the placement gizmo).
+  const [lassoMode, setLassoMode] = useState(false)
+  const toggleLasso = () => {
+    const next = !lassoMode
+    setLassoMode(next)
+    if (next) setGizmoOn(false)
+  }
+  // Apply a lasso deletion: rebuild a SAFE program from the kept segments and
+  // replace the program with it (collapsed into one edited section).
+  const onLassoDelete = (kept: Segment[]) => {
+    setLassoMode(false)
+    const out = reemitSafe(
+      kept.map((s) => ({ from: s.from, to: s.to, kind: s.kind })),
+      { ...inferEmitOptions(gcode), programName: 'edited toolpath' },
+    )
+    useProgram.getState().setCombined('edited toolpath', out)
+  }
 
   const gcode = useMemo(() => lines.join('\n'), [lines])
 
-  // Cutter radius for the material-removal sim. Read from the persisted carve
-  // tool diameter (set in the 3D Carving panel); recomputed when the program
-  // changes so a freshly generated job uses its own bit size. Falls back to a
-  // sane default when nothing has been configured yet.
-  const toolRadius = useMemo(() => {
-    const read = (key: string, field: string): number | null => {
-      try {
-        const raw = localStorage.getItem(key)
-        if (!raw) return null
-        const v = JSON.parse(raw)?.[field]
-        return typeof v === 'number' && v > 0 ? v : null
-      } catch {
-        return null
-      }
-    }
-    const dia =
-      read('karmyogi.carve.3d', 'toolDiameter') ??
-      read('karmyogi.carve.2d', 'diameter') ??
-      3.175
-    return Math.max(0.1, dia / 2)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gcode])
+  // Cutter radius for the material-removal sim. Read live from the carve store's
+  // GLOBAL tool diameter (the single bit that cuts all jobs, set in the 3D
+  // Carving panel) instead of re-parsing localStorage — the store IS the source
+  // of truth and this reacts to bit changes immediately. Falls back to a sane
+  // default when nothing has been configured yet.
+  const toolDiameter = useCarveJobs((s) => s.global.toolDiameter)
+  const toolRadius = useMemo(
+    () => Math.max(0.1, (toolDiameter > 0 ? toolDiameter : 3.175) / 2),
+    [toolDiameter],
+  )
 
   // Build a time-parameterised simulation timeline from the loaded program and
   // install it in the playback store. Rebuilds only when the gcode text changes.
@@ -131,9 +214,13 @@ export function VisualizerPanel() {
 
   // Bounding box of the loaded program (mm). The viewer scene is always mm
   // (the emitter outputs G21), so we report mm regardless of UI unit setting.
+  //
+  // Derived from the ALREADY-BUILT timeline segments (same geometry the viewer
+  // draws) rather than a second `gcodeToPolylines` parse — one parse, and the
+  // reported bounds can never disagree with what's on screen. Memoized on
+  // `simSegments` (rebuilt only when the program changes), not the 60fps playhead.
   const dims = useMemo(() => {
-    if (!gcode || gcode.trim() === '') return null
-    const { bounds } = gcodeToPolylines(gcode)
+    const bounds = boundsOfSegments(simSegments)
     if (!bounds) return null
     const w = bounds.max[0] - bounds.min[0]
     const h = bounds.max[1] - bounds.min[1]
@@ -169,12 +256,18 @@ export function VisualizerPanel() {
       offBed,
       oversized,
     }
-  }, [gcode, bedW, bedD])
+  }, [simSegments, bedW, bedD])
 
   return (
     <div className="vz-root">
       <style>{OVERLAY_CSS}</style>
       <div className="vz-stage">
+        {/* Toolbar: PRIMARY buttons stay always-visible and the row wraps
+            (flex-wrap + capped max-width) so it can never overlap the scene on a
+            phone; SECONDARY actions (add-shape + display toggles + camera) live
+            in an overflow "⋯" menu so ~18 controls never collide. Each glyph is
+            unique across the always-visible set (front-view ▭ vs add-rect — the
+            latter is now labeled in the menu; fit ⤢ vs scale ⤡). */}
         <div className="vz-toolbar">
           <button
             className="vz-toolbar-btn"
@@ -192,145 +285,62 @@ export function VisualizerPanel() {
           >
             ⧉
           </button>
-          <button
-            className="vz-toolbar-btn"
-            onClick={() => ref.current?.setView('top')}
-            title={t('vz.top', 'Top view')}
-            aria-label={t('vz.top', 'Top view')}
-          >
-            ▣
-          </button>
-          <button
-            className="vz-toolbar-btn"
-            onClick={() => ref.current?.setView('front')}
-            title={t('vz.front', 'Front view')}
-            aria-label={t('vz.front', 'Front view')}
-          >
-            ▭
-          </button>
-          <button
-            className={
-              showStock ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
-            }
-            onClick={() => setShowStock((s) => !s)}
-            title={t('vz.showStock', 'Show stock')}
-            aria-label={t('vz.showStock', 'Show stock')}
-            aria-pressed={showStock}
-          >
-            📦
-          </button>
-          <button
-            className={
-              carveSim ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
-            }
-            onClick={() => setCarveSim((s) => !s)}
-            title={t(
-              'vz.carveSim',
-              'Material removal simulation (carve the stock as it runs)',
-            )}
-            aria-label={t('vz.carveSim', 'Material removal simulation')}
-            aria-pressed={carveSim}
-          >
-            🪵
-          </button>
-          <button
-            className={
-              showActualTool ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
-            }
-            onClick={() => setShowActualTool((s) => !s)}
-            title={t('vz.showActualTool', 'Show actual machine tool (live)')}
-            aria-label={t('vz.showActualTool', 'Show actual machine tool (live)')}
-            aria-pressed={showActualTool}
-          >
-            <span style={{ color: '#f59e0b' }}>▼</span>
-          </button>
-          <button
-            className={
-              showSimTool ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
-            }
-            onClick={() => setShowSimTool((s) => !s)}
-            title={t('vz.showSimTool', 'Show simulation tool')}
-            aria-label={t('vz.showSimTool', 'Show simulation tool')}
-            aria-pressed={showSimTool}
-          >
-            <span style={{ color: '#22d3ee' }}>▼</span>
-          </button>
+          {/* Top/front view buttons removed — the orientation cube (upper-right)
+              now covers all named views (faces/edges/corners). */}
+          <span className="vz-toolbar-sep" aria-hidden="true" />
           <BedSizeControl />
-          <button
-            className={
-              camOverlay ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
-            }
-            onClick={toggleCamOverlay}
-            title={t('vz.cameraOverlay', 'Show live camera 3D (bed + job from the Camera panel)')}
-            aria-label={t('vz.cameraOverlay', 'Show live camera 3D')}
-            aria-pressed={camOverlay}
-          >
-            📷
-          </button>
+          {/* Overflow menu for the secondary controls. */}
+          <OverflowMenu
+            t={t}
+            onAddShape={onAddShape}
+            showDimensions={showDimensions}
+            setShowDimensions={setShowDimensions}
+            showStock={showStock}
+            setShowStock={setShowStock}
+            carveSim={carveSim}
+            setCarveSim={setCarveSim}
+            showActualTool={showActualTool}
+            setShowActualTool={setShowActualTool}
+            showSimTool={showSimTool}
+            setShowSimTool={setShowSimTool}
+            camOverlay={camOverlay}
+            toggleCamOverlay={toggleCamOverlay}
+          />
           <span className="vz-toolbar-sep" aria-hidden="true" />
           <button
             className={
               gizmoOn ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
             }
-            onClick={() => setGizmoOn((g) => !g)}
+            onClick={toggleGizmo}
             disabled={!hasProgram}
-            title={t('vz.place', 'Place job (move / rotate / scale)')}
+            title={t('vz.place', 'Place job — move / rotate / scale on all 3 axes (or click a toolpath)')}
             aria-label={t('vz.place', 'Place job')}
             aria-pressed={gizmoOn}
           >
             ✛
           </button>
-          {gizmoOn && (
-            <>
-              <button
-                className={
-                  gizmoMode === 'translate'
-                    ? 'vz-toolbar-btn vz-toolbar-btn--on'
-                    : 'vz-toolbar-btn'
-                }
-                onClick={() => setGizmoMode('translate')}
-                title={t('vz.move', 'Move')}
-                aria-label={t('vz.move', 'Move')}
-                aria-pressed={gizmoMode === 'translate'}
-              >
-                ↔
-              </button>
-              <button
-                className={
-                  gizmoMode === 'rotate'
-                    ? 'vz-toolbar-btn vz-toolbar-btn--on'
-                    : 'vz-toolbar-btn'
-                }
-                onClick={() => setGizmoMode('rotate')}
-                title={t('vz.rotate', 'Rotate')}
-                aria-label={t('vz.rotate', 'Rotate')}
-                aria-pressed={gizmoMode === 'rotate'}
-              >
-                ⟲
-              </button>
-              <button
-                className={
-                  gizmoMode === 'scale'
-                    ? 'vz-toolbar-btn vz-toolbar-btn--on'
-                    : 'vz-toolbar-btn'
-                }
-                onClick={() => setGizmoMode('scale')}
-                title={t('vz.scale', 'Scale')}
-                aria-label={t('vz.scale', 'Scale')}
-                aria-pressed={gizmoMode === 'scale'}
-              >
-                ⤢
-              </button>
-              <button
-                className="vz-toolbar-btn"
-                onClick={() => useProgram.getState().resetPlacement()}
-                title={t('vz.resetPlacement', 'Reset placement')}
-                aria-label={t('vz.resetPlacement', 'Reset placement')}
-              >
-                ⟳
-              </button>
-            </>
+          {gizmoOn && selectedSectionId && (
+            <button
+              className="vz-toolbar-btn"
+              onClick={() =>
+                useProgram.getState().resetSectionPlacement(selectedSectionId)
+              }
+              title={t('vz.resetPlacement', 'Reset placement')}
+              aria-label={t('vz.resetPlacement', 'Reset placement')}
+            >
+              ⟳
+            </button>
           )}
+          <button
+            className={lassoMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+            onClick={toggleLasso}
+            disabled={!hasProgram}
+            title={t('vz.lasso', 'Lasso-delete: drag a region over the toolpath to remove moves (safe-Z kept)')}
+            aria-label={t('vz.lasso', 'Lasso delete')}
+            aria-pressed={lassoMode}
+          >
+            ✂
+          </button>
         </div>
         <Viewer
           ref={ref}
@@ -348,15 +358,293 @@ export function VisualizerPanel() {
           bedWidth={bedW}
           bedDepth={bedD}
           bedHeight={bedH}
-          gizmo={gizmoOn && hasProgram}
-          gizmoMode={gizmoMode}
+          gizmo={gizmoOn && hasProgram && !!selectedSectionId}
+          onGizmoChange={setGizmoOn}
+          sectionBoxes={sectionBoxes}
+          sectionPaths={sectionPaths}
+          selectedSectionId={selectedSectionId}
+          onSelectSection={selectSection}
+          lasso={lassoMode && hasProgram}
+          onLassoDelete={onLassoDelete}
+          showDimensions={showDimensions}
         />
-        {gizmoOn && hasProgram && (
-          <PlacementReadout placement={placement} t={t} />
+        {gizmoOn && placement && (
+          <PlacementReadout
+            placement={placement}
+            name={selectedSection?.name}
+            sectionId={selectedSectionId ?? ''}
+            t={t}
+          />
         )}
         <DimensionsOverlay dims={dims} bedW={bedW} bedD={bedD} />
+        <ToolConeLegend
+          showActualTool={showActualTool}
+          showSimTool={showSimTool}
+          t={t}
+        />
       </div>
       <PlaybackTimeline />
+    </div>
+  )
+}
+
+type TFn = (
+  key: string,
+  english: string,
+  vars?: Record<string, string | number>,
+) => string
+type Toggle = (updater: (v: boolean) => boolean) => void
+
+/** Amber = actual (live machine) cone; cyan = simulation cone. */
+const ACTUAL_TOOL_COLOR = '#f59e0b'
+const SIM_TOOL_COLOR = '#22d3ee'
+
+/**
+ * Overflow ("⋯") menu holding the SECONDARY toolbar controls (add-shape +
+ * display toggles + camera overlay). Keeping these off the always-visible row
+ * means ~18 controls never collide or overflow on a phone. Each menu row is
+ * labeled, so the add-shape glyphs (incl. ▭ for rectangle) read unambiguously
+ * even though they overlap the view-button glyphs. Dismisses on outside-click /
+ * Escape.
+ */
+function OverflowMenu({
+  t,
+  onAddShape,
+  showDimensions,
+  setShowDimensions,
+  showStock,
+  setShowStock,
+  carveSim,
+  setCarveSim,
+  showActualTool,
+  setShowActualTool,
+  showSimTool,
+  setShowSimTool,
+  camOverlay,
+  toggleCamOverlay,
+}: {
+  t: TFn
+  onAddShape: (kind: ShapeKind) => void
+  showDimensions: boolean
+  setShowDimensions: Toggle
+  showStock: boolean
+  setShowStock: Toggle
+  carveSim: boolean
+  setCarveSim: Toggle
+  showActualTool: boolean
+  setShowActualTool: Toggle
+  showSimTool: boolean
+  setShowSimTool: Toggle
+  camOverlay: boolean
+  toggleCamOverlay: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // The menu is PORTALED to <body> (fixed coords) so a sibling dockview panel's
+  // overflow/stacking can never clip its lower items. JS supplies the position.
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+
+  const reposition = () => {
+    const btn = btnRef.current
+    const menu = menuRef.current
+    if (!btn) return
+    const margin = 8
+    const br = btn.getBoundingClientRect()
+    const mw = menu?.offsetWidth ?? 190
+    let left = br.right - mw // right-aligned to the trigger
+    left = Math.max(margin, Math.min(left, window.innerWidth - margin - mw))
+    setCoords({ top: br.bottom + 6, left })
+  }
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setCoords(null)
+      return
+    }
+    reposition()
+    const onScrollResize = () => reposition()
+    window.addEventListener('scroll', onScrollResize, true)
+    window.addEventListener('resize', onScrollResize)
+    return () => {
+      window.removeEventListener('scroll', onScrollResize, true)
+      window.removeEventListener('resize', onScrollResize)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node
+      // "Inside" now spans the trigger wrapper AND the portaled menu.
+      if (
+        (wrapRef.current && wrapRef.current.contains(target)) ||
+        (menuRef.current && menuRef.current.contains(target))
+      )
+        return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const item = (
+    glyph: React.ReactNode,
+    label: string,
+    onClick: () => void,
+    pressed?: boolean,
+  ) => (
+    <button
+      type="button"
+      className={'vz-menu-item' + (pressed ? ' vz-menu-item--on' : '')}
+      onClick={onClick}
+      aria-pressed={pressed}
+    >
+      <span className="vz-menu-glyph" aria-hidden="true">
+        {glyph}
+      </span>
+      <span className="vz-menu-label">{label}</span>
+    </button>
+  )
+
+  return (
+    <div className="vz-bed-wrap" ref={wrapRef}>
+      <button
+        ref={btnRef}
+        className={open ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+        onClick={() => setOpen((o) => !o)}
+        title={t('vz.more', 'More tools (add shapes, display options)')}
+        aria-label={t('vz.more', 'More tools')}
+        aria-expanded={open}
+      >
+        ⋯
+      </button>
+      {open &&
+        createPortal(
+        <div
+          ref={menuRef}
+          className="vz-menu vz-menu--portal"
+          role="menu"
+          aria-label={t('vz.more', 'More tools')}
+          style={{
+            top: coords ? `${coords.top}px` : undefined,
+            left: coords ? `${coords.left}px` : undefined,
+            visibility: coords ? 'visible' : 'hidden',
+          }}
+        >
+          <div className="vz-menu-group">
+            {t('vz.menu.add', 'Add shape')}
+          </div>
+          {item('╱', t('vp.add.line', 'Add line'), () => onAddShape('line'))}
+          {item('◯', t('vp.add.circle', 'Add circle'), () =>
+            onAddShape('circle'),
+          )}
+          {item('▭', t('vp.add.rectangle', 'Add rectangle'), () =>
+            onAddShape('rectangle'),
+          )}
+          {item('△', t('vp.add.triangle', 'Add triangle'), () =>
+            onAddShape('triangle'),
+          )}
+          <div className="vz-menu-group">
+            {t('vz.menu.display', 'Display')}
+          </div>
+          {item(
+            '⊢',
+            t('vz.dimensions', 'Show toolpath dimensions (X/Y/Z)'),
+            () => setShowDimensions((s) => !s),
+            showDimensions,
+          )}
+          {item(
+            '📦',
+            t('vz.showStock', 'Show stock'),
+            () => setShowStock((s) => !s),
+            showStock,
+          )}
+          {item(
+            '🪵',
+            t('vz.carveSim', 'Material removal simulation'),
+            () => setCarveSim((s) => !s),
+            carveSim,
+          )}
+          {item(
+            <span style={{ color: ACTUAL_TOOL_COLOR }}>▼</span>,
+            t('vz.showActualTool', 'Show actual machine tool (live)'),
+            () => setShowActualTool((s) => !s),
+            showActualTool,
+          )}
+          {item(
+            <span style={{ color: SIM_TOOL_COLOR }}>▼</span>,
+            t('vz.showSimTool', 'Show simulation tool'),
+            () => setShowSimTool((s) => !s),
+            showSimTool,
+          )}
+          {item(
+            '📷',
+            t('vz.cameraOverlay', 'Show live camera 3D'),
+            toggleCamOverlay,
+            camOverlay,
+          )}
+        </div>,
+          document.body,
+        )}
+    </div>
+  )
+}
+
+/**
+ * Tiny tool-cone legend (bottom-right) clarifying the two coloured cones: amber
+ * is the ACTUAL live machine position, cyan is the SIMULATION playhead. Only
+ * shows the rows for cones that are currently enabled; hides entirely when both
+ * are off.
+ */
+function ToolConeLegend({
+  showActualTool,
+  showSimTool,
+  t,
+}: {
+  showActualTool: boolean
+  showSimTool: boolean
+  t: TFn
+}) {
+  if (!showActualTool && !showSimTool) return null
+  return (
+    <div
+      className="vz-legend"
+      role="note"
+      aria-label={t('vz.legend.aria', 'Tool cone legend')}
+    >
+      {showActualTool && (
+        <span className="vz-legend-row">
+          <span
+            className="vz-legend-cone"
+            style={{ color: ACTUAL_TOOL_COLOR }}
+            aria-hidden="true"
+          >
+            ▼
+          </span>
+          {t('vz.legend.actual', 'Machine (live)')}
+        </span>
+      )}
+      {showSimTool && (
+        <span className="vz-legend-row">
+          <span
+            className="vz-legend-cone"
+            style={{ color: SIM_TOOL_COLOR }}
+            aria-hidden="true"
+          >
+            ▼
+          </span>
+          {t('vz.legend.sim', 'Simulation')}
+        </span>
+      )}
     </div>
   )
 }
@@ -370,6 +658,7 @@ export function VisualizerPanel() {
 function BedSizeControl() {
   const t = useT()
   const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
   const width = useBed((s) => s.width)
   const depth = useBed((s) => s.depth)
   const height = useBed((s) => s.height)
@@ -377,8 +666,27 @@ function BedSizeControl() {
   const setDepth = useBed((s) => s.setDepth)
   const setHeight = useBed((s) => s.setHeight)
 
+  // Dismiss on outside-click or Escape, like a native popover.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
   return (
-    <div className="vz-bed-wrap">
+    <div className="vz-bed-wrap" ref={wrapRef}>
       <button
         className="vz-toolbar-btn"
         onClick={() => setOpen((o) => !o)}
@@ -454,6 +762,59 @@ function BedField({
   )
 }
 
+/** Format a placement value for an editable cell (≤2 decimals, no trailing noise). */
+function fmtCell(v: number): string {
+  return String(Math.round(v * 100) / 100)
+}
+
+/**
+ * One editable axis cell (label + number input) for the placement readout.
+ *
+ * MUST be a module-level component (not defined inside PlacementReadout): a
+ * component declared inside another renders as a brand-new type on every parent
+ * render, so React unmounts/remounts its <input> — which steals focus after the
+ * first keystroke (you type "1", the store updates, the cell remounts, the field
+ * blurs). Hoisting it fixes that. It also holds LOCAL text state while focused so
+ * the rounded/derived value doesn't fight what you're typing (e.g. "1.", "-",
+ * "12.5"); it commits a parsed number on each valid keystroke and re-syncs from
+ * the prop (gizmo drags, reset) only when not being edited.
+ */
+function NumberCell({
+  axis,
+  value,
+  onCommit,
+}: {
+  axis: string
+  value: number
+  onCommit: (v: number) => void
+}) {
+  const [text, setText] = useState(() => fmtCell(value))
+  const [editing, setEditing] = useState(false)
+  useEffect(() => {
+    if (!editing) setText(fmtCell(value))
+  }, [value, editing])
+  return (
+    <>
+      <span className="vz-place-k">{axis}</span>
+      <input
+        className="vz-place-input"
+        type="number"
+        value={text}
+        onFocus={() => setEditing(true)}
+        onBlur={() => {
+          setEditing(false)
+          setText(fmtCell(value))
+        }}
+        onChange={(e) => {
+          setText(e.target.value)
+          const v = parseFloat(e.target.value)
+          if (Number.isFinite(v)) onCommit(v)
+        }}
+      />
+    </>
+  )
+}
+
 /**
  * Compact top-left readout of the current placement (XY offset in mm, Z rotation
  * in degrees, uniform scale as a percentage). Sits opposite the toolbar so the
@@ -461,27 +822,63 @@ function BedField({
  */
 function PlacementReadout({
   placement,
+  name,
+  sectionId,
   t,
 }: {
-  placement: Placement
+  placement: JobPlacement
+  name?: string
+  sectionId: string
   t: (key: string, english: string) => string
 }) {
+  const [rx, ry, rz] = quaternionToEulerDeg(
+    placement.qx,
+    placement.qy,
+    placement.qz,
+    placement.qw,
+  )
+  const patch = (p: Partial<JobPlacement>) => {
+    if (sectionId) useProgram.getState().setSectionPlacement(sectionId, p)
+  }
   return (
     <div className="vz-place" role="status" aria-label={t('vz.placement', 'Placement')}>
-      <span className="vz-place-pair" title={t('vz.move', 'Move')}>
-        <span className="vz-place-k">X</span>
-        <span className="vz-place-v">{mm(placement.dx)}</span>
-        <span className="vz-place-k">Y</span>
-        <span className="vz-place-v">{mm(placement.dy)}</span>
-        <span className="vz-place-unit">mm</span>
+      {name && (
+        <span className="vz-place-pair vz-place-name" title={t('vz.placeSection', 'Selected toolpath')}>
+          {name}
+        </span>
+      )}
+      <span className="vz-place-pair" title={t('vz.move', 'Move (editable — type X/Y/Z in mm)')}>
+        <NumberCell axis={t('common.axisX', 'X')} value={placement.dx} onCommit={(v) => patch({ dx: v })} />
+        <NumberCell axis={t('common.axisY', 'Y')} value={placement.dy} onCommit={(v) => patch({ dy: v })} />
+        <NumberCell axis={t('common.axisZ', 'Z')} value={placement.dz} onCommit={(v) => patch({ dz: v })} />
+        <span className="vz-place-unit">{t('common.mm', 'mm')}</span>
       </span>
-      <span className="vz-place-pair" title={t('vz.rotate', 'Rotate')}>
-        <span className="vz-place-v">{mm(placement.rotDeg)}</span>
-        <span className="vz-place-unit">°</span>
+      <span className="vz-place-pair" title={t('vz.rotate', 'Rotate (drag the gizmo arcs)')}>
+        <span className="vz-place-k">{t('common.axisX', 'X')}</span>
+        <span className="vz-place-v">{mm(rx)}</span>
+        <span className="vz-place-k">{t('common.axisY', 'Y')}</span>
+        <span className="vz-place-v">{mm(ry)}</span>
+        <span className="vz-place-k">{t('common.axisZ', 'Z')}</span>
+        <span className="vz-place-v">{mm(rz)}</span>
+        <span className="vz-place-unit">{t('common.deg', '°')}</span>
       </span>
-      <span className="vz-place-pair" title={t('vz.scale', 'Scale')}>
-        <span className="vz-place-v">{Math.round(placement.scale * 100)}</span>
-        <span className="vz-place-unit">%</span>
+      <span className="vz-place-pair" title={t('vz.scale', 'Scale % (editable — reliable per-axis incl. Z)')}>
+        <NumberCell
+          axis={t('common.axisX', 'X')}
+          value={placement.sx * 100}
+          onCommit={(v) => patch({ sx: Math.max(0.01, v / 100) })}
+        />
+        <NumberCell
+          axis={t('common.axisY', 'Y')}
+          value={placement.sy * 100}
+          onCommit={(v) => patch({ sy: Math.max(0.01, v / 100) })}
+        />
+        <NumberCell
+          axis={t('common.axisZ', 'Z')}
+          value={placement.sz * 100}
+          onCommit={(v) => patch({ sz: Math.max(0.01, v / 100) })}
+        />
+        <span className="vz-place-unit">{t('common.percent', '%')}</span>
       </span>
     </div>
   )
@@ -499,15 +896,44 @@ interface Dims {
   oversized: boolean
 }
 
+/**
+ * Axis-aligned bounds of a set of segments (the SAME geometry the viewer draws),
+ * or null when there is nothing to bound. Replaces a second gcodeToPolylines
+ * parse so the reported size always matches what's on screen.
+ */
+function boundsOfSegments(
+  segments: Segment[] | undefined,
+): { min: [number, number, number]; max: [number, number, number] } | null {
+  if (!segments || segments.length === 0) return null
+  const min: [number, number, number] = [Infinity, Infinity, Infinity]
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
+  const grow = (p: [number, number, number]) => {
+    for (let i = 0; i < 3; i++) {
+      if (p[i] < min[i]) min[i] = p[i]
+      if (p[i] > max[i]) max[i] = p[i]
+    }
+  }
+  for (const s of segments) {
+    grow(s.from)
+    grow(s.to)
+  }
+  if (!isFinite(min[0]) || !isFinite(max[0])) return null
+  return { min, max }
+}
+
 /** Format a length in mm with at most 1 decimal, trimming trailing zeros. */
 function mm(v: number): string {
   return (Math.round(v * 10) / 10).toString()
 }
 
-/** Area in cm² (>=1cm²) or mm², human-friendly. */
-function fmtArea(mm2: number): string {
-  if (mm2 >= 100) return `${(Math.round((mm2 / 100) * 10) / 10).toString()} cm²`
-  return `${Math.round(mm2)} mm²`
+/** Area in cm² (>=1cm²) or mm², human-friendly (units wrapped for i18n). */
+function fmtArea(mm2: number, t: TFn): string {
+  if (mm2 >= 100) {
+    return t('vz.area.cm2', '{v} cm²', {
+      v: (Math.round((mm2 / 100) * 10) / 10).toString(),
+    })
+  }
+  return t('vz.area.mm2', '{v} mm²', { v: Math.round(mm2) })
 }
 
 /** Compact bottom-left overlay reporting program size + bed-fit status. */
@@ -524,12 +950,12 @@ function DimensionsOverlay({
   if (!dims) {
     return (
       <div className="vz-dims" data-empty="true" aria-hidden="true">
-        <span className="vz-dims-dash">—</span>
+        <span className="vz-dims-dash">{t('common.emDash', '—')}</span>
       </div>
     )
   }
 
-  const bedLabel = `${mm(bedW)}×${mm(bedD)}`
+  const bedLabel = t('vz.bedLabel', '{w}×{d}', { w: mm(bedW), d: mm(bedD) })
   const fitLabel =
     dims.fit === 'danger'
       ? t('vz.fit.exceeds', 'exceeds bed {bed}', { bed: bedLabel })
@@ -547,9 +973,9 @@ function DimensionsOverlay({
         )}
       >
         <span className="vz-dims-val">{mm(dims.w)}</span>
-        <span className="vz-dims-x">×</span>
+        <span className="vz-dims-x">{t('common.times', '×')}</span>
         <span className="vz-dims-val">{mm(dims.h)}</span>
-        <span className="vz-dims-unit">mm</span>
+        <span className="vz-dims-unit">{t('common.mm', 'mm')}</span>
       </div>
       <div
         className="vz-dims-row vz-dims-meta"
@@ -567,7 +993,7 @@ function DimensionsOverlay({
         className="vz-dims-row vz-dims-meta"
         title={t('vz.footprint.title', 'Footprint area covered by the toolpath')}
       >
-        <span>{fmtArea(dims.area)}</span>
+        <span>{fmtArea(dims.area, t)}</span>
       </div>
       <div
         className="vz-dims-row vz-dims-fit"
@@ -608,7 +1034,12 @@ const OVERLAY_CSS = `
   right: 8px;
   z-index: 3;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
+  /* Cap the width so the row WRAPS instead of overlapping the scene; leave a
+     left gutter so it never collides with the placement readout (top-left). */
+  max-width: calc(100% - 16px);
   pointer-events: auto;
 }
 .vz-toolbar-btn {
@@ -672,8 +1103,33 @@ const OVERLAY_CSS = `
   font-variant-numeric: tabular-nums;
 }
 .vz-place-pair { display: inline-flex; align-items: baseline; gap: 3px; }
+.vz-place-name {
+  font-weight: 700;
+  color: var(--accent, var(--fg));
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .vz-place-k { color: var(--fg-muted); font-weight: 600; }
 .vz-place-v { font-weight: 600; }
+.vz-place-input {
+  width: 46px;
+  font: 600 12px/1 inherit;
+  color: var(--fg);
+  background: var(--bg-input, var(--bg-elev));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 3px;
+  text-align: right;
+  -moz-appearance: textfield;
+  /* The readout panel is pointer-events:none (so its empty area never blocks
+     orbiting), but the inputs MUST be clickable/typeable — re-enable here. */
+  pointer-events: auto;
+}
+.vz-place-input::-webkit-outer-spin-button,
+.vz-place-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vz-place-input:focus { outline: none; border-color: var(--accent); }
 .vz-place-unit { color: var(--fg-muted); font-size: 10px; }
 .vz-bed-wrap { position: relative; display: inline-flex; }
 .vz-bed-pop {
@@ -720,6 +1176,93 @@ const OVERLAY_CSS = `
   outline: none;
   border-color: var(--accent, var(--fg-muted));
 }
+/* --- overflow ("more") menu --- */
+.vz-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 190px;
+  max-height: min(60vh, 360px);
+  overflow-y: auto;
+  padding: 5px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+/* Portaled to <body>: fixed to the viewport (JS supplies top/left) so it floats
+   above every panel instead of being clipped/stacked under the one below. */
+.vz-menu--portal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  z-index: 2147483000;
+}
+.vz-menu-group {
+  padding: 5px 8px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.vz-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.vz-menu-item:hover { background: color-mix(in srgb, var(--accent, var(--fg)) 14%, transparent); }
+.vz-menu-item--on {
+  border-color: var(--accent, var(--fg-muted));
+  background: color-mix(in srgb, var(--accent, var(--bg-elev)) 24%, transparent);
+  color: var(--accent-fg, var(--fg));
+}
+.vz-menu-glyph {
+  flex: 0 0 auto;
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1;
+}
+.vz-menu-label { flex: 1 1 auto; min-width: 0; }
+/* --- tool-cone legend (bottom-right) --- */
+.vz-legend {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+  backdrop-filter: blur(4px);
+  color: var(--fg);
+  font-size: 10px;
+  line-height: 1.3;
+}
+.vz-legend-row { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.vz-legend-cone { font-size: 12px; line-height: 1; }
 .vz-dims {
   position: absolute;
   left: 8px;
@@ -765,6 +1308,9 @@ const OVERLAY_CSS = `
 @media (pointer: coarse), (max-width: 768px) {
   .vz-toolbar { gap: 6px; }
   .vz-toolbar-btn { width: 36px; height: 36px; font-size: 18px; }
+  .vz-menu-item { min-height: 40px; font-size: 13px; }
+  .vz-menu-glyph { font-size: 16px; }
+  .vz-legend { font-size: 11px; padding: 7px 11px; }
   .vz-bed-field { gap: 8px; font-size: 13px; }
   .vz-bed-axis { width: 14px; font-size: 13px; }
   .vz-bed-input { height: 36px; font-size: 14px; }

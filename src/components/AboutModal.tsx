@@ -1,5 +1,6 @@
 import { Modal } from './Modal'
 import { useT } from '../i18n'
+import { usePolicies } from './policies'
 
 interface AboutModalProps {
   open: boolean
@@ -37,7 +38,9 @@ function BugGlyph() {
  */
 export function AboutModal({ open, onClose, repoUrl, issuesUrl }: AboutModalProps) {
   const t = useT()
+  const policies = usePolicies()
   return (
+    <>
     <Modal open={open} title={t('about.title', 'About karmyogi')} onClose={onClose} width={460}>
       <div className="km-about">
         <div className="km-about-brand">
@@ -76,7 +79,11 @@ export function AboutModal({ open, onClose, repoUrl, issuesUrl }: AboutModalProp
             <BugGlyph /> {t('about.report', 'Report a bug')}
           </a>
         </div>
+
+        {policies.list}
       </div>
     </Modal>
+    {policies.modal}
+    </>
   )
 }

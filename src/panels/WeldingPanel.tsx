@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMachine, useProgram, usePersistentState } from '../store'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { Icon } from '../components/Icons'
 import {
   WeavePattern,
   defaultWeldLine,
   defaultWeldCircle,
   defaultWeldingParams,
+  estimateWeldingSeconds,
   generateWelding,
+  isDegenerate,
   newWeldId,
   totalWeldLength,
   countLines,
@@ -23,6 +26,51 @@ import '../styles/welding.css'
 /** Split G-code into non-empty lines for the line count shown to the operator. */
 function gcodeLines(gcode: string): string[] {
   return gcode.split(/\r?\n/).filter((l) => l.trim().length > 0)
+}
+
+/** Clamp decimals to the range toFixed() accepts (0..6) — guards the
+ * render-phase useMemo from a RangeError that would white-screen the panel. */
+function clampDecimals(n: number): number {
+  if (!Number.isFinite(n)) return 3
+  return Math.min(6, Math.max(0, Math.floor(n)))
+}
+
+/** Human-readable duration from seconds (e.g. "1 m 30 s", "12 s"). */
+function fmtDuration(totalSeconds: number, t: ReturnType<typeof useT>): string {
+  const s = Math.max(0, Math.round(totalSeconds))
+  if (s < 60) return t('time.seconds', '{s} s', { s })
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  if (m < 60) return t('time.minSec', '{m} m {s} s', { m, s: rem })
+  const h = Math.floor(m / 60)
+  const mm = m % 60
+  return t('time.hourMin', '{h} h {m} m', { h, m: mm })
+}
+
+/**
+ * Inline warnings for a single weld object — the operator sees, on the card,
+ * exactly why an object would emit nothing useful:
+ *  • zero-length line / zero-radius circle (degenerate — skipped entirely),
+ *  • amplitude ≤ 0 while a non-Straight pattern is selected (the weave collapses
+ *    to a plain bead, so the chosen pattern has no effect).
+ */
+function objectWarnings(obj: WeldObject, t: ReturnType<typeof useT>): string[] {
+  const warns: string[] = []
+  if (isDegenerate(obj)) {
+    warns.push(
+      obj.kind === 'line'
+        ? t('weld.warn.zeroLine', 'Zero-length line — start and end coincide; nothing is welded.')
+        : t('weld.warn.zeroCircle', 'Zero-radius circle — nothing is welded.'),
+    )
+  }
+  if (obj.pattern !== WeavePattern.Straight && obj.amplitude <= 0) {
+    warns.push(
+      t('weld.warn.noAmp', 'Amplitude ≤ 0 with a {pattern} weave — the weave collapses to a straight bead.', {
+        pattern: obj.pattern,
+      }),
+    )
+  }
+  return warns
 }
 
 const num = (v: string, fallback: number): number => {
@@ -123,9 +171,12 @@ function parseObject(v: unknown): WeldObject | null {
   return null
 }
 
-/** Narrow unknown params into valid PersistParams, falling back per-field. */
+/** Narrow unknown params into valid PersistParams, falling back per-field.
+ * `decimals` is CLAMPED to 0..6 here so a corrupt/out-of-range value in a loaded
+ * document (or persisted state) can never reach toFixed() and white-screen the
+ * panel from inside the render-phase useMemo. */
 function parseWeldParams(v: unknown, base: PersistParams): PersistParams {
-  if (!isRecord(v)) return base
+  if (!isRecord(v)) return { ...base, decimals: clampDecimals(base.decimals) }
   return {
     safeZ: numOr(v.safeZ, base.safeZ),
     plungeFeed: numOr(v.plungeFeed, base.plungeFeed),
@@ -134,7 +185,7 @@ function parseWeldParams(v: unknown, base: PersistParams): PersistParams {
     arcPower: numOr(v.arcPower, base.arcPower),
     preFlowSeconds: numOr(v.preFlowSeconds, base.preFlowSeconds),
     postFlowSeconds: numOr(v.postFlowSeconds, base.postFlowSeconds),
-    decimals: numOr(v.decimals, base.decimals),
+    decimals: clampDecimals(numOr(v.decimals, base.decimals)),
   }
 }
 
@@ -144,7 +195,7 @@ function parseWeldParams(v: unknown, base: PersistParams): PersistParams {
  * action click, keeping the toolbar compact while every button is self-doc.
  */
 function ToolButton(props: {
-  glyph: string
+  glyph: ReactNode
   title: string
   body: string
   onClick: () => void
@@ -220,6 +271,8 @@ export function WeldingPanel() {
   const wpos = useMachine((s) => s.wpos)
   const connected = useMachine((s) => s.connection === 'connected')
   const setProgram = useProgram((s) => s.setProgram)
+  const removeSection = useProgram((s) => s.removeSection)
+  const streaming = useProgram((s) => s.streaming)
 
   const [objects, setObjects] = usePersistentState<WeldObject[]>('karmyogi.welding.objects', [])
   const [selected, setSelected] = usePersistentState<string>('karmyogi.welding.selectedId', '')
@@ -232,6 +285,18 @@ export function WeldingPanel() {
     defaultParams(),
   )
   const [loadError, setLoadError] = useState<string>('')
+
+  // Sanitize PERSISTED params once on mount: a value restored from localStorage
+  // bypasses the input/load guards, so a corrupt out-of-range `decimals` could
+  // otherwise reach toFixed() in the render-phase useMemo and white-screen the
+  // panel. Clamp it back into range if needed.
+  useEffect(() => {
+    if (clampDecimals(params.decimals) !== params.decimals) {
+      setParams((p) => ({ ...p, decimals: clampDecimals(p.decimals) }))
+    }
+    // run once on mount — intentionally not reactive to later edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function addLine() {
     const line = defaultWeldLine()
@@ -248,6 +313,34 @@ export function WeldingPanel() {
   function deleteObject(id: string) {
     setObjects((s) => s.filter((o) => o.id !== id))
     setSelected((sel) => (sel === id ? '' : sel))
+  }
+
+  /** Clear all objects (confirm first when non-empty). The synced 'welding'
+   * section is dropped by the live-generation effect once the list is empty. */
+  function clearAll() {
+    if (objects.length === 0) return
+    if (!window.confirm(t('weld.clearConfirm', 'Remove all {n} weld object(s)?', { n: objects.length })))
+      return
+    setObjects([])
+    setSelected('')
+  }
+
+  /** Duplicate an object: deep-copy it, give it a fresh id, insert right after
+   * the original, and select the copy. */
+  function duplicateObject(id: string) {
+    setObjects((s) => {
+      const i = s.findIndex((o) => o.id === id)
+      if (i < 0) return s
+      const src = s[i]
+      const copy: WeldObject =
+        src.kind === 'line'
+          ? { ...src, id: newWeldId(), start: { ...src.start }, end: { ...src.end } }
+          : { ...src, id: newWeldId(), center: { ...src.center } }
+      const next = [...s]
+      next.splice(i + 1, 0, copy)
+      setSelected(copy.id)
+      return next
+    })
   }
 
   function moveObject(id: string, dir: -1 | 1) {
@@ -313,33 +406,53 @@ export function WeldingPanel() {
   }
 
   // Record the live machine work-position into the selected object's field.
+  // Routed through the functional updater so it always patches the CURRENT
+  // object list, never a stale closure copy.
   function recordPoint(field: 'start' | 'end' | 'center') {
     if (!connected) return
-    const obj = objects.find((o) => o.id === selected)
-    if (!obj) return
     const pos: Vec3 = { x: wpos.x, y: wpos.y, z: wpos.z }
-    if (field === 'center' && obj.kind === 'circle') {
-      updateObject(obj.id, { center: pos })
-    } else if (field === 'start' && obj.kind === 'line') {
-      updateObject(obj.id, { start: pos })
-    } else if (field === 'end' && obj.kind === 'line') {
-      updateObject(obj.id, { end: pos })
-    }
+    setObjects((s) =>
+      s.map((o) => {
+        if (o.id !== selected) return o
+        if (field === 'center' && o.kind === 'circle') return { ...o, center: pos }
+        if (field === 'start' && o.kind === 'line') return { ...o, start: pos }
+        if (field === 'end' && o.kind === 'line') return { ...o, end: pos }
+        return o
+      }),
+    )
   }
 
-  // Live G-code preview, recomputed whenever objects/params change.
-  const gcode = useMemo(() => generateWelding(objects, { ...params }), [objects, params])
+  // Live G-code preview, recomputed whenever objects/params change. Decimals is
+  // clamped here so the preview + estimate share one safe value even if a
+  // persisted/loaded value slipped through before the mount-time sanitize ran.
+  const safeParams = useMemo(
+    () => ({ ...params, decimals: clampDecimals(params.decimals) }),
+    [params],
+  )
+  const gcode = useMemo(() => generateWelding(objects, safeParams), [objects, safeParams])
   const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
   const weldLen = useMemo(() => totalWeldLength(objects), [objects])
   const nLines = useMemo(() => countLines(objects), [objects])
+  const estSeconds = useMemo(
+    () => estimateWeldingSeconds(objects, safeParams),
+    [objects, safeParams],
+  )
 
   // Live generation: push the freshly-computed program (debounced) so the
-  // Visualizer + Program tab pick it up without a manual Generate step.
+  // Visualizer + Program tab pick it up without a manual Generate step. When the
+  // list is emptied (Clear-all), DROP the section instead of leaving a stale
+  // toolpath in the Visualizer / Program tab.
   useEffect(() => {
-    if (objects.length === 0) return
+    // While a job is streaming, skip the sync so a fresh push can't reset the
+    // running stream (setProgram forces streaming:false / cursor:-1) mid-weld.
+    if (streaming) return
+    if (objects.length === 0) {
+      removeSection('welding')
+      return
+    }
     const id = window.setTimeout(() => setProgram('welding', gcode), 300)
     return () => window.clearTimeout(id)
-  }, [gcode, objects.length, setProgram])
+  }, [gcode, objects.length, setProgram, removeSection, streaming])
 
   const selObj = objects.find((o) => o.id === selected)
   const canRecStartEnd = connected && selObj?.kind === 'line'
@@ -437,8 +550,8 @@ export function WeldingPanel() {
           />
           <ToolButton
             className="wp-ico-danger"
-            glyph="🗑"
-            onClick={() => setObjects([])}
+            glyph={<Icon name="trash" />}
+            onClick={clearAll}
             disabled={objects.length === 0}
             title={t('weld.toolbar.clear', 'Clear all')}
             body={t('weld.toolbar.clear.body', 'Remove every object and start over.')}
@@ -446,7 +559,7 @@ export function WeldingPanel() {
           <span className="wp-tools-sep" aria-hidden="true" />
           <ToolButton
             className={showSettings ? 'is-active' : ''}
-            glyph="⚙"
+            glyph={<Icon name="settings" />}
             onClick={() => setShowSettings((v) => !v)}
             ariaExpanded={showSettings}
             title={t('weld.toolbar.settings', 'Settings')}
@@ -472,8 +585,11 @@ export function WeldingPanel() {
           <b>{objects.length}</b> {t('weld.status.objects', 'objects')}
         </span>
         <span className="wp-status-sep" aria-hidden="true">·</span>
-        <span className="wp-status-pill">
-          <b>{nLines}</b> {t('weld.status.lines2', 'lines')}
+        <span
+          className="wp-status-pill"
+          title={t('weld.status.lineObjects.title', 'Number of LINE objects (circles are counted separately).')}
+        >
+          <b>{nLines}</b> {t('weld.status.lineObjects', 'line objects')}
         </span>
         <span className="wp-status-sep" aria-hidden="true">·</span>
         <span className="wp-status-pill">
@@ -482,6 +598,13 @@ export function WeldingPanel() {
         <span className="wp-status-sep" aria-hidden="true">·</span>
         <span className="wp-status-pill">
           <b>{lineCount}</b> {t('weld.status.gcode', 'G-code lines')}
+        </span>
+        <span className="wp-status-sep" aria-hidden="true">·</span>
+        <span
+          className="wp-status-pill"
+          title={t('weld.status.est.title', 'Estimated cycle time (woven-path travel + gas pre/post-flow; rapids ignored)')}
+        >
+          <b>{fmtDuration(estSeconds, t)}</b> {t('weld.status.est', 'est.')}
         </span>
         <span className="wp-status-sync" title={t('weld.live.title', 'Lines auto-synced to the Program tab')}>
           → {t('weld.status.program', 'Program')}
@@ -511,7 +634,7 @@ export function WeldingPanel() {
             <div className="wp-fields">
               <NumField
                 label={t('weld.field.safeZ', 'Safe-Z')}
-                unit="mm"
+                unit={t('unit.mm', 'mm')}
                 value={params.safeZ}
                 onChange={(n) => setParams((p) => ({ ...p, safeZ: n }))}
                 info={{
@@ -521,7 +644,7 @@ export function WeldingPanel() {
               />
               <NumField
                 label={t('weld.field.plungeF', 'Plunge')}
-                unit="mm/min"
+                unit={t('unit.mmPerMin', 'mm/min')}
                 step="10"
                 min="1"
                 value={params.plungeFeed}
@@ -533,7 +656,7 @@ export function WeldingPanel() {
               />
               <NumField
                 label={t('weld.field.segs', 'Smoothness')}
-                unit="pts/cyc"
+                unit={t('unit.ptsPerCyc', 'pts/cyc')}
                 step="1"
                 min="2"
                 value={params.segmentsPerCycle}
@@ -550,11 +673,11 @@ export function WeldingPanel() {
                 min="0"
                 max="6"
                 value={params.decimals}
-                parse={intNum}
-                onChange={(n) => setParams((p) => ({ ...p, decimals: n }))}
+                parse={(v, fb) => clampDecimals(intNum(v, fb))}
+                onChange={(n) => setParams((p) => ({ ...p, decimals: clampDecimals(n) }))}
                 info={{
                   title: t('weld.field.decimals', 'Decimals'),
-                  body: t('weld.field.decimals.body', 'Number of decimal places in the emitted coordinates.'),
+                  body: t('weld.field.decimals.body', 'Number of decimal places in the emitted coordinates (0–6).'),
                 }}
               />
             </div>
@@ -590,7 +713,7 @@ export function WeldingPanel() {
               </label>
               <NumField
                 label={t('weld.field.arcPower', 'Arc power')}
-                unit="S"
+                unit={t('unit.sWord', 'S')}
                 step="10"
                 min="0"
                 value={params.arcPower}
@@ -602,7 +725,7 @@ export function WeldingPanel() {
               />
               <NumField
                 label={t('weld.field.preFlow', 'Pre-flow')}
-                unit="s"
+                unit={t('unit.s', 's')}
                 min="0"
                 value={params.preFlowSeconds}
                 onChange={(n) => setParams((p) => ({ ...p, preFlowSeconds: n }))}
@@ -613,7 +736,7 @@ export function WeldingPanel() {
               />
               <NumField
                 label={t('weld.field.postFlow', 'Post-flow')}
-                unit="s"
+                unit={t('unit.s', 's')}
                 min="0"
                 value={params.postFlowSeconds}
                 onChange={(n) => setParams((p) => ({ ...p, postFlowSeconds: n }))}
@@ -647,12 +770,14 @@ export function WeldingPanel() {
               isFirst={i === 0}
               isLast={i === objects.length - 1}
               selected={obj.id === selected}
+              warnings={objectWarnings(obj, t)}
               t={t}
               onSelect={() => setSelected(obj.id)}
               onSetKind={(k) => setKind(obj.id, k)}
               onUpdate={(patch) => updateObject(obj.id, patch)}
               onUpdateVec={(field, axis, val) => updateVec(obj.id, field, axis, val)}
               onMove={(dir) => moveObject(obj.id, dir)}
+              onDuplicate={() => duplicateObject(obj.id)}
               onDelete={() => deleteObject(obj.id)}
             />
           ))}
@@ -670,23 +795,30 @@ function ObjectCard(props: {
   isFirst: boolean
   isLast: boolean
   selected: boolean
+  warnings: string[]
   t: ReturnType<typeof useT>
   onSelect: () => void
   onSetKind: (k: 'line' | 'circle') => void
   onUpdate: (patch: Partial<WeldLine> & Partial<WeldCircle>) => void
   onUpdateVec: (field: 'start' | 'end' | 'center', axis: 'x' | 'y' | 'z', val: number) => void
   onMove: (dir: -1 | 1) => void
+  onDuplicate: () => void
   onDelete: () => void
 }) {
-  const { obj, index, isFirst, isLast, selected, t, onSelect, onSetKind, onUpdate, onUpdateVec, onMove, onDelete } = props
+  const { obj, index, isFirst, isLast, selected, warnings, t, onSelect, onSetKind, onUpdate, onUpdateVec, onMove, onDuplicate, onDelete } = props
   const stop = (e: React.MouseEvent) => e.stopPropagation()
 
+  const axisLabel: Record<'x' | 'y' | 'z', string> = {
+    x: t('weld.axis.x', 'X'),
+    y: t('weld.axis.y', 'Y'),
+    z: t('weld.axis.z', 'Z'),
+  }
   const vecRow = (label: string, field: 'start' | 'end' | 'center', v: Vec3) => (
     <div className="wp-vec">
       <span className="wp-vec-label">{label}</span>
       {(['x', 'y', 'z'] as const).map((axis) => (
         <label key={axis} className="wp-mini">
-          <span>{axis.toUpperCase()}</span>
+          <span>{axisLabel[axis]}</span>
           <input
             type="number"
             step="0.1"
@@ -730,11 +862,29 @@ function ObjectCard(props: {
           <button className="wp-row-ico" title={t('weld.row.moveDown', 'Move down')}
             aria-label={t('weld.row.moveDown', 'Move down')}
             onClick={(e) => { stop(e); onMove(1) }} disabled={isLast}>↓</button>
+          <button className="wp-row-ico" title={t('weld.row.duplicate', 'Duplicate')}
+            aria-label={t('weld.row.duplicate', 'Duplicate')}
+            onClick={(e) => { stop(e); onDuplicate() }}>
+            <Icon name="duplicate" size={14} />
+          </button>
           <button className="wp-row-ico wp-del" title={t('weld.row.delete', 'Delete')}
             aria-label={t('weld.row.delete', 'Delete')}
-            onClick={(e) => { stop(e); onDelete() }}>✕</button>
+            onClick={(e) => { stop(e); onDelete() }}>
+            <Icon name="close" size={14} />
+          </button>
         </div>
       </div>
+
+      {warnings.length > 0 && (
+        <div className="wp-ocard-warns" role="alert">
+          {warnings.map((w, wi) => (
+            <span className="wp-warn-badge" key={wi}>
+              <Icon name="warning" size={13} />
+              <span>{w}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="wp-ocard-geom">
         {obj.kind === 'line' ? (
@@ -748,7 +898,7 @@ function ObjectCard(props: {
             <div className="wp-vec">
               <span className="wp-vec-label">{t('weld.geom.radius', 'Radius')}</span>
               <label className="wp-mini wp-mini-wide">
-                <span>R</span>
+                <span>{t('weld.geom.r', 'R')}</span>
                 <input
                   type="number"
                   step="0.1"
@@ -777,7 +927,7 @@ function ObjectCard(props: {
                   : onUpdate({ peripheralFeed: num(e.target.value, obj.peripheralFeed) })
               }
             />
-            <i>mm/min</i>
+            <i>{t('unit.mmPerMin', 'mm/min')}</i>
           </span>
         </label>
         <label className="wp-mini">
@@ -802,7 +952,7 @@ function ObjectCard(props: {
               value={obj.amplitude}
               onChange={(e) => onUpdate({ amplitude: num(e.target.value, obj.amplitude) })}
             />
-            <i>mm</i>
+            <i>{t('unit.mm', 'mm')}</i>
           </span>
         </label>
         <label className="wp-mini">
@@ -822,7 +972,7 @@ function ObjectCard(props: {
               value={obj.patternSpeed}
               onChange={(e) => onUpdate({ patternSpeed: num(e.target.value, obj.patternSpeed) })}
             />
-            <i>mm/min</i>
+            <i>{t('unit.mmPerMin', 'mm/min')}</i>
           </span>
         </label>
       </div>

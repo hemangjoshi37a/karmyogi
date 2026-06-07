@@ -16,6 +16,7 @@ coverage
 # Secrets / deploy credentials — NEVER commit
 .env
 .env.*
+!.env.example
 .dev.vars
 .dev.vars.*
 .wrangler/
@@ -27,7 +28,14 @@ secrets.*
 OM MANDALA.*
 *.cdr
 
+# Local STL test fixtures — large binaries, kept on disk but never tracked
+# (some exceed GitHub's 100 MB file limit and broke `git push`).
+test_stl_files/
+
 # dev scratch (camera frames sent from the browser, UI screenshots)
 .camera-frames/
 .ui-shots/
 .machine-bridge/
+
+# Stray editor/agent config (do not track)
+.antigravitycli/

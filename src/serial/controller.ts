@@ -8,9 +8,11 @@
 // and the helpers here — they never touch the raw transport classes directly.
 
 import { GrblConnection, type PortLike } from './grblConnection'
+import { WsPort, normalizeWsUrl, mixedContentReason } from './wsPort'
+import { BlePort } from './blePort'
 import { Streamer, type StreamMode } from './streamer'
 import { RealtimeByte } from './realtime'
-import { isStatusReport } from './status'
+import { isStatusReport, isParserStateLine } from './status'
 import {
   GRBL_DIALECT,
   resolveDialect,
@@ -39,7 +41,15 @@ export interface ConnectMeta {
   machineId?: string
   /** Human label shown in the appbar machine switcher (e.g. port / URL / "Mock"). */
   label?: string
-  /** Transport kind, for the manager's bookkeeping. */
+  /**
+   * Transport kind, for the manager's bookkeeping. Constrained to the kinds the
+   * machine-farm store understands (serial / mock / websocket). Bluetooth (BLE)
+   * connections register as `serial` for the farm's roster — BLE can't be
+   * silently reconnected anyway (Web Bluetooth requires a fresh user gesture +
+   * device chooser), so it isn't a persistently-reconnectable farm entry; its
+   * appbar label still reads "Bluetooth …" (see defaultPortLabel + the BlePort
+   * detection in connect()).
+   */
   kind?: 'serial' | 'mock' | 'websocket'
 }
 
@@ -58,6 +68,12 @@ export interface JogParams {
 }
 
 const STATUS_POLL_MS = 200 // ~5 Hz
+// `$G` parser state changes rarely (only on a G54–G59 / modal change), and it is
+// a buffered LINE command (not a realtime byte), so polling it fast would
+// needlessly fill the RX buffer and compete with a running job. Poll it slowly
+// and ONLY when idle/not streaming (see the timer) so the active WCS badge stays
+// fresh without ever interfering with a cut.
+const PARSER_STATE_POLL_MS = 2000 // ~0.5 Hz
 
 // Remembered device (by USB vendor/product) so we can auto-reconnect on reload.
 const PREF_KEY = 'karmyogi.serial.preferred'
@@ -94,6 +110,9 @@ function savePreferredPort(
 function defaultPortLabel(kind: 'serial' | 'mock' | 'websocket', port: PortLike): string {
   if (kind === 'mock') return 'Mock'
   if (kind === 'websocket') return 'WebSocket'
+  // A BLE connection arrives as kind 'serial' (farm bookkeeping), so detect it by
+  // the BlePort's `label` and prefer the device name.
+  if (port instanceof BlePort) return port.label
   const p = port as unknown as { getInfo?: () => SerialPortInfo }
   if (typeof p.getInfo === 'function') {
     try {
@@ -134,6 +153,11 @@ class GrblController {
   private conn: GrblConnection | null = null
   private streamer: Streamer | null = null
   private statusTimer: ReturnType<typeof setInterval> | null = null
+  private parserStateTimer: ReturnType<typeof setInterval> | null = null
+  // Set when an automatic `$G` poll's `[GC:…]` report arrives, so the matching
+  // `ok` that immediately follows is consumed SILENTLY (not echoed to the console
+  // and not counted by the jog gate) — otherwise the slow poll spams the console.
+  private suppressNextOk = false
   private settingsReading = false
   private connecting = false
   /**
@@ -284,11 +308,79 @@ class GrblController {
       this.startStatusPolling()
     } catch (err) {
       machine.setConnection('disconnected')
-      machine.setError(err instanceof Error ? err.message : String(err))
+      // Dismissing the Web Serial port picker (no device chosen) is a normal user
+      // action, NOT a failure — don't surface it as an error.
+      const name = (err as { name?: string } | null)?.name
+      if (name !== 'AbortError' && name !== 'NotFoundError') {
+        machine.setError(err instanceof Error ? err.message : String(err))
+      }
       throw err
     } finally {
       this.connecting = false
     }
+  }
+
+  /**
+   * Connect over WiFi to a network-attached GRBL controller (ESP3D / FluidNC /
+   * MKS DLC32) via its WebSocket bridge. `endpoint` may be a bare host/IP, a
+   * host:port, or a full ws(s):// URL (see normalizeWsUrl). When the page is
+   * served over https and no scheme is given we default to `wss://`; a plain
+   * `ws://` from an https page is blocked by the browser (mixed content) and is
+   * rejected up front with a clear, actionable message.
+   */
+  async connectWebSocket(
+    endpoint: string,
+    opts?: { defaultPort?: number; label?: string; machineId?: string; streamMode?: StreamMode },
+  ): Promise<void> {
+    const url = normalizeWsUrl(endpoint, opts?.defaultPort ?? 81)
+    // Pre-flight the mixed-content rule so the UI gets a clean message instead of
+    // an opaque socket failure (the WsPort ctor also enforces this).
+    const blocked = mixedContentReason(url)
+    if (blocked) {
+      useConsole.getState().push('error', blocked)
+      useMachine.getState().setError(blocked)
+      throw new Error(blocked)
+    }
+    const port = new WsPort(url)
+    await this.connect(port, {
+      streamMode: opts?.streamMode,
+      meta: {
+        kind: 'websocket',
+        label: opts?.label ?? url,
+        machineId: opts?.machineId,
+      },
+    })
+  }
+
+  /**
+   * Connect over Bluetooth (Web Bluetooth / BLE GATT) to a GRBL Bluetooth-LE
+   * serial bridge (Nordic UART Service, or an HM-10/HC-08-style module). Must be
+   * called from a user gesture; the browser shows its device chooser. Reuses the
+   * whole streaming stack via a BlePort PortLike.
+   */
+  async connectBluetooth(
+    opts?: { acceptAllDevices?: boolean; machineId?: string; streamMode?: StreamMode },
+  ): Promise<void> {
+    if (!BlePort.isSupported()) {
+      const msg =
+        'Web Bluetooth is not available in this browser. Use Chrome/Edge over HTTPS ' +
+        '(or localhost) with the OS Bluetooth turned on.'
+      useConsole.getState().push('error', msg)
+      useMachine.getState().setError(msg)
+      throw new Error(msg)
+    }
+    const port = new BlePort({ acceptAllDevices: opts?.acceptAllDevices })
+    // Surface an unexpected GATT drop (the read loop also catches the readable
+    // closing, but this guarantees the disconnect path runs).
+    port.setOnDisconnect(() => this.handleDisconnect())
+    // The device name isn't known until requestDevice resolves; connect() reads
+    // the BlePort.label after open() via defaultPortLabel (which detects BlePort),
+    // so leave label unset. `kind: 'serial'` is the farm-understood fallback
+    // (the farm has no 'ble' kind); BLE isn't a reconnectable farm entry anyway.
+    await this.connect(port, {
+      streamMode: opts?.streamMode,
+      meta: { kind: 'serial', machineId: opts?.machineId },
+    })
   }
 
   /**
@@ -351,6 +443,16 @@ class GrblController {
         useMachine.getState().ingestStatusLine(line)
         return
       }
+      // `$G` parser-state report (`[GC:G0 G54 …]`): record the active WCS + modal
+      // words so the Coordinates panel reflects the machine's REAL state. This is
+      // an AUTOMATIC poll, so consume it SILENTLY (like a `?` status report) — do
+      // NOT echo it to the console — and flag the matching `ok` (which arrives on
+      // the next line) for silent consumption too, so the poll never spams.
+      if (isParserStateLine(line)) {
+        useMachine.getState().ingestParserStateLine(line)
+        this.suppressNextOk = true
+        return
+      }
     } else if (this.dialect.status === 'marlin') {
       // Marlin/RepRap/Smoothie: position arrives as an `M114` reply line (not
       // `<...>`). Parse it into a StatusReport and apply it via the same store
@@ -375,6 +477,13 @@ class GrblController {
       this.settingsReading = false
       useGrblSettings.getState().markRead()
     }
+    // Silently swallow the `ok` that acknowledges an AUTOMATIC `$G` poll (its
+    // `[GC:…]` was just ingested above): no console echo, and it must NOT reach the
+    // jog gate below (it isn't a jog ack). This stops the slow poll spamming.
+    if (this.suppressNextOk && line.trim().toLowerCase() === 'ok') {
+      this.suppressNextOk = false
+      return
+    }
     // During an active program stream, suppress the high-volume routine `ok`
     // acks from the console: pushing one console entry per line floods the store
     // and blocks the UI on a large/fast program. Errors and any non-`ok`
@@ -396,7 +505,21 @@ class GrblController {
   }
 
   private handleDisconnect(err?: unknown): void {
-    if (err) useMachine.getState().setError(err instanceof Error ? err.message : String(err))
+    // The dangerous CNC case: losing the link WHILE a job is streaming. Surface
+    // an explicit, prominent message (not just a console line) via the machine
+    // store so the operator immediately sees the cut was interrupted. A plain
+    // idle disconnect just shows the underlying transport error (if any).
+    const detail = err instanceof Error ? err.message : err ? String(err) : ''
+    const wasStreaming = !!this.streamer?.isRunning
+    if (wasStreaming) {
+      const msg =
+        'Connection lost while a program was running — the job was interrupted. ' +
+        'Check the machine before reconnecting.' + (detail ? ` (${detail})` : '')
+      useMachine.getState().setError(msg)
+      useConsole.getState().push('error', msg)
+    } else if (detail) {
+      useMachine.getState().setError(detail)
+    }
     void this.disconnect()
   }
 
@@ -432,6 +555,29 @@ class GrblController {
     }
     const q = statusQueryLine(this.dialect)
     if (q) await this.conn.writeLine(q)
+  }
+
+  /**
+   * Request the GRBL `$G` parser-state report (`[GC:…]`). GRBL family only — it
+   * carries the active work coordinate system (G54–G59) which the Coordinates
+   * panel reads. A buffered line command; skipped while NOT connected to the
+   * GRBL family. Errors are swallowed (a transient write failure must not crash
+   * the poll loop; the next tick retries).
+   */
+  requestParserState = async (): Promise<void> => {
+    if (!this.conn) return
+    if (!this.isGrblFamily) return
+    try {
+      // Flag the ACK suppression at SEND time, not on the `[GC:…]` line: real GRBL
+      // replies `[GC:…]` + `ok`, but the mock device (and anything that doesn't
+      // emit the parser-state report) replies with a bare `ok`. Suppressing here
+      // swallows the auto-poll's ack in BOTH cases, so the console never spams.
+      this.suppressNextOk = true
+      await this.conn.writeLine('$G')
+    } catch {
+      this.suppressNextOk = false
+      /* transient write error — the next poll tick retries */
+    }
   }
 
   /** Feed hold. GRBL: `!` byte. Non-realtime firmwares have no equivalent → no-op. */
@@ -543,13 +689,25 @@ class GrblController {
     await this.realtime(0x85)
   }
 
-  /** Stream a program (array of lines). Drives program-store progress. */
-  startProgram(lines: string[]): void {
+  /**
+   * Stream a program. `lines` is the slice to actually send; `opts.startIndex`
+   * is the 0-based offset of `lines[0]` within the FULL program (default 0), so
+   * a "feed from line N" run reports progress / current-line in full-program
+   * indices. The streamer adds `startIndex` to every reported index/count, and
+   * the cursor below is seeded to the first line being sent (= startIndex).
+   */
+  startProgram(lines: string[], opts?: { startIndex?: number }): void {
     if (!this.streamer) throw new Error('Not connected')
+    const startIndex =
+      opts?.startIndex != null && Number.isFinite(opts.startIndex) && opts.startIndex > 0
+        ? Math.floor(opts.startIndex)
+        : 0
     this.streamer.reset()
+    this.streamer.setStartIndex(startIndex)
     const program = useProgram.getState()
     program.setStreaming?.(true)
-    program.setCursor?.(0)
+    // Seed the cursor at the first line we're about to send (full-program index).
+    program.setCursor?.(startIndex)
     this.streamer.enqueue(lines)
     this.streamer.start()
   }
@@ -561,12 +719,24 @@ class GrblController {
   private startStatusPolling(): void {
     this.stopStatusPolling()
     this.statusTimer = setInterval(() => void this.requestStatus(), STATUS_POLL_MS)
+    // Prime the active-WCS badge immediately, then poll `$G` slowly. The poll
+    // only fires when a program is NOT streaming, so it never competes with a
+    // job for the RX buffer (the WCS won't change mid-cut anyway).
+    void this.requestParserState()
+    this.parserStateTimer = setInterval(() => {
+      if (this.streamer?.isRunning) return
+      void this.requestParserState()
+    }, PARSER_STATE_POLL_MS)
   }
 
   private stopStatusPolling(): void {
     if (this.statusTimer !== null) {
       clearInterval(this.statusTimer)
       this.statusTimer = null
+    }
+    if (this.parserStateTimer !== null) {
+      clearInterval(this.parserStateTimer)
+      this.parserStateTimer = null
     }
   }
 }

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { grbl } from '../serial/controller'
 import { useGrblSettings, useMachine, useMachineProfile, usePersistentState } from '../store'
-import { profileFor } from '../machine/controllers'
+import { notesKeyFor, profileFor } from '../machine/controllers'
 import type { Capabilities, ControllerProfile } from '../machine/types'
-import { GRBL_SETTING_META } from '../serial'
+import { GRBL_SETTING_META, writeSettingCommand } from '../serial'
 import type { GrblSetting } from '../serial'
+import { parseSettingsBlock } from '../serial'
 import {
   GRBL_GROUPS,
   GRBL_SETTING_RICH,
@@ -16,6 +17,8 @@ import {
   MACHINE_DEFAULT_PROFILE,
   type GrblSettingGroup,
 } from './grblSettingsMeta'
+import { Icon } from '../components/Icons'
+import { Modal } from '../components/Modal'
 import { useT } from '../i18n'
 import '../styles/motion.css'
 
@@ -81,7 +84,21 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
     {},
   )
   const [saving, setSaving] = useState(false)
+  // Failures from the last Save, by setting number → reason. Surfaced so a
+  // partial save is obvious; the failed rows keep their pending edit.
+  const [saveErrors, setSaveErrors] = useState<Record<number, string>>({})
   const editCount = Object.keys(edits).length
+
+  // Search / filter + "only flagged or changed" toggle for the (long) table.
+  const [search, setSearch] = useState('')
+  const [flaggedOnly, setFlaggedOnly] = useState(false)
+
+  // Confirm dialog state for the factory-reset actions (replaces window.confirm).
+  const [confirmKind, setConfirmKind] = useState<'$' | '#' | '*' | null>(null)
+  // Import/paste-config dialog.
+  const [importOpen, setImportOpen] = useState(false)
+  const [importText, setImportText] = useState('')
+  const [copied, setCopied] = useState(false)
 
   const onSync = () => {
     grbl.readSettings().catch(() => {
@@ -95,44 +112,135 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected])
 
+  // Clear pending edits + save errors when the link drops or the controller kind
+  // changes — those edits were against a different/now-gone machine and applying
+  // them silently on reconnect would be wrong.
+  const prevConn = useRef(connection)
+  useEffect(() => {
+    if (prevConn.current === 'connected' && connection === 'disconnected') {
+      setEdits({})
+      setSaveErrors({})
+    }
+    prevConn.current = connection
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection])
+  useEffect(() => {
+    setEdits({})
+    setSaveErrors({})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.kind])
+
   const setEdit = (num: number, v: string) =>
     setEdits((e) => ({ ...e, [num]: v }))
 
-  /** Write every pending edit to the machine, then re-sync to confirm. */
+  /**
+   * Write every pending edit to the machine, then re-sync to confirm. Only the
+   * edits that WROTE SUCCESSFULLY are dropped from the pending set; any that
+   * failed keep their value and are surfaced in `saveErrors` so the user can
+   * retry, rather than silently losing a failed change with an unconditional
+   * `setEdits({})`.
+   */
   const onSave = async () => {
     const entries = Object.entries(edits)
     if (entries.length === 0) return
     setSaving(true)
+    const remaining: Record<number, string> = {}
+    const failures: Record<number, string> = {}
     for (const [num, val] of entries) {
       try {
         await grbl.writeSetting(Number(num), val)
-      } catch {
-        /* surfaced via console */
+      } catch (e) {
+        // Keep the failed edit so it isn't lost, and record why.
+        remaining[Number(num)] = val
+        failures[Number(num)] = e instanceof Error ? e.message : String(e)
       }
     }
-    setEdits({})
+    setEdits(remaining)
+    setSaveErrors(failures)
     setSaving(false)
     grbl.readSettings().catch(() => {})
   }
 
-  const discardEdits = () => setEdits({})
+  const discardEdits = () => {
+    setEdits({})
+    setSaveErrors({})
+  }
 
-  const onReset = (kind: '$' | '#' | '*') => {
-    const messages: Record<typeof kind, string> = {
-      $: t(
-        'motion.confirm.resetSettings',
-        'Restore the machine to its known-good default configuration?\n\nThis runs $RST=$ then writes the karmyogi default profile (steps/mm 1600, max rate 1000, accel 30, max travel 200, etc.) — use it to recover a corrupted or mis-configured controller.',
-      ),
-      '#': t(
-        'motion.confirm.clearOffsets',
-        'Clear all work-coordinate offsets (G54–G59, G28/G30, G92)?\n\nMachine settings are kept; only your zero offsets are erased.',
-      ),
-      '*': t(
-        'motion.confirm.wipeAll',
-        'FULL EEPROM WIPE: reset BOTH settings AND coordinate offsets to defaults?\n\nThis is the nuclear option — everything goes back to factory.',
-      ),
+  /** Set a row to its default ONLY if it differs numerically (parseFloat). */
+  const resetToDefault = (num: number, def: string, current: string) => {
+    if (parseFloat(current) === parseFloat(def)) return
+    setEdit(num, def)
+  }
+
+  /** Serialize the current live values (or defaults) as `$N=val` lines for export. */
+  const exportText = useMemo(() => {
+    const numbers = Object.keys(GRBL_SETTING_META)
+      .map(Number)
+      .concat(Object.values(values).map((s) => s.number))
+    const uniq = Array.from(new Set(numbers)).sort((a, b) => a - b)
+    return uniq
+      .map((n) => {
+        const live = values[n]
+        const val = live ? live.value : settingDefault(n)
+        if (val === undefined) return null
+        return writeSettingCommand(n, val)
+      })
+      .filter((l): l is string => l !== null)
+      .join('\n')
+  }, [values])
+
+  const onCopy = () => {
+    const text = exportText
+    const done = () => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
     }
-    if (!window.confirm(messages[kind])) return
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => done())
+    } else {
+      done()
+    }
+  }
+
+  /** Parse pasted `$$` text and stage every parsed line as a pending edit. */
+  const applyImport = () => {
+    const parsed = parseSettingsBlock(importText)
+    if (parsed.size === 0) {
+      setImportOpen(false)
+      return
+    }
+    setEdits((e) => {
+      const next = { ...e }
+      for (const [num, s] of parsed) {
+        // Only stage when the imported value differs numerically from the live one.
+        const live = values[num]
+        if (!live || parseFloat(live.value) !== parseFloat(s.value)) {
+          next[num] = s.value
+        }
+      }
+      return next
+    })
+    setImportOpen(false)
+    setImportText('')
+  }
+
+  const resetMessages: Record<'$' | '#' | '*', string> = {
+    $: t(
+      'motion.confirm.resetSettings',
+      'Restore the machine to its known-good default configuration?\n\nThis runs $RST=$ then writes the karmyogi default profile (steps/mm 1600, max rate 1000, accel 30, max travel 200, etc.) — use it to recover a corrupted or mis-configured controller.',
+    ),
+    '#': t(
+      'motion.confirm.clearOffsets',
+      'Clear all work-coordinate offsets (G54–G59, G28/G30, G92)?\n\nMachine settings are kept; only your zero offsets are erased.',
+    ),
+    '*': t(
+      'motion.confirm.wipeAll',
+      'FULL EEPROM WIPE: reset BOTH settings AND coordinate offsets to defaults?\n\nThis is the nuclear option — everything goes back to factory.',
+    ),
+  }
+
+  const executeReset = (kind: '$' | '#' | '*') => {
+    setConfirmKind(null)
     void (async () => {
       try {
         await grbl.resetSettings(kind)
@@ -187,6 +295,38 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
     [values],
   )
 
+  // Apply the search box + "only flagged/changed" toggle to the grouped table.
+  // A row matches the search if its number (with/without `$`) or its English
+  // label/description contains the query. "Flagged or changed" = validation-bad
+  // OR has a pending edit. The English meta is used for matching so the filter is
+  // stable regardless of UI language (the query is usually a number anyway).
+  const filteredSections = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const matchesSearch = (s: GrblSetting): boolean => {
+      if (!q) return true
+      if (String(s.number).includes(q)) return true
+      if (`$${s.number}`.includes(q)) return true
+      const meta = GRBL_SETTING_META[s.number]
+      if (meta?.label.toLowerCase().includes(q)) return true
+      const rich = GRBL_SETTING_RICH[s.number]
+      if (rich?.description.toLowerCase().includes(q)) return true
+      return false
+    }
+    const matchesFlagged = (s: GrblSetting): boolean => {
+      if (!flaggedOnly) return true
+      if (edits[s.number] !== undefined) return true
+      return validateSetting(s.number, s.numeric).bad
+    }
+    return sections
+      .map((sec) => ({
+        info: sec.info,
+        rows: sec.rows.filter((s) => matchesSearch(s) && matchesFlagged(s)),
+      }))
+      .filter((sec) => sec.rows.length > 0)
+  }, [sections, search, flaggedOnly, edits])
+
+  const saveErrorCount = Object.keys(saveErrors).length
+
   return (
     <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and GRBL settings')}>
       {/* Read / status */}
@@ -199,7 +339,7 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
         <div className="mo-row">
           <button
             type="button"
-            className="mo-btn primary"
+            className="mo-btn primary mo-iconbtn"
             disabled={!connected || loading}
             onClick={onSync}
             title={
@@ -208,20 +348,22 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
                 : t('motion.connectFirst', 'Connect first')
             }
           >
-            {loading ? t('motion.sync.syncing', '⟳ Syncing…') : t('motion.sync.label', '⟳ Sync')}
+            <Icon name="download" size={14} />
+            {loading ? t('motion.sync.syncing', 'Syncing…') : t('motion.sync.label', 'Sync')}
           </button>
           <button
             type="button"
-            className="mo-btn save"
+            className="mo-btn save mo-iconbtn"
             disabled={!connected || saving || editCount === 0}
             onClick={() => void onSave()}
             title={t('motion.save.title', 'Save all edited parameters to the machine')}
           >
+            <Icon name="upload" size={14} />
             {saving
               ? t('motion.save.saving', 'Saving…')
               : editCount > 0
-                ? t('motion.save.labelCount', '💾 Save changes ({count})', { count: editCount })
-                : t('motion.save.label', '💾 Save changes')}
+                ? t('motion.save.labelCount', 'Save changes ({count})', { count: editCount })
+                : t('motion.save.label', 'Save changes')}
           </button>
           {editCount > 0 && (
             <button
@@ -233,6 +375,28 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
               {t('motion.discard.label', 'Discard')}
             </button>
           )}
+          <button
+            type="button"
+            className="mo-btn mo-iconbtn"
+            onClick={onCopy}
+            title={t('motion.copy.title', 'Copy all $N=val settings to the clipboard')}
+          >
+            <Icon name="copy" size={14} />
+            {copied ? t('motion.copy.copied', 'Copied') : t('motion.copy.label', 'Copy $$')}
+          </button>
+          <button
+            type="button"
+            className="mo-btn mo-iconbtn"
+            disabled={!connected}
+            onClick={() => {
+              setImportText('')
+              setImportOpen(true)
+            }}
+            title={t('motion.import.title', 'Paste a $$ dump / config to stage as edits')}
+          >
+            <Icon name="upload" size={14} />
+            {t('motion.import.label', 'Import config')}
+          </button>
           <span className="mo-grow" />
           <span className="mo-status">
             {total > 0
@@ -270,10 +434,50 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
                 )}
           </div>
         )}
+        {saveErrorCount > 0 && (
+          <div className="mo-alert" role="alert">
+            {saveErrorCount > 1
+              ? t(
+                  'motion.alert.saveFailedPlural',
+                  '{count} settings failed to save and kept their pending edit — check the Console and retry.',
+                  { count: saveErrorCount },
+                )
+              : t(
+                  'motion.alert.saveFailedSingular',
+                  '1 setting failed to save and kept its pending edit — check the Console and retry.',
+                )}
+          </div>
+        )}
+        {/* Search / filter the (long) settings table. */}
+        <div className="mo-row mo-filter">
+          <input
+            className="mo-search"
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('motion.filter.searchPlaceholder', 'Search settings ($-number or name)…')}
+            aria-label={t('motion.filter.searchAria', 'Search settings')}
+          />
+          <label className="mo-toggle" title={t('motion.filter.flaggedTitle', 'Show only flagged or changed settings')}>
+            <input
+              type="checkbox"
+              checked={flaggedOnly}
+              onChange={(e) => setFlaggedOnly(e.target.checked)}
+            />
+            {t('motion.filter.flaggedLabel', 'Only flagged / changed')}
+          </label>
+        </div>
       </section>
 
       {/* Settings table, grouped */}
-      {sections.map((sec) => {
+      {filteredSections.length === 0 && (
+        <section className="mo-section">
+          <div className="mo-note">
+            {t('motion.filter.noMatches', 'No settings match the current filter.')}
+          </div>
+        </section>
+      )}
+      {filteredSections.map((sec) => {
         const groupTitle = t(sec.info.titleKey, sec.info.title)
         return (
         <section className="mo-section" key={sec.info.id}>
@@ -288,6 +492,14 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
               const known = GRBL_SETTING_META[s.number] !== undefined
               const def = settingDefault(s.number)
               const range = settingRangeText(s.number)
+              // Resolve the (pure-module) English label/units through i18n here at
+              // the UI boundary.
+              const label = t(meta.labelKey, meta.label)
+              const units = meta.units ? t(meta.unitsKey ?? meta.labelKey, meta.units) : undefined
+              const failed = saveErrors[s.number]
+              // Reset is disabled when the field already equals the default — but
+              // compared NUMERICALLY (parseFloat), so "200" == "200.000".
+              const atDefault = def !== undefined && parseFloat(fieldVal) === parseFloat(def)
               return (
                 <div
                   className="mo-rowitem"
@@ -298,7 +510,7 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
                   <div className="mo-cell mo-key">
                     <span className="mo-num">${s.number}</span>
                     <span className="mo-name">
-                      {known ? meta.label : <em>{t('motion.unknown', 'unknown')}</em>}
+                      {known ? label : <em>{t('motion.unknown', 'unknown')}</em>}
                     </span>
                     {rich?.description && (
                       (() => {
@@ -327,23 +539,23 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
                       disabled={!connected}
                       onChange={(e) => setEdit(s.number, e.target.value)}
                       aria-label={t('motion.aria.value', '{label} (${num}) value', {
-                        label: meta.label,
+                        label,
                         num: s.number,
                       })}
                       data-bad={v.bad ? v.severity : undefined}
                     />
-                    {meta.units && <span className="mo-units">{meta.units}</span>}
+                    {units && <span className="mo-units">{units}</span>}
                     {editing && (
                       <span className="mo-pending" title={t('motion.pending.title', 'Edited — click Save changes')}>
-                        ●
+                        <Icon name="info" size={12} />
                       </span>
                     )}
                     {def !== undefined && (
                       <button
                         type="button"
-                        className="mo-btn mo-reset"
-                        disabled={!connected || fieldVal === def}
-                        onClick={() => setEdit(s.number, def)}
+                        className="mo-btn mo-reset mo-iconbtn"
+                        disabled={!connected || atDefault}
+                        onClick={() => resetToDefault(s.number, def, fieldVal)}
                         title={t(
                           'motion.reset.title',
                           'Reset ${num} to default ({value}) — then Save to apply',
@@ -351,7 +563,7 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
                         )}
                         aria-label={t('motion.reset.aria', 'Reset ${num} to default', { num: s.number })}
                       >
-                        ↺
+                        <Icon name="home" size={13} />
                       </button>
                     )}
                   </div>
@@ -362,7 +574,15 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
                           ? t('motion.badge.corrupt', 'corrupt')
                           : t('motion.badge.check', 'check')}
                       </span>
-                      {v.hint}
+                      {v.hintKey ? t(v.hintKey, v.hint, v.hintParams) : v.hint}
+                    </div>
+                  )}
+                  {failed && (
+                    <div className="mo-warn" data-sev="danger" role="status">
+                      <span className="mo-badge" data-sev="danger">
+                        {t('motion.badge.saveFailed', 'save failed')}
+                      </span>
+                      {failed}
                     </div>
                   )}
                 </div>
@@ -399,7 +619,7 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
             type="button"
             className="mo-btn danger"
             disabled={!connected}
-            onClick={() => onReset('$')}
+            onClick={() => setConfirmKind('$')}
             title={t('motion.factory.resetSettings.title', '$RST=$ — restore settings ($0–$132) to defaults')}
           >
             {t('motion.factory.resetSettings.label', 'Reset settings ($RST=$)')}
@@ -408,7 +628,7 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
             type="button"
             className="mo-btn"
             disabled={!connected}
-            onClick={() => onReset('#')}
+            onClick={() => setConfirmKind('#')}
             title={t('motion.factory.clearOffsets.title', '$RST=# — clear G54–G59 coordinate offsets')}
           >
             {t('motion.factory.clearOffsets.label', 'Clear offsets ($RST=#)')}
@@ -417,13 +637,73 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
             type="button"
             className="mo-btn danger"
             disabled={!connected}
-            onClick={() => onReset('*')}
+            onClick={() => setConfirmKind('*')}
             title={t('motion.factory.wipeAll.title', '$RST=* — full EEPROM wipe (settings + offsets)')}
           >
             {t('motion.factory.wipeAll.label', 'Wipe all ($RST=*)')}
           </button>
         </div>
       </section>
+
+      {/* Factory-reset confirmation (replaces native window.confirm). */}
+      <Modal
+        open={confirmKind !== null}
+        title={t('motion.confirm.title', 'Confirm factory reset')}
+        onClose={() => setConfirmKind(null)}
+        width={460}
+      >
+        <p className="mo-confirm-msg">{confirmKind ? resetMessages[confirmKind] : ''}</p>
+        <div className="mo-row mo-confirm-actions">
+          <button type="button" className="mo-btn" onClick={() => setConfirmKind(null)}>
+            {t('motion.confirm.cancel', 'Cancel')}
+          </button>
+          <span className="mo-grow" />
+          <button
+            type="button"
+            className="mo-btn danger"
+            onClick={() => confirmKind && executeReset(confirmKind)}
+          >
+            {t('motion.confirm.confirm', 'Reset')}
+          </button>
+        </div>
+      </Modal>
+
+      {/* Import / paste config dialog. */}
+      <Modal
+        open={importOpen}
+        title={t('motion.import.dialogTitle', 'Import / paste config')}
+        onClose={() => setImportOpen(false)}
+        width={520}
+      >
+        <p className="mo-note">
+          {t(
+            'motion.import.help',
+            'Paste a $$ dump or a list of $N=val lines. Values that differ from the live settings are staged as pending edits — review them, then press Save changes to write them.',
+          )}
+        </p>
+        <textarea
+          className="mo-import"
+          value={importText}
+          onChange={(e) => setImportText(e.target.value)}
+          placeholder={'$100=250.000\n$110=500.000\n…'}
+          aria-label={t('motion.import.aria', 'Paste $$ config')}
+          rows={10}
+        />
+        <div className="mo-row mo-confirm-actions">
+          <button type="button" className="mo-btn" onClick={() => setImportOpen(false)}>
+            {t('motion.confirm.cancel', 'Cancel')}
+          </button>
+          <span className="mo-grow" />
+          <button
+            type="button"
+            className="mo-btn primary"
+            disabled={importText.trim().length === 0}
+            onClick={applyImport}
+          >
+            {t('motion.import.apply', 'Stage edits')}
+          </button>
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -505,7 +785,7 @@ function NoSettingsView({ profile }: { profile: ControllerProfile }) {
 
       <section className="mo-section">
         <h5 className="mo-group">{t('motion.notes.heading', 'About this controller')}</h5>
-        <div className="mo-note">{profile.notes}</div>
+        <div className="mo-note">{t(notesKeyFor(profile.kind), profile.notes)}</div>
       </section>
     </div>
   )
@@ -767,7 +1047,7 @@ function MassoSettingsView({ profile }: { profile: ControllerProfile }) {
 
       <section className="mo-section">
         <h5 className="mo-group">{t('motion.notes.heading', 'About this controller')}</h5>
-        <div className="mo-note">{profile.notes}</div>
+        <div className="mo-note">{t(notesKeyFor(profile.kind), profile.notes)}</div>
       </section>
     </div>
   )

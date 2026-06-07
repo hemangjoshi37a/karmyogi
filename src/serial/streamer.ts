@@ -27,13 +27,24 @@ export interface StreamerOptions {
   writeLine: (line: string) => Promise<void>
   /** RX buffer limit override (defaults to 127). */
   rxBufferLimit?: number
-  /** Called when a queued line is acknowledged with `ok`. */
+  /**
+   * Called when a queued line is acknowledged with `ok`. `index` is the line's
+   * 0-based position within the FULL program (i.e. it already includes any
+   * `startIndex` offset applied via {@link Streamer.setStartIndex}).
+   */
   onAck?: (line: string, index: number) => void
-  /** Called when a queued line gets an `error:...` response. */
+  /** Called when a queued line gets an `error:...` response. Index is full-program. */
   onError?: (line: string, response: string, index: number) => void
   /** Called when the whole queue has drained (no pending, none queued). */
   onIdle?: () => void
-  /** Progress callback: (completed, total). */
+  /**
+   * Progress callback. `completed` is the count of FULL-program lines done so
+   * far (startIndex + lines completed within this slice), and `total` is the
+   * FULL-program line count (startIndex + queued slice length). When streaming
+   * from line N, `completed`/`total` therefore track the whole program, not
+   * just the streamed tail — so a "feed from line N" run reports correct
+   * progress and a correct current-line cursor.
+   */
   onProgress?: (completed: number, total: number) => void
 }
 
@@ -57,6 +68,13 @@ export class Streamer {
   private total = 0
   private running = false
   private pumping = false
+  /**
+   * 0-based offset of the FIRST queued line within the FULL program. When a job
+   * is streamed "from line N", this is N so that progress / current-line are
+   * reported in full-program indices (startIndex + completed-within-slice)
+   * rather than slice-local ones. Defaults to 0 (stream from the top).
+   */
+  private startIndex = 0
 
   private readonly opts: StreamerOptions
 
@@ -85,6 +103,30 @@ export class Streamer {
     return this.running
   }
 
+  /**
+   * Full-program count of lines completed so far: `startIndex` (the lines we
+   * skipped by feeding from line N — counted as already done) plus the number
+   * of lines acknowledged within the streamed slice.
+   */
+  get completedInProgram(): number {
+    return this.startIndex + this.completed
+  }
+
+  /** Full-program total line count (`startIndex` + the queued slice's total). */
+  get totalInProgram(): number {
+    return this.startIndex + this.total
+  }
+
+  /**
+   * Set the 0-based offset of the first queued line within the FULL program, so
+   * progress / current-line are reported in full-program indices. Must be set
+   * BEFORE enqueueing/starting a slice (the controller calls this from
+   * `startProgram({ startIndex })`). Cleared back to 0 by {@link reset}.
+   */
+  setStartIndex(index: number): void {
+    this.startIndex = Number.isFinite(index) && index > 0 ? Math.floor(index) : 0
+  }
+
   /** Queue one or more lines for streaming (blank/comment lines kept as-is). */
   enqueue(lines: string | string[]): void {
     const arr = Array.isArray(lines) ? lines : [lines]
@@ -92,13 +134,29 @@ export class Streamer {
       this.queue.push(l)
       this.total++
     }
-    if (this.running) void this.pump()
+    if (this.running) this.safePump()
   }
 
   /** Begin streaming the queued lines. */
   start(): void {
     this.running = true
-    void this.pump()
+    this.safePump()
+  }
+
+  /**
+   * Fire-and-forget pump that can never surface as an unhandled rejection (which
+   * would otherwise leave `pumping` true after the `finally` only if the throw
+   * escaped — it doesn't, but a rejected promise from a write must still not
+   * crash the page or kill the loop silently). Errors are reported and swallowed.
+   */
+  private safePump(): void {
+    void this.pump().catch((err) => {
+      this.opts.onError?.(
+        '<pump>',
+        err instanceof Error ? err.message : String(err),
+        -1,
+      )
+    })
   }
 
   /**
@@ -113,6 +171,7 @@ export class Streamer {
     this.completed = 0
     this.total = 0
     this.nextIndex = 0
+    this.startIndex = 0
   }
 
   private lineBytes(line: string): number {
@@ -143,11 +202,27 @@ export class Streamer {
           }
         }
 
+        // Reserve the slot BEFORE writing so concurrent re-entrant pumps can't
+        // double-send the same line; roll the accounting back if the write
+        // fails so a transient error never leaves a phantom in-flight line that
+        // wedges the window forever.
         this.queue.shift()
         const entry: PendingLine = { text: next, bytes, index: this.nextIndex++ }
         this.pending.push(entry)
         this.bytesInFlight += bytes
-        await this.writeLine(next)
+        try {
+          await this.writeLine(next)
+        } catch (err) {
+          // Undo the reservation and stop pumping; the caller's transport-error
+          // handling (disconnect / reset) takes over. We must not loop forever
+          // re-throwing, but we also must not silently swallow into a half state.
+          this.pending.pop()
+          this.bytesInFlight -= bytes
+          if (this.bytesInFlight < 0) this.bytesInFlight = 0
+          this.nextIndex--
+          this.queue.unshift(entry.text)
+          throw err
+        }
       }
     } finally {
       this.pumping = false
@@ -160,10 +235,16 @@ export class Streamer {
    * message, welcome banner, etc.).
    */
   onResponse(line: string): boolean {
-    const t = line.trim()
+    // Strip any leftover status report(s) so a glued `ok<Run|..>` (the
+    // transport should already un-glue these, but be defensive — a missed ack
+    // permanently dead-locks the char-counting window) still acknowledges.
+    const t = line.replace(/<[^>]*>/g, '').trim()
     const lower = t.toLowerCase()
+    // Match `ok` or `error[:N]` as a standalone token, tolerating trailing junk
+    // but NOT matching it inside another word (so `[MSG:...]`, `oktoberfest`,
+    // welcome banners, push messages, etc. are never mistaken for an ack).
     const isOk = lower === 'ok'
-    const isError = lower.startsWith('error')
+    const isError = /^error(:|\b)/.test(lower)
 
     if (!isOk && !isError) return false
     if (this.pending.length === 0) return false
@@ -173,15 +254,17 @@ export class Streamer {
     if (this.bytesInFlight < 0) this.bytesInFlight = 0
     this.completed++
 
+    // Report indices/counts in FULL-program space so a "feed from line N" run
+    // tracks the whole program (startIndex + slice-local), not just the tail.
     if (isError) {
-      this.opts.onError?.(entry.text, t, entry.index)
+      this.opts.onError?.(entry.text, t, this.startIndex + entry.index)
     } else {
-      this.opts.onAck?.(entry.text, entry.index)
+      this.opts.onAck?.(entry.text, this.startIndex + entry.index)
     }
-    this.opts.onProgress?.(this.completed, this.total)
+    this.opts.onProgress?.(this.startIndex + this.completed, this.startIndex + this.total)
 
     // Keep the pipe full.
-    void this.pump()
+    this.safePump()
 
     if (this.queue.length === 0 && this.pending.length === 0) {
       this.running = false

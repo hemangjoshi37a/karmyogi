@@ -4,6 +4,11 @@ import { meshFootprint, type ToolType } from '../core/carve3d'
 import { nestFootprints } from '../core/nesting'
 import type { Placement } from '../core/transform'
 import { IDENTITY_PLACEMENT } from '../core/transform'
+import {
+  hydrateCarveJobs,
+  saveCarveJobs,
+  clearPersistedCarveJobs,
+} from './carveJobsPersist'
 
 /**
  * Multi-model carving job list (3D Carving panel).
@@ -15,10 +20,14 @@ import { IDENTITY_PLACEMENT } from '../core/transform'
  * every job shares the same settings. The TOOL/BIT, safe-Z, spindle and Z-mode
  * are GLOBAL (one bit cuts all jobs in a single combined program).
  *
- * Meshes are large typed arrays, so this store is NOT persisted — jobs live for
- * the session. (Settings the operator tunes are mirrored into job objects that
- * could be re-applied, but the heavy mesh data is intentionally kept in memory
- * only.) Import this store directly where used.
+ * Meshes are large typed arrays, so this store is persisted to **IndexedDB**
+ * (NOT localStorage — typed arrays would have to be base64'd and would blow the
+ * ~5MB quota). On module load we hydrate the saved snapshot so previously
+ * imported models reappear with their settings across page reloads / PWA
+ * service-worker updates; after every mutation we debounce-save the whole list
+ * (meshes + per-job metadata + defaults + global). Persistence is best-effort
+ * and a silent no-op when IndexedDB is unavailable (see carveJobsPersist.ts).
+ * Import this store directly where used.
  */
 
 /** A material id from the material library (kept as a string to avoid a dep). */
@@ -287,12 +296,31 @@ export const useCarveJobs = create<CarveJobsState>((set, get) => ({
     const st = get()
     const active = st.jobs.filter((j) => j.enabled)
     if (active.length === 0) return { overflow: false, warnings: [] }
+
+    // SINGLE job: leave it exactly where the operator placed it (the X/Y=0
+    // default, or wherever they nudged it). Never auto-rotate a single job —
+    // there is no material to save by turning one part.
+    if (active.length === 1) {
+      const j = active[0]
+      const fp = meshFootprint(j.mesh, { rotDeg: j.placement.rotDeg, scale: j.placement.scale })
+      const overflow = fp.w > bedW || fp.h > bedH
+      return {
+        overflow,
+        warnings: overflow
+          ? ['Job is larger than the bed — shrink it or use a bigger bed.']
+          : [],
+      }
+    }
+
     const margin = st.global.nestMargin
+    // Feed each job's footprint at its CURRENT scale but BASE rotation (the
+    // nester may add a 90°-class turn to pack tighter; pass the job's existing
+    // rotation as `rotDeg` so the reported rotation is absolute).
     const items = active.map((j) => {
       const fp = meshFootprint(j.mesh, { rotDeg: j.placement.rotDeg, scale: j.placement.scale })
-      return { id: j.id, w: fp.w, h: fp.h }
+      return { id: j.id, w: fp.w, h: fp.h, rotDeg: j.placement.rotDeg }
     })
-    const res = nestFootprints(items, { bedW, bedH, margin })
+    const res = nestFootprints(items, { bedW, bedH, margin, rotations: [0, 90] })
 
     // Map each packed footprint's bottom-left corner into work coordinates.
     // The viewer/work origin is the bed CENTRE, so shift the packed block (which
@@ -301,10 +329,14 @@ export const useCarveJobs = create<CarveJobsState>((set, get) => ({
     const jobs = st.jobs.map((j) => {
       const slot = res.placements.find((p) => p.id === j.id)
       if (!slot) return j
-      const fp = meshFootprint(j.mesh, { rotDeg: j.placement.rotDeg, scale: j.placement.scale })
+      // The nester may have chosen a tighter rotation — adopt it, and use the
+      // post-rotation footprint dims (returned by the nester) for centring.
+      const rotDeg = slot.rotDeg
+      const fpW = slot.w
+      const fpH = slot.h
       // Footprint centre at the packed slot centre, re-centred on the bed origin.
-      const slotCx = slot.x + fp.w / 2 - bedW / 2
-      const slotCy = slot.y + fp.h / 2 - bedH / 2
+      const slotCx = slot.x + fpW / 2 - bedW / 2
+      const slotCy = slot.y + fpH / 2 - bedH / 2
       // The job's design centre is its mesh bbox centre; placement.dx/dy move
       // that centre. Carving emits in the mesh's own coords, so we need the
       // translation that brings the mesh footprint centre to slotC.
@@ -312,12 +344,59 @@ export const useCarveJobs = create<CarveJobsState>((set, get) => ({
       const meshCy = (j.mesh.bbox.min[1] + j.mesh.bbox.max[1]) / 2
       return {
         ...j,
-        placement: { ...j.placement, dx: slotCx - meshCx, dy: slotCy - meshCy },
+        placement: { ...j.placement, rotDeg, dx: slotCx - meshCx, dy: slotCy - meshCy },
       }
     })
     set({ jobs, rev: st.rev + 1 })
     return { overflow: res.overflow, warnings: res.warnings }
   },
 
-  clear: () => set((st) => ({ jobs: [], selectedId: null, rev: st.rev + 1 })),
+  clear: () => {
+    clearPersistedCarveJobs()
+    set((st) => ({ jobs: [], selectedId: null, rev: st.rev + 1 }))
+  },
 }))
+
+// ---------------------------------------------------------------------------
+// IndexedDB persistence wiring (best-effort, never blocks the UI).
+// ---------------------------------------------------------------------------
+
+/** True once the initial hydrate has resolved, so we don't save over the
+ *  persisted snapshot before we've loaded it (a save fired during hydration
+ *  could otherwise clobber the saved jobs with the empty initial state). */
+let hydrated = false
+
+// Persist on any meaningful change. We subscribe to the whole state and write a
+// snapshot of the persisted slices; the debounce in carveJobsPersist coalesces
+// bursts. `clear()` handles its own deletion, so an empty list after clear is
+// simply saved as empty (harmless).
+useCarveJobs.subscribe((st) => {
+  if (!hydrated) return
+  saveCarveJobs({
+    jobs: st.jobs,
+    selectedId: st.selectedId,
+    defaults: st.defaults,
+    global: st.global,
+  })
+})
+
+// Hydrate once at startup: restore previously imported models + settings so a
+// page reload (or PWA update) doesn't lose the operator's work.
+void hydrateCarveJobs()
+  .then((snap) => {
+    if (snap) {
+      useCarveJobs.setState((st) => ({
+        jobs: snap.jobs,
+        selectedId: snap.selectedId,
+        defaults: snap.defaults,
+        global: snap.global,
+        rev: st.rev + 1,
+      }))
+    }
+  })
+  .catch(() => {
+    /* persistence is best-effort; ignore */
+  })
+  .finally(() => {
+    hydrated = true
+  })

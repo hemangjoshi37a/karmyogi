@@ -124,7 +124,15 @@ export function PlaybackTimeline() {
         />
       </div>
 
-      <div className="pt-scrub" style={{ ['--pt-pct' as string]: `${pct}%` }}>
+      <div
+        className="pt-scrub"
+        style={{
+          ['--pt-pct' as string]: `${pct}%`,
+          // Unitless fraction so the fill can be aligned to the thumb CENTRE
+          // (which is inset by half the thumb width at each end).
+          ['--pt-frac' as string]: `${pct / 100}`,
+        }}
+      >
         <input
           type="range"
           className="pt-range"

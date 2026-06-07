@@ -95,16 +95,6 @@
   min-width: 0;
 }
 
-/* Card that should expand to fill remaining height (raw G-code when open). */
-.wr-grow {
-  flex: 1 1 auto;
-  min-height: 140px;
-}
-.wr-grow .wr-card-body {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
 /* Compact field grid: fields pack left tightly and wrap naturally instead of
    stretching one-per-huge-column. */
 .wr-grid {
@@ -171,18 +161,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
-}
-.wr-font-name {
-  font-size: var(--fs-body);
-  color: var(--fg-muted);
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wr-font-name strong {
-  color: var(--fg);
 }
 /* hidden native file input — triggered via the styled button */
 .wr-file {
@@ -353,71 +331,6 @@
   font-size: 13px;
 }
 
-.wr-btn {
-  height: var(--ctl-h);
-  min-height: 0;
-  padding: 0 var(--sp-3);
-  font: inherit;
-  font-size: var(--fs-ctl);
-  color: var(--fg);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.wr-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.wr-btn:active:not(:disabled) {
-  transform: translateY(1px);
-}
-.wr-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.wr-btn.primary {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
-}
-
-/* Send bar: primary action + compact regen icon button. */
-.wr-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.wr-play {
-  flex: 1 1 auto;
-  min-width: 160px;
-  height: var(--ctl-h-lg);
-  font-weight: 600;
-}
-/* shared .icon-btn base gives layout; panel chrome + compact size here */
-.wr-regen.icon-btn {
-  flex: 0 0 auto;
-  width: var(--ctl-h-lg);
-  height: var(--ctl-h-lg);
-  min-width: var(--ctl-h-lg);
-  min-height: 0;
-  padding: 0;
-  color: var(--fg);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.wr-regen.icon-btn:hover {
-  border-color: var(--accent);
-}
-.wr-regen.icon-btn:active {
-  transform: translateY(1px);
-}
-.wr-regen .icon-btn-glyph {
-  font-size: 15px;
-}
-
 /* collapsible toggle (Advanced + Raw G-code) */
 .wr-toggle {
   display: flex;
@@ -442,7 +355,8 @@
 }
 .wr-toggle .wr-caret {
   flex: 0 0 auto;
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
 }
 .wr-toggle .wr-toggle-note {
   flex: 0 0 auto;
@@ -461,34 +375,23 @@
   border-bottom: 1px solid var(--border);
 }
 
-.wr-info {
-  margin: 0;
-  font-size: var(--fs-body);
-  line-height: 1.4;
-  color: var(--fg-muted);
-}
 .wr-warn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
   margin: 0;
   font-size: var(--fs-body);
   line-height: 1.4;
   color: var(--warn);
 }
+.wr-warn svg {
+  flex: 0 0 auto;
+}
 
-.wr-preview {
-  width: 100%;
-  box-sizing: border-box;
-  flex: 1 1 auto;
-  min-height: 120px;
-  resize: vertical;
-  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
-  font-size: var(--fs-mono);
-  line-height: 1.35;
-  white-space: pre;
-  color: var(--fg);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-2) var(--sp-3);
+/* Inline icons in compact field labels (pen-up/down Z, alignment) line up with
+   the adjacent text. */
+.wr-ic-label svg {
+  vertical-align: -2px;
 }
 
 /* ---- narrow docked column (≤430px panel width): instead of one tall column,
@@ -534,21 +437,8 @@
   .wr-input input,
   .wr-field select,
   .wr-field input,
-  .wr-btn,
   .wr-toggle {
     height: var(--ctl-h-touch);
-  }
-  .wr-play,
-  .wr-regen.icon-btn {
-    height: var(--ctl-h-touch);
-    min-height: var(--ctl-h-touch);
-  }
-  .wr-play {
-    min-width: 100%;
-  }
-  .wr-regen.icon-btn {
-    width: var(--ctl-h-touch);
-    min-width: var(--ctl-h-touch);
   }
   /* font picker stacks full-width; the icon toolbar spreads its buttons evenly
      beneath it at touch size. */
@@ -595,22 +485,12 @@
 /* ---- mobile / touch (≤768px): bigger tap targets everywhere. Also a
    container query — measures the panel, not the window. */
 @container writingpanel (max-width: 768px) {
-  .wr-btn,
   .wr-input input,
   .wr-field select,
   .wr-field input,
   .wr-toggle {
     height: var(--ctl-h-touch);
     min-height: var(--ctl-h-touch);
-  }
-  .wr-play,
-  .wr-regen.icon-btn {
-    height: var(--ctl-h-touch);
-    min-height: var(--ctl-h-touch);
-  }
-  .wr-regen.icon-btn {
-    width: var(--ctl-h-touch);
-    min-width: var(--ctl-h-touch);
   }
   .wr-seg {
     height: var(--ctl-h-touch);
@@ -630,25 +510,12 @@
     .wr-grid {
       grid-template-columns: 1fr;
     }
-    .wr-play {
-      min-width: 100%;
-    }
-    .wr-btn,
     .wr-input input,
     .wr-field select,
     .wr-field input,
     .wr-toggle {
       height: var(--ctl-h-touch);
       min-height: var(--ctl-h-touch);
-    }
-    .wr-play,
-    .wr-regen.icon-btn {
-      height: var(--ctl-h-touch);
-      min-height: var(--ctl-h-touch);
-    }
-    .wr-regen.icon-btn {
-      width: var(--ctl-h-touch);
-      min-width: var(--ctl-h-touch);
     }
   }
 }

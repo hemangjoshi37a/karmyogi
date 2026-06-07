@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProgram, usePersistentState } from '../store'
 import { useT } from '../i18n'
+import { Icon } from '../components/Icons'
 import { FrameButton } from '../components/FrameButton'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { importDxfString } from '../core/dxf'
-import { nestFootprints, type NestItem } from '../core/nesting'
+import { nestFootprints, type NestItem, type NestWarning } from '../core/nesting'
+import { distance } from '../core/geometry'
 import {
   LaserMode,
   LaserPowerMode,
@@ -21,6 +23,26 @@ import {
   type PlacedContour,
 } from '../core/laser'
 import '../styles/laser.css'
+
+/** Hard cap on the Quantity field — keeps the O(n²) nest hill-climb bounded. */
+const MAX_QUANTITY = 200
+
+/** Clamp `n` into [lo, hi]. */
+function clamp(n: number, lo: number, hi: number): number {
+  return n < lo ? lo : n > hi ? hi : n
+}
+
+/** Format a duration (seconds) as "1h 23m" / "12m 30s" / "45s". */
+function fmtDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '—'
+  const s = Math.round(seconds)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${sec}s`
+  return `${sec}s`
+}
 
 /** Non-empty G-code line count for the operator status strip. */
 function gcodeLineCount(gcode: string): number {
@@ -154,6 +176,28 @@ function parseParams(v: unknown, base: PanelParams): PanelParams {
   }
 }
 
+/** Map a structured nesting warning to a localized string (code → t(), else fallback). */
+function useNestWarnText() {
+  const t = useT()
+  return (w: NestWarning): string => {
+    switch (w.code) {
+      case 'tooLarge':
+        return t(
+          'laser.nest.warn.tooLarge',
+          'Job is larger ({jobW}×{jobH} mm) than the sheet ({bedW}×{bedH} mm) — shrink it or use a bigger sheet.',
+          w.params,
+        )
+      case 'edgeOverflow':
+        return t(
+          'laser.nest.warn.edgeOverflow',
+          'Not all jobs fit on the sheet — they are stacked but overlap the edge.',
+        )
+      default:
+        return w.message
+    }
+  }
+}
+
 /**
  * Laser-cutting workbench — handles BOTH CO2 and Fiber in one UI. A mode radio
  * at the top toggles the few mode-specific controls (piercing / focus-Z); DXF
@@ -164,7 +208,9 @@ function parseParams(v: unknown, base: PanelParams): PanelParams {
  */
 export function LaserPanel() {
   const t = useT()
+  const nestWarnText = useNestWarnText()
   const setProgram = useProgram((s) => s.setProgram)
+  const streaming = useProgram((s) => s.streaming)
 
   // ---- Mode (persisted) — gates the mode-specific controls below. ---------
   const [mode, setMode] = usePersistentState<LaserMode>('karmyogi.laser.mode', LaserMode.CO2)
@@ -183,6 +229,9 @@ export function LaserPanel() {
     if (mode === LaserMode.Fiber) setFiber((p) => ({ ...p, ...patch }))
     else setCo2((p) => ({ ...p, ...patch }))
   }
+
+  // Collapse the two mode-specific (advanced) cards to tame vertical scroll.
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   // ---- Sheet / nesting (persisted). ---------------------------------------
   const [sheetW, setSheetW] = usePersistentState<number>('karmyogi.laser.sheetW', 300)
@@ -216,6 +265,11 @@ export function LaserPanel() {
       setContours(drawingToContours(res.drawing))
       setFileName(file.name)
     }
+    reader.onerror = () => {
+      setContours([])
+      setWarnings([])
+      setImportError(t('laser.dxf.readFail', 'Could not read {name}.', { name: file.name }))
+    }
     reader.readAsText(file)
   }
 
@@ -223,13 +277,22 @@ export function LaserPanel() {
   // Each copy is one NestItem with the part footprint; the packer returns a
   // bottom-left placement we translate the part into. When nesting is off, all
   // copies are stacked at the origin (single copy use-case).
-  const placed = useMemo<PlacedContour[]>(() => {
-    if (contours.length === 0) return []
-    const qty = Math.max(1, Math.floor(quantity))
+  //
+  // The placed contours, the fit summary AND the warnings are derived from ONE
+  // `nestFootprints` call (it runs an O(n²) hill-climb, so it must not run twice
+  // per render — that froze the UI on large Quantity).
+  const nest = useMemo(() => {
+    if (contours.length === 0) {
+      return { placed: [] as PlacedContour[], fit: null as null | { fit: number; total: number; overflow: boolean }, warnings: [] as NestWarning[] }
+    }
+    const qty = clamp(Math.floor(quantity), 1, MAX_QUANTITY)
     const w = bounds.width()
     const h = bounds.height()
 
     const out: PlacedContour[] = []
+    let fit: { fit: number; total: number; overflow: boolean } | null = null
+    let warnings: NestWarning[] = []
+
     if (doNest && qty > 0 && w > 0 && h > 0) {
       const items: NestItem[] = []
       for (let i = 0; i < qty; ++i) items.push({ id: `c${i}`, w, h })
@@ -237,43 +300,37 @@ export function LaserPanel() {
       for (const pl of res.placements) {
         out.push(...placeContours(contours, bounds, pl.x, pl.y))
       }
+      fit = { fit: res.placements.filter((p) => !p.overflow).length, total: qty, overflow: res.overflow }
+      warnings = res.warningCodes
     } else {
-      // No nesting → place a single copy at the sheet origin (+margin).
+      // No nesting → stack all copies at the sheet origin (+margin).
       for (let i = 0; i < qty; ++i) {
         out.push(...placeContours(contours, bounds, margin, margin))
       }
     }
-    return orderContours(out)
+    return { placed: orderContours(out), fit, warnings }
   }, [contours, bounds, quantity, doNest, sheetW, sheetH, margin])
 
-  // How many copies actually fit (nesting only) — for the status strip.
-  const nestFit = useMemo(() => {
-    if (!doNest || contours.length === 0) return null
-    const qty = Math.max(1, Math.floor(quantity))
-    const w = bounds.width()
-    const h = bounds.height()
-    if (!(w > 0 && h > 0)) return null
-    const items: NestItem[] = []
-    for (let i = 0; i < qty; ++i) items.push({ id: `c${i}`, w, h })
-    const res = nestFootprints(items, { bedW: sheetW, bedH: sheetH, margin })
-    const fit = res.placements.filter((p) => !p.overflow).length
-    return { fit, total: qty, overflow: res.overflow }
-  }, [doNest, contours.length, quantity, bounds, sheetW, sheetH, margin])
+  const placed = nest.placed
+  const nestFit = nest.fit
 
   // ---- Live G-code (recomputed on any param/DXF change). ------------------
+  // Power / pierce power are CLAMPED to [0, sMax] here so an out-of-range S value
+  // can never reach the emitter (the GRBL controller caps at $30 = sMax anyway).
   const gcode = useMemo(() => {
     if (placed.length === 0) return ''
+    const sMax = Math.max(1, params.sMax)
     return emitLaserProgram(placed, {
       mode: params.mode,
       cutFeed: params.cutFeed,
-      power: params.power,
-      sMax: params.sMax,
+      power: clamp(params.power, 0, sMax),
+      sMax,
       passes: params.passes,
       powerMode: params.powerMode,
       useFocusZ: params.useFocusZ,
       focusZ: params.focusZ,
       pierce: params.pierce,
-      piercePower: params.piercePower,
+      piercePower: clamp(params.piercePower, 0, sMax),
       pierceTime: params.pierceTime,
       decimals: params.decimals,
       programName: `hjLabs Laser — ${params.mode}`,
@@ -281,13 +338,34 @@ export function LaserPanel() {
   }, [placed, params])
   const lineCount = useMemo(() => gcodeLineCount(gcode), [gcode])
 
+  // ---- Cut-path length + time estimate (XY only, all passes). -------------
+  const estimate = useMemo(() => {
+    if (placed.length === 0 || params.cutFeed <= 0) return null
+    const passes = Math.max(1, Math.floor(params.passes))
+    let len = 0
+    for (const c of placed) {
+      const pts = c.points
+      for (let i = 1; i < pts.length; ++i) len += distance(pts[i - 1], pts[i])
+      if (c.closed && pts.length > 1) len += distance(pts[pts.length - 1], pts[0])
+    }
+    len *= passes
+    // time(min) = length(mm) / feed(mm/min); add pierce dwell per contour/pass.
+    let timeMin = len / params.cutFeed
+    if (params.pierce && params.pierceTime > 0) {
+      timeMin += (placed.length * passes * params.pierceTime) / 60
+    }
+    return { lengthMm: len, timeSeconds: timeMin * 60 }
+  }, [placed, params])
+
   // Live sync: push the freshly-computed program to the store (debounced) so the
   // Visualizer + Program tab pick it up without a manual Generate step.
+  // GUARD: never push WHILE a job is streaming — a fresh setProgram would reset
+  // the program/cursor mid-cut. We skip the sync entirely while streaming.
   useEffect(() => {
-    if (!gcode) return
+    if (!gcode || streaming) return
     const id = window.setTimeout(() => setProgram('laser', gcode), 300)
     return () => window.clearTimeout(id)
-  }, [gcode, setProgram])
+  }, [gcode, setProgram, streaming])
 
   const powerPct = percentFromPower(params.power, params.sMax)
   const fiberMode = mode === LaserMode.Fiber
@@ -385,8 +463,34 @@ export function LaserPanel() {
         <span className="lp-status-pill">
           <b>{lineCount}</b> {t('laser.status.gcode', 'G-code lines')}
         </span>
-        <span className="lp-status-sync" title={t('laser.status.syncTitle', 'Lines auto-synced to the Program tab')}>
-          → {t('laser.status.program', 'Program')}
+        {estimate && (
+          <>
+            <span className="lp-status-sep" aria-hidden="true">·</span>
+            <span
+              className="lp-status-pill"
+              title={t('laser.status.estTitle', 'Estimated cut path length and time (XY, all passes — pierce dwell included).')}
+            >
+              <b>{(estimate.lengthMm / 1000).toFixed(2)} m</b> · <b>{fmtDuration(estimate.timeSeconds)}</b>
+            </span>
+          </>
+        )}
+        <span
+          className="lp-status-sync"
+          title={
+            streaming
+              ? t('laser.status.streamingTitle', 'Streaming — live sync paused so the running job is not reset.')
+              : t('laser.status.syncTitle', 'Lines auto-synced to the Program tab')
+          }
+        >
+          {streaming ? (
+            <>
+              <Icon name="play" size={12} /> {t('laser.status.streaming', 'Streaming')}
+            </>
+          ) : (
+            <>
+              <Icon name="chevron-right" size={12} /> {t('laser.status.program', 'Program')}
+            </>
+          )}
         </span>
       </div>
 
@@ -402,7 +506,7 @@ export function LaserPanel() {
             className="lp-btn lp-btn-primary"
             onClick={() => fileInputRef.current?.click()}
           >
-            {t('laser.dxf.import', 'Import DXF…')}
+            <Icon name="upload" size={15} /> {t('laser.dxf.import', 'Import DXF…')}
           </button>
           <input
             ref={fileInputRef}
@@ -482,10 +586,11 @@ export function LaserPanel() {
           <NumField
             label={t('laser.sheet.qty', 'Quantity')}
             min="1"
+            max={String(MAX_QUANTITY)}
             value={quantity}
             parse={intNum}
-            onChange={(n) => setQuantity(n)}
-            title={t('laser.sheet.qty.title', 'Number of copies of the imported part to lay out.')}
+            onChange={(n) => setQuantity(clamp(Math.floor(n), 1, MAX_QUANTITY))}
+            title={t('laser.sheet.qty.title', 'Number of copies of the imported part to lay out (max {max}).', { max: MAX_QUANTITY })}
           />
         </div>
         {nestFit && (
@@ -500,6 +605,24 @@ export function LaserPanel() {
               ? t('laser.nest.overflow', ' — some overflow the edge.')
               : t('laser.nest.period', '.')}
           </p>
+        )}
+        {/* Without nesting, >1 copies stack at the SAME spot → overlapping burns. */}
+        {!doNest && quantity > 1 && contours.length > 0 && (
+          <p className="lp-hint is-warn">
+            <Icon name="warning" size={13} />{' '}
+            {t(
+              'laser.nest.stackWarn',
+              'Nesting is off — all {n} copies overlap at the same spot. Enable Nest to lay them out separately.',
+              { n: quantity },
+            )}
+          </p>
+        )}
+        {nest.warnings.length > 0 && (
+          <ul className="lp-warn-list">
+            {nest.warnings.map((w, i) => (
+              <li key={i}>{nestWarnText(w)}</li>
+            ))}
+          </ul>
         )}
       </section>
 
@@ -522,9 +645,10 @@ export function LaserPanel() {
             label={t('laser.cut.power', 'Power')}
             unit="S"
             min="0"
+            max={String(params.sMax)}
             step="10"
             value={params.power}
-            onChange={(n) => setParams({ power: n })}
+            onChange={(n) => setParams({ power: clamp(n, 0, Math.max(1, params.sMax)) })}
             title={t('laser.cut.power.title', 'Laser power as an S value (0..{sMax} = 0..100%). Currently {pct}%.', {
               sMax: params.sMax,
               pct: powerPct,
@@ -590,6 +714,19 @@ export function LaserPanel() {
         </div>
       </section>
 
+      {/* Advanced (mode-specific) — collapsed by default to reduce scroll. */}
+      <button
+        type="button"
+        className="lp-advanced-toggle"
+        onClick={() => setShowAdvanced((v) => !v)}
+        aria-expanded={showAdvanced}
+      >
+        <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
+        {t('laser.advanced', 'Advanced — piercing & focus')}
+      </button>
+
+      {showAdvanced && (
+      <>
       {/* Mode-specific: piercing. Both modes can pierce; defaults differ. */}
       <section className="lp-card">
         <div className="lp-card-head">
@@ -609,10 +746,11 @@ export function LaserPanel() {
               label={t('laser.pierce.power', 'Pierce power')}
               unit="S"
               min="0"
+              max={String(params.sMax)}
               step="10"
               value={params.piercePower}
-              onChange={(n) => setParams({ piercePower: n })}
-              title={t('laser.pierce.power.title', 'Beam power during the pre-cut pierce dwell (typically higher than cut power).')}
+              onChange={(n) => setParams({ piercePower: clamp(n, 0, Math.max(1, params.sMax)) })}
+              title={t('laser.pierce.power.title', 'Beam power during the pre-cut pierce dwell (0..{sMax}).', { sMax: params.sMax })}
             />
             <NumField
               label={t('laser.pierce.time', 'Pierce time')}
@@ -652,9 +790,11 @@ export function LaserPanel() {
               label={t('laser.focus.z', 'Focus Z')}
               unit="mm"
               step="0.1"
+              min="0"
+              max="200"
               value={params.focusZ}
-              onChange={(n) => setParams({ focusZ: n })}
-              title={t('laser.focus.z.title', 'Absolute Z moved to at program start to set focus.')}
+              onChange={(n) => setParams({ focusZ: clamp(n, 0, 200) })}
+              title={t('laser.focus.z.title', 'Absolute Z moved to at program start to set focus (0..200 mm). Negative Z is blocked — there is no safe-Z retract before this move.')}
             />
           </div>
         ) : (
@@ -668,6 +808,8 @@ export function LaserPanel() {
             : t('laser.focus.note.co2', 'CO2 focus is usually fixed/manual; set a Z here only if your machine focuses by Z.')}
         </p>
       </section>
+      </>
+      )}
 
       <p className="lp-safety">
         {t('laser.safety', 'Safety: laser OFF (M5 S0) during all travel; beam on (M3/M4 S…) only on cut feeds; requires GRBL laser mode $32=1.')}

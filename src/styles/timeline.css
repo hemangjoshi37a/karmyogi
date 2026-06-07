@@ -59,11 +59,15 @@
   height: 6px;
   margin: 0;
   border-radius: 3px;
+  /* The fill must end at the THUMB's centre, not at a raw percent of the full
+     track — the 12px thumb's centre travels from 6px to (100% − 6px), so the
+     fill edge is computed the same way and the handle sits exactly on it. */
+  --pt-pos: calc(6px + var(--pt-frac, 0) * (100% - 12px));
   background: linear-gradient(
     to right,
     var(--accent) 0%,
-    var(--accent) var(--pt-pct, 0%),
-    var(--bg-input) var(--pt-pct, 0%),
+    var(--accent) var(--pt-pos),
+    var(--bg-input) var(--pt-pos),
     var(--bg-input) 100%
   );
   cursor: pointer;
@@ -162,6 +166,8 @@
   }
   .pt-range {
     height: 10px;
+    /* Larger (20px) touch thumb → match the fill inset to it. */
+    --pt-pos: calc(10px + var(--pt-frac, 0) * (100% - 20px));
   }
   .pt-range::-webkit-slider-thumb {
     width: 20px;

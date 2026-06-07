@@ -1434,7 +1434,7 @@
   "solder.toolbar.settings": "Settings",
   "solder.toolbar.settings.body": "New-point defaults plus feeder and motion parameters (Safe-Z, feeder S, plunge feed, dwell).",
   "tab.aigcode": "AI G-code",
-  "tab.cadcam": "3D Carving",
+  "tab.cadcam": "2D/3D Carving",
   "tab.camera": "Camera",
   "tab.console": "Console",
   "tab.controller": "Controller",

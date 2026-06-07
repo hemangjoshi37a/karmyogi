@@ -23,9 +23,15 @@ import {
   type LayerRole,
   type PackageEntry,
 } from '../core/gerberPackage'
+import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import '../styles/pcb.css'
+
+/** Single canonical program section for ALL PCB output (preview / play / generate).
+ *  Using ONE name means each push REPLACES the previous one — the operator never
+ *  accumulates stale stages, and what shows in the Visualizer == what runs. */
+const PCB_SECTION = 'pcb'
 
 const ZIP_ACCEPT = '.zip'
 const GERBER_ACCEPT = '.gbr,.ger,.gtl,.gbl,.art,.gko,.gm1,.txt'
@@ -53,6 +59,34 @@ function stageVerb(t: TFn, stage: StageId): string {
       return t('pcb.verb.cutout', 'board cutout')
   }
 }
+
+/** Localised noun label for a stage — translated BEFORE being interpolated into
+ *  status/title strings (so we never inject a raw English/enum id). */
+function stageLabel(t: TFn, stage: StageId): string {
+  switch (stage) {
+    case 'isolation':
+      return t('pcb.stage.isolation', 'Isolation')
+    case 'drill':
+      return t('pcb.stage.drilling', 'Drilling')
+    case 'cutout':
+      return t('pcb.stage.cutout', 'Cutout')
+  }
+}
+
+/** The tool the operator must fit for each stage (for the run-all checklist). */
+function stageTool(t: TFn, stage: StageId): string {
+  switch (stage) {
+    case 'isolation':
+      return t('pcb.tool.isolation', 'V-bit / engraving tool for isolation')
+    case 'drill':
+      return t('pcb.tool.drill', 'drill bit matching the hole size')
+    case 'cutout':
+      return t('pcb.tool.cutout', 'end mill for the board cutout')
+  }
+}
+
+/** Fixed CAM order for a full run: isolate copper, drill holes, cut the board out. */
+const STAGE_ORDER: StageId[] = ['isolation', 'drill', 'cutout']
 
 interface Params {
   zmode: 'spindle' | 'pen'
@@ -139,23 +173,44 @@ function parsePcbParams(v: unknown, base: Params): Params {
   }
 }
 
-/** A layer file in the mapping table, with a one-line parse summary. */
+/**
+ * Parsed geometry for a row, cached on the row so a file is parsed exactly ONCE
+ * (in {@link makeRow} / {@link changeRole}) and reused everywhere — the summary,
+ * the `resolved` stage inputs, and per-row Preview/Play. `kind` follows the row's
+ * role at parse time; an error means the file failed to parse for that role.
+ */
+type ParsedGeom =
+  | { kind: 'copper'; data: GerberData }
+  | { kind: 'drill'; data: ExcellonData }
+  | { kind: 'outline'; data: GerberData }
+  | { kind: 'none' } // role with no CAM op (Ignore/Unknown)
+  | { kind: 'error'; error: string }
+
+/** A layer file in the mapping table, with a one-line parse summary + cached geometry. */
 interface LayerRow extends PackageEntry {
   /** Stable id for React keys / role edits. */
   id: string
   /** Short human summary (geometry counts) or parse error. */
   summary: string
   parseError?: boolean
+  /** Geometry parsed ONCE for the current role (memoised on the row). */
+  parsed: ParsedGeom
 }
 
 const bytesLabel = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`)
 
-// Summarise an entry's geometry for the table, without committing it to a stage.
-function summarizeEntry(t: TFn, e: PackageEntry): { summary: string; parseError?: boolean } {
+// Parse an entry's file ONCE for its current role and build both the cached
+// geometry and the one-line table summary. Called only when a row is created or
+// its role changes — never during render — so files aren't re-parsed per frame.
+function parseEntry(t: TFn, e: PackageEntry): { parsed: ParsedGeom; summary: string; parseError?: boolean } {
   if (e.role === 'Drill') {
     const res = importExcellon(e.text)
-    if (!res.ok) return { summary: res.error ?? t('pcb.summary.parseError', 'parse error'), parseError: true }
+    if (!res.ok) {
+      const error = res.error ?? t('pcb.summary.parseError', 'parse error')
+      return { parsed: { kind: 'error', error }, summary: error, parseError: true }
+    }
     return {
+      parsed: { kind: 'drill', data: res.data },
       summary: t('pcb.summary.drill', '{hits} hits, {tools} tools', {
         hits: res.data.hits.length,
         tools: res.data.toolDiameters().length,
@@ -164,9 +219,13 @@ function summarizeEntry(t: TFn, e: PackageEntry): { summary: string; parseError?
   }
   if (e.role === 'CopperTop' || e.role === 'CopperBottom' || e.role === 'BoardOutline') {
     const res = importGerber(e.text)
-    if (!res.ok) return { summary: res.error ?? t('pcb.summary.parseError', 'parse error'), parseError: true }
+    if (!res.ok) {
+      const error = res.error ?? t('pcb.summary.parseError', 'parse error')
+      return { parsed: { kind: 'error', error }, summary: error, parseError: true }
+    }
     const b = res.data.bounds()
     return {
+      parsed: { kind: e.role === 'BoardOutline' ? 'outline' : 'copper', data: res.data },
       summary: t('pcb.summary.gerber', '{tr}tr {pad}pad {rgn}rgn · {w}×{h}mm', {
         tr: res.data.traces.length,
         pad: res.data.pads.length,
@@ -176,15 +235,23 @@ function summarizeEntry(t: TFn, e: PackageEntry): { summary: string; parseError?
       }),
     }
   }
-  return { summary: bytesLabel(e.size) }
+  return { parsed: { kind: 'none' }, summary: bytesLabel(e.size) }
 }
 
 function makeRow(t: TFn, e: PackageEntry, idx: number): LayerRow {
-  const { summary, parseError } = summarizeEntry(t, e)
-  return { ...e, id: `${idx}-${e.name}`, summary, parseError }
+  const { parsed, summary, parseError } = parseEntry(t, e)
+  return { ...e, id: `${idx}-${e.name}`, summary, parseError, parsed }
 }
 
-/** Geometry resolved for a single layer row, ready to feed a CAM op. */
+/** Re-parse a row for a new role (used by changeRole / loadPcbDoc remap). */
+function rowWithRole(t: TFn, row: LayerRow, role: LayerRole): LayerRow {
+  const updated: PackageEntry = { ...row, role }
+  const { parsed, summary, parseError } = parseEntry(t, updated)
+  return { ...row, role, summary, parseError, parsed }
+}
+
+/** Geometry resolved for a single layer row, ready to feed a CAM op (reuses the
+ *  cached parse — no re-parsing). */
 type RowGeom =
   | { kind: 'copper'; data: GerberData }
   | { kind: 'drill'; data: ExcellonData }
@@ -193,14 +260,12 @@ type RowGeom =
 function rowGeometry(t: TFn, row: LayerRow): RowGeom | { error: string } {
   const stage = ROLE_STAGE[row.role]
   if (!stage) return { error: t('pcb.error.noOperation', 'This layer role has no machining operation.') }
-  if (row.role === 'Drill') {
-    const res = importExcellon(row.text)
-    if (!res.ok) return { error: res.error ?? t('pcb.error.excellonParse', 'Excellon parse error') }
-    return { kind: 'drill', data: res.data }
-  }
-  const res = importGerber(row.text)
-  if (!res.ok) return { error: res.error ?? t('pcb.error.gerberParse', 'Gerber parse error') }
-  return { kind: row.role === 'BoardOutline' ? 'outline' : 'copper', data: res.data }
+  const p = row.parsed
+  if (p.kind === 'error') return { error: p.error }
+  if (p.kind === 'drill') return { kind: 'drill', data: p.data }
+  if (p.kind === 'copper') return { kind: 'copper', data: p.data }
+  if (p.kind === 'outline') return { kind: 'outline', data: p.data }
+  return { error: t('pcb.error.noOperation', 'This layer role has no machining operation.') }
 }
 
 /**
@@ -214,7 +279,15 @@ function rowGeometry(t: TFn, row: LayerRow): RowGeom | { error: string } {
 export function PcbPanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
+  const removeSection = useProgram((s) => s.removeSection)
+  const streaming = useProgram((s) => s.streaming)
   const connected = useMachine((s) => s.connection === 'connected')
+  const machineState = useMachine((s) => s.state)
+
+  // The machine is "busy" while a program is streaming OR GRBL reports Run/Hold;
+  // running another job on top would corrupt the active stream. Used to gate
+  // every Play / streamed-generate affordance below.
+  const machineBusy = streaming || machineState === 'Run' || machineState === 'Hold'
 
   const zipRef = useRef<HTMLInputElement>(null)
   const gerberRef = useRef<HTMLInputElement>(null)
@@ -237,7 +310,21 @@ export function PcbPanel() {
 
   const [params, setParams] = useState<Params>(DEFAULTS)
   const [activeStage, setActiveStage] = useState<StageId>('isolation')
+  // The single status line. `statusError` routes the message to .pcb-error
+  // (red/danger) styling rather than the green .pcb-status success styling.
   const [status, setStatus] = useState<string>('')
+  const [statusError, setStatusError] = useState(false)
+
+  // Report a success message (green) or a failure (red). `setStatus` is reserved
+  // for clearing ('') and for SaveLoadButtons' onError (treated as an error).
+  const ok = (msg: string) => {
+    setStatusError(false)
+    setStatus(msg)
+  }
+  const fail = (msg: string) => {
+    setStatusError(true)
+    setStatus(msg)
+  }
 
   // Advanced section is collapsed by default — beginners drive the layer table.
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -246,13 +333,25 @@ export function PcbPanel() {
   const [lastGcode, setLastGcode] = useState<{ name: string; text: string } | null>(null)
   const [showGcode, setShowGcode] = useState(false)
 
+  // Run-gate: the row whose Play has been "armed" (a styled hold-to-run affordance
+  // that replaces the native window.confirm). Confirming it streams; arming any
+  // other row (or generating elsewhere) cancels a previous arm.
+  const [armedRunId, setArmedRunId] = useState<string | null>(null)
+
   function set<K extends keyof Params>(key: K, value: Params[K]) {
     setParams((p) => ({ ...p, [key]: value }))
   }
-  function num(key: keyof Params) {
+  // Numeric input handler with clamping. A blank/non-numeric value keeps the
+  // PREVIOUS value (instead of silently coercing to 0, which would, e.g., make a
+  // cut depth or tool diameter zero); finite values are clamped to [min, max].
+  function num(key: keyof Params, min?: number, max?: number) {
     return (e: ChangeEvent<HTMLInputElement>) => {
       const v = parseFloat(e.target.value)
-      set(key, (Number.isFinite(v) ? v : 0) as Params[typeof key])
+      if (!Number.isFinite(v)) return // blank/garbage: leave the field unchanged
+      let clamped = v
+      if (min != null && clamped < min) clamped = min
+      if (max != null && clamped > max) clamped = max
+      set(key, clamped as Params[typeof key])
     }
   }
 
@@ -260,6 +359,8 @@ export function PcbPanel() {
   async function loadZip(file: File) {
     setPkgError('')
     setStatus('')
+    setStatusError(false)
+    setArmedRunId(null)
     try {
       const buf = new Uint8Array(await file.arrayBuffer())
       const entries = unzipGerberPackage(buf)
@@ -295,14 +396,22 @@ export function PcbPanel() {
   }
 
   function changeRole(id: string, role: LayerRole) {
-    setLayers((rows) =>
-      rows.map((r) => {
-        if (r.id !== id) return r
-        const updated: PackageEntry = { ...r, role }
-        const { summary, parseError } = summarizeEntry(t, updated)
-        return { ...r, role, summary, parseError }
-      })
-    )
+    setArmedRunId(null)
+    setLayers((rows) => rows.map((r) => (r.id === id ? rowWithRole(t, r, role) : r)))
+  }
+
+  // Clear the whole package back to the empty state (TASK: Clear package reset).
+  function clearPackage() {
+    setLayers([])
+    setPkgName('')
+    setPkgError('')
+    setStatus('')
+    setStatusError(false)
+    setArmedRunId(null)
+    setLastGcode(null)
+    // Drop our (single canonical) section from the program store too, so the
+    // Visualizer/Program tab don't keep showing a now-orphaned PCB program.
+    removeSection(PCB_SECTION)
   }
 
   // Find the first non-erroring layer row assigned to a given role.
@@ -385,9 +494,13 @@ export function PcbPanel() {
   }
 
   function makeTool() {
+    // NOTE: `Tool.stepover` is the documented 0..1 fraction (used by pocketing);
+    // we leave it at the library default. The PCB "Pass stepover (mm)" field is a
+    // METRIC value passed EXPLICITLY to isolationRoutes() instead (see below), so
+    // the unit contract is unambiguous and a sub-mm value is never mistaken for a
+    // fraction of the (tiny) tool diameter.
     return defaultTool({
       diameter: params.toolDia,
-      stepover: params.stepover, // metric step (mm) for isolation passes
       stepdown: params.cutoutDepth > 0.6 ? 0.6 : params.cutoutDepth,
       feedXY: params.feedXY,
       feedZ: params.feedZ,
@@ -410,7 +523,7 @@ export function PcbPanel() {
             'Assign a Copper Top/Bottom layer (or load a Gerber) for isolation routing.',
           ),
         }
-      tp = isolationRoutes(geom.copper, tool, params.safeZ, params.copperZ, params.passes)
+      tp = isolationRoutes(geom.copper, tool, params.safeZ, params.copperZ, params.passes, params.stepover)
     } else if (stage === 'drill') {
       if (!geom.drillData)
         return {
@@ -455,47 +568,55 @@ export function PcbPanel() {
 
   // ---- resolve the geometry that drives each (global) stage ----
   // Prefer a layer assigned in the ZIP table; fall back to the single-file input.
+  // REUSES each row's cached `parsed` geometry — no file is re-parsed here.
   const resolved = useMemo(() => {
     const copperRow = rowFor('CopperTop') ?? rowFor('CopperBottom')
     let copper: GerberData | null = null
-    if (copperRow) {
-      const res = importGerber(copperRow.text)
-      if (res.ok) copper = res.data
-    }
+    if (copperRow && copperRow.parsed.kind === 'copper') copper = copperRow.parsed.data
     if (!copper) copper = singleGerber
 
     const drillRow = rowFor('Drill')
     let drillData: ExcellonData | null = null
-    if (drillRow) {
-      const res = importExcellon(drillRow.text)
-      if (res.ok) drillData = res.data
-    }
+    if (drillRow && drillRow.parsed.kind === 'drill') drillData = drillRow.parsed.data
     if (!drillData) drillData = singleDrill
 
     const outlineRow = rowFor('BoardOutline')
     let outline: GerberData | null = null
-    if (outlineRow) {
-      const res = importGerber(outlineRow.text)
-      if (res.ok) outline = res.data
-    }
+    if (outlineRow && outlineRow.parsed.kind === 'outline') outline = outlineRow.parsed.data
 
     return { copper, drillData, outline }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layers, singleGerber, singleDrill])
 
-  // Generate a (global) stage and push it to the program store.
+  // Push G-code into the SINGLE canonical PCB section (replacing whatever was
+  // there) and mirror it into the collapsible preview, then return the program
+  // store's BAKED (placement-applied) lines. Streaming these guarantees
+  // what-shows == what-runs (WYSIWYG): both the Visualizer and the machine get
+  // the same placed program, never a divergent raw split. `label` is the
+  // human-readable program name shown in the G-code preview header.
+  function pushProgram(gcode: string, label: string): string[] {
+    setProgram(PCB_SECTION, gcode)
+    // After setProgram, the store has re-baked `lines` (placement applied). Read
+    // them back so the preview text and the streamed lines are the SAME source.
+    const baked = useProgram.getState().lines
+    const text = baked.join('\n')
+    setLastGcode({ name: label, text })
+    return baked.filter((l) => l.length > 0)
+  }
+
+  // Generate a (global) stage and push it to the program store (NOT streamed).
   function sendStage(stage: StageId) {
     const res = buildGcode(stage, resolved)
     if ('error' in res) {
-      setStatus(res.error)
+      fail(res.error)
+      setLastGcode(null)
       return
     }
-    const name = `pcb-${stage}.nc`
-    setProgram(name, res.gcode)
-    setLastGcode({ name, text: res.gcode })
-    setStatus(
+    setArmedRunId(null)
+    pushProgram(res.gcode, `pcb-${stage}.nc`)
+    ok(
       t('pcb.status.sentStage', 'Sent {stage} to program: {moves} moves, cut {mm} mm.', {
-        stage,
+        stage: stageLabel(t, stage),
         moves: res.tp.size(),
         mm: res.tp.cutLength().toFixed(1),
       }),
@@ -525,14 +646,14 @@ export function PcbPanel() {
   }
 
   function previewRow(row: LayerRow) {
+    setArmedRunId(null)
     const res = buildRowGcode(row)
     if ('error' in res) {
-      setStatus(t('pcb.status.rowError', '{name}: {error}', { name: row.name, error: res.error }))
+      fail(t('pcb.status.rowError', '{name}: {error}', { name: row.name, error: res.error }))
       return
     }
-    setProgram(res.name, res.gcode)
-    setLastGcode({ name: res.name, text: res.gcode })
-    setStatus(
+    pushProgram(res.gcode, res.name)
+    ok(
       t(
         'pcb.status.preview',
         'Preview {verb} for {name}: {moves} moves, cut {mm} mm. Shown in Visualizer.',
@@ -546,34 +667,51 @@ export function PcbPanel() {
     )
   }
 
+  // Tapping Play ARMS the row (a styled, in-panel confirm — no native dialog).
+  // A second tap on the now-armed control actually streams it.
   function playRow(row: LayerRow) {
     if (!connected) {
-      setStatus(t('pcb.status.connectFirst', 'Connect to the machine before running a layer.'))
+      fail(t('pcb.status.connectFirst', 'Connect to the machine before running a layer.'))
+      return
+    }
+    if (machineBusy) {
+      fail(t('pcb.status.busy', 'Machine is busy (running/paused) — wait for the current job to finish.'))
+      return
+    }
+    // Always show the layer in the Visualizer first (WYSIWYG), then arm.
+    const res = buildRowGcode(row)
+    if ('error' in res) {
+      fail(t('pcb.status.rowError', '{name}: {error}', { name: row.name, error: res.error }))
+      return
+    }
+    pushProgram(res.gcode, res.name)
+    setArmedRunId(row.id)
+    ok(
+      t('pcb.status.armed', 'Armed {verb} for {name} — {moves} moves, {mm} mm. Confirm to run.', {
+        verb: stageVerb(t, res.stage),
+        name: row.name,
+        moves: res.tp.size(),
+        mm: res.tp.cutLength().toFixed(1),
+      }),
+    )
+  }
+
+  // Confirm the armed run: re-check the gate, push the canonical section, and
+  // stream the program store's BAKED lines so what-shows == what-runs.
+  function confirmRunRow(row: LayerRow) {
+    setArmedRunId(null)
+    if (!connected || machineBusy) {
+      fail(t('pcb.status.busy', 'Machine is busy (running/paused) — wait for the current job to finish.'))
       return
     }
     const res = buildRowGcode(row)
     if ('error' in res) {
-      setStatus(t('pcb.status.rowError', '{name}: {error}', { name: row.name, error: res.error }))
+      fail(t('pcb.status.rowError', '{name}: {error}', { name: row.name, error: res.error }))
       return
     }
-    const ok = window.confirm(
-      t(
-        'pcb.confirm.run',
-        'RUN {verb} for "{name}" on the machine now?\n{moves} moves, {mm} mm of cutting.\nMake sure the work is clamped and Z is zeroed.',
-        {
-          verb: stageVerb(t, res.stage),
-          name: row.name,
-          moves: res.tp.size(),
-          mm: res.tp.cutLength().toFixed(1),
-        },
-      ),
-    )
-    if (!ok) return
-    setProgram(res.name, res.gcode)
-    setLastGcode({ name: res.name, text: res.gcode })
-    const lines = res.gcode.split(/\r?\n/).filter((l) => l.length > 0)
+    const lines = pushProgram(res.gcode, res.name)
     grbl.startProgram(lines)
-    setStatus(
+    ok(
       t('pcb.status.streaming', 'Streaming {verb} for {name} — {lines} lines.', {
         verb: stageVerb(t, res.stage),
         name: row.name,
@@ -597,13 +735,18 @@ export function PcbPanel() {
   const drillTools = resolved.drillData ? resolved.drillData.toolDiameters().length : 0
   const drillHitsCount = resolved.drillData ? resolved.drillData.hits.length : 0
 
+  const stageReady: Record<StageId, boolean> = {
+    isolation: hasCopper,
+    drill: hasDrill,
+    cutout: hasOutline || hasCopper,
+  }
   const stageMeta: { id: StageId; label: string; ready: boolean; note?: string }[] = [
-    { id: 'isolation', label: t('pcb.stage.isolation', 'Isolation'), ready: hasCopper },
-    { id: 'drill', label: t('pcb.stage.drilling', 'Drilling'), ready: hasDrill },
+    { id: 'isolation', label: t('pcb.stage.isolation', 'Isolation'), ready: stageReady.isolation },
+    { id: 'drill', label: t('pcb.stage.drilling', 'Drilling'), ready: stageReady.drill },
     {
       id: 'cutout',
       label: t('pcb.stage.cutout', 'Cutout'),
-      ready: hasOutline || hasCopper,
+      ready: stageReady.cutout,
       note: hasOutline
         ? undefined
         : hasCopper
@@ -611,6 +754,70 @@ export function PcbPanel() {
         : undefined,
     },
   ]
+
+  // The stages that CAN run (in fixed CAM order) given the assigned layers.
+  const readyStages = STAGE_ORDER.filter((s) => stageReady[s])
+
+  // ---- Run all ready stages in sequence ----
+  // Build ONE program that runs each ready stage back-to-back, pausing (M0) before
+  // each so the operator can fit the right tool / re-zero. Streams the BAKED lines
+  // from the single canonical section, so the Visualizer shows the full sequence.
+  function buildAllStagesGcode(): { gcode: string; stages: StageId[]; moves: number } | { error: string } {
+    const parts: string[] = []
+    let totalMoves = 0
+    const done: StageId[] = []
+    for (const stage of readyStages) {
+      const res = buildGcode(stage, resolved)
+      if ('error' in res) continue // skip a stage that produced nothing
+      // A pause + comment between stages so the operator can change the tool.
+      if (parts.length > 0) {
+        parts.push('M0 (tool change — fit ' + stageTool(t, stage).replace(/[()]/g, '') + ')')
+      }
+      parts.push(`(— ${stageLabel(t, stage)} —)`)
+      parts.push(res.gcode.trimEnd())
+      totalMoves += res.tp.size()
+      done.push(stage)
+    }
+    if (done.length === 0) return { error: t('pcb.error.noStages', 'No stages are ready to run. Assign layers first.') }
+    return { gcode: parts.join('\n'), stages: done, moves: totalMoves }
+  }
+
+  function previewAllStages() {
+    setArmedRunId(null)
+    const res = buildAllStagesGcode()
+    if ('error' in res) {
+      fail(res.error)
+      return
+    }
+    pushProgram(res.gcode, 'pcb-all.nc')
+    ok(
+      t('pcb.status.previewAll', 'Preview all {n} stages — {moves} moves. Shown in Visualizer.', {
+        n: res.stages.length,
+        moves: res.moves,
+      }),
+    )
+  }
+
+  function runAllStages() {
+    setArmedRunId(null)
+    if (!connected || machineBusy) {
+      fail(t('pcb.status.busy', 'Machine is busy (running/paused) — wait for the current job to finish.'))
+      return
+    }
+    const res = buildAllStagesGcode()
+    if ('error' in res) {
+      fail(res.error)
+      return
+    }
+    const lines = pushProgram(res.gcode, 'pcb-all.nc')
+    grbl.startProgram(lines)
+    ok(
+      t('pcb.status.streamingAll', 'Streaming all {n} stages — {lines} lines. Pauses (M0) between stages for tool changes.', {
+        n: res.stages.length,
+        lines: lines.length,
+      }),
+    )
+  }
 
   // Counts for the package summary banner.
   const roleCounts = useMemo(() => {
@@ -649,9 +856,10 @@ export function PcbPanel() {
 
   function loadPcbDoc(data: unknown) {
     if (!isRecord(data)) {
-      setStatus(t('pcb.load.bad', 'Could not load — not a valid PCB settings file.'))
+      fail(t('pcb.load.bad', 'Could not load — not a valid PCB settings file.'))
       return
     }
+    setArmedRunId(null)
     setParams((p) => parsePcbParams(data.params, p))
     if (VALID_STAGES.includes(data.activeStage as StageId)) {
       setActiveStage(data.activeStage as StageId)
@@ -665,13 +873,11 @@ export function PcbPanel() {
           const role = roles[r.name]
           if (typeof role !== 'string' || !VALID_ROLES.includes(role as LayerRole)) return r
           remapped++
-          const updated: PackageEntry = { ...r, role: role as LayerRole }
-          const { summary, parseError } = summarizeEntry(t, updated)
-          return { ...r, role: role as LayerRole, summary, parseError }
+          return rowWithRole(t, r, role as LayerRole)
         }),
       )
     }
-    setStatus(
+    ok(
       layers.length === 0
         ? t('pcb.load.paramsOnly', 'Loaded PCB settings. Upload a Gerber ZIP to apply the saved layer roles.')
         : t('pcb.load.applied', 'Loaded PCB settings — re-applied {n} layer roles.', { n: remapped }),
@@ -700,7 +906,8 @@ export function PcbPanel() {
               }}
             >
               <button className="pcb-load-btn primary pcb-load-zip" onClick={() => zipRef.current?.click()}>
-                {t('pcb.upload.button', '⬆ Upload Gerber ZIP…')}
+                <Icon name="upload" size={16} className="pcb-btn-icon" />
+                {t('pcb.upload.button', 'Upload Gerber ZIP…')}
               </button>
               <span className="pcb-drop-hint">{t('pcb.upload.dropHint', 'or drop a .zip export here')}</span>
               <input
@@ -718,7 +925,9 @@ export function PcbPanel() {
                   'pcb.intro.lead',
                   "Drop your board's Gerber/Excellon export ZIP here. Layers are detected automatically — then press ",
                 )}
-                <span className="pcb-kbd">▶</span>
+                <span className="pcb-kbd">
+                  <Icon name="play" size={11} />
+                </span>
                 {t('pcb.intro.rest', ' on a layer to run it.')}
               </p>
             )}
@@ -730,7 +939,8 @@ export function PcbPanel() {
               onClick={() => setShowSingle((s) => !s)}
               aria-expanded={showSingle}
             >
-              {showSingle ? '▾' : '▸'} {t('pcb.single.toggle', 'or load individual files')}
+              <Icon name={showSingle ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
+              {t('pcb.single.toggle', 'or load individual files')}
             </button>
 
             {showSingle && (
@@ -822,26 +1032,35 @@ export function PcbPanel() {
         {/* ---- 2. Detected layers ---- */}
         {layers.length > 0 && (
           <section className="pcb-section pcb-section-wide">
-            <h3>{t('pcb.layers.title', '2 · Layers — press ▶ to run')}</h3>
+            <h3 className="pcb-h3-row">
+              <span>{t('pcb.layers.title', '2 · Layers')}</span>
+              <IconButton
+                className="pcb-clear-btn"
+                iconName="trash"
+                iconSize={14}
+                onClick={clearPackage}
+                label={t('pcb.layers.clear', 'Clear package')}
+              />
+            </h3>
             <div className="pcb-section-body">
               {pkgName && <div className="pcb-info">{pkgName}</div>}
 
-              {/* At-a-glance board summary: size + which stages are ready. */}
+              {/* Canonical at-a-glance readiness: size + which stages are ready. */}
               <div className="pcb-summary">
                 {boardSize && (
                   <span className="pcb-chip pcb-chip-dim" title={t('pcb.summary.boardSizeTitle', 'Board extents (mm)')}>
-                    📐 {boardSize.w.toFixed(1)} × {boardSize.h.toFixed(1)} mm
+                    <Icon name="frame" size={12} /> {boardSize.w.toFixed(1)} × {boardSize.h.toFixed(1)} mm
                   </span>
                 )}
                 <span className={'pcb-chip' + (hasCopper ? ' pcb-chip-ok' : ' pcb-chip-off')}>
-                  {hasCopper ? '✓' : '○'} {t('pcb.stage.isolation', 'Isolation')}
+                  <Icon name={hasCopper ? 'zero' : 'info'} size={12} /> {t('pcb.stage.isolation', 'Isolation')}
                 </span>
                 <span className={'pcb-chip' + (hasDrill ? ' pcb-chip-ok' : ' pcb-chip-off')}>
-                  {hasDrill ? '✓' : '○'} {t('pcb.stage.drilling', 'Drilling')}
+                  <Icon name={hasDrill ? 'zero' : 'info'} size={12} /> {t('pcb.stage.drilling', 'Drilling')}
                   {hasDrill ? ` · ${drillHitsCount}/${drillTools}T` : ''}
                 </span>
                 <span className={'pcb-chip' + (hasOutline || hasCopper ? ' pcb-chip-ok' : ' pcb-chip-off')}>
-                  {hasOutline || hasCopper ? '✓' : '○'} {t('pcb.stage.cutout', 'Cutout')}
+                  <Icon name={hasOutline || hasCopper ? 'zero' : 'info'} size={12} /> {t('pcb.stage.cutout', 'Cutout')}
                   {!hasOutline && hasCopper ? ` · ${t('pcb.summary.fromCopper', 'from copper')}` : ''}
                 </span>
               </div>
@@ -875,6 +1094,7 @@ export function PcbPanel() {
                       const stage = ROLE_STAGE[row.role]
                       const runnable = !!stage && !row.parseError
                       const verb = stage ? stageVerb(t, stage) : ''
+                      const armed = armedRunId === row.id
                       return (
                         <tr
                           key={row.id}
@@ -901,7 +1121,7 @@ export function PcbPanel() {
                             >
                               {LAYER_ROLES.map((r) => (
                                 <option key={r.role} value={r.role}>
-                                  {r.label}
+                                  {t(r.labelKey, r.label)}
                                 </option>
                               ))}
                             </select>
@@ -914,36 +1134,61 @@ export function PcbPanel() {
                           </td>
                           <td className="pcb-cell-run">
                             <div className="pcb-row-actions">
-                              <IconButton
-                                className="pcb-icon-btn"
-                                icon="👁"
-                                disabled={!runnable}
-                                onClick={() => previewRow(row)}
-                                label={
-                                  runnable
-                                    ? `${t('pcb.layers.previewAria', 'Preview {name}', {
-                                        name: row.name,
-                                      })} — ${t('pcb.layers.previewTitle', 'Preview {verb} in the Visualizer', {
-                                        verb,
-                                      })}`
-                                    : t('pcb.layers.noOpTitle', 'No machining operation for this role')
-                                }
-                              />
-                              <IconButton
-                                className="pcb-icon-btn pcb-icon-play"
-                                icon="▶"
-                                disabled={!runnable || !connected}
-                                onClick={() => playRow(row)}
-                                label={
-                                  !runnable
-                                    ? t('pcb.layers.noOpTitle', 'No machining operation for this role')
-                                    : !connected
-                                    ? t('pcb.layers.connectToRunTitle', 'Connect to the machine to run')
-                                    : `${t('pcb.layers.runAria', 'Run {name} on the machine', {
-                                        name: row.name,
-                                      })} — ${t('pcb.layers.runTitle', 'RUN {verb} on the machine', { verb })}`
-                                }
-                              />
+                              {armed ? (
+                                // Styled in-panel arm/confirm (replaces window.confirm).
+                                <>
+                                  <button
+                                    className="pcb-run-confirm"
+                                    onClick={() => confirmRunRow(row)}
+                                    disabled={machineBusy}
+                                    title={t('pcb.layers.confirmRunTitle', 'Confirm — stream to the machine')}
+                                  >
+                                    <Icon name="play" size={13} />
+                                    {t('pcb.layers.confirmRun', 'Run')}
+                                  </button>
+                                  <IconButton
+                                    className="pcb-icon-btn"
+                                    iconName="close"
+                                    onClick={() => setArmedRunId(null)}
+                                    label={t('pcb.layers.cancelRun', 'Cancel run')}
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  <IconButton
+                                    className="pcb-icon-btn"
+                                    iconName="eye"
+                                    disabled={!runnable}
+                                    onClick={() => previewRow(row)}
+                                    label={
+                                      runnable
+                                        ? `${t('pcb.layers.previewAria', 'Preview {name}', {
+                                            name: row.name,
+                                          })} — ${t('pcb.layers.previewTitle', 'Preview {verb} in the Visualizer', {
+                                            verb,
+                                          })}`
+                                        : t('pcb.layers.noOpTitle', 'No machining operation for this role')
+                                    }
+                                  />
+                                  <IconButton
+                                    className="pcb-icon-btn pcb-icon-play"
+                                    iconName="play"
+                                    disabled={!runnable || !connected || machineBusy}
+                                    onClick={() => playRow(row)}
+                                    label={
+                                      !runnable
+                                        ? t('pcb.layers.noOpTitle', 'No machining operation for this role')
+                                        : !connected
+                                        ? t('pcb.layers.connectToRunTitle', 'Connect to the machine to run')
+                                        : machineBusy
+                                        ? t('pcb.layers.busyTitle', 'Machine is busy — wait for the current job')
+                                        : `${t('pcb.layers.runAria', 'Run {name} on the machine', {
+                                            name: row.name,
+                                          })} — ${t('pcb.layers.runTitle', 'RUN {verb} on the machine', { verb })}`
+                                    }
+                                  />
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -954,10 +1199,64 @@ export function PcbPanel() {
               </div>
 
               <p className="pcb-legend">
-                <span className="pcb-kbd">👁</span> {t('pcb.legend.preview', 'preview in the 3D Visualizer · ')}
-                <span className="pcb-kbd">▶</span>{' '}
+                <span className="pcb-kbd">
+                  <Icon name="eye" size={11} />
+                </span>{' '}
+                {t('pcb.legend.preview', 'preview in the 3D Visualizer · ')}
+                <span className="pcb-kbd">
+                  <Icon name="play" size={11} />
+                </span>{' '}
                 {t('pcb.legend.stream', 'stream to the machine. Adjust the cut in Advanced below.')}
               </p>
+
+              {/* ---- Run all ready stages in sequence (with tool-change checklist) ---- */}
+              {readyStages.length > 0 && (
+                <div className="pcb-runall">
+                  <div className="pcb-subhead">
+                    {t('pcb.runall.title', 'Run all stages in sequence')}
+                  </div>
+                  <ol className="pcb-runall-list">
+                    {readyStages.map((s, i) => (
+                      <li key={s}>
+                        <span className="pcb-runall-step">{i + 1}.</span>{' '}
+                        <b>{stageLabel(t, s)}</b>
+                        {' — '}
+                        {t('pcb.runall.fit', 'fit {tool}', { tool: stageTool(t, s) })}
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="pcb-hint">
+                    {t(
+                      'pcb.runall.hint',
+                      'Runs each ready stage back-to-back, pausing (M0) before each so you can change the tool and re-zero.',
+                    )}
+                  </p>
+                  <div className="pcb-runall-actions">
+                    <button className="pcb-load-btn" onClick={previewAllStages}>
+                      <Icon name="eye" size={14} className="pcb-btn-icon" />
+                      {t('pcb.runall.preview', 'Preview all')}
+                    </button>
+                    <button
+                      className="pcb-load-btn primary"
+                      onClick={runAllStages}
+                      disabled={!connected || machineBusy}
+                      title={
+                        !connected
+                          ? t('pcb.layers.connectToRunTitle', 'Connect to the machine to run')
+                          : machineBusy
+                          ? t('pcb.layers.busyTitle', 'Machine is busy — wait for the current job')
+                          : t('pcb.runall.runTitle', 'Stream all ready stages in sequence')
+                      }
+                    >
+                      <Icon name="play" size={14} className="pcb-btn-icon" />
+                      {t('pcb.runall.run', 'Run all')}
+                    </button>
+                    {machineBusy && (
+                      <span className="pcb-hint">{t('pcb.runall.busy', 'Machine busy')}</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -969,7 +1268,7 @@ export function PcbPanel() {
             <SaveLoadButtons
               value={pcbDoc}
               onLoad={loadPcbDoc}
-              onError={setStatus}
+              onError={fail}
               fileBase="karmyogi-pcb"
               ext="kpcb"
               saveTitle={t('pcb.save', 'Save PCB settings + layer roles')}
@@ -993,10 +1292,10 @@ export function PcbPanel() {
             </div>
             <div className="pcb-grid">
               <Field label={t('pcb.essentials.toolDia', 'Tool Ø (mm)')}>
-                <input type="number" step="0.05" min="0.05" value={params.toolDia} onChange={num('toolDia')} />
+                <input type="number" step="0.05" min="0.05" value={params.toolDia} onChange={num('toolDia', 0.05)} />
               </Field>
               <Field label={t('pcb.essentials.safeZ', 'Safe Z (mm)')}>
-                <input type="number" step="0.5" value={params.safeZ} onChange={num('safeZ')} />
+                <input type="number" step="0.5" min="0" value={params.safeZ} onChange={num('safeZ', 0)} />
               </Field>
             </div>
             <p className="pcb-hint">
@@ -1015,7 +1314,8 @@ export function PcbPanel() {
             onClick={() => setShowAdvanced((v) => !v)}
             aria-expanded={showAdvanced}
           >
-            {showAdvanced ? '▾' : '▸'} {t('pcb.advanced.toggle', 'Advanced — stage, depths & feeds')}
+            <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
+            {t('pcb.advanced.toggle', 'Advanced — stage, depths & feeds')}
           </button>
           {showAdvanced && (
             <div className="pcb-section-body">
@@ -1030,7 +1330,12 @@ export function PcbPanel() {
                     title={s.ready ? s.note : t('pcb.advanced.layerNotAssigned', 'Required layer not assigned')}
                   >
                     {s.label}
-                    {!s.ready && <span className="pcb-stage-missing"> ⚠</span>}
+                    {!s.ready && (
+                      <span className="pcb-stage-missing" title={t('pcb.advanced.layerNotAssigned', 'Required layer not assigned')}>
+                        {' '}
+                        <Icon name="warning" size={12} />
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1047,14 +1352,14 @@ export function PcbPanel() {
               <div className="pcb-subhead">{t('pcb.advanced.feeds', 'Feeds')}</div>
               <div className="pcb-grid">
                 <Field label={t('pcb.advanced.feedXY', 'Feed XY (mm/min)')}>
-                  <input type="number" step="10" min="1" value={params.feedXY} onChange={num('feedXY')} />
+                  <input type="number" step="10" min="1" value={params.feedXY} onChange={num('feedXY', 1)} />
                 </Field>
                 <Field label={t('pcb.advanced.feedZ', 'Feed Z (mm/min)')}>
-                  <input type="number" step="10" min="1" value={params.feedZ} onChange={num('feedZ')} />
+                  <input type="number" step="10" min="1" value={params.feedZ} onChange={num('feedZ', 1)} />
                 </Field>
                 {params.zmode === 'spindle' && (
                   <Field label={t('pcb.advanced.spindleRpm', 'Spindle (rpm)')}>
-                    <input type="number" step="500" min="0" value={params.rpm} onChange={num('rpm')} />
+                    <input type="number" step="500" min="0" value={params.rpm} onChange={num('rpm', 0)} />
                   </Field>
                 )}
               </div>
@@ -1068,49 +1373,52 @@ export function PcbPanel() {
               {activeStage === 'isolation' && (
                 <div className="pcb-grid">
                   <Field label={t('pcb.advanced.isolationPasses', 'Isolation passes')}>
-                    <input type="number" step="1" min="1" max="8" value={params.passes} onChange={num('passes')} />
+                    <input type="number" step="1" min="1" max="8" value={params.passes} onChange={num('passes', 1, 8)} />
                   </Field>
                   <Field label={t('pcb.advanced.passStepover', 'Pass stepover (mm)')}>
-                    <input type="number" step="0.05" min="0.05" value={params.stepover} onChange={num('stepover')} />
+                    <input type="number" step="0.05" min="0.05" value={params.stepover} onChange={num('stepover', 0.05)} />
                   </Field>
                   <Field label={t('pcb.advanced.copperCutZ', 'Copper cut Z (mm)')}>
-                    <input type="number" step="0.01" max="0" value={params.copperZ} onChange={num('copperZ')} />
+                    <input type="number" step="0.01" max="0" value={params.copperZ} onChange={num('copperZ', undefined, 0)} />
                   </Field>
                 </div>
               )}
               {activeStage === 'drill' && (
                 <div className="pcb-grid">
                   <Field label={t('pcb.advanced.drillZ', 'Drill Z (mm)')}>
-                    <input type="number" step="0.1" max="0" value={params.drillZ} onChange={num('drillZ')} />
+                    <input type="number" step="0.1" max="0" value={params.drillZ} onChange={num('drillZ', undefined, 0)} />
                   </Field>
                   <Field label={t('pcb.advanced.peckDepth', 'Peck depth (mm, 0 = off)')}>
-                    <input type="number" step="0.1" min="0" value={params.peckDepth} onChange={num('peckDepth')} />
+                    <input type="number" step="0.1" min="0" value={params.peckDepth} onChange={num('peckDepth', 0)} />
                   </Field>
                 </div>
               )}
               {activeStage === 'cutout' && (
                 <div className="pcb-grid">
                   <Field label={t('pcb.advanced.cutoutDepth', 'Cutout depth (mm)')}>
-                    <input type="number" step="0.1" min="0.1" value={params.cutoutDepth} onChange={num('cutoutDepth')} />
+                    <input type="number" step="0.1" min="0.1" value={params.cutoutDepth} onChange={num('cutoutDepth', 0.1)} />
                   </Field>
                   <Field label={t('pcb.advanced.holdingTabs', 'Holding tabs (0 = none)')}>
-                    <input type="number" step="1" min="0" max="12" value={params.tabs} onChange={num('tabs')} />
+                    <input type="number" step="1" min="0" max="12" value={params.tabs} onChange={num('tabs', 0, 12)} />
                   </Field>
                   <Field label={t('pcb.advanced.tabWidth', 'Tab width (mm)')}>
-                    <input type="number" step="0.5" min="0.5" value={params.tabWidth} onChange={num('tabWidth')} />
+                    <input type="number" step="0.5" min="0.5" value={params.tabWidth} onChange={num('tabWidth', 0.5)} />
                   </Field>
                 </div>
               )}
 
-              {/* Manual generate for the active stage */}
+              {/* Manual generate for the active stage (pushes to the program store
+                  ONLY — never streams — so it stays enabled even while busy). */}
               <div className="pcb-generate">
                 <button className="primary" onClick={() => sendStage(activeStage)}>
-                  {t('pcb.advanced.generate', 'Generate {stage} → Program', { stage: activeStage })}
+                  {t('pcb.advanced.generate', 'Generate {stage} → Program', {
+                    stage: stageLabel(t, activeStage),
+                  })}
                 </button>
                 <span className="pcb-hint">
                   {t(
                     'pcb.advanced.generateHint',
-                    'Sends the active stage to the program store (same as a layer ▶, without streaming).',
+                    'Sends the active stage to the program store (same as a layer Play, without streaming).',
                   )}
                 </span>
               </div>
@@ -1123,7 +1431,11 @@ export function PcbPanel() {
           <section className="pcb-section pcb-section-wide">
             <h3>{t('pcb.output.title', 'Output')}</h3>
             <div className="pcb-section-body">
-              {status && <div className="pcb-status">{status}</div>}
+              {status && (
+                <div className={statusError ? 'pcb-error' : 'pcb-status'} role={statusError ? 'alert' : undefined}>
+                  {status}
+                </div>
+              )}
               {lastGcode && (
                 <div className="pcb-gcode">
                   <button
@@ -1131,7 +1443,7 @@ export function PcbPanel() {
                     onClick={() => setShowGcode((v) => !v)}
                     aria-expanded={showGcode}
                   >
-                    {showGcode ? '▾' : '▸'}{' '}
+                    <Icon name={showGcode ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
                     {t('pcb.output.gcodeLabel', 'G-code — {name}', { name: lastGcode.name })}
                     <span className="pcb-gcode-meta">
                       {t('pcb.output.lines', '{count} lines', {

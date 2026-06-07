@@ -1,0 +1,139 @@
+rules_version = '2';
+
+// karmyogi Firestore security rules (HARDENED).
+//
+// Model: each signed-in user owns a private subtree at users/{uid}/**. The single
+// super-admin (hardcoded email below; rules can't read env — keep in sync with
+// adminEmail() in src/auth/firebase.ts) may read everything, delete event docs,
+// and create remote-control commands. Everything else is denied.
+//
+// Hardening vs. the prior version: per-collection field/type/size validation and
+// document bounds so an authenticated client can't write oversized/malformed docs
+// (bill/abuse hardening), command-kind allow-listing, owner command-update limited
+// to {status,result}, and a locked-down catch-all (no open-ended owner create).
+// No real app read/write path is removed.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // REAL security gate. Keep in sync with adminEmail() in src/auth/firebase.ts.
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'hemangjoshi37a@gmail.com';
+    }
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    function fieldsAtMost(n) {
+      return request.resource.data.keys().size() <= n;
+    }
+    function isStr(v, max) {
+      return v is string && v.size() <= max;
+    }
+    function isOptStr(m, k, max) {
+      return !(k in m) || m[k] == null || (m[k] is string && m[k].size() <= max);
+    }
+    function isOptNum(m, k) {
+      return !(k in m) || m[k] == null || m[k] is number;
+    }
+
+    // ── users/{uid} profile / presence doc ───────────────────────────────
+    // writeProfile() upsert: { uid, email, displayName, photoURL, lastSeen,
+    // userAgent, lang, firstSeen?, policiesAcceptedAt?, policiesVersion? }.
+    match /users/{uid} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.uid == uid
+        && fieldsAtMost(14)
+        && isOptStr(request.resource.data, 'email', 320)
+        && isOptStr(request.resource.data, 'displayName', 200)
+        && isOptStr(request.resource.data, 'photoURL', 1000)
+        && isOptStr(request.resource.data, 'userAgent', 400)
+        && isOptStr(request.resource.data, 'lang', 40)
+        && isOptStr(request.resource.data, 'policiesVersion', 40);
+      allow delete: if false;
+    }
+
+    // ── users/{uid}/events/{eventId} batched activity (append-only) ───────
+    match /users/{uid}/events/{eventId} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.uid == uid
+        && fieldsAtMost(10)
+        && request.resource.data.events is list
+        && request.resource.data.events.size() <= 500
+        && isOptStr(request.resource.data, 'sessionId', 60)
+        && isOptNum(request.resource.data, 'count')
+        && isOptNum(request.resource.data, 'ts');
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ── users/{uid}/live/{doc} live mirror (state | program) ──────────────
+    // gcode is capped ~200KB client-side; allow headroom, stay well under 1MB.
+    match /users/{uid}/live/{doc} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow write: if isOwner(uid)
+        && fieldsAtMost(24)
+        && isOptStr(request.resource.data, 'gcode', 300000)
+        && isOptStr(request.resource.data, 'firmware', 80)
+        && isOptStr(request.resource.data, 'machineState', 40)
+        && isOptStr(request.resource.data, 'activeTab', 80)
+        && isOptStr(request.resource.data, 'programName', 400)
+        && isOptStr(request.resource.data, 'name', 400);
+    }
+
+    // ── users/{uid}/commands/{cmdId} remote-control queue ─────────────────
+    // CREATE: sendCommand() (admin only). UPDATE: owner sets ONLY {status,result}.
+    match /users/{uid}/commands/{cmdId} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow create: if isAdmin()
+        && request.resource.data.kind in ['realtime', 'gcode', 'jog']
+        && isStr(request.resource.data.data, 4000)
+        && request.resource.data.status == 'pending'
+        && fieldsAtMost(10);
+      allow update: if isAdmin()
+        || (isOwner(uid)
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['status', 'result'])
+            && request.resource.data.status in ['pending', 'done', 'error']
+            && isOptStr(request.resource.data, 'result', 2000));
+      allow delete: if isAdmin();
+    }
+
+    // ── users/{uid}/files/{fileId} upload metadata ────────────────────────
+    match /users/{uid}/files/{fileId} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow create: if isOwner(uid)
+        && fieldsAtMost(10)
+        && isStr(request.resource.data.name, 300)
+        && request.resource.data.size is number
+        && request.resource.data.size <= 26214400
+        && isOptStr(request.resource.data, 'type', 200)
+        && isStr(request.resource.data.storagePath, 500)
+        && request.resource.data.storagePath.matches('userfiles/' + uid + '/.*')
+        && isOptStr(request.resource.data, 'context', 80);
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ── collectionGroup admin dashboards ──────────────────────────────────
+    match /{path=**}/events/{eventId} {
+      allow read: if isAdmin();
+    }
+    match /{path=**}/live/{doc} {
+      allow read: if isAdmin();
+    }
+
+    // Within a user subtree: owner/admin READ only; no open-ended create/write
+    // (the app writes ONLY the collections matched above).
+    match /users/{uid}/{document=**} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow write: if false;
+    }
+
+    // Default deny everything not matched above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

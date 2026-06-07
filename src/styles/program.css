@@ -219,6 +219,37 @@
   white-space: nowrap;
 }
 .pp-eta-icon { font-size: 13px; opacity: 0.8; }
+.pp-eta-empty { color: var(--fg-muted); font-weight: 400; }
+
+/* --- mid-program error / alarm banner --- */
+.pp-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elev));
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.pp-error-icon { flex: 0 0 auto; font-size: 14px; line-height: 1.2; }
+.pp-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- live read view (virtualized line list) --- */
+.pp-read-card { margin-top: 0; }
+.pp-read-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2, 6px);
+}
 
 /* --- Program text header: disclosure title + filename + Load/Clear (right) --- */
 .pp-text-header {
@@ -258,6 +289,76 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+/* While streaming the field is a read-only LIVE current-line readout — make
+   that visually obvious (dimmed, accent text, no edit affordance). */
+.pp-line-input--readonly {
+  cursor: default;
+  color: var(--accent);
+  font-weight: 700;
+  background: var(--bg-elev);
+  opacity: 0.92;
+}
+
+/* --- virtualized read view (ProgramList) ---
+   ROW_H below MUST equal the ROW_H constant in ProgramList.tsx (18px). The list
+   scrolls internally and only renders the rows in view (+overscan). */
+.pp-list {
+  position: relative;
+  height: clamp(140px, 30vh, 360px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: var(--fs-mono, 11.5px);
+}
+.pp-list-inner { position: relative; width: 100%; }
+.pp-empty {
+  padding: 10px 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-family: var(--font, system-ui), sans-serif;
+}
+.pp-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  line-height: 18px;
+  white-space: pre;
+  cursor: pointer;
+  color: var(--fg);
+}
+.pp-row:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.pp-ln {
+  flex: 0 0 auto;
+  width: 4ch;
+  text-align: right;
+  color: var(--fg-muted);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.pp-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The user-selected feed-from-line start (when idle). */
+.pp-row-selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.pp-row-selected .pp-ln { color: var(--accent); font-weight: 700; }
+/* The line currently being streamed. */
+.pp-row-cursor {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.pp-row-cursor .pp-ln,
+.pp-row-cursor .pp-code { color: var(--accent-fg, var(--fg)); font-weight: 600; }
 
 /* --- editable program text ---
    The editor lives in its own card BELOW the Run card and its Load/Clear header,

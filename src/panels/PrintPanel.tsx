@@ -10,8 +10,10 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
 import { useT } from '../i18n'
+import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { useProgram, useMachine, usePersistentState } from '../store'
+import { useBed } from '../store/bed'
 import { grbl } from '../serial/controller'
 import {
   parseStl,
@@ -19,14 +21,15 @@ import {
   type StlMesh,
   type SliceParams,
   type GcodeParams,
+  type SliceWarning,
+  type PrintEstimate,
   type SliceWorkerRequest,
   type SliceWorkerOutbound,
 } from '../core/slicer'
 import '../styles/print.css'
 
-// Build volume (mm). Matches the app's default 300×200 bed.
-const BED_X = 300
-const BED_Y = 200
+// Z build height (mm). X/Y come from the shared bed config; Z has no separate
+// store field, so use a generous default ceiling for the fit check.
 const BED_Z = 200
 
 interface PrintSettings {
@@ -89,10 +92,54 @@ const f1 = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : '—')
  * alternating 0/90° rectilinear infill) for hobby GRBL printers — not a
  * production slicer (no supports, bridging, or adaptive layers).
  */
+/** Map a structured slicer warning to a localized string (code → t(), else fallback). */
+function useWarningText() {
+  const t = useT()
+  return (w: SliceWarning): string => {
+    switch (w.code) {
+      case 'meshEmpty':
+        return t('print.warn.meshEmpty', 'Mesh is empty — nothing to slice.')
+      case 'meshTooLarge':
+        return t('print.warn.meshTooLarge', 'Mesh too large ({tris} triangles); skipped.', w.params)
+      case 'layerHeightInvalid':
+        return t('print.warn.layerHeightInvalid', 'Layer height must be > 0.')
+      case 'modelTooShort':
+        return t('print.warn.modelTooShort', 'Model is shorter than one layer; nothing to slice.')
+      case 'layerCapClamped':
+        return t('print.warn.layerCapClamped', 'Layer count {count} exceeds cap {cap}; clamped.', w.params)
+      case 'layerSegmentCap':
+        return t('print.warn.layerSegmentCap', 'Layer {layer}: too many segments; skipped.', w.params)
+      case 'degenerateLayers':
+        return t('print.warn.degenerateLayers', '{count} layer(s) produced no usable contour and were skipped.', w.params)
+      case 'noLayers':
+        return t('print.warn.noLayers', 'No printable layers produced. The mesh may be non-watertight or open.')
+      default:
+        return w.message
+    }
+  }
+}
+
+/** Format a duration (seconds) as "1h 23m" / "12m 30s" / "45s". */
+function fmtDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '—'
+  const s = Math.round(seconds)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${sec}s`
+  return `${sec}s`
+}
+
 export function PrintPanel() {
   const t = useT()
+  const warnText = useWarningText()
   const setProgram = useProgram((s) => s.setProgram)
   const connected = useMachine((s) => s.connection === 'connected')
+  const streaming = useProgram((s) => s.streaming)
+  const bedX = useBed((s) => s.width)
+  const bedY = useBed((s) => s.depth)
+  const bedZ = useBed((s) => s.height) || BED_Z
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -119,6 +166,7 @@ export function PrintPanel() {
   const [lastGcode, setLastGcode] = useState<{ name: string; text: string; lines: number } | null>(
     null,
   )
+  const [estimate, setEstimate] = useState<PrintEstimate | null>(null)
   const [showGcode, setShowGcode] = useState(false)
 
   function set<K extends keyof PrintSettings>(key: K, value: PrintSettings[K]) {
@@ -130,6 +178,22 @@ export function PrintPanel() {
       set(key, (Number.isFinite(v) ? v : 0) as PrintSettings[typeof key])
     }
   }
+
+  // Invalidate the previously sliced G-code whenever the inputs that produced it
+  // change (settings / transform / mesh). This prevents "Send to printer" from
+  // streaming G-code that no longer matches the previewed object. We deliberately
+  // skip this while a slice is in flight (doSlice manages lastGcode itself).
+  useEffect(() => {
+    if (slicing) return
+    if (lastGcode || estimate) {
+      setLastGcode(null)
+      setEstimate(null)
+      setStatus('')
+    }
+    // Intentionally omit lastGcode/estimate/slicing from deps: this fires on the
+    // INPUT changes (settings/transform/mesh) to clear a now-stale result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings, transform, meshInfo])
 
   // ---- STL import ----------------------------------------------------------
   async function loadFile(file: File) {
@@ -193,8 +257,8 @@ export function PrintPanel() {
     }
     const cx = (minX + maxX) / 2
     const cy = (minY + maxY) / 2
-    const bedCx = BED_X / 2
-    const bedCy = BED_Y / 2
+    const bedCx = bedX / 2
+    const bedCy = bedY / 2
 
     // Second pass: write centred, base at z=0, normals rotated too.
     let nMinX = Infinity, nMinY = Infinity, nMinZ = 0
@@ -235,9 +299,9 @@ export function PrintPanel() {
     const sizeX = maxX - minX
     const sizeY = maxY - minY
     const sizeZ = maxZ - minZ
-    const fits = sizeX <= BED_X && sizeY <= BED_Y && sizeZ <= BED_Z
+    const fits = sizeX <= bedX && sizeY <= bedY && sizeZ <= bedZ
     return { mesh: placedMesh, sizeX, sizeY, sizeZ, fits }
-  }, [meshInfo, transform])
+  }, [meshInfo, transform, bedX, bedY, bedZ])
 
   // ---- Arrange controls ----------------------------------------------------
   function applyScalePct() {
@@ -252,9 +316,9 @@ export function PrintPanel() {
     const baseY = placed.sizeY / cur
     const baseZ = placed.sizeZ / cur
     const fitS = Math.min(
-      (BED_X * 0.9) / Math.max(baseX, 1e-6),
-      (BED_Y * 0.9) / Math.max(baseY, 1e-6),
-      (BED_Z * 0.9) / Math.max(baseZ, 1e-6),
+      (bedX * 0.9) / Math.max(baseX, 1e-6),
+      (bedY * 0.9) / Math.max(baseY, 1e-6),
+      (bedZ * 0.9) / Math.max(baseZ, 1e-6),
     )
     const next = Math.min(1, fitS)
     setTransform((t) => ({ ...t, scale: next }))
@@ -297,6 +361,17 @@ export function PrintPanel() {
 
   function doSlice() {
     if (!placed || slicing) return
+    // Block slicing an object that exceeds the bed unless the operator confirms.
+    if (!placed.fits) {
+      const ok = window.confirm(
+        t(
+          'print.confirm.exceeds',
+          'The object exceeds the {x}×{y}×{z} mm build volume and may not fit. Slice anyway?',
+          { x: bedX, y: bedY, z: bedZ },
+        ),
+      )
+      if (!ok) return
+    }
     // Guard against overlapping slices: tear down any prior worker first.
     teardownWorker()
 
@@ -305,6 +380,7 @@ export function PrintPanel() {
     setProgressPhase(t('print.phase.start', 'Preparing…'))
     setStatus(t('print.status.slicing', 'Slicing…'))
     setLastGcode(null)
+    setEstimate(null)
 
     const sliceParams: SliceParams = {
       layerHeight: settings.layerHeight,
@@ -356,13 +432,15 @@ export function PrintPanel() {
         setSlicing(false)
         setProgress(0)
         setProgressPhase('')
+        const warnStr = msg.warnings.map(warnText).join(' ')
         if (msg.layers === 0) {
-          setStatus(msg.warnings.join(' ') || t('print.status.noLayers', 'Slicing produced no layers.'))
+          setStatus(warnStr || t('print.status.noLayers', 'Slicing produced no layers.'))
           return
         }
         const name = `print.gcode`
         setProgram(name, msg.gcode)
         setLastGcode({ name, text: msg.gcode, lines: msg.lines })
+        setEstimate(msg.estimate ?? null)
         const warn = msg.warnings.length
           ? t('print.status.warnings', ' ({n} warning(s))', { n: msg.warnings.length })
           : ''
@@ -371,7 +449,7 @@ export function PrintPanel() {
             layers: msg.layers,
             lines: msg.lines,
             warn,
-          }),
+          }) + (warnStr ? ` ${warnStr}` : ''),
         )
         return
       }
@@ -412,14 +490,64 @@ export function PrintPanel() {
     worker.postMessage(req, [tris.buffer])
   }
 
+  function downloadGcode() {
+    if (!lastGcode) return
+    const blob = new Blob([lastGcode.text], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = lastGcode.name
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   function sendToMachine() {
-    if (!connected || !lastGcode) return
+    // Never start a stream while one is already running, or with stale/no g-code.
+    if (!lastGcode || streaming) return
+    // Re-check the live connection at click-time (it may have dropped since the
+    // button was last enabled).
+    if (!connected || !grbl.isConnected) {
+      setStatus(t('print.status.noConn', 'Not connected — connect the machine first.'))
+      return
+    }
+    if (!placed?.fits) {
+      const ok = window.confirm(
+        t(
+          'print.confirm.sendExceeds',
+          'This object exceeds the build volume and may not fit. Start the print anyway?',
+        ),
+      )
+      if (!ok) return
+    }
     const ok = window.confirm(
       t('print.confirm', 'Start the print on the machine now?\n{lines} lines. Make sure the bed is clear and the printer is homed-safe.', { lines: lastGcode.lines }),
     )
     if (!ok) return
-    grbl.startProgram(lastGcode.text.split(/\r?\n/).filter(Boolean))
-    setStatus(t('print.status.streaming', 'Streaming print — {lines} lines.', { lines: lastGcode.lines }))
+    try {
+      grbl.startProgram(lastGcode.text.split(/\r?\n/).filter(Boolean))
+      setStatus(t('print.status.streaming', 'Streaming print — {lines} lines.', { lines: lastGcode.lines }))
+    } catch (err) {
+      setStatus(
+        t('print.status.sendFailed', 'Could not start the print: {msg}', {
+          msg: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    }
+  }
+
+  function pauseStream() {
+    grbl.feedHold()
+    setStatus(t('print.status.paused', 'Print paused (feed hold). Resume to continue.'))
+  }
+  function resumeStream() {
+    grbl.resume()
+    setStatus(t('print.status.resumed', 'Print resumed.'))
+  }
+  function stopStream() {
+    const ok = window.confirm(t('print.confirm.stop', 'Stop the print now? This sends a soft reset.'))
+    if (!ok) return
+    grbl.abortProgram()
+    setStatus(t('print.status.stopped', 'Print stopped.'))
   }
 
   return (
@@ -450,7 +578,7 @@ export function PrintPanel() {
               }}
             >
               <button className="print-btn primary" onClick={() => fileRef.current?.click()}>
-                {t('print.openStl', '⬆ Open STL…')}
+                <Icon name="upload" size={15} /> {t('print.openStl', 'Open STL…')}
               </button>
               <span className="print-drop-hint">{t('print.dropHint', 'or drop a .stl file here')}</span>
               <input
@@ -480,7 +608,7 @@ export function PrintPanel() {
             <h3>{t('print.arrange.title', '2 · Arrange')}</h3>
             <div className="print-section-body">
               <div className="print-viewport">
-                <MeshPreview triangles={placed.mesh.triangles} fits={placed.fits} />
+                <MeshPreview triangles={placed.mesh.triangles} fits={placed.fits} bedX={bedX} bedY={bedY} />
               </div>
 
               <div className={'print-size' + (placed.fits ? '' : ' print-size-bad')}>
@@ -488,7 +616,11 @@ export function PrintPanel() {
                 {placed.fits ? (
                   <span className="print-fit-ok"> {t('print.fits', '· fits bed')}</span>
                 ) : (
-                  <span className="print-fit-bad"> {t('print.exceeds', '· ⚠ exceeds {x}×{y}×{z} mm bed', { x: BED_X, y: BED_Y, z: BED_Z })}</span>
+                  <span className="print-fit-bad">
+                    {' · '}
+                    <Icon name="warning" size={13} className="print-fit-ico" />{' '}
+                    {t('print.exceeds', 'exceeds {x}×{y}×{z} mm bed', { x: bedX, y: bedY, z: bedZ })}
+                  </span>
                 )}
               </div>
 
@@ -575,7 +707,8 @@ export function PrintPanel() {
             onClick={() => setShowAdvanced((v) => !v)}
             aria-expanded={showAdvanced}
           >
-            {showAdvanced ? '▾' : '▸'} {t('print.advanced', 'Advanced — filament, retraction, first layer')}
+            <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
+            {t('print.advanced', 'Advanced — filament, retraction, first layer')}
           </button>
           {showAdvanced && (
             <div className="print-section-body">
@@ -616,22 +749,74 @@ export function PrintPanel() {
           <div className="print-section-body">
             <div className="print-actions">
               <button className="print-btn primary" onClick={doSlice} disabled={!placed || slicing}>
-                {slicing ? t('print.status.slicing', 'Slicing…') : t('print.slice.btn', '✂ Slice → G-code')}
+                {slicing ? (
+                  t('print.status.slicing', 'Slicing…')
+                ) : (
+                  <>
+                    <Icon name="settings" size={15} /> {t('print.slice.btn', 'Slice → G-code')}
+                  </>
+                )}
               </button>
               {slicing && (
                 <button className="print-btn print-cancel" onClick={cancelSlice}>
-                  {t('print.cancel', '✕ Cancel')}
+                  <Icon name="close" size={15} /> {t('print.cancel', 'Cancel')}
                 </button>
               )}
               <button
+                className="print-btn"
+                onClick={downloadGcode}
+                disabled={!lastGcode || slicing}
+                title={t('print.download.title', 'Download the sliced G-code as a .gcode file')}
+              >
+                <Icon name="download" size={15} /> {t('print.download', 'Download .gcode')}
+              </button>
+              <button
                 className="print-btn print-send"
                 onClick={sendToMachine}
-                disabled={!connected || !lastGcode || slicing}
-                title={!connected ? t('print.send.title.noConn', 'Connect to the machine first') : !lastGcode ? t('print.send.title.noSlice', 'Slice first') : t('print.send.title.ok', 'Stream the print')}
+                disabled={!connected || !lastGcode || slicing || streaming}
+                title={
+                  !connected
+                    ? t('print.send.title.noConn', 'Connect to the machine first')
+                    : !lastGcode
+                      ? t('print.send.title.noSlice', 'Slice first')
+                      : streaming
+                        ? t('print.send.title.streaming', 'A print is already streaming')
+                        : t('print.send.title.ok', 'Stream the print')
+                }
               >
-                {t('print.send', '▶ Send to printer')}
+                <Icon name="play" size={15} /> {t('print.send', 'Send to printer')}
               </button>
             </div>
+
+            {/* Live stream controls — only while a print is actively streaming. */}
+            {streaming && (
+              <div className="print-actions print-stream-ctl">
+                <button className="print-btn" onClick={pauseStream} title={t('print.pause.title', 'Feed hold (pause)')}>
+                  <Icon name="pause" size={15} /> {t('print.pause', 'Pause')}
+                </button>
+                <button className="print-btn" onClick={resumeStream} title={t('print.resume.title', 'Resume from feed hold')}>
+                  <Icon name="play" size={15} /> {t('print.resume', 'Resume')}
+                </button>
+                <button className="print-btn print-cancel" onClick={stopStream} title={t('print.stop.title', 'Stop the print (soft reset)')}>
+                  <Icon name="stop" size={15} /> {t('print.stop', 'Stop')}
+                </button>
+              </div>
+            )}
+
+            {estimate && (
+              <div className="print-estimate">
+                <span className="print-estimate-item">
+                  <Icon name="info" size={13} />{' '}
+                  {t('print.estimate.filament', 'Filament: ~{m} m ({g} g)', {
+                    m: (estimate.filamentMm / 1000).toFixed(2),
+                    g: estimate.filamentGrams.toFixed(1),
+                  })}
+                </span>
+                <span className="print-estimate-item">
+                  {t('print.estimate.time', 'Est. time: ~{time}', { time: fmtDuration(estimate.timeSeconds) })}
+                </span>
+              </div>
+            )}
             {slicing && (
               <div className="print-progress-wrap">
                 <div
@@ -659,7 +844,8 @@ export function PrintPanel() {
                   onClick={() => setShowGcode((v) => !v)}
                   aria-expanded={showGcode}
                 >
-                  {showGcode ? '▾' : '▸'} {t('print.gcode.label', 'G-code — {name}', { name: lastGcode.name })}
+                  <Icon name={showGcode ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
+                  {t('print.gcode.label', 'G-code — {name}', { name: lastGcode.name })}
                   <span className="print-gcode-meta">{t('print.gcode.lines', '{n} lines', { n: lastGcode.lines })}</span>
                 </button>
                 {showGcode && (
@@ -695,7 +881,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  * Small 3D preview of the imported mesh sitting on the bed (Z-up, matching the
  * app). The mesh is supplied already placed in bed coordinates.
  */
-function MeshPreview({ triangles, fits }: { triangles: Float32Array; fits: boolean }) {
+function MeshPreview({
+  triangles,
+  fits,
+  bedX,
+  bedY,
+}: {
+  triangles: Float32Array
+  fits: boolean
+  bedX: number
+  bedY: number
+}) {
   // Extract just positions (drop interleaved normals) into a tight buffer.
   const geom = useMemo(() => {
     const triCount = triangles.length / (STL_STRIDE * 3)
@@ -715,12 +911,12 @@ function MeshPreview({ triangles, fits }: { triangles: Float32Array; fits: boole
   }, [triangles])
 
   // Frame the camera roughly to the bed.
-  const camTarget: [number, number, number] = [BED_X / 2, BED_Y / 2, 20]
+  const camTarget: [number, number, number] = [bedX / 2, bedY / 2, 20]
 
   return (
     <Canvas
       style={{ height: '100%', width: '100%' }}
-      camera={{ position: [BED_X / 2 + 180, -180, 180], up: [0, 0, 1], fov: 45, near: 0.1, far: 5000 }}
+      camera={{ position: [bedX / 2 + 180, -180, 180], up: [0, 0, 1], fov: 45, near: 0.1, far: 5000 }}
       onCreated={({ camera }) => camera.lookAt(...camTarget)}
     >
       <color attach="background" args={['#15181c']} />
@@ -728,9 +924,9 @@ function MeshPreview({ triangles, fits }: { triangles: Float32Array; fits: boole
       <directionalLight position={[100, -120, 300]} intensity={0.7} />
       <directionalLight position={[-120, 80, 150]} intensity={0.3} />
       {/* Bed: grid on the XY plane (Z-up). Centred on the bed centre. */}
-      <group position={[BED_X / 2, BED_Y / 2, 0]}>
+      <group position={[bedX / 2, bedY / 2, 0]}>
         <Grid
-          args={[BED_X, BED_Y]}
+          args={[bedX, bedY]}
           cellSize={10}
           cellThickness={0.6}
           cellColor="#3a4250"
@@ -739,7 +935,7 @@ function MeshPreview({ triangles, fits }: { triangles: Float32Array; fits: boole
           sectionColor="#515c6e"
           rotation={[Math.PI / 2, 0, 0]}
           infiniteGrid={false}
-          fadeDistance={Math.max(BED_X, BED_Y) * 3}
+          fadeDistance={Math.max(bedX, bedY) * 3}
           fadeStrength={1}
         />
       </group>

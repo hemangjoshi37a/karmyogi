@@ -90,6 +90,14 @@
 }
 .pcb-load-btn {
   min-height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+/* Leading icon inside a text button — keeps optical baseline with the label. */
+.pcb-btn-icon {
+  flex: 0 0 auto;
 }
 
 /* Primary ZIP upload — capped dropzone, the obvious first action. */
@@ -113,12 +121,15 @@
   color: var(--fg-muted);
 }
 .pcb-kbd {
-  display: inline-block;
-  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
   border-radius: var(--radius-sm);
   background: var(--bg-input);
   border: 1px solid var(--border);
   font-size: var(--fs-body);
+  vertical-align: middle;
 }
 
 .pcb-info {
@@ -463,6 +474,74 @@
   font-size: var(--fs-label);
   line-height: 1.45;
   color: var(--fg-muted);
+}
+
+/* --- Clear-package button (header row, danger-tinted on hover) --- */
+.pcb-clear-btn.icon-btn {
+  color: var(--fg-muted);
+}
+.pcb-clear-btn.icon-btn:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+}
+
+/* --- in-row armed run-confirm (styled, replaces window.confirm) --- */
+.pcb-run-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--icon-btn);
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: var(--ok);
+  color: var(--accent-fg, #fff);
+  border: 1px solid var(--ok);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pcb-run-confirm:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.pcb-run-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- run-all-stages helper (sequence + tool-change checklist) --- */
+.pcb-runall {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+.pcb-runall-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-body);
+}
+.pcb-runall-list li {
+  line-height: 1.5;
+}
+.pcb-runall-step {
+  display: inline-block;
+  min-width: 1.4em;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.pcb-runall-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
 /* --- Advanced disclosure --- */

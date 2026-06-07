@@ -66,8 +66,10 @@ export interface BitPreset {
   /** Stable id (e.g. 'flat-3.175'). */
   id: string;
   type: BitType;
-  /** Display name, e.g. '1/8" Flat (3.175mm)'. */
+  /** Display name, e.g. '1/8" Flat (3.175mm)' (English source-of-truth). */
   name: string;
+  /** i18n lookup key for {@link name}, e.g. 'bit.size.flat-3.175'. */
+  i18nKey: string;
   /** Emoji glyph for the picker. */
   icon: string;
   /** Cutting diameter (mm). For vbit/engraving this is the body/max width. */
@@ -84,28 +86,28 @@ export interface BitPreset {
  */
 export const BITS: BitPreset[] = [
   // ---- Flat / end mills ----------------------------------------------------
-  { id: 'flat-1.0', type: 'flat', name: '1mm Flat', icon: '🔲', diameter: 1.0, flutes: 2 },
-  { id: 'flat-1.5875', type: 'flat', name: '1/16" Flat (1.5875mm)', icon: '🔲', diameter: 1.5875, flutes: 2 },
-  { id: 'flat-2.0', type: 'flat', name: '2mm Flat', icon: '🔲', diameter: 2.0, flutes: 2 },
-  { id: 'flat-3.0', type: 'flat', name: '3mm Flat', icon: '🔲', diameter: 3.0, flutes: 2 },
-  { id: 'flat-3.175', type: 'flat', name: '1/8" Flat (3.175mm)', icon: '🔲', diameter: 3.175, flutes: 2 },
-  { id: 'flat-6.0', type: 'flat', name: '6mm Flat', icon: '🔲', diameter: 6.0, flutes: 2 },
+  { id: 'flat-1.0', type: 'flat', name: '1mm Flat', i18nKey: 'bit.size.flat-1.0', icon: '🔲', diameter: 1.0, flutes: 2 },
+  { id: 'flat-1.5875', type: 'flat', name: '1/16" Flat (1.5875mm)', i18nKey: 'bit.size.flat-1.5875', icon: '🔲', diameter: 1.5875, flutes: 2 },
+  { id: 'flat-2.0', type: 'flat', name: '2mm Flat', i18nKey: 'bit.size.flat-2.0', icon: '🔲', diameter: 2.0, flutes: 2 },
+  { id: 'flat-3.0', type: 'flat', name: '3mm Flat', i18nKey: 'bit.size.flat-3.0', icon: '🔲', diameter: 3.0, flutes: 2 },
+  { id: 'flat-3.175', type: 'flat', name: '1/8" Flat (3.175mm)', i18nKey: 'bit.size.flat-3.175', icon: '🔲', diameter: 3.175, flutes: 2 },
+  { id: 'flat-6.0', type: 'flat', name: '6mm Flat', i18nKey: 'bit.size.flat-6.0', icon: '🔲', diameter: 6.0, flutes: 2 },
   // ---- Ball nose -----------------------------------------------------------
-  { id: 'ball-1.5', type: 'ball', name: '1.5mm Ball', icon: '⚫', diameter: 1.5, flutes: 2 },
-  { id: 'ball-2.0', type: 'ball', name: '2mm Ball', icon: '⚫', diameter: 2.0, flutes: 2 },
-  { id: 'ball-3.175', type: 'ball', name: '1/8" Ball (3.175mm)', icon: '⚫', diameter: 3.175, flutes: 2 },
-  { id: 'ball-6.0', type: 'ball', name: '6mm Ball', icon: '⚫', diameter: 6.0, flutes: 2 },
+  { id: 'ball-1.5', type: 'ball', name: '1.5mm Ball', i18nKey: 'bit.size.ball-1.5', icon: '⚫', diameter: 1.5, flutes: 2 },
+  { id: 'ball-2.0', type: 'ball', name: '2mm Ball', i18nKey: 'bit.size.ball-2.0', icon: '⚫', diameter: 2.0, flutes: 2 },
+  { id: 'ball-3.175', type: 'ball', name: '1/8" Ball (3.175mm)', i18nKey: 'bit.size.ball-3.175', icon: '⚫', diameter: 3.175, flutes: 2 },
+  { id: 'ball-6.0', type: 'ball', name: '6mm Ball', i18nKey: 'bit.size.ball-6.0', icon: '⚫', diameter: 6.0, flutes: 2 },
   // ---- V-bits --------------------------------------------------------------
-  { id: 'vbit-30', type: 'vbit', name: '30° V-bit', icon: '▽', diameter: 3.175, angle: 30, flutes: 1 },
-  { id: 'vbit-60', type: 'vbit', name: '60° V-bit', icon: '▽', diameter: 3.175, angle: 60, flutes: 1 },
-  { id: 'vbit-90', type: 'vbit', name: '90° V-bit', icon: '▽', diameter: 3.175, angle: 90, flutes: 1 },
+  { id: 'vbit-30', type: 'vbit', name: '30° V-bit', i18nKey: 'bit.size.vbit-30', icon: '▽', diameter: 3.175, angle: 30, flutes: 1 },
+  { id: 'vbit-60', type: 'vbit', name: '60° V-bit', i18nKey: 'bit.size.vbit-60', icon: '▽', diameter: 3.175, angle: 60, flutes: 1 },
+  { id: 'vbit-90', type: 'vbit', name: '90° V-bit', i18nKey: 'bit.size.vbit-90', icon: '▽', diameter: 3.175, angle: 90, flutes: 1 },
   // ---- Engraving -----------------------------------------------------------
-  { id: 'engraving-20', type: 'engraving', name: '0.1mm Engraving (20°)', icon: '✒', diameter: 0.1, angle: 20, flutes: 1 },
-  { id: 'engraving-30', type: 'engraving', name: '0.1mm Engraving (30°)', icon: '✒', diameter: 0.1, angle: 30, flutes: 1 },
+  { id: 'engraving-20', type: 'engraving', name: '0.1mm Engraving (20°)', i18nKey: 'bit.size.engraving-20', icon: '✒', diameter: 0.1, angle: 20, flutes: 1 },
+  { id: 'engraving-30', type: 'engraving', name: '0.1mm Engraving (30°)', i18nKey: 'bit.size.engraving-30', icon: '✒', diameter: 0.1, angle: 30, flutes: 1 },
   // ---- Drills --------------------------------------------------------------
-  { id: 'drill-0.8', type: 'drill', name: '0.8mm Drill', icon: '🪡', diameter: 0.8, flutes: 2 },
-  { id: 'drill-1.0', type: 'drill', name: '1.0mm Drill', icon: '🪡', diameter: 1.0, flutes: 2 },
-  { id: 'drill-3.175', type: 'drill', name: '1/8" Drill (3.175mm)', icon: '🪡', diameter: 3.175, flutes: 2 },
+  { id: 'drill-0.8', type: 'drill', name: '0.8mm Drill', i18nKey: 'bit.size.drill-0.8', icon: '🪡', diameter: 0.8, flutes: 2 },
+  { id: 'drill-1.0', type: 'drill', name: '1.0mm Drill', i18nKey: 'bit.size.drill-1.0', icon: '🪡', diameter: 1.0, flutes: 2 },
+  { id: 'drill-3.175', type: 'drill', name: '1/8" Drill (3.175mm)', i18nKey: 'bit.size.drill-3.175', icon: '🪡', diameter: 3.175, flutes: 2 },
 ];
 
 /** All bits of a given class, in catalogue order. */

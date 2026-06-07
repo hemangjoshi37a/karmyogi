@@ -263,6 +263,31 @@ export function parseStl(buffer: ArrayBuffer): StlMesh {
 // Slicing
 // ============================================================================
 
+/**
+ * A structured slicer warning. The core stays UI-independent (no i18n), so it
+ * emits a STABLE machine-readable `code` plus any interpolation `params` and an
+ * English `message` fallback. The panel maps `code` → a localized string via
+ * `t()` (falling back to `message` for unknown codes). Keeping codes here means
+ * the warning text can be translated without the core importing the UI layer.
+ */
+export type SliceWarningCode =
+  | 'meshEmpty'
+  | 'meshTooLarge'
+  | 'layerHeightInvalid'
+  | 'modelTooShort'
+  | 'layerCapClamped'
+  | 'layerSegmentCap'
+  | 'degenerateLayers'
+  | 'noLayers';
+
+export interface SliceWarning {
+  code: SliceWarningCode;
+  /** English fallback text (already interpolated). */
+  message: string;
+  /** Interpolation params for the panel to feed into t(). */
+  params?: Record<string, number>;
+}
+
 export interface SliceParams {
   layerHeight: number;        // mm
   lineWidth: number;          // mm (extrusion width)
@@ -285,7 +310,7 @@ export interface SliceResult {
   layers: SliceLayer[];
   /** Footprint bounds in XY (after the mesh has been placed by the caller). */
   bounds: BBox;
-  warnings: string[];
+  warnings: SliceWarning[];
   /** Total layer count actually produced. */
   layerCount: number;
 }
@@ -497,21 +522,25 @@ function buildInfill(boundary: Polyline, spacing: number, angleDeg: number): Pol
  * the lowest non-empty Z up to the top by `layerHeight`.
  */
 export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: SliceProgress): SliceResult {
-  const warnings: string[] = [];
+  const warnings: SliceWarning[] = [];
   const result: SliceResult = { layers: [], bounds: new BBox(), warnings, layerCount: 0 };
 
   if (mesh.triangleCount === 0) {
-    warnings.push('Mesh is empty — nothing to slice.');
+    warnings.push({ code: 'meshEmpty', message: 'Mesh is empty — nothing to slice.' });
     return result;
   }
   if (mesh.triangleCount > MAX_TRIANGLES) {
-    warnings.push(`Mesh too large (${mesh.triangleCount} triangles); skipped.`);
+    warnings.push({
+      code: 'meshTooLarge',
+      message: `Mesh too large (${mesh.triangleCount} triangles); skipped.`,
+      params: { tris: mesh.triangleCount, cap: MAX_TRIANGLES },
+    });
     return result;
   }
 
   const layerH = params.layerHeight;
   if (!(layerH > 0)) {
-    warnings.push('Layer height must be > 0.');
+    warnings.push({ code: 'layerHeightInvalid', message: 'Layer height must be > 0.' });
     return result;
   }
   const lineWidth = params.lineWidth > 0 ? params.lineWidth : 0.4;
@@ -522,13 +551,17 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
   const zMax = mesh.bbox.max[2];
   const totalH = zMax - zMin;
   if (!(totalH > layerH * 0.25)) {
-    warnings.push('Model is shorter than one layer; nothing to slice.');
+    warnings.push({ code: 'modelTooShort', message: 'Model is shorter than one layer; nothing to slice.' });
     return result;
   }
 
   let nLayers = Math.floor(totalH / layerH);
   if (nLayers > MAX_LAYERS) {
-    warnings.push(`Layer count ${nLayers} exceeds cap ${MAX_LAYERS}; clamped.`);
+    warnings.push({
+      code: 'layerCapClamped',
+      message: `Layer count ${nLayers} exceeds cap ${MAX_LAYERS}; clamped.`,
+      params: { count: nLayers, cap: MAX_LAYERS },
+    });
     nLayers = MAX_LAYERS;
   }
   if (nLayers < 1) nLayers = 1;
@@ -567,7 +600,11 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
       );
       if (seg) segs.push(seg);
       if (segs.length > MAX_SEGMENTS_PER_LAYER) {
-        warnings.push(`Layer ${li}: too many segments; skipped.`);
+        warnings.push({
+          code: 'layerSegmentCap',
+          message: `Layer ${li}: too many segments; skipped.`,
+          params: { layer: li },
+        });
         break;
       }
     }
@@ -612,11 +649,18 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
   }
 
   if (degenerateLayers > 0) {
-    warnings.push(`${degenerateLayers} layer(s) produced no usable contour and were skipped.`);
+    warnings.push({
+      code: 'degenerateLayers',
+      message: `${degenerateLayers} layer(s) produced no usable contour and were skipped.`,
+      params: { count: degenerateLayers },
+    });
   }
   result.layerCount = result.layers.length;
   if (result.layerCount === 0) {
-    warnings.push('No printable layers produced. The mesh may be non-watertight or open.');
+    warnings.push({
+      code: 'noLayers',
+      message: 'No printable layers produced. The mesh may be non-watertight or open.',
+    });
   }
   return result;
 }
@@ -817,6 +861,70 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams, onProgress
 }
 
 // ============================================================================
+// Print estimate (filament + time)
+// ============================================================================
+
+/** Rough filament + time estimate for a sliced job. */
+export interface PrintEstimate {
+  /** Total extruded filament length (mm). */
+  filamentMm: number;
+  /** Filament mass (g), assuming PLA density 1.24 g/cm³. */
+  filamentGrams: number;
+  /** Estimated print time (seconds). A coarse upper-bound from path length / feed. */
+  timeSeconds: number;
+}
+
+/** PLA density (g/cm³) — used for a ballpark mass estimate. */
+const FILAMENT_DENSITY_G_CM3 = 1.24;
+
+/**
+ * Estimate filament use and print time from a slice result. This is a coarse
+ * model: extrusion length comes from the printed bead volume (the same volumetric
+ * formula the emitter uses); time sums each printed path's length / its feed plus
+ * a small per-layer Z-move allowance. Travel/retraction time is approximated, so
+ * treat the result as a ballpark — always sanity-check on the machine.
+ */
+export function estimatePrint(slice: SliceResult, params: GcodeParams): PrintEstimate {
+  const ePerMm = extrusionPerMm(params.lineWidth, params.layerHeight, params.filamentDiameter);
+  const firstSpeed = params.firstLayerSpeed ?? Math.round(params.printSpeed * 0.5);
+
+  let printLenMm = 0; // total extruded XY distance
+  let timeMin = 0;
+
+  const pathLen = (pl: Polyline): number => {
+    const pts = pl.points;
+    if (pts.length < 2) return 0;
+    let d = 0;
+    for (let i = 1; i < pts.length; i++) d += distance(pts[i - 1], pts[i]);
+    if (pl.closed) d += distance(pts[pts.length - 1], pts[0]);
+    return d;
+  };
+
+  for (let li = 0; li < slice.layers.length; li++) {
+    const layer = slice.layers[li];
+    const feed = li === 0 ? firstSpeed : params.printSpeed; // mm/min
+    let layerLen = 0;
+    for (const w of layer.perimeters) layerLen += pathLen(w);
+    for (const f of layer.infill) layerLen += pathLen(f);
+    printLenMm += layerLen;
+    if (feed > 0) timeMin += layerLen / feed;
+    // Per-layer Z move + a small travel allowance.
+    if (params.travelSpeed > 0) timeMin += (params.layerHeight + 5) / params.travelSpeed;
+  }
+
+  const filamentMm = printLenMm * ePerMm;
+  const filArea = Math.PI * (params.filamentDiameter / 2) * (params.filamentDiameter / 2); // mm²
+  const volumeCm3 = (filArea * filamentMm) / 1000; // mm³ → cm³
+  const filamentGrams = volumeCm3 * FILAMENT_DENSITY_G_CM3;
+
+  return {
+    filamentMm,
+    filamentGrams,
+    timeSeconds: timeMin * 60,
+  };
+}
+
+// ============================================================================
 // Worker message protocol (shared by slicer.worker.ts and the Print panel)
 // ============================================================================
 
@@ -859,7 +967,9 @@ export interface SliceWorkerDone {
   gcode: string;
   layers: number;
   lines: number;
-  warnings: string[];
+  warnings: SliceWarning[];
+  /** Filament + time estimate (omitted when no layers were produced). */
+  estimate?: PrintEstimate;
 }
 
 export interface SliceWorkerError {

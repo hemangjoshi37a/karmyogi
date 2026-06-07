@@ -32,19 +32,91 @@ export default defineConfig({
     cameraFrameReceiver(),
     machineBridgeReceiver(),
     ...(useHttps ? [basicSsl()] : []),
-    // PWA / offline: precache the built app shell so karmyogi loads without a
-    // network (the app itself is offline-capable; the machine link is USB).
+    // PWA / offline: precache ONLY the small, always-needed app shell so the
+    // first-install download stays light (it was ~18MB because the ~7.6MB OCCT
+    // WASM and the big lazy CAM chunks were all precached up front). The shell
+    // (entry JS/CSS/HTML + icons + fonts) is precached; everything heavy is
+    // runtime-cached on first use instead, so unopened CAM modes never cost the
+    // user a download.
+    //   - `wasm` is NOT precached → the OCCT WASM loads lazily with the Carving
+    //     panel and is then cached for offline reuse via runtimeCaching below.
+    //   - `maximumFileSizeToCacheInBytes` is lowered so any single oversized
+    //     asset is skipped by the precache and runtime-cached instead.
     // Uses the existing public/manifest.webmanifest (manifest: false).
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       manifest: false,
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,woff2,wasm}'],
-        maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
+        // Precache the lightweight shell only (no wasm).
+        globPatterns: ['**/*.{css,html,svg,woff2,ico,png,webmanifest}'],
+        // Skip any single asset larger than this from the PRECACHE manifest; it
+        // will instead be fetched + cached on demand by runtimeCaching.
+        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
+        // Lazy/code-split JS chunks and the OCCT WASM are cached the first time
+        // they're actually requested, so offline use still works after a panel
+        // has been opened once — without front-loading megabytes on install.
+        runtimeCaching: [
+          {
+            urlPattern: ({ request, url }) =>
+              request.destination === 'script' || url.pathname.endsWith('.js'),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'karmyogi-js',
+              expiration: { maxEntries: 80, maxAgeSeconds: 60 * 60 * 24 * 30 },
+            },
+          },
+          {
+            urlPattern: ({ url }) => url.pathname.endsWith('.wasm'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'karmyogi-wasm',
+              expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              rangeRequests: true,
+            },
+          },
+        ],
       },
     }),
   ],
+  build: {
+    // Vendor code-splitting: keep heavy, independently-loaded libraries in their
+    // own chunks so they're cached separately and only fetched when a panel that
+    // needs them is opened (the panels themselves are React.lazy — see
+    // src/app/panelRegistry.ts). This keeps the entry chunk small for the 1M-user
+    // first paint.
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined
+          // 3D stack: three.js + the @react-three ecosystem (only the Visualizer
+          // and a couple of CAM previews pull this in).
+          if (
+            /[\\/]node_modules[\\/](three|@react-three)[\\/]/.test(id) ||
+            id.includes('postprocessing') ||
+            id.includes('troika')
+          ) {
+            return 'vendor-three'
+          }
+          // Docking shell.
+          if (/[\\/]node_modules[\\/]dockview/.test(id)) return 'vendor-dockview'
+          // Heavy CAD/CAM libraries, each loaded lazily with its panel.
+          if (/[\\/]occt-import-js[\\/]/.test(id)) return 'vendor-occt'
+          if (/[\\/]opentype\.js[\\/]/.test(id)) return 'vendor-opentype'
+          if (/[\\/]polygon-clipping[\\/]/.test(id) || /[\\/]splaytree[\\/]/.test(id)) {
+            return 'vendor-clipping'
+          }
+          // Firebase is sizeable; keep it isolated from the entry chunk.
+          if (/[\\/]node_modules[\\/](@firebase|firebase)[\\/]/.test(id)) return 'vendor-firebase'
+          // React runtime shared by everything.
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) {
+            return 'vendor-react'
+          }
+          return undefined
+        },
+      },
+    },
+  },
   server: {
     port: 5185,
     strictPort: true,

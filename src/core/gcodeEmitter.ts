@@ -42,6 +42,16 @@ export interface EmitterOptions {
   comments: boolean; // include explanatory comments
 }
 
+/**
+ * Sanitize the `decimals` option. It feeds `Number.toFixed`, which throws a
+ * RangeError outside [0,100], so a bad/corrupt/typed value (e.g. -1, 7.5, 200)
+ * must never reach it. The UI offers 0–6; clamp to an integer in [0,8].
+ */
+export function clampDecimals(decimals: number): number {
+  if (!Number.isFinite(decimals)) return 3;
+  return Math.max(0, Math.min(8, Math.floor(decimals)));
+}
+
 export function defaultEmitterOptions(overrides: Partial<EmitterOptions> = {}): EmitterOptions {
   return {
     programName: '',
@@ -70,6 +80,7 @@ export class GcodeEmitter {
 
   constructor(options: Partial<EmitterOptions> = {}) {
     this.m_opt = defaultEmitterOptions(options);
+    this.m_opt.decimals = clampDecimals(this.m_opt.decimals);
   }
 
   options(): EmitterOptions {
@@ -77,6 +88,7 @@ export class GcodeEmitter {
   }
   setOptions(options: EmitterOptions): void {
     this.m_opt = options;
+    this.m_opt.decimals = clampDecimals(this.m_opt.decimals);
   }
 
   /** Formatted number, never "-0.000". */

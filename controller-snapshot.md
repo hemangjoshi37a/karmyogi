@@ -1,0 +1,693 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - img "karmyogi — meditating yogi mark" [ref=e6]
+      - generic [ref=e7]: karmyogi
+    - generic [ref=e8]: CAD/CAM workbench
+    - generic [ref=e9]:
+      - text: by
+      - link "hjLabs.in" [ref=e10] [cursor=pointer]:
+        - /url: https://hjLabs.in
+      - text: ·
+      - link "MIT" [ref=e11] [cursor=pointer]:
+        - /url: https://github.com/hemangjoshi37a/karmyogi/blob/main/LICENSE
+    - generic [ref=e12]:
+      - combobox "Controller firmware" [disabled] [ref=e13]:
+        - option "GRBL" [selected]
+        - option "FluidNC"
+        - option "grblHAL"
+        - option "Marlin — experimental"
+        - option "Smoothieware — experimental"
+        - option "Masso G3 Touch — experimental"
+        - option "Ruida — experimental"
+        - option "EzCAD / BJJCZ (galvo fiber) — experimental"
+        - option "Cypcut / FSCUT (fiber gantry) — experimental"
+      - generic [ref=e15]: Idle
+      - button "Disconnect" [ref=e878] [cursor=pointer]
+      - button "Mock" [ref=e879] [cursor=pointer]:
+        - generic [ref=e20]: Mock
+        - img [ref=e22]
+      - 'button "Server bridge: relay this browser’s machine to the karmyogi dev server so it can read state and send commands — OFF" [ref=e24] [cursor=pointer]':
+        - img [ref=e26]
+      - button "Probe & limits" [ref=e31] [cursor=pointer]:
+        - img [ref=e33]
+      - button "Motion / GRBL settings" [ref=e35] [cursor=pointer]:
+        - img [ref=e37]
+    - generic [ref=e40]:
+      - generic [ref=e41]:
+        - button "Open / reopen panels" [expanded] [active] [ref=e42] [cursor=pointer]:
+          - generic [ref=e43]: ▦
+        - menu "Panels" [ref=e880]:
+          - generic [ref=e881]: Panels
+          - generic [ref=e882]:
+            - menuitem "Controller" [ref=e883] [cursor=pointer]:
+              - generic [ref=e884]: Controller
+            - menuitem "Console" [ref=e886] [cursor=pointer]:
+              - generic [ref=e887]: Console
+            - menuitem "Program" [ref=e889] [cursor=pointer]:
+              - generic [ref=e890]: Program
+            - menuitem "Visualizer" [ref=e892] [cursor=pointer]:
+              - generic [ref=e893]: Visualizer
+            - menuitem "Coordinates" [ref=e895] [cursor=pointer]:
+              - generic [ref=e896]: Coordinates
+            - menuitem "2D/3D Carving" [ref=e898] [cursor=pointer]:
+              - generic [ref=e899]: 2D/3D Carving
+            - menuitem "Writing" [ref=e901] [cursor=pointer]:
+              - generic [ref=e902]: Writing
+            - menuitem "Soldering" [ref=e904] [cursor=pointer]:
+              - generic [ref=e905]: Soldering
+            - menuitem "PCB" [ref=e907] [cursor=pointer]:
+              - generic [ref=e908]: PCB
+            - menuitem "Glue Dispense" [ref=e910] [cursor=pointer]:
+              - generic [ref=e911]: Glue Dispense
+            - menuitem "Pick & Place" [ref=e913] [cursor=pointer]:
+              - generic [ref=e914]: Pick & Place
+            - menuitem "Signature" [ref=e916] [cursor=pointer]:
+              - generic [ref=e917]: Signature
+            - menuitem "3D Printing" [ref=e919] [cursor=pointer]:
+              - generic [ref=e920]: 3D Printing
+            - menuitem "Laser Cutting" [ref=e922] [cursor=pointer]:
+              - generic [ref=e923]: Laser Cutting
+            - menuitem "Welding" [ref=e925] [cursor=pointer]:
+              - generic [ref=e926]: Welding
+            - menuitem "Camera" [ref=e928] [cursor=pointer]:
+              - generic [ref=e929]: Camera
+            - menuitem "AI G-code" [ref=e931] [cursor=pointer]:
+              - generic [ref=e932]: AI G-code
+      - button "Reset dock layout to default" [ref=e44] [cursor=pointer]:
+        - generic [ref=e45]: ↺
+      - generic "UI zoom" [ref=e46]:
+        - button "Zoom out" [ref=e47] [cursor=pointer]:
+          - generic [ref=e48]: −
+        - button "Reset zoom" [ref=e49] [cursor=pointer]: 100%
+        - button "Zoom in" [ref=e50] [cursor=pointer]:
+          - generic [ref=e51]: +
+      - button "Notifications (1 unread)" [ref=e934] [cursor=pointer]:
+        - generic [ref=e54]:
+          - text: 🔔
+          - generic [ref=e935]: "1"
+      - button "Sign in" [ref=e211] [cursor=pointer]
+      - generic "Language — English" [ref=e55] [cursor=pointer]:
+        - generic [ref=e56]: 🌐
+        - combobox "Language — English" [ref=e57]:
+          - option "English" [selected]
+          - option "हिन्दी"
+          - option "বাংলা"
+          - option "తెలుగు"
+          - option "मराठी"
+          - option "தமிழ்"
+          - option "اردو"
+          - option "ગુજરાતી"
+          - option "ಕನ್ನಡ"
+          - option "ଓଡ଼ିଆ"
+          - option "മലയാളം"
+          - option "ਪੰਜਾਬੀ"
+          - option "অসমীয়া"
+          - option "मैथिली"
+          - option "संस्कृतम्"
+          - option "नेपाली"
+          - option "कोंकणी"
+          - option "سنڌي"
+          - option "डोगरी"
+          - option "মৈতৈলোন"
+          - option "भोजपुरी"
+          - option "کٲشُر"
+          - option "ᱥᱟᱱᱛᱟᱲᱤ"
+          - option "बड़ो"
+          - option "中文"
+          - option "Español"
+          - option "العربية"
+          - option "Português"
+          - option "Русский"
+          - option "日本語"
+          - option "Deutsch"
+          - option "Français"
+          - option "Bahasa Indonesia"
+          - option "한국어"
+          - option "Italiano"
+          - option "Türkçe"
+          - option "Tiếng Việt"
+          - option "ไทย"
+          - option "Polski"
+          - option "Українська"
+          - option "فارسی"
+          - option "Nederlands"
+          - option "Filipino"
+          - option "Kiswahili"
+          - option "Bahasa Melayu"
+          - option "Hausa"
+          - option "አማርኛ"
+          - option "Yorùbá"
+          - option "မြန်မာ"
+          - option "עברית"
+          - option "Ελληνικά"
+          - option "Română"
+          - option "Magyar"
+          - option "Čeština"
+      - button "About karmyogi (source, license, report a bug)" [ref=e58] [cursor=pointer]:
+        - generic [ref=e59]: ⓘ
+      - button "Switch to light theme" [ref=e60] [cursor=pointer]:
+        - generic [ref=e61]: ☀
+  - generic [ref=e81]:
+    - generic [ref=e83]:
+      - generic [ref=e84]:
+        - generic [ref=e86]:
+          - generic [ref=e89] [cursor=pointer]: Coordinates
+          - generic [ref=e91] [cursor=pointer]:
+            - generic [ref=e92]: 2D/3D Carving
+            - img [ref=e937]
+          - generic [ref=e95] [cursor=pointer]: Writing
+          - generic [ref=e98] [cursor=pointer]: Soldering
+          - generic [ref=e101] [cursor=pointer]: PCB
+          - generic [ref=e104] [cursor=pointer]: Glue Dispense
+          - generic [ref=e107] [cursor=pointer]: Pick & Place
+          - generic [ref=e110] [cursor=pointer]: Signature
+          - generic [ref=e113] [cursor=pointer]: 3D Printing
+          - generic [ref=e116] [cursor=pointer]: Laser Cutting
+          - generic [ref=e119] [cursor=pointer]: Welding
+          - generic [ref=e125] [cursor=pointer]: Camera
+        - generic [ref=e215] [cursor=pointer]:
+          - img [ref=e216]
+          - generic [ref=e218]: "10"
+      - generic [ref=e941]:
+        - heading "2D/3D Carving What is “2D/3D Carving”?" [level=2] [ref=e942]:
+          - text: 2D/3D Carving
+          - button "What is “2D/3D Carving”?" [ref=e944]:
+            - img [ref=e945]
+        - generic [ref=e949]:
+          - generic [ref=e950]:
+            - heading "Model" [level=3] [ref=e951]
+            - generic [ref=e953]:
+              - img [ref=e955]
+              - button "Add model…" [ref=e957] [cursor=pointer]
+              - generic [ref=e958]: or drop a .stl / .obj / .step / .dxf / .eps / .ai file anywhere — each model adds a job
+          - generic [ref=e959]:
+            - heading "Bit & material" [level=3] [ref=e960]
+            - generic [ref=e961]:
+              - generic [ref=e962]:
+                - generic [ref=e963]:
+                  - generic [ref=e964]:
+                    - text: Bit type
+                    - button "What is “Bit type”?" [ref=e966]:
+                      - img [ref=e967]
+                  - combobox "Bit type" [ref=e971]:
+                    - option "🔲 Flat / end mill" [selected]
+                    - option "⚫ Ball nose"
+                    - option "▽ V-bit"
+                    - option "✒ Engraving"
+                    - option "🪡 Drill"
+                - generic [ref=e972]:
+                  - generic [ref=e973]:
+                    - text: Bit width ⌀ (mm)
+                    - button "What is “Bit width ⌀ (mm)”?" [ref=e975]:
+                      - img [ref=e976]
+                  - combobox "Bit width ⌀ (mm)" [ref=e980]:
+                    - option "🔲 1mm Flat"
+                    - option "🔲 1/16\" Flat (1.5875mm)"
+                    - option "🔲 2mm Flat"
+                    - option "🔲 3mm Flat"
+                    - option "🔲 1/8\" Flat (3.175mm)" [selected]
+                    - option "🔲 6mm Flat"
+                - generic [ref=e981]:
+                  - generic [ref=e982]:
+                    - text: Bit length (mm)
+                    - button "What is “Bit length (mm)”?" [ref=e984]:
+                      - img [ref=e985]
+                  - spinbutton "Bit length (mm)" [ref=e989]: "16"
+              - generic [ref=e990]:
+                - generic [ref=e991]:
+                  - text: Material
+                  - button "What is “Material”?" [ref=e993]:
+                    - img [ref=e994]
+                - generic [ref=e998]:
+                  - button "View Softwood (pine, cedar) details" [ref=e999]
+                  - combobox "Material" [ref=e1000]:
+                    - option "🪵 Softwood (pine, cedar)" [selected]
+                    - option "🪵 Hardwood (oak, maple)"
+                    - option "🪵 Plywood"
+                    - option "🟫 MDF"
+                    - option "🟦 Acrylic (PMMA)"
+                    - option "🟨 PVC / plastics"
+                    - option "🟩 PCB (FR-4 copper-clad)"
+                    - option "⬜ Aluminium"
+                    - option "🟧 Brass"
+                    - option "🧊 Foam (EPS/XPS, modelling)"
+                    - option "🕯️ Machining wax"
+                  - button "View Softwood (pine, cedar) details" [ref=e1001] [cursor=pointer]:
+                    - img [ref=e1002]
+              - generic [ref=e1004]: One bit cuts every job. Speeds & depth are worked out from these — see Advanced (auto) below.
+          - generic [ref=e1005]:
+            - heading "Output" [level=3] [ref=e1006]
+            - generic [ref=e1007]:
+              - generic [ref=e1009]: Live preview · 0 lines → Visualizer
+              - generic [ref=e1010]:
+                - button "Regenerate now" [disabled] [ref=e1011] [cursor=pointer]:
+                  - generic [ref=e1012]: ↻
+                - generic [ref=e1013]:
+                  - button "Save carve settings" [ref=e1014] [cursor=pointer]:
+                    - img [ref=e1015]
+                  - button "Load carve settings" [ref=e1017] [cursor=pointer]:
+                    - img [ref=e1018]
+                - generic [ref=e1020]:
+                  - button "Frame — trace the job perimeter (70.0×27.0 mm) at safe Z with the tool OFF, so you can check placement." [ref=e1021] [cursor=pointer]:
+                    - img [ref=e1023]
+                    - generic [ref=e1028]: Frame
+                  - generic [ref=e1029]:
+                    - generic "Feed rate for the perimeter trace (mm/min)" [ref=e1030]:
+                      - generic [ref=e1031]: Frame speed
+                      - spinbutton "Frame speed mm/min" [ref=e1032]: "1500"
+                      - generic [ref=e1033]: mm/min
+                    - generic "How many times to loop the perimeter" [ref=e1034]:
+                      - generic [ref=e1035]: Loops
+                      - spinbutton "Loops" [ref=e1036]: "1"
+                    - generic "Inset (+) shrinks the trace inward; margin (−) grows it outward, per side (mm)" [ref=e1037]:
+                      - generic [ref=e1038]: Inset
+                      - spinbutton "Inset" [ref=e1039]: "0"
+              - generic [ref=e1040]: Import a model to generate a toolpath.
+    - generic [ref=e136]:
+      - generic [ref=e138]:
+        - generic [ref=e143] [cursor=pointer]:
+          - generic [ref=e144]: Visualizer
+          - img [ref=e146]
+        - generic [ref=e794]:
+          - generic [ref=e795]:
+            - generic [ref=e796]:
+              - button "Fit to toolpath" [ref=e797] [cursor=pointer]: ⤢
+              - button "Isometric view" [ref=e798] [cursor=pointer]: ⧉
+              - button "Top view" [ref=e799] [cursor=pointer]: ▣
+              - button "Front view" [ref=e800] [cursor=pointer]: ▭
+              - button "Bed size" [ref=e803] [cursor=pointer]: 📐
+              - button "More tools" [ref=e805] [cursor=pointer]: ⋯
+              - button "Place job" [ref=e807] [cursor=pointer]: ✛
+            - alert [ref=e812]:
+              - generic [ref=e813]: ⚠
+              - generic [ref=e814]: The 3D view lost the GPU (WebGL) context — usually a graphics-driver hiccup. The rest of the app is unaffected.
+              - button "Reload 3D view" [ref=e815] [cursor=pointer]
+            - status "Program dimensions" [ref=e816]:
+              - generic "Width (X) × Depth (Y) of the loaded program's bounding box, in mm" [ref=e817]:
+                - generic [ref=e818]: "70"
+                - generic [ref=e819]: ×
+                - generic [ref=e820]: "27"
+                - generic [ref=e821]: mm
+              - generic "Z range (top→bottom) and total cut depth, in mm" [ref=e822]:
+                - generic [ref=e823]: Z 0…5 (5)
+              - generic "Footprint area covered by the toolpath" [ref=e824]:
+                - generic [ref=e825]: 18.9 cm²
+              - generic "Whether the program fits within the machine work area (bed 300×200 mm)" [ref=e826]:
+                - generic [ref=e828]: fits bed 300×200
+            - note "Tool cone legend":
+              - generic:
+                - generic: ▼
+                - text: Machine (live)
+              - generic:
+                - generic: ▼
+                - text: Simulation
+          - generic [ref=e829]:
+            - generic [ref=e830]:
+              - button "Jump to start" [ref=e831] [cursor=pointer]:
+                - generic [ref=e832]: ⏮
+              - button "Previous segment" [ref=e833] [cursor=pointer]:
+                - generic [ref=e834]: ◀
+              - button "Play" [ref=e835] [cursor=pointer]:
+                - generic [ref=e836]: ▶
+              - button "Next segment" [ref=e837] [cursor=pointer]:
+                - generic [ref=e838]: ▶▌
+              - button "Jump to end" [ref=e839] [cursor=pointer]:
+                - generic [ref=e840]: ⏭
+              - button "Loop" [ref=e841] [cursor=pointer]:
+                - generic [ref=e842]: 🔁
+            - slider "Scrub timeline" [ref=e844] [cursor=pointer]: "0"
+            - generic "Elapsed and total time" [ref=e845]: 0:00 / 3:29
+            - group "Playback speed" [ref=e846]:
+              - button "0.25×" [ref=e847] [cursor=pointer]
+              - button "0.5×" [ref=e848] [cursor=pointer]
+              - button "1×" [pressed] [ref=e849] [cursor=pointer]
+              - button "2×" [ref=e850] [cursor=pointer]
+              - button "4×" [ref=e851] [cursor=pointer]
+      - generic [ref=e159]:
+        - generic [ref=e161]:
+          - generic [ref=e166] [cursor=pointer]:
+            - generic [ref=e167]: Program
+            - img [ref=e169]
+          - generic [ref=e442]:
+            - generic [ref=e444]:
+              - generic [ref=e445]:
+                - button "Reset start line to 1" [ref=e446] [cursor=pointer]: ↺
+                - spinbutton "Start line / current line" [ref=e447]: "1"
+                - button "▶ Stream" [ref=e448] [cursor=pointer]
+                - button "Pause" [disabled] [ref=e449] [cursor=pointer]: ⏸
+                - button "Abort" [disabled] [ref=e450] [cursor=pointer]: ⏹
+              - generic [ref=e451]:
+                - generic "Program progress" [ref=e452]:
+                  - generic [ref=e453]:
+                    - progressbar
+                  - generic [ref=e454]: 0 / 1799 (0%)
+                - generic "Estimated total run time" [ref=e455]:
+                  - generic [ref=e456]: ⏱
+                  - text: ~3m 29s
+            - generic [ref=e457]:
+              - generic [ref=e458]:
+                - generic [ref=e459]: Sections
+                - generic [ref=e460]: 2 sections
+              - list [ref=e461]:
+                - listitem [ref=e462]:
+                  - generic [ref=e463]:
+                    - button "▸ welding 1621 lines" [ref=e464] [cursor=pointer]:
+                      - generic [ref=e465]: ▸
+                      - generic "welding" [ref=e466]
+                      - generic [ref=e467]: 1621 lines
+                    - button "Delete section welding" [ref=e468] [cursor=pointer]: 🗑
+                - listitem [ref=e852]:
+                  - generic [ref=e853]:
+                    - button "▸ text — pen 176 lines" [ref=e854] [cursor=pointer]:
+                      - generic [ref=e855]: ▸
+                      - generic "text — pen" [ref=e856]
+                      - generic [ref=e857]: 176 lines
+                    - button "Delete section text — pen" [ref=e858] [cursor=pointer]: 🗑
+            - generic [ref=e469]:
+              - generic [ref=e470]:
+                - generic [ref=e471]: Program lines
+                - generic [ref=e472]: start at line 1
+              - generic [ref=e474]:
+                - generic "Click to select (feed-from-line start)" [ref=e475] [cursor=pointer]:
+                  - generic [ref=e476]: "1"
+                  - generic [ref=e477]: (— welding —)
+                - generic "Click to select (feed-from-line start)" [ref=e478] [cursor=pointer]:
+                  - generic [ref=e479]: "2"
+                  - generic [ref=e480]: (hjLabs Welding)
+                - generic "Click to select (feed-from-line start)" [ref=e481] [cursor=pointer]:
+                  - generic [ref=e482]: "3"
+                  - generic [ref=e483]: (Generated by hjLabs Candle Welding)
+                - generic "Click to select (feed-from-line start)" [ref=e484] [cursor=pointer]:
+                  - generic [ref=e485]: "4"
+                  - generic [ref=e486]: G21
+                - generic "Click to select (feed-from-line start)" [ref=e487] [cursor=pointer]:
+                  - generic [ref=e488]: "5"
+                  - generic [ref=e489]: G90
+                - generic "Click to select (feed-from-line start)" [ref=e490] [cursor=pointer]:
+                  - generic [ref=e491]: "6"
+                  - generic [ref=e492]: G94
+                - generic "Click to select (feed-from-line start)" [ref=e493] [cursor=pointer]:
+                  - generic [ref=e494]: "7"
+                  - generic [ref=e495]: G17
+                - generic "Click to select (feed-from-line start)" [ref=e496] [cursor=pointer]:
+                  - generic [ref=e497]: "8"
+                  - generic [ref=e498]: M5
+                - generic "Click to select (feed-from-line start)" [ref=e499] [cursor=pointer]:
+                  - generic [ref=e500]: "9"
+                  - generic [ref=e501]: G0 Z5.000000
+                - generic "Click to select (feed-from-line start)" [ref=e502] [cursor=pointer]:
+                  - generic [ref=e503]: "10"
+                  - generic [ref=e504]: "(Object 1: line Zigzag weave, 50.000000mm)"
+                - generic "Click to select (feed-from-line start)" [ref=e505] [cursor=pointer]:
+                  - generic [ref=e506]: "11"
+                  - generic [ref=e507]: G0 Z5.000000
+                - generic "Click to select (feed-from-line start)" [ref=e508] [cursor=pointer]:
+                  - generic [ref=e509]: "12"
+                  - generic [ref=e510]: G0 X0.000000 Y0.000000
+                - generic "Click to select (feed-from-line start)" [ref=e511] [cursor=pointer]:
+                  - generic [ref=e512]: "13"
+                  - generic [ref=e513]: G1 Z0.000000 F150.000000
+                - generic "Click to select (feed-from-line start)" [ref=e514] [cursor=pointer]:
+                  - generic [ref=e515]: "14"
+                  - generic [ref=e516]: G4 P0.500000
+                - generic "Click to select (feed-from-line start)" [ref=e517] [cursor=pointer]:
+                  - generic [ref=e518]: "15"
+                  - generic [ref=e519]: M3
+                - generic "Click to select (feed-from-line start)" [ref=e520] [cursor=pointer]:
+                  - generic [ref=e521]: "16"
+                  - generic [ref=e522]: G1 X0.031250 Y-0.500000 F300.000000
+                - generic "Click to select (feed-from-line start)" [ref=e523] [cursor=pointer]:
+                  - generic [ref=e524]: "17"
+                  - generic [ref=e525]: G1 X0.062500 Y-1.000000
+                - generic "Click to select (feed-from-line start)" [ref=e526] [cursor=pointer]:
+                  - generic [ref=e527]: "18"
+                  - generic [ref=e528]: G1 X0.093750 Y-1.500000
+                - generic "Click to select (feed-from-line start)" [ref=e529] [cursor=pointer]:
+                  - generic [ref=e530]: "19"
+                  - generic [ref=e531]: G1 X0.125000 Y-2.000000
+                - generic "Click to select (feed-from-line start)" [ref=e532] [cursor=pointer]:
+                  - generic [ref=e533]: "20"
+                  - generic [ref=e534]: G1 X0.156250 Y-1.500000
+                - generic "Click to select (feed-from-line start)" [ref=e535] [cursor=pointer]:
+                  - generic [ref=e536]: "21"
+                  - generic [ref=e537]: G1 X0.187500 Y-1.000000
+                - generic "Click to select (feed-from-line start)" [ref=e538] [cursor=pointer]:
+                  - generic [ref=e539]: "22"
+                  - generic [ref=e540]: G1 X0.218750 Y-0.500000
+                - generic "Click to select (feed-from-line start)" [ref=e541] [cursor=pointer]:
+                  - generic [ref=e542]: "23"
+                  - generic [ref=e543]: G1 X0.250000 Y0.000000
+                - generic "Click to select (feed-from-line start)" [ref=e544] [cursor=pointer]:
+                  - generic [ref=e545]: "24"
+                  - generic [ref=e546]: G1 X0.281250 Y0.500000
+                - generic "Click to select (feed-from-line start)" [ref=e547] [cursor=pointer]:
+                  - generic [ref=e548]: "25"
+                  - generic [ref=e549]: G1 X0.312500 Y1.000000
+                - generic "Click to select (feed-from-line start)" [ref=e550] [cursor=pointer]:
+                  - generic [ref=e551]: "26"
+                  - generic [ref=e552]: G1 X0.343750 Y1.500000
+                - generic "Click to select (feed-from-line start)" [ref=e553] [cursor=pointer]:
+                  - generic [ref=e554]: "27"
+                  - generic [ref=e555]: G1 X0.375000 Y2.000000
+                - generic "Click to select (feed-from-line start)" [ref=e556] [cursor=pointer]:
+                  - generic [ref=e557]: "28"
+                  - generic [ref=e558]: G1 X0.406250 Y1.500000
+                - generic "Click to select (feed-from-line start)" [ref=e559] [cursor=pointer]:
+                  - generic [ref=e560]: "29"
+                  - generic [ref=e561]: G1 X0.437500 Y1.000000
+                - generic "Click to select (feed-from-line start)" [ref=e562] [cursor=pointer]:
+                  - generic [ref=e563]: "30"
+                  - generic [ref=e564]: G1 X0.468750 Y0.500000
+            - generic [ref=e565]:
+              - generic [ref=e566]:
+                - button "▾ Program text (1799 lines)" [expanded] [ref=e859] [cursor=pointer]:
+                  - generic [ref=e568]: ▾
+                  - text: Program text
+                  - generic [ref=e569]: (1799 lines)
+                - generic "welding + text — pen" [ref=e860]
+                - generic [ref=e571]:
+                  - button "Load file" [ref=e572] [cursor=pointer]: ⬆
+                  - button "Clear program" [ref=e573] [cursor=pointer]: 🗑
+              - textbox "Editable G-code program text" [ref=e574]:
+                - /placeholder: No program loaded. Drag & drop or ⬆ a .nc / .gcode file, or type / paste G-code here.
+                - text: "(— welding —) (hjLabs Welding) (Generated by hjLabs Candle Welding) G21 G90 G94 G17 M5 G0 Z5.000000 (Object 1: line Zigzag weave, 50.000000mm) G0 Z5.000000 G0 X0.000000 Y0.000000 G1 Z0.000000 F150.000000 G4 P0.500000 M3 G1 X0.031250 Y-0.500000 F300.000000 G1 X0.062500 Y-1.000000 G1 X0.093750 Y-1.500000 G1 X0.125000 Y-2.000000 G1 X0.156250 Y-1.500000 G1 X0.187500 Y-1.000000 G1 X0.218750 Y-0.500000 G1 X0.250000 Y0.000000 G1 X0.281250 Y0.500000 G1 X0.312500 Y1.000000 G1 X0.343750 Y1.500000 G1 X0.375000 Y2.000000 G1 X0.406250 Y1.500000 G1 X0.437500 Y1.000000 G1 X0.468750 Y0.500000 G1 X0.500000 Y0.000000 G1 X0.531250 Y-0.500000 G1 X0.562500 Y-1.000000 G1 X0.593750 Y-1.500000 G1 X0.625000 Y-2.000000 G1 X0.656250 Y-1.500000 G1 X0.687500 Y-1.000000 G1 X0.718750 Y-0.500000 G1 X0.750000 Y0.000000 G1 X0.781250 Y0.500000 G1 X0.812500 Y1.000000 G1 X0.843750 Y1.500000 G1 X0.875000 Y2.000000 G1 X0.906250 Y1.500000 G1 X0.937500 Y1.000000 G1 X0.968750 Y0.500000 G1 X1.000000 Y0.000000 G1 X1.031250 Y-0.500000 G1 X1.062500 Y-1.000000 G1 X1.093750 Y-1.500000 G1 X1.125000 Y-2.000000 G1 X1.156250 Y-1.500000 G1 X1.187500 Y-1.000000 G1 X1.218750 Y-0.500000 G1 X1.250000 Y0.000000 G1 X1.281250 Y0.500000 G1 X1.312500 Y1.000000 G1 X1.343750 Y1.500000 G1 X1.375000 Y2.000000 G1 X1.406250 Y1.500000 G1 X1.437500 Y1.000000 G1 X1.468750 Y0.500000 G1 X1.500000 Y0.000000 G1 X1.531250 Y-0.500000 G1 X1.562500 Y-1.000000 G1 X1.593750 Y-1.500000 G1 X1.625000 Y-2.000000 G1 X1.656250 Y-1.500000 G1 X1.687500 Y-1.000000 G1 X1.718750 Y-0.500000 G1 X1.750000 Y0.000000 G1 X1.781250 Y0.500000 G1 X1.812500 Y1.000000 G1 X1.843750 Y1.500000 G1 X1.875000 Y2.000000 G1 X1.906250 Y1.500000 G1 X1.937500 Y1.000000 G1 X1.968750 Y0.500000 G1 X2.000000 Y0.000000 G1 X2.031250 Y-0.500000 G1 X2.062500 Y-1.000000 G1 X2.093750 Y-1.500000 G1 X2.125000 Y-2.000000 G1 X2.156250 Y-1.500000 G1 X2.187500 Y-1.000000 G1 X2.218750 Y-0.500000 G1 X2.250000 Y0.000000 G1 X2.281250 Y0.500000 G1 X2.312500 Y1.000000 G1 X2.343750 Y1.500000 G1 X2.375000 Y2.000000 G1 X2.406250 Y1.500000 G1 X2.437500 Y1.000000 G1 X2.468750 Y0.500000 G1 X2.500000 Y0.000000 G1 X2.531250 Y-0.500000 G1 X2.562500 Y-1.000000 G1 X2.593750 Y-1.500000 G1 X2.625000 Y-2.000000 G1 X2.656250 Y-1.500000 G1 X2.687500 Y-1.000000 G1 X2.718750 Y-0.500000 G1 X2.750000 Y0.000000 G1 X2.781250 Y0.500000 G1 X2.812500 Y1.000000 G1 X2.843750 Y1.500000 G1 X2.875000 Y2.000000 G1 X2.906250 Y1.500000 G1 X2.937500 Y1.000000 G1 X2.968750 Y0.500000 G1 X3.000000 Y0.000000 G1 X3.031250 Y-0.500000 G1 X3.062500 Y-1.000000 G1 X3.093750 Y-1.500000 G1 X3.125000 Y-2.000000 G1 X3.156250 Y-1.500000 G1 X3.187500 Y-1.000000 G1 X3.218750 Y-0.500000 G1 X3.250000 Y0.000000 G1 X3.281250 Y0.500000 G1 X3.312500 Y1.000000 G1 X3.343750 Y1.500000 G1 X3.375000 Y2.000000 G1 X3.406250 Y1.500000 G1 X3.437500 Y1.000000 G1 X3.468750 Y0.500000 G1 X3.500000 Y0.000000 G1 X3.531250 Y-0.500000 G1 X3.562500 Y-1.000000 G1 X3.593750 Y-1.500000 G1 X3.625000 Y-2.000000 G1 X3.656250 Y-1.500000 G1 X3.687500 Y-1.000000 G1 X3.718750 Y-0.500000 G1 X3.750000 Y0.000000 G1 X3.781250 Y0.500000 G1 X3.812500 Y1.000000 G1 X3.843750 Y1.500000 G1 X3.875000 Y2.000000 G1 X3.906250 Y1.500000 G1 X3.937500 Y1.000000 G1 X3.968750 Y0.500000 G1 X4.000000 Y0.000000 G1 X4.031250 Y-0.500000 G1 X4.062500 Y-1.000000 G1 X4.093750 Y-1.500000 G1 X4.125000 Y-2.000000 G1 X4.156250 Y-1.500000 G1 X4.187500 Y-1.000000 G1 X4.218750 Y-0.500000 G1 X4.250000 Y0.000000 G1 X4.281250 Y0.500000 G1 X4.312500 Y1.000000 G1 X4.343750 Y1.500000 G1 X4.375000 Y2.000000 G1 X4.406250 Y1.500000 G1 X4.437500 Y1.000000 G1 X4.468750 Y0.500000 G1 X4.500000 Y0.000000 G1 X4.531250 Y-0.500000 G1 X4.562500 Y-1.000000 G1 X4.593750 Y-1.500000 G1 X4.625000 Y-2.000000 G1 X4.656250 Y-1.500000 G1 X4.687500 Y-1.000000 G1 X4.718750 Y-0.500000 G1 X4.750000 Y0.000000 G1 X4.781250 Y0.500000 G1 X4.812500 Y1.000000 G1 X4.843750 Y1.500000 G1 X4.875000 Y2.000000 G1 X4.906250 Y1.500000 G1 X4.937500 Y1.000000 G1 X4.968750 Y0.500000 G1 X5.000000 Y0.000000 G1 X5.031250 Y-0.500000 G1 X5.062500 Y-1.000000 G1 X5.093750 Y-1.500000 G1 X5.125000 Y-2.000000 G1 X5.156250 Y-1.500000 G1 X5.187500 Y-1.000000 G1 X5.218750 Y-0.500000 G1 X5.250000 Y0.000000 G1 X5.281250 Y0.500000 G1 X5.312500 Y1.000000 G1 X5.343750 Y1.500000 G1 X5.375000 Y2.000000 G1 X5.406250 Y1.500000 G1 X5.437500 Y1.000000 G1 X5.468750 Y0.500000 G1 X5.500000 Y0.000000 G1 X5.531250 Y-0.500000 G1 X5.562500 Y-1.000000 G1 X5.593750 Y-1.500000 G1 X5.625000 Y-2.000000 G1 X5.656250 Y-1.500000 G1 X5.687500 Y-1.000000 G1 X5.718750 Y-0.500000 G1 X5.750000 Y0.000000 G1 X5.781250 Y0.500000 G1 X5.812500 Y1.000000 G1 X5.843750 Y1.500000 G1 X5.875000 Y2.000000 G1 X5.906250 Y1.500000 G1 X5.937500 Y1.000000 G1 X5.968750 Y0.500000 G1 X6.000000 Y0.000000 G1 X6.031250 Y-0.500000 G1 X6.062500 Y-1.000000 G1 X6.093750 Y-1.500000 G1 X6.125000 Y-2.000000 G1 X6.156250 Y-1.500000 G1 X6.187500 Y-1.000000 G1 X6.218750 Y-0.500000 G1 X6.250000 Y0.000000 G1 X6.281250 Y0.500000 G1 X6.312500 Y1.000000 G1 X6.343750 Y1.500000 G1 X6.375000 Y2.000000 G1 X6.406250 Y1.500000 G1 X6.437500 Y1.000000 G1 X6.468750 Y0.500000 G1 X6.500000 Y0.000000 G1 X6.531250 Y-0.500000 G1 X6.562500 Y-1.000000 G1 X6.593750 Y-1.500000 G1 X6.625000 Y-2.000000 G1 X6.656250 Y-1.500000 G1 X6.687500 Y-1.000000 G1 X6.718750 Y-0.500000 G1 X6.750000 Y0.000000 G1 X6.781250 Y0.500000 G1 X6.812500 Y1.000000 G1 X6.843750 Y1.500000 G1 X6.875000 Y2.000000 G1 X6.906250 Y1.500000 G1 X6.937500 Y1.000000 G1 X6.968750 Y0.500000 G1 X7.000000 Y0.000000 G1 X7.031250 Y-0.500000 G1 X7.062500 Y-1.000000 G1 X7.093750 Y-1.500000 G1 X7.125000 Y-2.000000 G1 X7.156250 Y-1.500000 G1 X7.187500 Y-1.000000 G1 X7.218750 Y-0.500000 G1 X7.250000 Y0.000000 G1 X7.281250 Y0.500000 G1 X7.312500 Y1.000000 G1 X7.343750 Y1.500000 G1 X7.375000 Y2.000000 G1 X7.406250 Y1.500000 G1 X7.437500 Y1.000000 G1 X7.468750 Y0.500000 G1 X7.500000 Y0.000000 G1 X7.531250 Y-0.500000 G1 X7.562500 Y-1.000000 G1 X7.593750 Y-1.500000 G1 X7.625000 Y-2.000000 G1 X7.656250 Y-1.500000 G1 X7.687500 Y-1.000000 G1 X7.718750 Y-0.500000 G1 X7.750000 Y0.000000 G1 X7.781250 Y0.500000 G1 X7.812500 Y1.000000 G1 X7.843750 Y1.500000 G1 X7.875000 Y2.000000 G1 X7.906250 Y1.500000 G1 X7.937500 Y1.000000 G1 X7.968750 Y0.500000 G1 X8.000000 Y0.000000 G1 X8.031250 Y-0.500000 G1 X8.062500 Y-1.000000 G1 X8.093750 Y-1.500000 G1 X8.125000 Y-2.000000 G1 X8.156250 Y-1.500000 G1 X8.187500 Y-1.000000 G1 X8.218750 Y-0.500000 G1 X8.250000 Y0.000000 G1 X8.281250 Y0.500000 G1 X8.312500 Y1.000000 G1 X8.343750 Y1.500000 G1 X8.375000 Y2.000000 G1 X8.406250 Y1.500000 G1 X8.437500 Y1.000000 G1 X8.468750 Y0.500000 G1 X8.500000 Y0.000000 G1 X8.531250 Y-0.500000 G1 X8.562500 Y-1.000000 G1 X8.593750 Y-1.500000 G1 X8.625000 Y-2.000000 G1 X8.656250 Y-1.500000 G1 X8.687500 Y-1.000000 G1 X8.718750 Y-0.500000 G1 X8.750000 Y0.000000 G1 X8.781250 Y0.500000 G1 X8.812500 Y1.000000 G1 X8.843750 Y1.500000 G1 X8.875000 Y2.000000 G1 X8.906250 Y1.500000 G1 X8.937500 Y1.000000 G1 X8.968750 Y0.500000 G1 X9.000000 Y0.000000 G1 X9.031250 Y-0.500000 G1 X9.062500 Y-1.000000 G1 X9.093750 Y-1.500000 G1 X9.125000 Y-2.000000 G1 X9.156250 Y-1.500000 G1 X9.187500 Y-1.000000 G1 X9.218750 Y-0.500000 G1 X9.250000 Y0.000000 G1 X9.281250 Y0.500000 G1 X9.312500 Y1.000000 G1 X9.343750 Y1.500000 G1 X9.375000 Y2.000000 G1 X9.406250 Y1.500000 G1 X9.437500 Y1.000000 G1 X9.468750 Y0.500000 G1 X9.500000 Y0.000000 G1 X9.531250 Y-0.500000 G1 X9.562500 Y-1.000000 G1 X9.593750 Y-1.500000 G1 X9.625000 Y-2.000000 G1 X9.656250 Y-1.500000 G1 X9.687500 Y-1.000000 G1 X9.718750 Y-0.500000 G1 X9.750000 Y0.000000 G1 X9.781250 Y0.500000 G1 X9.812500 Y1.000000 G1 X9.843750 Y1.500000 G1 X9.875000 Y2.000000 G1 X9.906250 Y1.500000 G1 X9.937500 Y1.000000 G1 X9.968750 Y0.500000 G1 X10.000000 Y0.000000 G1 X10.031250 Y-0.500000 G1 X10.062500 Y-1.000000 G1 X10.093750 Y-1.500000 G1 X10.125000 Y-2.000000 G1 X10.156250 Y-1.500000 G1 X10.187500 Y-1.000000 G1 X10.218750 Y-0.500000 G1 X10.250000 Y0.000000 G1 X10.281250 Y0.500000 G1 X10.312500 Y1.000000 G1 X10.343750 Y1.500000 G1 X10.375000 Y2.000000 G1 X10.406250 Y1.500000 G1 X10.437500 Y1.000000 G1 X10.468750 Y0.500000 G1 X10.500000 Y0.000000 G1 X10.531250 Y-0.500000 G1 X10.562500 Y-1.000000 G1 X10.593750 Y-1.500000 G1 X10.625000 Y-2.000000 G1 X10.656250 Y-1.500000 G1 X10.687500 Y-1.000000 G1 X10.718750 Y-0.500000 G1 X10.750000 Y0.000000 G1 X10.781250 Y0.500000 G1 X10.812500 Y1.000000 G1 X10.843750 Y1.500000 G1 X10.875000 Y2.000000 G1 X10.906250 Y1.500000 G1 X10.937500 Y1.000000 G1 X10.968750 Y0.500000 G1 X11.000000 Y0.000000 G1 X11.031250 Y-0.500000 G1 X11.062500 Y-1.000000 G1 X11.093750 Y-1.500000 G1 X11.125000 Y-2.000000 G1 X11.156250 Y-1.500000 G1 X11.187500 Y-1.000000 G1 X11.218750 Y-0.500000 G1 X11.250000 Y0.000000 G1 X11.281250 Y0.500000 G1 X11.312500 Y1.000000 G1 X11.343750 Y1.500000 G1 X11.375000 Y2.000000 G1 X11.406250 Y1.500000 G1 X11.437500 Y1.000000 G1 X11.468750 Y0.500000 G1 X11.500000 Y0.000000 G1 X11.531250 Y-0.500000 G1 X11.562500 Y-1.000000 G1 X11.593750 Y-1.500000 G1 X11.625000 Y-2.000000 G1 X11.656250 Y-1.500000 G1 X11.687500 Y-1.000000 G1 X11.718750 Y-0.500000 G1 X11.750000 Y0.000000 G1 X11.781250 Y0.500000 G1 X11.812500 Y1.000000 G1 X11.843750 Y1.500000 G1 X11.875000 Y2.000000 G1 X11.906250 Y1.500000 G1 X11.937500 Y1.000000 G1 X11.968750 Y0.500000 G1 X12.000000 Y0.000000 G1 X12.031250 Y-0.500000 G1 X12.062500 Y-1.000000 G1 X12.093750 Y-1.500000 G1 X12.125000 Y-2.000000 G1 X12.156250 Y-1.500000 G1 X12.187500 Y-1.000000 G1 X12.218750 Y-0.500000 G1 X12.250000 Y0.000000 G1 X12.281250 Y0.500000 G1 X12.312500 Y1.000000 G1 X12.343750 Y1.500000 G1 X12.375000 Y2.000000 G1 X12.406250 Y1.500000 G1 X12.437500 Y1.000000 G1 X12.468750 Y0.500000 G1 X12.500000 Y0.000000 G1 X12.531250 Y-0.500000 G1 X12.562500 Y-1.000000 G1 X12.593750 Y-1.500000 G1 X12.625000 Y-2.000000 G1 X12.656250 Y-1.500000 G1 X12.687500 Y-1.000000 G1 X12.718750 Y-0.500000 G1 X12.750000 Y0.000000 G1 X12.781250 Y0.500000 G1 X12.812500 Y1.000000 G1 X12.843750 Y1.500000 G1 X12.875000 Y2.000000 G1 X12.906250 Y1.500000 G1 X12.937500 Y1.000000 G1 X12.968750 Y0.500000 G1 X13.000000 Y0.000000 G1 X13.031250 Y-0.500000 G1 X13.062500 Y-1.000000 G1 X13.093750 Y-1.500000 G1 X13.125000 Y-2.000000 G1 X13.156250 Y-1.500000 G1 X13.187500 Y-1.000000 G1 X13.218750 Y-0.500000 G1 X13.250000 Y0.000000 G1 X13.281250 Y0.500000 G1 X13.312500 Y1.000000 G1 X13.343750 Y1.500000 G1 X13.375000 Y2.000000 G1 X13.406250 Y1.500000 G1 X13.437500 Y1.000000 G1 X13.468750 Y0.500000 G1 X13.500000 Y0.000000 G1 X13.531250 Y-0.500000 G1 X13.562500 Y-1.000000 G1 X13.593750 Y-1.500000 G1 X13.625000 Y-2.000000 G1 X13.656250 Y-1.500000 G1 X13.687500 Y-1.000000 G1 X13.718750 Y-0.500000 G1 X13.750000 Y0.000000 G1 X13.781250 Y0.500000 G1 X13.812500 Y1.000000 G1 X13.843750 Y1.500000 G1 X13.875000 Y2.000000 G1 X13.906250 Y1.500000 G1 X13.937500 Y1.000000 G1 X13.968750 Y0.500000 G1 X14.000000 Y0.000000 G1 X14.031250 Y-0.500000 G1 X14.062500 Y-1.000000 G1 X14.093750 Y-1.500000 G1 X14.125000 Y-2.000000 G1 X14.156250 Y-1.500000 G1 X14.187500 Y-1.000000 G1 X14.218750 Y-0.500000 G1 X14.250000 Y0.000000 G1 X14.281250 Y0.500000 G1 X14.312500 Y1.000000 G1 X14.343750 Y1.500000 G1 X14.375000 Y2.000000 G1 X14.406250 Y1.500000 G1 X14.437500 Y1.000000 G1 X14.468750 Y0.500000 G1 X14.500000 Y0.000000 G1 X14.531250 Y-0.500000 G1 X14.562500 Y-1.000000 G1 X14.593750 Y-1.500000 G1 X14.625000 Y-2.000000 G1 X14.656250 Y-1.500000 G1 X14.687500 Y-1.000000 G1 X14.718750 Y-0.500000 G1 X14.750000 Y0.000000 G1 X14.781250 Y0.500000 G1 X14.812500 Y1.000000 G1 X14.843750 Y1.500000 G1 X14.875000 Y2.000000 G1 X14.906250 Y1.500000 G1 X14.937500 Y1.000000 G1 X14.968750 Y0.500000 G1 X15.000000 Y0.000000 G1 X15.031250 Y-0.500000 G1 X15.062500 Y-1.000000 G1 X15.093750 Y-1.500000 G1 X15.125000 Y-2.000000 G1 X15.156250 Y-1.500000 G1 X15.187500 Y-1.000000 G1 X15.218750 Y-0.500000 G1 X15.250000 Y0.000000 G1 X15.281250 Y0.500000 G1 X15.312500 Y1.000000 G1 X15.343750 Y1.500000 G1 X15.375000 Y2.000000 G1 X15.406250 Y1.500000 G1 X15.437500 Y1.000000 G1 X15.468750 Y0.500000 G1 X15.500000 Y0.000000 G1 X15.531250 Y-0.500000 G1 X15.562500 Y-1.000000 G1 X15.593750 Y-1.500000 G1 X15.625000 Y-2.000000 G1 X15.656250 Y-1.500000 G1 X15.687500 Y-1.000000 G1 X15.718750 Y-0.500000 G1 X15.750000 Y0.000000 G1 X15.781250 Y0.500000 G1 X15.812500 Y1.000000 G1 X15.843750 Y1.500000 G1 X15.875000 Y2.000000 G1 X15.906250 Y1.500000 G1 X15.937500 Y1.000000 G1 X15.968750 Y0.500000 G1 X16.000000 Y0.000000 G1 X16.031250 Y-0.500000 G1 X16.062500 Y-1.000000 G1 X16.093750 Y-1.500000 G1 X16.125000 Y-2.000000 G1 X16.156250 Y-1.500000 G1 X16.187500 Y-1.000000 G1 X16.218750 Y-0.500000 G1 X16.250000 Y0.000000 G1 X16.281250 Y0.500000 G1 X16.312500 Y1.000000 G1 X16.343750 Y1.500000 G1 X16.375000 Y2.000000 G1 X16.406250 Y1.500000 G1 X16.437500 Y1.000000 G1 X16.468750 Y0.500000 G1 X16.500000 Y0.000000 G1 X16.531250 Y-0.500000 G1 X16.562500 Y-1.000000 G1 X16.593750 Y-1.500000 G1 X16.625000 Y-2.000000 G1 X16.656250 Y-1.500000 G1 X16.687500 Y-1.000000 G1 X16.718750 Y-0.500000 G1 X16.750000 Y0.000000 G1 X16.781250 Y0.500000 G1 X16.812500 Y1.000000 G1 X16.843750 Y1.500000 G1 X16.875000 Y2.000000 G1 X16.906250 Y1.500000 G1 X16.937500 Y1.000000 G1 X16.968750 Y0.500000 G1 X17.000000 Y0.000000 G1 X17.031250 Y-0.500000 G1 X17.062500 Y-1.000000 G1 X17.093750 Y-1.500000 G1 X17.125000 Y-2.000000 G1 X17.156250 Y-1.500000 G1 X17.187500 Y-1.000000 G1 X17.218750 Y-0.500000 G1 X17.250000 Y0.000000 G1 X17.281250 Y0.500000 G1 X17.312500 Y1.000000 G1 X17.343750 Y1.500000 G1 X17.375000 Y2.000000 G1 X17.406250 Y1.500000 G1 X17.437500 Y1.000000 G1 X17.468750 Y0.500000 G1 X17.500000 Y0.000000 G1 X17.531250 Y-0.500000 G1 X17.562500 Y-1.000000 G1 X17.593750 Y-1.500000 G1 X17.625000 Y-2.000000 G1 X17.656250 Y-1.500000 G1 X17.687500 Y-1.000000 G1 X17.718750 Y-0.500000 G1 X17.750000 Y0.000000 G1 X17.781250 Y0.500000 G1 X17.812500 Y1.000000 G1 X17.843750 Y1.500000 G1 X17.875000 Y2.000000 G1 X17.906250 Y1.500000 G1 X17.937500 Y1.000000 G1 X17.968750 Y0.500000 G1 X18.000000 Y0.000000 G1 X18.031250 Y-0.500000 G1 X18.062500 Y-1.000000 G1 X18.093750 Y-1.500000 G1 X18.125000 Y-2.000000 G1 X18.156250 Y-1.500000 G1 X18.187500 Y-1.000000 G1 X18.218750 Y-0.500000 G1 X18.250000 Y0.000000 G1 X18.281250 Y0.500000 G1 X18.312500 Y1.000000 G1 X18.343750 Y1.500000 G1 X18.375000 Y2.000000 G1 X18.406250 Y1.500000 G1 X18.437500 Y1.000000 G1 X18.468750 Y0.500000 G1 X18.500000 Y0.000000 G1 X18.531250 Y-0.500000 G1 X18.562500 Y-1.000000 G1 X18.593750 Y-1.500000 G1 X18.625000 Y-2.000000 G1 X18.656250 Y-1.500000 G1 X18.687500 Y-1.000000 G1 X18.718750 Y-0.500000 G1 X18.750000 Y0.000000 G1 X18.781250 Y0.500000 G1 X18.812500 Y1.000000 G1 X18.843750 Y1.500000 G1 X18.875000 Y2.000000 G1 X18.906250 Y1.500000 G1 X18.937500 Y1.000000 G1 X18.968750 Y0.500000 G1 X19.000000 Y0.000000 G1 X19.031250 Y-0.500000 G1 X19.062500 Y-1.000000 G1 X19.093750 Y-1.500000 G1 X19.125000 Y-2.000000 G1 X19.156250 Y-1.500000 G1 X19.187500 Y-1.000000 G1 X19.218750 Y-0.500000 G1 X19.250000 Y0.000000 G1 X19.281250 Y0.500000 G1 X19.312500 Y1.000000 G1 X19.343750 Y1.500000 G1 X19.375000 Y2.000000 G1 X19.406250 Y1.500000 G1 X19.437500 Y1.000000 G1 X19.468750 Y0.500000 G1 X19.500000 Y0.000000 G1 X19.531250 Y-0.500000 G1 X19.562500 Y-1.000000 G1 X19.593750 Y-1.500000 G1 X19.625000 Y-2.000000 G1 X19.656250 Y-1.500000 G1 X19.687500 Y-1.000000 G1 X19.718750 Y-0.500000 G1 X19.750000 Y0.000000 G1 X19.781250 Y0.500000 G1 X19.812500 Y1.000000 G1 X19.843750 Y1.500000 G1 X19.875000 Y2.000000 G1 X19.906250 Y1.500000 G1 X19.937500 Y1.000000 G1 X19.968750 Y0.500000 G1 X20.000000 Y0.000000 G1 X20.031250 Y-0.500000 G1 X20.062500 Y-1.000000 G1 X20.093750 Y-1.500000 G1 X20.125000 Y-2.000000 G1 X20.156250 Y-1.500000 G1 X20.187500 Y-1.000000 G1 X20.218750 Y-0.500000 G1 X20.250000 Y0.000000 G1 X20.281250 Y0.500000 G1 X20.312500 Y1.000000 G1 X20.343750 Y1.500000 G1 X20.375000 Y2.000000 G1 X20.406250 Y1.500000 G1 X20.437500 Y1.000000 G1 X20.468750 Y0.500000 G1 X20.500000 Y0.000000 G1 X20.531250 Y-0.500000 G1 X20.562500 Y-1.000000 G1 X20.593750 Y-1.500000 G1 X20.625000 Y-2.000000 G1 X20.656250 Y-1.500000 G1 X20.687500 Y-1.000000 G1 X20.718750 Y-0.500000 G1 X20.750000 Y0.000000 G1 X20.781250 Y0.500000 G1 X20.812500 Y1.000000 G1 X20.843750 Y1.500000 G1 X20.875000 Y2.000000 G1 X20.906250 Y1.500000 G1 X20.937500 Y1.000000 G1 X20.968750 Y0.500000 G1 X21.000000 Y0.000000 G1 X21.031250 Y-0.500000 G1 X21.062500 Y-1.000000 G1 X21.093750 Y-1.500000 G1 X21.125000 Y-2.000000 G1 X21.156250 Y-1.500000 G1 X21.187500 Y-1.000000 G1 X21.218750 Y-0.500000 G1 X21.250000 Y0.000000 G1 X21.281250 Y0.500000 G1 X21.312500 Y1.000000 G1 X21.343750 Y1.500000 G1 X21.375000 Y2.000000 G1 X21.406250 Y1.500000 G1 X21.437500 Y1.000000 G1 X21.468750 Y0.500000 G1 X21.500000 Y0.000000 G1 X21.531250 Y-0.500000 G1 X21.562500 Y-1.000000 G1 X21.593750 Y-1.500000 G1 X21.625000 Y-2.000000 G1 X21.656250 Y-1.500000 G1 X21.687500 Y-1.000000 G1 X21.718750 Y-0.500000 G1 X21.750000 Y0.000000 G1 X21.781250 Y0.500000 G1 X21.812500 Y1.000000 G1 X21.843750 Y1.500000 G1 X21.875000 Y2.000000 G1 X21.906250 Y1.500000 G1 X21.937500 Y1.000000 G1 X21.968750 Y0.500000 G1 X22.000000 Y0.000000 G1 X22.031250 Y-0.500000 G1 X22.062500 Y-1.000000 G1 X22.093750 Y-1.500000 G1 X22.125000 Y-2.000000 G1 X22.156250 Y-1.500000 G1 X22.187500 Y-1.000000 G1 X22.218750 Y-0.500000 G1 X22.250000 Y0.000000 G1 X22.281250 Y0.500000 G1 X22.312500 Y1.000000 G1 X22.343750 Y1.500000 G1 X22.375000 Y2.000000 G1 X22.406250 Y1.500000 G1 X22.437500 Y1.000000 G1 X22.468750 Y0.500000 G1 X22.500000 Y0.000000 G1 X22.531250 Y-0.500000 G1 X22.562500 Y-1.000000 G1 X22.593750 Y-1.500000 G1 X22.625000 Y-2.000000 G1 X22.656250 Y-1.500000 G1 X22.687500 Y-1.000000 G1 X22.718750 Y-0.500000 G1 X22.750000 Y0.000000 G1 X22.781250 Y0.500000 G1 X22.812500 Y1.000000 G1 X22.843750 Y1.500000 G1 X22.875000 Y2.000000 G1 X22.906250 Y1.500000 G1 X22.937500 Y1.000000 G1 X22.968750 Y0.500000 G1 X23.000000 Y0.000000 G1 X23.031250 Y-0.500000 G1 X23.062500 Y-1.000000 G1 X23.093750 Y-1.500000 G1 X23.125000 Y-2.000000 G1 X23.156250 Y-1.500000 G1 X23.187500 Y-1.000000 G1 X23.218750 Y-0.500000 G1 X23.250000 Y0.000000 G1 X23.281250 Y0.500000 G1 X23.312500 Y1.000000 G1 X23.343750 Y1.500000 G1 X23.375000 Y2.000000 G1 X23.406250 Y1.500000 G1 X23.437500 Y1.000000 G1 X23.468750 Y0.500000 G1 X23.500000 Y0.000000 G1 X23.531250 Y-0.500000 G1 X23.562500 Y-1.000000 G1 X23.593750 Y-1.500000 G1 X23.625000 Y-2.000000 G1 X23.656250 Y-1.500000 G1 X23.687500 Y-1.000000 G1 X23.718750 Y-0.500000 G1 X23.750000 Y0.000000 G1 X23.781250 Y0.500000 G1 X23.812500 Y1.000000 G1 X23.843750 Y1.500000 G1 X23.875000 Y2.000000 G1 X23.906250 Y1.500000 G1 X23.937500 Y1.000000 G1 X23.968750 Y0.500000 G1 X24.000000 Y0.000000 G1 X24.031250 Y-0.500000 G1 X24.062500 Y-1.000000 G1 X24.093750 Y-1.500000 G1 X24.125000 Y-2.000000 G1 X24.156250 Y-1.500000 G1 X24.187500 Y-1.000000 G1 X24.218750 Y-0.500000 G1 X24.250000 Y0.000000 G1 X24.281250 Y0.500000 G1 X24.312500 Y1.000000 G1 X24.343750 Y1.500000 G1 X24.375000 Y2.000000 G1 X24.406250 Y1.500000 G1 X24.437500 Y1.000000 G1 X24.468750 Y0.500000 G1 X24.500000 Y0.000000 G1 X24.531250 Y-0.500000 G1 X24.562500 Y-1.000000 G1 X24.593750 Y-1.500000 G1 X24.625000 Y-2.000000 G1 X24.656250 Y-1.500000 G1 X24.687500 Y-1.000000 G1 X24.718750 Y-0.500000 G1 X24.750000 Y0.000000 G1 X24.781250 Y0.500000 G1 X24.812500 Y1.000000 G1 X24.843750 Y1.500000 G1 X24.875000 Y2.000000 G1 X24.906250 Y1.500000 G1 X24.937500 Y1.000000 G1 X24.968750 Y0.500000 G1 X25.000000 Y0.000000 G1 X25.031250 Y-0.500000 G1 X25.062500 Y-1.000000 G1 X25.093750 Y-1.500000 G1 X25.125000 Y-2.000000 G1 X25.156250 Y-1.500000 G1 X25.187500 Y-1.000000 G1 X25.218750 Y-0.500000 G1 X25.250000 Y0.000000 G1 X25.281250 Y0.500000 G1 X25.312500 Y1.000000 G1 X25.343750 Y1.500000 G1 X25.375000 Y2.000000 G1 X25.406250 Y1.500000 G1 X25.437500 Y1.000000 G1 X25.468750 Y0.500000 G1 X25.500000 Y0.000000 G1 X25.531250 Y-0.500000 G1 X25.562500 Y-1.000000 G1 X25.593750 Y-1.500000 G1 X25.625000 Y-2.000000 G1 X25.656250 Y-1.500000 G1 X25.687500 Y-1.000000 G1 X25.718750 Y-0.500000 G1 X25.750000 Y0.000000 G1 X25.781250 Y0.500000 G1 X25.812500 Y1.000000 G1 X25.843750 Y1.500000 G1 X25.875000 Y2.000000 G1 X25.906250 Y1.500000 G1 X25.937500 Y1.000000 G1 X25.968750 Y0.500000 G1 X26.000000 Y0.000000 G1 X26.031250 Y-0.500000 G1 X26.062500 Y-1.000000 G1 X26.093750 Y-1.500000 G1 X26.125000 Y-2.000000 G1 X26.156250 Y-1.500000 G1 X26.187500 Y-1.000000 G1 X26.218750 Y-0.500000 G1 X26.250000 Y0.000000 G1 X26.281250 Y0.500000 G1 X26.312500 Y1.000000 G1 X26.343750 Y1.500000 G1 X26.375000 Y2.000000 G1 X26.406250 Y1.500000 G1 X26.437500 Y1.000000 G1 X26.468750 Y0.500000 G1 X26.500000 Y0.000000 G1 X26.531250 Y-0.500000 G1 X26.562500 Y-1.000000 G1 X26.593750 Y-1.500000 G1 X26.625000 Y-2.000000 G1 X26.656250 Y-1.500000 G1 X26.687500 Y-1.000000 G1 X26.718750 Y-0.500000 G1 X26.750000 Y0.000000 G1 X26.781250 Y0.500000 G1 X26.812500 Y1.000000 G1 X26.843750 Y1.500000 G1 X26.875000 Y2.000000 G1 X26.906250 Y1.500000 G1 X26.937500 Y1.000000 G1 X26.968750 Y0.500000 G1 X27.000000 Y0.000000 G1 X27.031250 Y-0.500000 G1 X27.062500 Y-1.000000 G1 X27.093750 Y-1.500000 G1 X27.125000 Y-2.000000 G1 X27.156250 Y-1.500000 G1 X27.187500 Y-1.000000 G1 X27.218750 Y-0.500000 G1 X27.250000 Y0.000000 G1 X27.281250 Y0.500000 G1 X27.312500 Y1.000000 G1 X27.343750 Y1.500000 G1 X27.375000 Y2.000000 G1 X27.406250 Y1.500000 G1 X27.437500 Y1.000000 G1 X27.468750 Y0.500000 G1 X27.500000 Y0.000000 G1 X27.531250 Y-0.500000 G1 X27.562500 Y-1.000000 G1 X27.593750 Y-1.500000 G1 X27.625000 Y-2.000000 G1 X27.656250 Y-1.500000 G1 X27.687500 Y-1.000000 G1 X27.718750 Y-0.500000 G1 X27.750000 Y0.000000 G1 X27.781250 Y0.500000 G1 X27.812500 Y1.000000 G1 X27.843750 Y1.500000 G1 X27.875000 Y2.000000 G1 X27.906250 Y1.500000 G1 X27.937500 Y1.000000 G1 X27.968750 Y0.500000 G1 X28.000000 Y0.000000 G1 X28.031250 Y-0.500000 G1 X28.062500 Y-1.000000 G1 X28.093750 Y-1.500000 G1 X28.125000 Y-2.000000 G1 X28.156250 Y-1.500000 G1 X28.187500 Y-1.000000 G1 X28.218750 Y-0.500000 G1 X28.250000 Y0.000000 G1 X28.281250 Y0.500000 G1 X28.312500 Y1.000000 G1 X28.343750 Y1.500000 G1 X28.375000 Y2.000000 G1 X28.406250 Y1.500000 G1 X28.437500 Y1.000000 G1 X28.468750 Y0.500000 G1 X28.500000 Y0.000000 G1 X28.531250 Y-0.500000 G1 X28.562500 Y-1.000000 G1 X28.593750 Y-1.500000 G1 X28.625000 Y-2.000000 G1 X28.656250 Y-1.500000 G1 X28.687500 Y-1.000000 G1 X28.718750 Y-0.500000 G1 X28.750000 Y0.000000 G1 X28.781250 Y0.500000 G1 X28.812500 Y1.000000 G1 X28.843750 Y1.500000 G1 X28.875000 Y2.000000 G1 X28.906250 Y1.500000 G1 X28.937500 Y1.000000 G1 X28.968750 Y0.500000 G1 X29.000000 Y0.000000 G1 X29.031250 Y-0.500000 G1 X29.062500 Y-1.000000 G1 X29.093750 Y-1.500000 G1 X29.125000 Y-2.000000 G1 X29.156250 Y-1.500000 G1 X29.187500 Y-1.000000 G1 X29.218750 Y-0.500000 G1 X29.250000 Y0.000000 G1 X29.281250 Y0.500000 G1 X29.312500 Y1.000000 G1 X29.343750 Y1.500000 G1 X29.375000 Y2.000000 G1 X29.406250 Y1.500000 G1 X29.437500 Y1.000000 G1 X29.468750 Y0.500000 G1 X29.500000 Y0.000000 G1 X29.531250 Y-0.500000 G1 X29.562500 Y-1.000000 G1 X29.593750 Y-1.500000 G1 X29.625000 Y-2.000000 G1 X29.656250 Y-1.500000 G1 X29.687500 Y-1.000000 G1 X29.718750 Y-0.500000 G1 X29.750000 Y0.000000 G1 X29.781250 Y0.500000 G1 X29.812500 Y1.000000 G1 X29.843750 Y1.500000 G1 X29.875000 Y2.000000 G1 X29.906250 Y1.500000 G1 X29.937500 Y1.000000 G1 X29.968750 Y0.500000 G1 X30.000000 Y0.000000 G1 X30.031250 Y-0.500000 G1 X30.062500 Y-1.000000 G1 X30.093750 Y-1.500000 G1 X30.125000 Y-2.000000 G1 X30.156250 Y-1.500000 G1 X30.187500 Y-1.000000 G1 X30.218750 Y-0.500000 G1 X30.250000 Y0.000000 G1 X30.281250 Y0.500000 G1 X30.312500 Y1.000000 G1 X30.343750 Y1.500000 G1 X30.375000 Y2.000000 G1 X30.406250 Y1.500000 G1 X30.437500 Y1.000000 G1 X30.468750 Y0.500000 G1 X30.500000 Y0.000000 G1 X30.531250 Y-0.500000 G1 X30.562500 Y-1.000000 G1 X30.593750 Y-1.500000 G1 X30.625000 Y-2.000000 G1 X30.656250 Y-1.500000 G1 X30.687500 Y-1.000000 G1 X30.718750 Y-0.500000 G1 X30.750000 Y0.000000 G1 X30.781250 Y0.500000 G1 X30.812500 Y1.000000 G1 X30.843750 Y1.500000 G1 X30.875000 Y2.000000 G1 X30.906250 Y1.500000 G1 X30.937500 Y1.000000 G1 X30.968750 Y0.500000 G1 X31.000000 Y0.000000 G1 X31.031250 Y-0.500000 G1 X31.062500 Y-1.000000 G1 X31.093750 Y-1.500000 G1 X31.125000 Y-2.000000 G1 X31.156250 Y-1.500000 G1 X31.187500 Y-1.000000 G1 X31.218750 Y-0.500000 G1 X31.250000 Y0.000000 G1 X31.281250 Y0.500000 G1 X31.312500 Y1.000000 G1 X31.343750 Y1.500000 G1 X31.375000 Y2.000000 G1 X31.406250 Y1.500000 G1 X31.437500 Y1.000000 G1 X31.468750 Y0.500000 G1 X31.500000 Y0.000000 G1 X31.531250 Y-0.500000 G1 X31.562500 Y-1.000000 G1 X31.593750 Y-1.500000 G1 X31.625000 Y-2.000000 G1 X31.656250 Y-1.500000 G1 X31.687500 Y-1.000000 G1 X31.718750 Y-0.500000 G1 X31.750000 Y0.000000 G1 X31.781250 Y0.500000 G1 X31.812500 Y1.000000 G1 X31.843750 Y1.500000 G1 X31.875000 Y2.000000 G1 X31.906250 Y1.500000 G1 X31.937500 Y1.000000 G1 X31.968750 Y0.500000 G1 X32.000000 Y0.000000 G1 X32.031250 Y-0.500000 G1 X32.062500 Y-1.000000 G1 X32.093750 Y-1.500000 G1 X32.125000 Y-2.000000 G1 X32.156250 Y-1.500000 G1 X32.187500 Y-1.000000 G1 X32.218750 Y-0.500000 G1 X32.250000 Y0.000000 G1 X32.281250 Y0.500000 G1 X32.312500 Y1.000000 G1 X32.343750 Y1.500000 G1 X32.375000 Y2.000000 G1 X32.406250 Y1.500000 G1 X32.437500 Y1.000000 G1 X32.468750 Y0.500000 G1 X32.500000 Y0.000000 G1 X32.531250 Y-0.500000 G1 X32.562500 Y-1.000000 G1 X32.593750 Y-1.500000 G1 X32.625000 Y-2.000000 G1 X32.656250 Y-1.500000 G1 X32.687500 Y-1.000000 G1 X32.718750 Y-0.500000 G1 X32.750000 Y0.000000 G1 X32.781250 Y0.500000 G1 X32.812500 Y1.000000 G1 X32.843750 Y1.500000 G1 X32.875000 Y2.000000 G1 X32.906250 Y1.500000 G1 X32.937500 Y1.000000 G1 X32.968750 Y0.500000 G1 X33.000000 Y0.000000 G1 X33.031250 Y-0.500000 G1 X33.062500 Y-1.000000 G1 X33.093750 Y-1.500000 G1 X33.125000 Y-2.000000 G1 X33.156250 Y-1.500000 G1 X33.187500 Y-1.000000 G1 X33.218750 Y-0.500000 G1 X33.250000 Y0.000000 G1 X33.281250 Y0.500000 G1 X33.312500 Y1.000000 G1 X33.343750 Y1.500000 G1 X33.375000 Y2.000000 G1 X33.406250 Y1.500000 G1 X33.437500 Y1.000000 G1 X33.468750 Y0.500000 G1 X33.500000 Y0.000000 G1 X33.531250 Y-0.500000 G1 X33.562500 Y-1.000000 G1 X33.593750 Y-1.500000 G1 X33.625000 Y-2.000000 G1 X33.656250 Y-1.500000 G1 X33.687500 Y-1.000000 G1 X33.718750 Y-0.500000 G1 X33.750000 Y0.000000 G1 X33.781250 Y0.500000 G1 X33.812500 Y1.000000 G1 X33.843750 Y1.500000 G1 X33.875000 Y2.000000 G1 X33.906250 Y1.500000 G1 X33.937500 Y1.000000 G1 X33.968750 Y0.500000 G1 X34.000000 Y0.000000 G1 X34.031250 Y-0.500000 G1 X34.062500 Y-1.000000 G1 X34.093750 Y-1.500000 G1 X34.125000 Y-2.000000 G1 X34.156250 Y-1.500000 G1 X34.187500 Y-1.000000 G1 X34.218750 Y-0.500000 G1 X34.250000 Y0.000000 G1 X34.281250 Y0.500000 G1 X34.312500 Y1.000000 G1 X34.343750 Y1.500000 G1 X34.375000 Y2.000000 G1 X34.406250 Y1.500000 G1 X34.437500 Y1.000000 G1 X34.468750 Y0.500000 G1 X34.500000 Y0.000000 G1 X34.531250 Y-0.500000 G1 X34.562500 Y-1.000000 G1 X34.593750 Y-1.500000 G1 X34.625000 Y-2.000000 G1 X34.656250 Y-1.500000 G1 X34.687500 Y-1.000000 G1 X34.718750 Y-0.500000 G1 X34.750000 Y0.000000 G1 X34.781250 Y0.500000 G1 X34.812500 Y1.000000 G1 X34.843750 Y1.500000 G1 X34.875000 Y2.000000 G1 X34.906250 Y1.500000 G1 X34.937500 Y1.000000 G1 X34.968750 Y0.500000 G1 X35.000000 Y0.000000 G1 X35.031250 Y-0.500000 G1 X35.062500 Y-1.000000 G1 X35.093750 Y-1.500000 G1 X35.125000 Y-2.000000 G1 X35.156250 Y-1.500000 G1 X35.187500 Y-1.000000 G1 X35.218750 Y-0.500000 G1 X35.250000 Y0.000000 G1 X35.281250 Y0.500000 G1 X35.312500 Y1.000000 G1 X35.343750 Y1.500000 G1 X35.375000 Y2.000000 G1 X35.406250 Y1.500000 G1 X35.437500 Y1.000000 G1 X35.468750 Y0.500000 G1 X35.500000 Y0.000000 G1 X35.531250 Y-0.500000 G1 X35.562500 Y-1.000000 G1 X35.593750 Y-1.500000 G1 X35.625000 Y-2.000000 G1 X35.656250 Y-1.500000 G1 X35.687500 Y-1.000000 G1 X35.718750 Y-0.500000 G1 X35.750000 Y0.000000 G1 X35.781250 Y0.500000 G1 X35.812500 Y1.000000 G1 X35.843750 Y1.500000 G1 X35.875000 Y2.000000 G1 X35.906250 Y1.500000 G1 X35.937500 Y1.000000 G1 X35.968750 Y0.500000 G1 X36.000000 Y0.000000 G1 X36.031250 Y-0.500000 G1 X36.062500 Y-1.000000 G1 X36.093750 Y-1.500000 G1 X36.125000 Y-2.000000 G1 X36.156250 Y-1.500000 G1 X36.187500 Y-1.000000 G1 X36.218750 Y-0.500000 G1 X36.250000 Y0.000000 G1 X36.281250 Y0.500000 G1 X36.312500 Y1.000000 G1 X36.343750 Y1.500000 G1 X36.375000 Y2.000000 G1 X36.406250 Y1.500000 G1 X36.437500 Y1.000000 G1 X36.468750 Y0.500000 G1 X36.500000 Y0.000000 G1 X36.531250 Y-0.500000 G1 X36.562500 Y-1.000000 G1 X36.593750 Y-1.500000 G1 X36.625000 Y-2.000000 G1 X36.656250 Y-1.500000 G1 X36.687500 Y-1.000000 G1 X36.718750 Y-0.500000 G1 X36.750000 Y0.000000 G1 X36.781250 Y0.500000 G1 X36.812500 Y1.000000 G1 X36.843750 Y1.500000 G1 X36.875000 Y2.000000 G1 X36.906250 Y1.500000 G1 X36.937500 Y1.000000 G1 X36.968750 Y0.500000 G1 X37.000000 Y0.000000 G1 X37.031250 Y-0.500000 G1 X37.062500 Y-1.000000 G1 X37.093750 Y-1.500000 G1 X37.125000 Y-2.000000 G1 X37.156250 Y-1.500000 G1 X37.187500 Y-1.000000 G1 X37.218750 Y-0.500000 G1 X37.250000 Y0.000000 G1 X37.281250 Y0.500000 G1 X37.312500 Y1.000000 G1 X37.343750 Y1.500000 G1 X37.375000 Y2.000000 G1 X37.406250 Y1.500000 G1 X37.437500 Y1.000000 G1 X37.468750 Y0.500000 G1 X37.500000 Y0.000000 G1 X37.531250 Y-0.500000 G1 X37.562500 Y-1.000000 G1 X37.593750 Y-1.500000 G1 X37.625000 Y-2.000000 G1 X37.656250 Y-1.500000 G1 X37.687500 Y-1.000000 G1 X37.718750 Y-0.500000 G1 X37.750000 Y0.000000 G1 X37.781250 Y0.500000 G1 X37.812500 Y1.000000 G1 X37.843750 Y1.500000 G1 X37.875000 Y2.000000 G1 X37.906250 Y1.500000 G1 X37.937500 Y1.000000 G1 X37.968750 Y0.500000 G1 X38.000000 Y0.000000 G1 X38.031250 Y-0.500000 G1 X38.062500 Y-1.000000 G1 X38.093750 Y-1.500000 G1 X38.125000 Y-2.000000 G1 X38.156250 Y-1.500000 G1 X38.187500 Y-1.000000 G1 X38.218750 Y-0.500000 G1 X38.250000 Y0.000000 G1 X38.281250 Y0.500000 G1 X38.312500 Y1.000000 G1 X38.343750 Y1.500000 G1 X38.375000 Y2.000000 G1 X38.406250 Y1.500000 G1 X38.437500 Y1.000000 G1 X38.468750 Y0.500000 G1 X38.500000 Y0.000000 G1 X38.531250 Y-0.500000 G1 X38.562500 Y-1.000000 G1 X38.593750 Y-1.500000 G1 X38.625000 Y-2.000000 G1 X38.656250 Y-1.500000 G1 X38.687500 Y-1.000000 G1 X38.718750 Y-0.500000 G1 X38.750000 Y0.000000 G1 X38.781250 Y0.500000 G1 X38.812500 Y1.000000 G1 X38.843750 Y1.500000 G1 X38.875000 Y2.000000 G1 X38.906250 Y1.500000 G1 X38.937500 Y1.000000 G1 X38.968750 Y0.500000 G1 X39.000000 Y0.000000 G1 X39.031250 Y-0.500000 G1 X39.062500 Y-1.000000 G1 X39.093750 Y-1.500000 G1 X39.125000 Y-2.000000 G1 X39.156250 Y-1.500000 G1 X39.187500 Y-1.000000 G1 X39.218750 Y-0.500000 G1 X39.250000 Y0.000000 G1 X39.281250 Y0.500000 G1 X39.312500 Y1.000000 G1 X39.343750 Y1.500000 G1 X39.375000 Y2.000000 G1 X39.406250 Y1.500000 G1 X39.437500 Y1.000000 G1 X39.468750 Y0.500000 G1 X39.500000 Y0.000000 G1 X39.531250 Y-0.500000 G1 X39.562500 Y-1.000000 G1 X39.593750 Y-1.500000 G1 X39.625000 Y-2.000000 G1 X39.656250 Y-1.500000 G1 X39.687500 Y-1.000000 G1 X39.718750 Y-0.500000 G1 X39.750000 Y0.000000 G1 X39.781250 Y0.500000 G1 X39.812500 Y1.000000 G1 X39.843750 Y1.500000 G1 X39.875000 Y2.000000 G1 X39.906250 Y1.500000 G1 X39.937500 Y1.000000 G1 X39.968750 Y0.500000 G1 X40.000000 Y0.000000 G1 X40.031250 Y-0.500000 G1 X40.062500 Y-1.000000 G1 X40.093750 Y-1.500000 G1 X40.125000 Y-2.000000 G1 X40.156250 Y-1.500000 G1 X40.187500 Y-1.000000 G1 X40.218750 Y-0.500000 G1 X40.250000 Y0.000000 G1 X40.281250 Y0.500000 G1 X40.312500 Y1.000000 G1 X40.343750 Y1.500000 G1 X40.375000 Y2.000000 G1 X40.406250 Y1.500000 G1 X40.437500 Y1.000000 G1 X40.468750 Y0.500000 G1 X40.500000 Y0.000000 G1 X40.531250 Y-0.500000 G1 X40.562500 Y-1.000000 G1 X40.593750 Y-1.500000 G1 X40.625000 Y-2.000000 G1 X40.656250 Y-1.500000 G1 X40.687500 Y-1.000000 G1 X40.718750 Y-0.500000 G1 X40.750000 Y0.000000 G1 X40.781250 Y0.500000 G1 X40.812500 Y1.000000 G1 X40.843750 Y1.500000 G1 X40.875000 Y2.000000 G1 X40.906250 Y1.500000 G1 X40.937500 Y1.000000 G1 X40.968750 Y0.500000 G1 X41.000000 Y0.000000 G1 X41.031250 Y-0.500000 G1 X41.062500 Y-1.000000 G1 X41.093750 Y-1.500000 G1 X41.125000 Y-2.000000 G1 X41.156250 Y-1.500000 G1 X41.187500 Y-1.000000 G1 X41.218750 Y-0.500000 G1 X41.250000 Y0.000000 G1 X41.281250 Y0.500000 G1 X41.312500 Y1.000000 G1 X41.343750 Y1.500000 G1 X41.375000 Y2.000000 G1 X41.406250 Y1.500000 G1 X41.437500 Y1.000000 G1 X41.468750 Y0.500000 G1 X41.500000 Y0.000000 G1 X41.531250 Y-0.500000 G1 X41.562500 Y-1.000000 G1 X41.593750 Y-1.500000 G1 X41.625000 Y-2.000000 G1 X41.656250 Y-1.500000 G1 X41.687500 Y-1.000000 G1 X41.718750 Y-0.500000 G1 X41.750000 Y0.000000 G1 X41.781250 Y0.500000 G1 X41.812500 Y1.000000 G1 X41.843750 Y1.500000 G1 X41.875000 Y2.000000 G1 X41.906250 Y1.500000 G1 X41.937500 Y1.000000 G1 X41.968750 Y0.500000 G1 X42.000000 Y0.000000 G1 X42.031250 Y-0.500000 G1 X42.062500 Y-1.000000 G1 X42.093750 Y-1.500000 G1 X42.125000 Y-2.000000 G1 X42.156250 Y-1.500000 G1 X42.187500 Y-1.000000 G1 X42.218750 Y-0.500000 G1 X42.250000 Y0.000000 G1 X42.281250 Y0.500000 G1 X42.312500 Y1.000000 G1 X42.343750 Y1.500000 G1 X42.375000 Y2.000000 G1 X42.406250 Y1.500000 G1 X42.437500 Y1.000000 G1 X42.468750 Y0.500000 G1 X42.500000 Y0.000000 G1 X42.531250 Y-0.500000 G1 X42.562500 Y-1.000000 G1 X42.593750 Y-1.500000 G1 X42.625000 Y-2.000000 G1 X42.656250 Y-1.500000 G1 X42.687500 Y-1.000000 G1 X42.718750 Y-0.500000 G1 X42.750000 Y0.000000 G1 X42.781250 Y0.500000 G1 X42.812500 Y1.000000 G1 X42.843750 Y1.500000 G1 X42.875000 Y2.000000 G1 X42.906250 Y1.500000 G1 X42.937500 Y1.000000 G1 X42.968750 Y0.500000 G1 X43.000000 Y0.000000 G1 X43.031250 Y-0.500000 G1 X43.062500 Y-1.000000 G1 X43.093750 Y-1.500000 G1 X43.125000 Y-2.000000 G1 X43.156250 Y-1.500000 G1 X43.187500 Y-1.000000 G1 X43.218750 Y-0.500000 G1 X43.250000 Y0.000000 G1 X43.281250 Y0.500000 G1 X43.312500 Y1.000000 G1 X43.343750 Y1.500000 G1 X43.375000 Y2.000000 G1 X43.406250 Y1.500000 G1 X43.437500 Y1.000000 G1 X43.468750 Y0.500000 G1 X43.500000 Y0.000000 G1 X43.531250 Y-0.500000 G1 X43.562500 Y-1.000000 G1 X43.593750 Y-1.500000 G1 X43.625000 Y-2.000000 G1 X43.656250 Y-1.500000 G1 X43.687500 Y-1.000000 G1 X43.718750 Y-0.500000 G1 X43.750000 Y0.000000 G1 X43.781250 Y0.500000 G1 X43.812500 Y1.000000 G1 X43.843750 Y1.500000 G1 X43.875000 Y2.000000 G1 X43.906250 Y1.500000 G1 X43.937500 Y1.000000 G1 X43.968750 Y0.500000 G1 X44.000000 Y0.000000 G1 X44.031250 Y-0.500000 G1 X44.062500 Y-1.000000 G1 X44.093750 Y-1.500000 G1 X44.125000 Y-2.000000 G1 X44.156250 Y-1.500000 G1 X44.187500 Y-1.000000 G1 X44.218750 Y-0.500000 G1 X44.250000 Y0.000000 G1 X44.281250 Y0.500000 G1 X44.312500 Y1.000000 G1 X44.343750 Y1.500000 G1 X44.375000 Y2.000000 G1 X44.406250 Y1.500000 G1 X44.437500 Y1.000000 G1 X44.468750 Y0.500000 G1 X44.500000 Y0.000000 G1 X44.531250 Y-0.500000 G1 X44.562500 Y-1.000000 G1 X44.593750 Y-1.500000 G1 X44.625000 Y-2.000000 G1 X44.656250 Y-1.500000 G1 X44.687500 Y-1.000000 G1 X44.718750 Y-0.500000 G1 X44.750000 Y0.000000 G1 X44.781250 Y0.500000 G1 X44.812500 Y1.000000 G1 X44.843750 Y1.500000 G1 X44.875000 Y2.000000 G1 X44.906250 Y1.500000 G1 X44.937500 Y1.000000 G1 X44.968750 Y0.500000 G1 X45.000000 Y0.000000 G1 X45.031250 Y-0.500000 G1 X45.062500 Y-1.000000 G1 X45.093750 Y-1.500000 G1 X45.125000 Y-2.000000 G1 X45.156250 Y-1.500000 G1 X45.187500 Y-1.000000 G1 X45.218750 Y-0.500000 G1 X45.250000 Y0.000000 G1 X45.281250 Y0.500000 G1 X45.312500 Y1.000000 G1 X45.343750 Y1.500000 G1 X45.375000 Y2.000000 G1 X45.406250 Y1.500000 G1 X45.437500 Y1.000000 G1 X45.468750 Y0.500000 G1 X45.500000 Y0.000000 G1 X45.531250 Y-0.500000 G1 X45.562500 Y-1.000000 G1 X45.593750 Y-1.500000 G1 X45.625000 Y-2.000000 G1 X45.656250 Y-1.500000 G1 X45.687500 Y-1.000000 G1 X45.718750 Y-0.500000 G1 X45.750000 Y0.000000 G1 X45.781250 Y0.500000 G1 X45.812500 Y1.000000 G1 X45.843750 Y1.500000 G1 X45.875000 Y2.000000 G1 X45.906250 Y1.500000 G1 X45.937500 Y1.000000 G1 X45.968750 Y0.500000 G1 X46.000000 Y0.000000 G1 X46.031250 Y-0.500000 G1 X46.062500 Y-1.000000 G1 X46.093750 Y-1.500000 G1 X46.125000 Y-2.000000 G1 X46.156250 Y-1.500000 G1 X46.187500 Y-1.000000 G1 X46.218750 Y-0.500000 G1 X46.250000 Y0.000000 G1 X46.281250 Y0.500000 G1 X46.312500 Y1.000000 G1 X46.343750 Y1.500000 G1 X46.375000 Y2.000000 G1 X46.406250 Y1.500000 G1 X46.437500 Y1.000000 G1 X46.468750 Y0.500000 G1 X46.500000 Y0.000000 G1 X46.531250 Y-0.500000 G1 X46.562500 Y-1.000000 G1 X46.593750 Y-1.500000 G1 X46.625000 Y-2.000000 G1 X46.656250 Y-1.500000 G1 X46.687500 Y-1.000000 G1 X46.718750 Y-0.500000 G1 X46.750000 Y0.000000 G1 X46.781250 Y0.500000 G1 X46.812500 Y1.000000 G1 X46.843750 Y1.500000 G1 X46.875000 Y2.000000 G1 X46.906250 Y1.500000 G1 X46.937500 Y1.000000 G1 X46.968750 Y0.500000 G1 X47.000000 Y0.000000 G1 X47.031250 Y-0.500000 G1 X47.062500 Y-1.000000 G1 X47.093750 Y-1.500000 G1 X47.125000 Y-2.000000 G1 X47.156250 Y-1.500000 G1 X47.187500 Y-1.000000 G1 X47.218750 Y-0.500000 G1 X47.250000 Y0.000000 G1 X47.281250 Y0.500000 G1 X47.312500 Y1.000000 G1 X47.343750 Y1.500000 G1 X47.375000 Y2.000000 G1 X47.406250 Y1.500000 G1 X47.437500 Y1.000000 G1 X47.468750 Y0.500000 G1 X47.500000 Y0.000000 G1 X47.531250 Y-0.500000 G1 X47.562500 Y-1.000000 G1 X47.593750 Y-1.500000 G1 X47.625000 Y-2.000000 G1 X47.656250 Y-1.500000 G1 X47.687500 Y-1.000000 G1 X47.718750 Y-0.500000 G1 X47.750000 Y0.000000 G1 X47.781250 Y0.500000 G1 X47.812500 Y1.000000 G1 X47.843750 Y1.500000 G1 X47.875000 Y2.000000 G1 X47.906250 Y1.500000 G1 X47.937500 Y1.000000 G1 X47.968750 Y0.500000 G1 X48.000000 Y0.000000 G1 X48.031250 Y-0.500000 G1 X48.062500 Y-1.000000 G1 X48.093750 Y-1.500000 G1 X48.125000 Y-2.000000 G1 X48.156250 Y-1.500000 G1 X48.187500 Y-1.000000 G1 X48.218750 Y-0.500000 G1 X48.250000 Y0.000000 G1 X48.281250 Y0.500000 G1 X48.312500 Y1.000000 G1 X48.343750 Y1.500000 G1 X48.375000 Y2.000000 G1 X48.406250 Y1.500000 G1 X48.437500 Y1.000000 G1 X48.468750 Y0.500000 G1 X48.500000 Y0.000000 G1 X48.531250 Y-0.500000 G1 X48.562500 Y-1.000000 G1 X48.593750 Y-1.500000 G1 X48.625000 Y-2.000000 G1 X48.656250 Y-1.500000 G1 X48.687500 Y-1.000000 G1 X48.718750 Y-0.500000 G1 X48.750000 Y0.000000 G1 X48.781250 Y0.500000 G1 X48.812500 Y1.000000 G1 X48.843750 Y1.500000 G1 X48.875000 Y2.000000 G1 X48.906250 Y1.500000 G1 X48.937500 Y1.000000 G1 X48.968750 Y0.500000 G1 X49.000000 Y0.000000 G1 X49.031250 Y-0.500000 G1 X49.062500 Y-1.000000 G1 X49.093750 Y-1.500000 G1 X49.125000 Y-2.000000 G1 X49.156250 Y-1.500000 G1 X49.187500 Y-1.000000 G1 X49.218750 Y-0.500000 G1 X49.250000 Y0.000000 G1 X49.281250 Y0.500000 G1 X49.312500 Y1.000000 G1 X49.343750 Y1.500000 G1 X49.375000 Y2.000000 G1 X49.406250 Y1.500000 G1 X49.437500 Y1.000000 G1 X49.468750 Y0.500000 G1 X49.500000 Y0.000000 G1 X49.531250 Y-0.500000 G1 X49.562500 Y-1.000000 G1 X49.593750 Y-1.500000 G1 X49.625000 Y-2.000000 G1 X49.656250 Y-1.500000 G1 X49.687500 Y-1.000000 G1 X49.718750 Y-0.500000 G1 X49.750000 Y0.000000 G1 X49.781250 Y0.500000 G1 X49.812500 Y1.000000 G1 X49.843750 Y1.500000 G1 X49.875000 Y2.000000 G1 X49.906250 Y1.500000 G1 X49.937500 Y1.000000 G1 X49.968750 Y0.500000 G1 X50.000000 Y0.000000 M5 G4 P1.000000 G0 Z5.000000 G0 Z5.000000 M5 M30 (— text — pen —) (Writing) (Generated by hjLabs Candle CAD/CAM) G21 G90 G94 G17 G0 Z5.000 (Writing) G0 X0.857 Y-10.000 G1 Z0.000 F200.000 Y0.000 F1500.000 G0 Z5.000 X8.000 Y-10.000 G1 Z0.000 F200.000 Y0.000 F1500.000 G0 Z5.000 X0.857 Y-5.000 G1 Z0.000 F200.000 X8.000 F1500.000 G0 Z5.000 X10.714 Y-7.429 G1 Z0.000 F200.000 X16.429 F1500.000 G0 Z5.000 Y-7.714 G1 Z0.000 F200.000 X16.268 Y-6.960 F1500.000 X15.806 Y-6.290 X15.093 Y-5.779 X14.209 Y-5.486 X13.254 Y-5.443 X12.334 Y-5.654 X11.553 Y-6.096 X10.999 Y-6.720 X10.733 Y-7.455 X10.785 Y-8.220 X11.150 Y-8.927 X11.786 Y-9.499 X12.623 Y-9.870 X13.565 Y-10.000 X14.509 Y-9.873 X15.347 Y-9.505 G0 Z5.000 X19.857 Y0.000 G1 Z0.000 F200.000 Y-10.000 F1500.000 G0 Z5.000 X24.000 Y0.000 G1 Z0.000 F200.000 Y-10.000 F1500.000 G0 Z5.000 X33.429 Y-7.714 G1 Z0.000 F200.000 X33.248 Y-6.933 F1500.000 X32.727 Y-6.245 X31.929 Y-5.735 X30.950 Y-5.463 X29.908 X28.929 Y-5.735 X28.130 Y-6.245 X27.609 Y-6.933 X27.429 Y-7.714 X27.609 Y-8.496 X28.130 Y-9.184 X28.929 Y-9.694 X29.908 Y-9.965 X30.950 X31.929 Y-9.694 X32.727 Y-9.184 X33.248 Y-8.496 X33.429 Y-7.714 G0 Z5.000 X0.286 Y-15.000 G1 Z0.000 F200.000 X2.857 Y-25.000 F1500.000 X5.714 Y-17.857 X8.571 Y-25.000 X11.143 Y-15.000 G0 Z5.000 X19.286 Y-22.714 G1 Z0.000 F200.000 X19.105 Y-21.933 F1500.000 X18.584 Y-21.245 X17.786 Y-20.735 X16.807 Y-20.463 X15.765 X14.786 Y-20.735 X13.988 Y-21.245 X13.467 Y-21.933 X13.286 Y-22.714 X13.467 Y-23.496 X13.988 Y-24.184 X14.786 Y-24.694 X15.765 Y-24.965 X16.807 X17.786 Y-24.694 X18.584 Y-24.184 X19.105 Y-23.496 X19.286 Y-22.714 G0 Z5.000 X22.000 Y-17.857 G1 Z0.000 F200.000 Y-25.000 F1500.000 G0 Z5.000 Y-20.143 G1 Z0.000 F200.000 X23.714 Y-17.857 F1500.000 X26.000 X26.857 Y-19.000 G0 Z5.000 X29.429 Y-15.000 G1 Z0.000 F200.000 Y-25.000 F1500.000 G0 Z5.000 X38.571 Y-15.000 G1 Z0.000 F200.000 Y-25.000 F1500.000 G0 Z5.000 X38.286 Y-22.714 G1 Z0.000 F200.000 X38.113 Y-21.933 F1500.000 X37.617 Y-21.245 X36.857 Y-20.735 X35.925 Y-20.463 X34.932 X34.000 Y-20.735 X33.240 Y-21.245 X32.744 Y-21.933 X32.571 Y-22.714 X32.744 Y-23.496 X33.240 Y-24.184 X34.000 Y-24.694 X34.932 Y-24.965 X35.925 X36.857 Y-24.694 X37.617 Y-24.184 X38.113 Y-23.496 X38.286 Y-22.714 G0 Z5.000 X48.857 Y-16.714 G1 Z0.000 F200.000 X50.857 Y-15.000 F1500.000 Y-25.000 G0 Z5.000 X48.286 G1 Z0.000 F200.000 X53.143 F1500.000 G0 Z5.000 X54.714 Y-17.000 G1 Z0.000 F200.000 X56.429 Y-15.000 F1500.000 X59.286 X61.000 Y-17.000 Y-18.714 X54.714 Y-23.571 Y-25.000 X61.286 G0 Z5.000 X63.429 Y-16.429 G1 Z0.000 F200.000 X65.429 Y-15.000 F1500.000 X68.286 X69.714 Y-16.714 X68.571 Y-19.000 X66.000 Y-19.286 G0 Z5.000 X68.571 Y-19.000 G1 Z0.000 F200.000 X70.000 Y-21.000 F1500.000 Y-23.571 X68.000 Y-25.000 X64.857 X63.143 Y-23.286 G0 Z5.000 M30"
+        - generic [ref=e178]:
+          - generic [ref=e183] [cursor=pointer]:
+            - generic [ref=e184]: Console
+            - img [ref=e186]
+          - generic [ref=e575]:
+            - search [ref=e576]:
+              - generic [ref=e577]: ⌕
+              - searchbox "Search console messages" [ref=e578]
+              - button "Copy transcript" [ref=e579] [cursor=pointer]: ⧉
+              - button "Toggle quick commands" [pressed] [ref=e580] [cursor=pointer]: ⚡
+              - button "Clear console" [ref=e581] [cursor=pointer]: 🗑
+            - generic "Console messages" [ref=e583]:
+              - generic [ref=e862]:
+                - generic [ref=e863]: Grbl 1.1f ['$' for help]
+                - time [ref=e864]: 01:08:37
+              - generic [ref=e866]:
+                - generic [ref=e867]: Connected (GRBL).
+                - time [ref=e868]: 01:08:37
+              - generic [ref=e870]:
+                - generic [ref=e871]: ok
+                - time [ref=e872]: 01:08:38
+              - generic [ref=e874]:
+                - generic [ref=e875]: ok
+                - time [ref=e876]: 01:08:38
+              - generic [ref=e1042]:
+                - generic [ref=e1043]: ok
+                - time [ref=e1044]: 01:08:39
+              - generic [ref=e1046]:
+                - generic [ref=e1047]: ok
+                - time [ref=e1048]: 01:08:41
+              - generic [ref=e1050]:
+                - generic [ref=e1051]: ok
+                - time [ref=e1052]: 01:08:43
+              - generic [ref=e1054]:
+                - generic [ref=e1055]: ok
+                - time [ref=e1056]: 01:08:45
+              - generic [ref=e1058]:
+                - generic [ref=e1059]: ok
+                - time [ref=e1060]: 01:08:47
+            - paragraph [ref=e585]:
+              - text: Raw GRBL console — type any G-code or
+              - code [ref=e586]: $
+              - text: command (advanced).
+            - group "Quick commands" [ref=e587]:
+              - button "Send $$" [ref=e588] [cursor=pointer]: $$
+              - button "Send $H" [ref=e589] [cursor=pointer]: $H
+              - button "Send $X" [ref=e590] [cursor=pointer]: $X
+              - button "Send $G" [ref=e591] [cursor=pointer]: $G
+              - button "Send G0 X0 Y0" [ref=e592] [cursor=pointer]: G0 X0 Y0
+              - button "Send ?" [ref=e593] [cursor=pointer]: "?"
+              - button "Edit macros" [ref=e594] [cursor=pointer]: ✎
+            - generic [ref=e595]:
+              - textbox "Message the controller" [ref=e596]:
+                - /placeholder: Type a G-code / $ command…
+              - button "Send command" [disabled] [ref=e597]:
+                - generic [ref=e598]: ➤
+    - generic [ref=e195]:
+      - generic [ref=e200] [cursor=pointer]:
+        - generic [ref=e201]: Controller
+        - img [ref=e203]
+      - generic "Machine controller" [ref=e599]:
+        - generic [ref=e600]:
+          - generic [ref=e601]:
+            - 'status "Machine state: Idle" [ref=e877]': Idle
+            - table "Digital read-out" [ref=e605]:
+              - generic [ref=e606]: Axis
+              - generic [ref=e607]:
+                - text: Work (mm)
+                - button "What is “Work zero (origin)”?" [ref=e609]:
+                  - img [ref=e610]
+              - generic [ref=e614]: Machine (mm)
+              - generic [ref=e615]:
+                - generic [ref=e616]: X
+                - generic [ref=e617]: "0.000"
+                - generic [ref=e618]: "0.000"
+              - generic [ref=e619]:
+                - generic [ref=e620]: "Y"
+                - generic [ref=e621]: "0.000"
+                - generic [ref=e622]: "0.000"
+              - generic [ref=e623]:
+                - generic [ref=e624]: Z
+                - generic [ref=e625]: "0.000"
+                - generic [ref=e626]: "0.000"
+          - generic [ref=e628]:
+            - button "Home" [ref=e629] [cursor=pointer]:
+              - img [ref=e630]
+              - generic [ref=e634]: Home
+              - generic [ref=e635]: $H
+              - generic: h
+            - button "Unlock" [ref=e636] [cursor=pointer]:
+              - img [ref=e637]
+              - generic [ref=e641]: Unlock
+              - generic [ref=e642]: $X
+              - generic: u
+            - button "Reset" [ref=e643] [cursor=pointer]:
+              - img [ref=e644]
+              - generic [ref=e647]: Reset
+              - generic [ref=e648]: ⌃X
+              - generic: r
+            - button "Hold" [ref=e649] [cursor=pointer]:
+              - img [ref=e650]
+              - generic [ref=e651]: Hold
+              - generic [ref=e652]: "!"
+              - generic: "!"
+            - button "Resume" [ref=e653] [cursor=pointer]:
+              - img [ref=e654]
+              - generic [ref=e656]: Resume
+              - generic [ref=e657]: ~
+              - generic: ~
+            - button "Zero" [ref=e658] [cursor=pointer]:
+              - img [ref=e659]
+              - generic [ref=e661]: Zero
+              - generic [ref=e662]: G10
+              - generic: z
+          - generic [ref=e663]:
+            - heading "Jog" [level=4] [ref=e664]
+            - generic [ref=e665]:
+              - generic [ref=e666]:
+                - text: Step
+                - button "What is “Jog step”?" [ref=e668]:
+                  - img [ref=e669]
+              - group "Jog step (mm)" [ref=e673]:
+                - button "0.1" [ref=e674] [cursor=pointer]:
+                  - text: "0.1"
+                  - generic: "1"
+                - button "1" [pressed] [ref=e675] [cursor=pointer]:
+                  - text: "1"
+                  - generic: "2"
+                - button "10" [ref=e676] [cursor=pointer]:
+                  - text: "10"
+                  - generic: "3"
+                - button "100" [ref=e677] [cursor=pointer]:
+                  - text: "100"
+                  - generic: "4"
+              - generic [ref=e678]: mm
+            - generic [ref=e679]:
+              - generic [ref=e680]: Feed
+              - button "What is “Feed rate”?" [ref=e682]:
+                - img [ref=e683]
+              - spinbutton "Jog feed rate (mm/min)" [ref=e687]: "1000"
+              - generic [ref=e688]: mm/min
+            - generic [ref=e689]:
+              - generic [ref=e690]: Hold dist
+              - button "What is “Continuous jog distance”?" [ref=e692]:
+                - img [ref=e693]
+              - spinbutton "Continuous (hold) jog distance (mm)" [ref=e697]: "1000"
+              - generic [ref=e698]: mm
+            - generic [ref=e699]:
+              - button "What is “Jog step”?" [ref=e702]:
+                - img [ref=e703]
+              - group "XY jog" [ref=e707]:
+                - button "Jog ↖" [ref=e708] [cursor=pointer]: ↖
+                - button "Jog Y+" [ref=e709] [cursor=pointer]: Y+
+                - button "Jog ↗" [ref=e710] [cursor=pointer]: ↗
+                - button "Jog X−" [ref=e711] [cursor=pointer]: X−
+                - button "Cancel jog" [ref=e712] [cursor=pointer]: ⨯
+                - button "Jog X+" [ref=e713] [cursor=pointer]: X+
+                - button "Jog ↙" [ref=e714] [cursor=pointer]: ↙
+                - button "Jog Y−" [ref=e715] [cursor=pointer]: Y−
+                - button "Jog ↘" [ref=e716] [cursor=pointer]: ↘
+              - group "Z jog" [ref=e717]:
+                - button "Jog Z+" [ref=e718] [cursor=pointer]: Z+
+                - button "Jog Z−" [ref=e719] [cursor=pointer]: Z−
+            - generic [ref=e720]: "Fully keyboard-operable when focused: arrows jog XY · PgUp/PgDn jog Z · Esc cancels · 1–4 step size · h Home · u Unlock · r Reset · ! Hold · ~ Resume · s Spindle · z Zero · [ ] feed ∓ · \\ feed 100%"
+          - generic [ref=e721]:
+            - generic [ref=e722]:
+              - switch "Spindle off (click to start)" [ref=e723] [cursor=pointer]:
+                - generic: s
+              - heading "Spindle" [level=4] [ref=e725]
+              - group "Spindle direction" [ref=e726]:
+                - button "Clockwise (M3)" [pressed] [ref=e727] [cursor=pointer]:
+                  - img [ref=e728]
+                - button "Counter-clockwise (M4)" [ref=e731] [cursor=pointer]:
+                  - img [ref=e732]
+            - generic [ref=e735]:
+              - generic [ref=e736]: Speed
+              - button "What is “Spindle speed (RPM)”?" [ref=e738]:
+                - img [ref=e739]
+              - spinbutton "Spindle speed (RPM)" [ref=e743]: "10000"
+              - generic [ref=e744]: RPM
+          - generic [ref=e745]:
+            - heading "Overrides" [level=4] [ref=e746]
+            - generic [ref=e747]:
+              - generic [ref=e748]:
+                - text: Feed
+                - button "What is “Feed override”?" [ref=e750]:
+                  - img [ref=e751]
+              - generic [ref=e755]: 100%
+              - button "Feed override minus 10" [ref=e756] [cursor=pointer]:
+                - img [ref=e757]
+                - generic: "["
+              - button "Feed override reset" [ref=e758] [cursor=pointer]:
+                - img [ref=e759]
+                - generic: \
+              - button "Feed override plus 10" [ref=e762] [cursor=pointer]:
+                - img [ref=e763]
+                - generic: "]"
+              - generic [ref=e764]:
+                - text: Rapid
+                - button "What is “Rapid override”?" [ref=e766]:
+                  - img [ref=e767]
+              - generic [ref=e771]: 100%
+              - button "Rapid override 25 percent" [ref=e772] [cursor=pointer]: "25"
+              - button "Rapid override 50 percent" [ref=e773] [cursor=pointer]: "50"
+              - button "Rapid override 100 percent" [ref=e774] [cursor=pointer]: "100"
+              - generic [ref=e775]:
+                - text: Spindle
+                - button "What is “Spindle override”?" [ref=e777]:
+                  - img [ref=e778]
+              - generic [ref=e782]: 100%
+              - button "Spindle override minus 10" [ref=e783] [cursor=pointer]:
+                - img [ref=e784]
+              - button "Spindle override reset" [ref=e785] [cursor=pointer]:
+                - img [ref=e786]
+              - button "Spindle override plus 10" [ref=e789] [cursor=pointer]:
+                - img [ref=e790]
+            - generic [ref=e791]:
+              - generic [ref=e792]: Feed 0 mm/min
+              - generic [ref=e793]: Spindle 0 rpm

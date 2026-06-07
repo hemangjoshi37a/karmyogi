@@ -37,8 +37,7 @@
   color: var(--fg);
 }
 .ai-safety-icon {
-  font-size: 14px;
-  line-height: 1.2;
+  margin-top: 1px;
   color: var(--warn);
   flex: 0 0 auto;
 }
@@ -237,6 +236,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--sp-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
@@ -380,6 +380,20 @@
 }
 .ai-warn-item.info {
   border-left-color: var(--accent);
+}
+/* Inline lint-warning icon: align with the text, take the row's severity color. */
+.ai-warn-icon {
+  vertical-align: -2px;
+  flex: 0 0 auto;
+}
+.ai-warn-item.error .ai-warn-icon {
+  color: var(--danger);
+}
+.ai-warn-item.warn .ai-warn-icon {
+  color: var(--warn);
+}
+.ai-warn-item.info .ai-warn-icon {
+  color: var(--accent);
 }
 
 .ai-code {
