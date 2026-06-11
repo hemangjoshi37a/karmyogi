@@ -184,7 +184,15 @@ function makeJob(mesh: StlMesh, name: string, d: JobDefaults): CarveJob {
     material: d.material,
     stock: stockFromMesh(mesh),
     speeds: { ...d.speeds },
-    placement: { ...IDENTITY_PLACEMENT },
+    // Centre the model on the bed by default (work origin = bed centre): offset so
+    // the mesh's XY bbox centre lands at the origin, instead of leaving it at the
+    // mesh's own (often off-origin) modelled position — so a loaded model appears
+    // in the MIDDLE of the bed instead of flung off toward a corner.
+    placement: {
+      ...IDENTITY_PLACEMENT,
+      dx: -(mesh.bbox.min[0] + mesh.bbox.max[0]) / 2,
+      dy: -(mesh.bbox.min[1] + mesh.bbox.max[1]) / 2,
+    },
     roughing: d.roughing,
     finishing: d.finishing,
     finishDir: d.finishDir,

@@ -1,0 +1,190 @@
+/* Floating, draggable AI chat bubble (src/components/AiBubble.tsx).
+   Sits below the modal overlay (z 1000) so the settings modal lands on top. */
+
+:root {
+  --ai-bubble-size: 56px;
+}
+
+/* ---- Collapsed circular button ---- */
+.ai-bubble {
+  position: fixed;
+  z-index: 900;
+  width: var(--ai-bubble-size);
+  height: var(--ai-bubble-size);
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent) 90%, #000),
+    color-mix(in srgb, var(--accent) 65%, #000)
+  );
+  color: var(--accent-fg, #fff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none; /* let pointer-drag work on touch without scrolling */
+  box-shadow: 0 6px 20px color-mix(in srgb, #000 45%, transparent);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ai-bubble:hover {
+  transform: scale(1.06);
+  box-shadow: 0 8px 26px color-mix(in srgb, #000 55%, transparent);
+}
+.ai-bubble:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+}
+
+/* ---- Expanded chat panel (left/top/width/height set inline by JS, clamped
+   on-screen; CSS overrides to a bottom sheet on phones) ---- */
+.ai-bubble-panel {
+  position: fixed;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  box-shadow: 0 12px 40px color-mix(in srgb, #000 55%, transparent);
+  overflow: hidden;
+}
+
+.ai-bubble-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2, 8px);
+  padding: var(--sp-2, 8px) var(--sp-3, 12px);
+  background: var(--bg-elev, var(--bg-panel));
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+.ai-bubble-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  font-weight: 600;
+  font-size: var(--fs-section, 13px);
+  color: var(--fg);
+}
+.ai-bubble-head-title svg {
+  color: var(--accent);
+}
+.ai-bubble-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.ai-bubble-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.ai-bubble-btn:hover {
+  background: var(--bg-input);
+  color: var(--fg);
+  border-color: var(--border);
+}
+.ai-bubble-btn-close:hover {
+  color: var(--danger, #d9534f);
+  border-color: color-mix(in srgb, var(--danger, #d9534f) 50%, transparent);
+}
+
+.ai-bubble-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* min-width:0 lets the shell shrink to the panel; without it the flex child
+     sizes to its content's intrinsic width and overflows the fixed panel. */
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+}
+/* The reused <AiChat compact/> fills the body. Constrain it to the panel width:
+   without min-width:0/max-width the shell grows to a long G-code line or an
+   unbroken token (~661px) and gets clipped on the right edge of the panel. */
+.ai-bubble-body .ai-chat-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The shared chat shell (also used inline in the dock panel). */
+.ai-chat-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+}
+.ai-chat-shell .ai-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Compact tweaks for the small bubble panel. */
+.ai-chat-compact .ai-safety {
+  font-size: var(--fs-label, 11px);
+  padding: var(--sp-1, 4px) var(--sp-2, 8px);
+}
+.ai-chat-compact .ai-status {
+  flex-wrap: wrap;
+}
+
+/* The clear-chat affordance in the status strip. */
+.ai-status-spacer {
+  flex: 1 1 auto;
+}
+.ai-status-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.ai-status-clear:hover:not(:disabled) {
+  color: var(--danger, #d9534f);
+  border-color: color-mix(in srgb, var(--danger, #d9534f) 50%, transparent);
+}
+.ai-status-clear:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The settings-body reused inside the modal — give it room to breathe. */
+.ai-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 12px);
+}
+
+/* ---- Responsive: cap to a near-full-screen sheet on phones ---- */
+@media (max-width: 600px) {
+  .ai-bubble-panel {
+    left: 8px !important;
+    top: auto !important;
+    bottom: 8px;
+    transform: none !important;
+    width: calc(100vw - 16px);
+    height: min(80vh, 620px);
+    max-height: calc(100vh - 16px);
+  }
+}

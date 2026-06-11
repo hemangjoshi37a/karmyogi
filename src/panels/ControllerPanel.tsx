@@ -7,6 +7,9 @@ import { DroReadout } from '../components/DroReadout'
 import { JogPad, jogKeyToDelta, jogParamsFromDelta, HOLD_DELAY_MS, type JogDelta } from '../components/JogPad'
 import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, SpindleCcwIcon, AxisZeroIcon, GoToZeroIcon, PlusIcon, MinusIcon, OvResetIcon } from '../components/MachineIcons'
 import { InfoTip } from '../components/InfoTip'
+import { Gamepad2 } from 'lucide-react'
+import { GamepadModal } from '../components/GamepadModal'
+import { useGamepad, type GamepadAction, type GamepadHandlers } from '../machine/useGamepad'
 import { useT } from '../i18n'
 import '../styles/controller.css'
 
@@ -60,6 +63,9 @@ function SliderField(props: {
 }) {
   const { label, rowTitle, inputId, value, onChange, min, max, step, unit, ariaLabel } = props
   const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the slider's accent fill (read as --mc-pct by the
+  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress).
+  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
     <div className="mc-field mc-sliderfield" title={rowTitle}>
       <label className="mc-label" htmlFor={inputId}>
@@ -72,6 +78,7 @@ function SliderField(props: {
         max={max}
         step={step}
         value={value}
+        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
         onChange={(e) => onChange(clamp(Number(e.target.value)))}
         aria-label={ariaLabel}
         tabIndex={-1}
@@ -131,6 +138,11 @@ export function ControllerPanel() {
   const [jogFeed, setJogFeed] = usePersistentState('karmyogi.jog.feed', 1000)
   const [spindleRpm, setSpindleRpm] = usePersistentState('karmyogi.spindle.rpm', 10000)
   const [spindleDir, setSpindleDir] = usePersistentState<'cw' | 'ccw'>('karmyogi.spindle.dir', 'cw')
+  // Spindle output mode: 'spindle' = control by RPM (S = rpm); 'pwm' = drive the
+  // GRBL board's spindle-PWM pin as a generic PWM signal, set by duty % (S maps
+  // to the 0–1000 PWM range). The same M3/M4 + S word carries both.
+  const [spindleMode, setSpindleMode] = usePersistentState<'spindle' | 'pwm'>('karmyogi.spindle.mode', 'spindle')
+  const [spindlePwm, setSpindlePwm] = usePersistentState('karmyogi.spindle.pwm', 100)
   // Continuous-jog distance is user-configurable (persisted) and capped to the
   // machine's travel so a held jog can't ask GRBL to fly far past the envelope.
   const [contJogMm, setContJogMm] = usePersistentState('karmyogi.jog.continuousMm', 1000)
@@ -142,6 +154,12 @@ export function ControllerPanel() {
   // Safe-Z retract height (work Z, mm) prepended before any XY return so the tool
   // lifts clear of the work/clamps instead of dragging across them.
   const [safeZ] = usePersistentState('karmyogi.coord.safeZ', DEFAULT_SAFE_Z)
+  // Game-controller (Gamepad API): persisted enable flag + modal open state.
+  const [gamepadEnabled, setGamepadEnabled] = usePersistentState('karmyogi.gamepad.enabled', false)
+  // Haptic (rumble) feedback on machine-state transitions — persisted, default on.
+  const [gamepadHaptics, setGamepadHaptics] = usePersistentState('karmyogi.gamepad.haptics', true)
+  const [gamepadHapticIntensity, setGamepadHapticIntensity] = usePersistentState('karmyogi.gamepad.hapticIntensity', 1)
+  const [gamepadOpen, setGamepadOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
   // Optimistic spindle-running flag: flip instantly on click for responsive UI,
@@ -161,10 +179,15 @@ export function ControllerPanel() {
   }, [connected])
 
   const spindleOn = useCallback(() => {
-    const rpm = Math.max(0, Math.round(spindleRpm) || 0)
     const cmd = spindleDir === 'ccw' ? 'M4' : 'M3'
-    void grbl.send(`${cmd} S${rpm}`)
-  }, [spindleRpm, spindleDir])
+    // PWM mode: duty % → S over GRBL's 0–1000 PWM range ($30 default). Spindle
+    // mode: S is the RPM directly. Same enable command (M3/M4) either way.
+    const s =
+      spindleMode === 'pwm'
+        ? Math.round((Math.min(100, Math.max(0, spindlePwm)) / 100) * 1000)
+        : Math.max(0, Math.round(spindleRpm) || 0)
+    void grbl.send(`${cmd} S${s}`)
+  }, [spindleRpm, spindlePwm, spindleMode, spindleDir])
   const spindleOff = useCallback(() => void grbl.send('M5'), [])
   // Toggle from the optimistic running flag: running -> stop, stopped -> start.
   const spindleToggle = useCallback(() => {
@@ -199,18 +222,27 @@ export function ControllerPanel() {
     [jogFeed],
   )
 
-  // A continuous jog (a hold): jog a large distance in the sign of each nonzero
-  // axis. Motion continues until cancelJog() (0x85) flushes it.
+  // A continuous jog (a hold): jog a large distance in the DIRECTION of the
+  // delta. `delta` may be a non-axis-aligned vector (e.g. the gamepad stick);
+  // each component is scaled to the configured continuous distance so the move
+  // follows the vector ANGLE — true diagonals, not axis-clamped. `feed`
+  // defaults to the configured jog feed but the analog stick passes its own
+  // magnitude-scaled feed. Motion continues until cancelJog() (0x85) flushes it.
   const doJogHold = useCallback(
-    (delta: JogDelta) => {
+    (delta: JogDelta, feed: number = jogFeed) => {
       if (!grbl.isConnected) return
       const big: JogDelta = {}
-      if (delta.x) big.x = Math.sign(delta.x) * continuousJogMm
-      if (delta.y) big.y = Math.sign(delta.y) * continuousJogMm
-      if (delta.z) big.z = Math.sign(delta.z) * continuousJogMm
+      // Preserve direction by scaling each component by the SAME factor (the
+      // largest component reaches continuousJogMm), so a diagonal stick vector
+      // produces a diagonal move rather than two clamped axis moves.
+      const maxComp = Math.max(Math.abs(delta.x ?? 0), Math.abs(delta.y ?? 0), Math.abs(delta.z ?? 0))
+      const scale = maxComp > 0 ? continuousJogMm / maxComp : 0
+      if (delta.x) big.x = delta.x * scale
+      if (delta.y) big.y = delta.y * scale
+      if (delta.z) big.z = delta.z * scale
       // The continuous hold is a single intentional move that stops on release
       // (0x85); force it past the discrete-jog flood cap.
-      void grbl.jog(jogParamsFromDelta(big, jogFeed), { force: true })
+      void grbl.jog(jogParamsFromDelta(big, feed), { force: true })
     },
     [jogFeed, continuousJogMm],
   )
@@ -319,6 +351,141 @@ export function ControllerPanel() {
       .catch(() => {})
   }, [busy, machineState, safeZ, t])
 
+  // ---- Game controller (Gamepad API) ----
+  // STEP_SIZES drives the LB/RB step-size cycling so it matches the on-screen
+  // step buttons (and the keyboard 1–4 keys).
+  const stepUp = useCallback(() => {
+    const i = STEP_SIZES.indexOf(step)
+    setStep(STEP_SIZES[Math.min(STEP_SIZES.length - 1, (i < 0 ? 1 : i) + 1)])
+  }, [step, setStep])
+  const stepDown = useCallback(() => {
+    const i = STEP_SIZES.indexOf(step)
+    setStep(STEP_SIZES[Math.max(0, (i < 0 ? 1 : i) - 1)])
+  }, [step, setStep])
+
+  // Analog jog from the sticks reuses the EXISTING continuous-jog plumbing: the
+  // hook calls jogXY/jogZ on deflection (a long doJogHold move that runs until
+  // cancelled) and cancelJog (0x85) when the sticks recenter — exactly like a
+  // press-and-hold of the on-screen / keyboard jog. We never spam one-shot jogs.
+  const gamepadHandlers = useRef<GamepadHandlers>({
+    jogXY: () => {},
+    jogZ: () => {},
+    cancelJog: () => {},
+    onAction: () => {},
+  })
+  gamepadHandlers.current = {
+    jogXY: (dx, dy, feed) => {
+      if (!grbl.isConnected) return
+      // dx,dy is the normalized stick vector; feed is magnitude-scaled. Reuses
+      // the same continuous-jog path as press-and-hold, just parameterized.
+      doJogHold({ x: dx, y: dy }, feed)
+    },
+    jogZ: (dz, feed) => {
+      if (!grbl.isConnected) return
+      doJogHold({ z: dz }, feed)
+    },
+    cancelJog,
+    onAction: (action: GamepadAction) => {
+      if (!grbl.isConnected) return
+      switch (action) {
+        case 'resume':
+          void grbl.resume()
+          break
+        case 'hold':
+          void grbl.feedHold()
+          break
+        case 'spindle':
+          spindleToggle()
+          break
+        case 'home':
+          void grbl.home()
+          break
+        case 'unlock':
+          void grbl.unlock()
+          break
+        case 'reset':
+          void grbl.softReset()
+          break
+        case 'stepUp':
+          stepUp()
+          break
+        case 'stepDown':
+          stepDown()
+          break
+        case 'stepJogXPlus':
+          doJog({ x: step })
+          break
+        case 'stepJogXMinus':
+          doJog({ x: -step })
+          break
+        case 'stepJogYPlus':
+          doJog({ y: step })
+          break
+        case 'stepJogYMinus':
+          doJog({ y: -step })
+          break
+        default:
+          break
+      }
+    },
+  }
+  // Stable handlers object that always delegates to the latest closures (the
+  // hook keeps its own ref; this avoids restarting its rAF loop on re-render).
+  const stableGamepadHandlers = useRef<GamepadHandlers>({
+    jogXY: (dx, dy, feed) => gamepadHandlers.current.jogXY(dx, dy, feed),
+    jogZ: (dz, feed) => gamepadHandlers.current.jogZ(dz, feed),
+    cancelJog: () => gamepadHandlers.current.cancelJog(),
+    onAction: (a) => gamepadHandlers.current.onAction(a),
+  })
+  // Only actually let the gamepad drive the machine while connected (mirrors the
+  // keyboard guard); the modal toggle persists the user's "armed" intent. The
+  // options carry the configured max jog feed (for magnitude-scaled analog jog)
+  // and the haptics preferences.
+  const gp = useGamepad(
+    stableGamepadHandlers.current,
+    gamepadEnabled && connected,
+    { jogFeed, haptics: gamepadHaptics, hapticIntensity: gamepadHapticIntensity },
+    setGamepadEnabled,
+  )
+
+  // ---- Haptic feedback driven off machine-state TRANSITIONS ----
+  // Fire a rumble only when state/error CHANGES (not every frame), and only when
+  // a pad is connected + control is armed. Feature-detection lives in the hook.
+  const prevMachineState = useRef<string | null>(null)
+  const prevMachineError = useRef<string | null>(null)
+  const prevGamepadConnected = useRef(false)
+  useEffect(() => {
+    const active = gp.connected && gamepadEnabled
+    const prevState = prevMachineState.current
+    const prevErr = prevMachineError.current
+    const wasConnected = prevGamepadConnected.current
+    prevMachineState.current = machineState
+    prevMachineError.current = machineError
+    prevGamepadConnected.current = gp.connected
+    if (!active) return
+
+    // Controller just connected → short single tick.
+    if (gp.connected && !wasConnected) gp.rumble('connect')
+
+    // Error appeared (incl. soft-reset surfaced as an error) → sharp double pulse.
+    if (machineError && machineError !== prevErr) {
+      gp.rumble('error')
+      window.setTimeout(() => gp.rumble('error'), 130)
+    }
+
+    // State transitions.
+    if (prevState !== null && machineState !== prevState) {
+      const isLimit = (s: string) => /alarm|limit|door/i.test(s)
+      if (isLimit(machineState) && !isLimit(prevState)) {
+        // Entered Alarm / limit / door → strong sustained rumble.
+        gp.rumble('alarm')
+      } else if (machineState === 'Idle' && (prevState === 'Run' || prevState === 'Home')) {
+        // Returned to Idle from Run/Home (job / probe complete) → soft tick.
+        gp.rumble('idle')
+      }
+    }
+  }, [machineState, machineError, gp, gamepadEnabled])
+
   // SAFETY: stop any continuous jog if the window loses focus or is hidden
   // (e.g. holding an arrow key then alt-tabbing) — keyup never fires for the
   // other window, so without this a held jog would run away. Wired at the
@@ -351,10 +518,23 @@ export function ControllerPanel() {
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!grbl.isConnected) return
-      // Don't hijack typing in inputs/selects/editable fields.
-      const el = e.target as HTMLElement | null
-      const tag = el?.tagName
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || el?.isContentEditable) return
+      // Don't hijack typing in inputs/selects/editable fields. Check BOTH the
+      // event target AND the actually-focused element, and bail whenever focus is
+      // inside an open modal/dialog (e.g. the Pick & Place / GRBL settings modals)
+      // — so jog/step/spindle keys never steal keystrokes meant for a form field.
+      const editable = (n: Element | null): boolean => {
+        const h = n as HTMLElement | null
+        if (!h) return false
+        const tag = h.tagName
+        return (
+          tag === 'INPUT' ||
+          tag === 'SELECT' ||
+          tag === 'TEXTAREA' ||
+          h.isContentEditable ||
+          !!h.closest?.('[role="dialog"], .km-modal')
+        )
+      }
+      if (editable(e.target as Element) || editable(document.activeElement)) return
       // Don't fight browser/OS shortcuts (Ctrl/Meta/Alt combos).
       if (e.ctrlKey || e.metaKey || e.altKey) return
 
@@ -758,7 +938,30 @@ export function ControllerPanel() {
             <span className="mc-switch-knob" aria-hidden="true" />
             <Kbd k="s" />
           </button>
-          <h4 className="mc-spindle-title">{t('ctrl.spindle', 'Spindle')}</h4>
+          <span
+            className="mc-seg mc-spindle-mode"
+            role="group"
+            aria-label={t('ctrl.spindle.mode', 'Spindle output mode')}
+          >
+            <button
+              type="button"
+              className={spindleMode === 'spindle' ? 'active' : ''}
+              onClick={() => setSpindleMode('spindle')}
+              aria-pressed={spindleMode === 'spindle'}
+              title={t('ctrl.spindle.mode.spindle', 'Spindle — set speed in RPM (M3/M4 S<rpm>)')}
+            >
+              {t('ctrl.spindle', 'Spindle')}
+            </button>
+            <button
+              type="button"
+              className={spindleMode === 'pwm' ? 'active' : ''}
+              onClick={() => setSpindleMode('pwm')}
+              aria-pressed={spindleMode === 'pwm'}
+              title={t('ctrl.spindle.mode.pwm', 'PWM — drive the GRBL spindle-PWM output as a duty % (S over the 0–1000 PWM range)')}
+            >
+              {t('ctrl.spindle.pwm', 'PWM')}
+            </button>
+          </span>
           <span className="mc-grow" />
           <span className="mc-seg mc-spindle-dir" role="group" aria-label={t('ctrl.spindle.dir', 'Spindle direction')}>
             <button
@@ -785,30 +988,58 @@ export function ControllerPanel() {
             </button>
           </span>
         </div>
-        <div className="mc-field">
-          <label className="mc-label" htmlFor="spindle-rpm">{t('ctrl.speed', 'Speed')}</label>
-          <InfoTip
-            topic="spindleRpm"
-            title={t('ctrl.explain.spindleRpm.title', 'Spindle speed (RPM)')}
-            body={t(
-              'ctrl.explain.spindleRpm.body',
-              'How fast the cutting tool spins, in turns per minute. Higher speeds suit small bits and soft material; too fast can burn wood or melt plastic, too slow can chip the bit. Follow the bit/material chart, or start moderate.',
-            )}
-          />
-          <input
-            id="spindle-rpm"
-            className="mc-input mc-input-grow"
-            type="number"
-            min={0}
-            step={1000}
-            value={spindleRpm}
-            onChange={(e) => setSpindleRpm(Math.max(0, Number(e.target.value) || 0))}
-            disabled={!connected}
-            aria-label={t('ctrl.speed.aria', 'Spindle speed (RPM)')}
-            title={t('ctrl.speed.title', 'Spindle speed in RPM (S word sent with M3/M4)')}
-          />
-          <span className="mc-unit">{unitRpm}</span>
-        </div>
+        {spindleMode === 'pwm' ? (
+          <div className="mc-field">
+            <label className="mc-label" htmlFor="spindle-pwm">{t('ctrl.pwm', 'PWM')}</label>
+            <InfoTip
+              topic="spindlePwm"
+              title={t('ctrl.explain.pwm.title', 'PWM duty (%)')}
+              body={t(
+                'ctrl.explain.pwm.body',
+                'Drives the GRBL board’s spindle-PWM output as a generic PWM signal (for a laser, LED, fan…). The duty % is sent as the S word over GRBL’s 0–1000 PWM range (S = % × 10), enabled with M3/M4 and stopped with M5. A streaming program keeps whatever S values it already contains.',
+              )}
+            />
+            <input
+              id="spindle-pwm"
+              className="mc-input mc-input-grow"
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={spindlePwm}
+              onChange={(e) => setSpindlePwm(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+              disabled={!connected}
+              aria-label={t('ctrl.pwm.aria', 'PWM duty percent')}
+              title={t('ctrl.pwm.title', 'PWM duty % — sent as the S word (0–1000) with M3/M4')}
+            />
+            <span className="mc-unit">{t('ctrl.unit.pct', '%')}</span>
+          </div>
+        ) : (
+          <div className="mc-field">
+            <label className="mc-label" htmlFor="spindle-rpm">{t('ctrl.speed', 'Speed')}</label>
+            <InfoTip
+              topic="spindleRpm"
+              title={t('ctrl.explain.spindleRpm.title', 'Spindle speed (RPM)')}
+              body={t(
+                'ctrl.explain.spindleRpm.body',
+                'How fast the cutting tool spins, in turns per minute. Higher speeds suit small bits and soft material; too fast can burn wood or melt plastic, too slow can chip the bit. Follow the bit/material chart, or start moderate.',
+              )}
+            />
+            <input
+              id="spindle-rpm"
+              className="mc-input mc-input-grow"
+              type="number"
+              min={0}
+              step={1000}
+              value={spindleRpm}
+              onChange={(e) => setSpindleRpm(Math.max(0, Number(e.target.value) || 0))}
+              disabled={!connected}
+              aria-label={t('ctrl.speed.aria', 'Spindle speed (RPM)')}
+              title={t('ctrl.speed.title', 'Spindle speed in RPM (S word sent with M3/M4)')}
+            />
+            <span className="mc-unit">{unitRpm}</span>
+          </div>
+        )}
       </section>
 
       {/* Overrides */}
@@ -860,7 +1091,46 @@ export function ControllerPanel() {
           <span className="mc-label">{t('ctrl.spindle.live', 'Spindle {n} rpm', { n: Math.round(spindle) })}</span>
         </div>
       </section>
+
+      {/* Game controller — big full-width launcher into the mapping/setup modal. */}
+      <section className="mc-section mc-gamepad-section">
+        <button
+          type="button"
+          className="mc-btn gp-launch"
+          onClick={() => setGamepadOpen(true)}
+          aria-haspopup="dialog"
+          title={t('ctrl.gamepad.title', 'Game controller — jog and operate the machine with an Xbox / PlayStation / USB gamepad')}
+        >
+          <Gamepad2 size={22} aria-hidden="true" />
+          <span className="gp-launch-text">
+            <span className="gp-launch-title">{t('ctrl.gamepad', 'Game controller')}</span>
+            <span className="gp-launch-sub">
+              {gp.connected
+                ? gamepadEnabled && connected
+                  ? t('ctrl.gamepad.active', 'Active — {name}', { name: gp.id ?? '' })
+                  : t('ctrl.gamepad.ready', 'Ready — {name}', { name: gp.id ?? '' })
+                : t('ctrl.gamepad.none', 'Not connected')}
+            </span>
+          </span>
+          {gp.connected && (
+            <span className={`gp-launch-dot${gamepadEnabled && connected ? ' on' : ''}`} aria-hidden="true" />
+          )}
+        </button>
+      </section>
       </div>
+
+      <GamepadModal
+        open={gamepadOpen}
+        onClose={() => setGamepadOpen(false)}
+        gp={gp}
+        armed={gamepadEnabled}
+        setArmed={setGamepadEnabled}
+        machineConnected={connected}
+        haptics={gamepadHaptics}
+        setHaptics={setGamepadHaptics}
+        hapticIntensity={gamepadHapticIntensity}
+        setHapticIntensity={setGamepadHapticIntensity}
+      />
     </div>
   )
 }

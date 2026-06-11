@@ -19,6 +19,7 @@
     "dockview": "^6.6.1",
     "fflate": "^0.8.3",
     "firebase": "^12.14.0",
+    "lucide-react": "^1.17.0",
     "occt-import-js": "^0.0.23",
     "opentype.js": "^1.3.4",
     "polygon-clipping": "^0.15.7",

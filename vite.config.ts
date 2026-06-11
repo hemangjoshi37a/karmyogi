@@ -75,6 +75,18 @@ export default defineConfig({
               rangeRequests: true,
             },
           },
+          {
+            // 3D models (controller STL/STEP, any glb/gltf) — large and rarely
+            // change, so cache the first download and serve from cache after, so
+            // the ~MBs are never re-fetched on later opens/reloads.
+            urlPattern: ({ url }) => /\.(stl|step|stp|glb|gltf)$/i.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'karmyogi-models',
+              expiration: { maxEntries: 12, maxAgeSeconds: 60 * 60 * 24 * 60 },
+              rangeRequests: true,
+            },
+          },
         ],
       },
     }),

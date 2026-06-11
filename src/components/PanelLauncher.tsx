@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { availablePanels, type PanelSpec } from '../app/panelRegistry'
+import { PanelIcon } from '../app/panelIcons'
 import { IconButton } from './IconButton'
 import { useT } from '../i18n'
 
@@ -69,11 +70,26 @@ export function PanelLauncher({ onOpenPanel, isPanelOpen }: PanelLauncherProps) 
                       : t('launch.open', 'Open {title}', { title: p.title })
                   }
                 >
+                  <PanelIcon id={p.id} size={15} className="launcher-item-ico" />
                   <span className="launcher-item-title">{p.title}</span>
                   <span className={isOpen ? 'launcher-dot open' : 'launcher-dot'} aria-hidden="true" />
                 </button>
               )
             })}
+            {/* The AI assistant is a floating bubble, not a dock panel — picking it
+                just reveals the bubble. Listed here so it's reachable like a panel. */}
+            <button
+              role="menuitem"
+              className="launcher-item launcher-item-ai"
+              onClick={() => {
+                window.dispatchEvent(new Event('karmyogi:openAiBubble'))
+                setOpen(false)
+              }}
+              title={t('launch.openAi', 'Open the floating AI G-code assistant')}
+            >
+              <PanelIcon id="aigcode" size={15} className="launcher-item-ico" />
+              <span className="launcher-item-title">{t('ai.bubble.menuItem', 'AI assistant')}</span>
+            </button>
           </div>
         </div>
       )}

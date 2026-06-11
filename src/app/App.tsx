@@ -11,6 +11,7 @@ import { AdminPage } from '../admin/AdminPage'
 import { useLiveSync } from '../machine/liveSync'
 import { useT } from '../i18n'
 import { UndoRedoHotkeys } from '../components/UndoRedoHotkeys'
+import { AiBubble } from '../components/AiBubble'
 
 /** True when the current path is the admin console (`/admin` or `/admin/...`). */
 function isAdminPath(pathname: string): boolean {
@@ -148,6 +149,9 @@ export function App() {
     <AuthGate>
       <UndoRedoHotkeys />
       <Shell />
+      {/* Floating AI chat assistant — the AI G-code surface (replaces the old
+          dock tab). Mounted globally so it floats over every panel. */}
+      <AiBubble />
     </AuthGate>
   )
 }

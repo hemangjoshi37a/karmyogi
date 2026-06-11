@@ -260,7 +260,13 @@ export function DrillingPanel() {
   )
 
   const gcode = useMemo(() => generateDrilling(points, safeParams), [points, safeParams])
-  const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
+  // With no hole points there is nothing to drill, so report ZERO lines (and
+  // never push a body-less program to the store) — the status strip must not
+  // claim a line count while the list is empty.
+  const lineCount = useMemo(
+    () => (points.length === 0 ? 0 : gcodeLines(gcode).length),
+    [gcode, points.length],
+  )
   const preset = useMemo(() => resolvePreset(params.preset), [params.preset])
   const drilledDia = useMemo(
     () => holeDiameter(defaultDrillingParams(safeParams)),
@@ -331,14 +337,6 @@ export function DrillingPanel() {
     a.click()
     URL.revokeObjectURL(url)
     notify('success', t('drill.downloaded', 'Downloaded the drilling program.'))
-  }
-
-  // Push the current program to the shared store immediately (bypassing the
-  // live-sync debounce) so it appears in the Program tab / Visualizer right away.
-  function sendToProgram() {
-    if (points.length === 0) return
-    setProgram('drilling', gcode)
-    notify('success', t('drill.send.done', 'Sent {n} line(s) to the Program tab.', { n: lineCount }))
   }
 
   // Live generation: push the freshly-computed program to the store (debounced)
@@ -881,24 +879,6 @@ export function DrillingPanel() {
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Send-to-Program action row. */}
-      <div className="scf-status">
-        <button
-          type="button"
-          className="scf-ico scf-ico-primary"
-          style={{ width: 'auto', padding: '0 12px', gap: 6 }}
-          onClick={sendToProgram}
-          disabled={points.length === 0}
-          title={t('drill.send.title', 'Send the generated program to the Program tab')}
-        >
-          <span aria-hidden="true"><Icon name="play" size={14} /></span>
-          {t('drill.send.btn', 'Send to Program')}
-        </button>
-        <span className="scf-status-sync" title={t('drill.live.title', 'Lines auto-synced to the Program tab')}>
-          {t('drill.status.autosync', 'auto-synced')}
-        </span>
       </div>
     </div>
       <PresetSaveBar

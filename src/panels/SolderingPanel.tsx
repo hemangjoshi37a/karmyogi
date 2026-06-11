@@ -17,6 +17,16 @@ import {
   type SolderPoint,
   type SolderingParams,
 } from '../core/soldering'
+import { importGerber } from '../core/gerber'
+import { padsToSolderPoints } from '../core/solderFromGerber'
+import {
+  unzipGerberPackage,
+  layerRoleLabel,
+  layerRoleLabelKey,
+  GerberPackageError,
+  type LayerRole,
+  type PackageEntry,
+} from '../core/gerberPackage'
 import '../styles/soldering.css'
 
 /** Clamp decimals to the range toFixed() accepts (0..6) — guards the
@@ -255,6 +265,11 @@ export function SolderingPanel() {
   )
   // Hidden <input type=file> trigger for "Load CSV".
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Hidden <input type=file> trigger for "Import from Gerber".
+  const gerberInputRef = useRef<HTMLInputElement>(null)
+  // When a ZIP holds several layers, hold the candidate layers here and show a
+  // compact picker so the operator chooses the one that carries the solder pads.
+  const [gerberLayers, setGerberLayers] = useState<PackageEntry[] | null>(null)
 
   // Global generator params (programName is fixed here; metric stays mm/G21).
   const [params, setParams] = useState<SolderParams>(() => {
@@ -391,6 +406,122 @@ export function SolderingPanel() {
       notify('success', t('solder.csv.loaded', 'Loaded {n} solder point(s) from CSV.', { n: parsed.length }))
     }
     reader.readAsText(file)
+  }
+
+  // Turn the chosen Gerber layer text into soldering points and merge them into
+  // the list. Each pad flash centre becomes a point built from the current
+  // new-point defaults (Free-Z / Touch-Z / feed / approach), so the imported
+  // points are individually editable exactly like manual ones and the operator
+  // zeros the machine to the board origin then tweaks each as usual. When the
+  // list is non-empty the operator chooses APPEND or REPLACE.
+  function importPadsFromText(text: string, layerName: string) {
+    const res = importGerber(text)
+    if (!res.ok) {
+      notify(
+        'warn',
+        t('solder.gerber.parseError', 'Could not read that Gerber layer: {error}', {
+          error: res.error ?? t('solder.gerber.noGeometry', 'no geometry'),
+        }),
+      )
+      return
+    }
+    const xy = padsToSolderPoints(res.data, clampDecimals(params.decimals))
+    if (xy.length === 0) {
+      notify(
+        'warn',
+        t('solder.gerber.noPads', 'No pads (flashes) found on {layer}. Pick the paste or top-copper layer.', {
+          layer: layerName,
+        }),
+      )
+      return
+    }
+    const imported = xy.map((p) => newRow(p.x, p.y))
+    // Offer REPLACE vs APPEND only when there is existing work to preserve.
+    let replace = false
+    if (points.length > 0) {
+      replace = window.confirm(
+        t(
+          'solder.gerber.replaceConfirm',
+          'Replace the current {n} point(s) with {m} from {layer}? Cancel to append instead.',
+          { n: points.length, m: imported.length, layer: layerName },
+        ),
+      )
+    }
+    setPoints((p) => (replace ? imported : [...p, ...imported]))
+    setSelected(-1)
+    notify(
+      'success',
+      t('solder.gerber.imported', 'Imported {n} pad(s) as solder points from {layer}.', {
+        n: imported.length,
+        layer: layerName,
+      }),
+    )
+  }
+
+  // Read a chosen file. A ZIP is unzipped and (if it holds more than one layer)
+  // surfaced in the layer picker — defaulting to the paste / top-copper layer
+  // where pads live. A single Gerber file is imported directly.
+  function loadGerberFile(file: File) {
+    setGerberLayers(null)
+    if (/\.zip$/i.test(file.name)) {
+      file
+        .arrayBuffer()
+        .then((buf) => {
+          let entries: PackageEntry[]
+          try {
+            entries = unzipGerberPackage(new Uint8Array(buf))
+          } catch (err) {
+            notify(
+              'warn',
+              err instanceof GerberPackageError
+                ? err.message
+                : t('solder.gerber.zipError', 'Could not read ZIP: {detail}', {
+                    detail: err instanceof Error ? err.message : String(err),
+                  }),
+            )
+            return
+          }
+          // Only Gerber copper/paste-style layers carry pad flashes; drill
+          // (Excellon) files are not Gerber and would not parse here, so keep
+          // every entry but let the picker default to a useful one.
+          if (entries.length === 1) {
+            importPadsFromText(entries[0].text, entries[0].name)
+          } else {
+            setGerberLayers(entries)
+          }
+        })
+        .catch((err) =>
+          notify('warn', t('solder.gerber.zipError', 'Could not read ZIP: {detail}', {
+            detail: err instanceof Error ? err.message : String(err),
+          })),
+        )
+      return
+    }
+    // Single Gerber text file.
+    file
+      .text()
+      .then((text) => importPadsFromText(text, file.name))
+      .catch((err) =>
+        notify('warn', t('solder.gerber.readError', 'Could not read file: {detail}', {
+          detail: err instanceof Error ? err.message : String(err),
+        })),
+      )
+  }
+
+  // The layer the picker pre-selects: prefer the solder-paste layer (where SMD
+  // pads live), then top copper, else the first listed layer.
+  function defaultLayerName(entries: PackageEntry[]): string {
+    const paste = entries.find((e) => /paste|\.(gtp|gbp)$/i.test(e.name))
+    if (paste) return paste.name
+    const top = entries.find((e) => e.role === 'CopperTop')
+    if (top) return top.name
+    return entries[0]?.name ?? ''
+  }
+
+  // Friendly localised role label for a layer entry (Drill layers are not
+  // Gerber and won't yield pads — flagged for the operator).
+  function layerRoleText(role: LayerRole): string {
+    return t(layerRoleLabelKey(role), layerRoleLabel(role))
   }
 
   // Clear all points (confirm first when non-empty), and drop the synced section
@@ -542,6 +673,31 @@ export function SolderingPanel() {
               e.target.value = '' // allow re-loading the same file
             }}
           />
+          <ToolButton
+            glyph={
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="2.5" y="2.5" width="11" height="11" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                <circle cx="5.5" cy="5.5" r="1.2" fill="currentColor" />
+                <circle cx="10.5" cy="5.5" r="1.2" fill="currentColor" />
+                <circle cx="5.5" cy="10.5" r="1.2" fill="currentColor" />
+                <circle cx="10.5" cy="10.5" r="1.2" fill="currentColor" />
+              </svg>
+            }
+            onClick={() => gerberInputRef.current?.click()}
+            title={t('solder.toolbar.gerber', 'Import from Gerber')}
+            body={t('solder.toolbar.gerber.body', 'Turn the pads on a Gerber layer (or a Gerber ZIP — pick the layer) into solder points; then zero the machine and tweak each point.')}
+          />
+          <input
+            ref={gerberInputRef}
+            type="file"
+            accept=".zip,.gbr,.ger,.gtl,.gbl,.gtp,.gbp,.art,.txt"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) loadGerberFile(f)
+              e.target.value = '' // allow re-loading the same file
+            }}
+          />
           <span className="sp-tools-sep" aria-hidden="true" />
           <ToolButton
             className={showSettings ? 'is-active' : ''}
@@ -553,6 +709,80 @@ export function SolderingPanel() {
           />
         </div>
       </header>
+
+      {/* Gerber layer picker — shown only while a multi-layer ZIP awaits a choice.
+          The operator picks the layer carrying the solder pads (paste / top
+          copper); on Import each pad flash centre becomes a soldering point. */}
+      {gerberLayers && (
+        <div className="sp-card sp-gerber-pick">
+          <div className="sp-card-head">
+            <h4>{t('solder.gerber.pickTitle', 'Choose the pad layer')}</h4>
+            <button
+              className="sp-row-ico"
+              title={t('solder.gerber.cancel', 'Cancel')}
+              aria-label={t('solder.gerber.cancel', 'Cancel')}
+              onClick={() => setGerberLayers(null)}
+            >
+              <Icon name="close" size={14} />
+            </button>
+          </div>
+          <p className="sp-gerber-hint" style={{ margin: '0 0 8px', opacity: 0.8, fontSize: '0.85em' }}>
+            {t(
+              'solder.gerber.pickHint',
+              'Pick the Gerber layer with the solder pads (usually the paste or top-copper layer). Each pad becomes one solder point.',
+            )}
+          </p>
+          {(() => {
+            const def = defaultLayerName(gerberLayers)
+            return (
+              <div
+                className="sp-gerber-layers"
+                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+              >
+                {gerberLayers.map((e) => (
+                  <button
+                    key={e.name}
+                    type="button"
+                    className="sp-gerber-layer"
+                    onClick={() => {
+                      setGerberLayers(null)
+                      importPadsFromText(e.text, e.name)
+                    }}
+                    title={t('solder.gerber.layerTitle', '{name} — {role}', {
+                      name: e.name,
+                      role: layerRoleText(e.role),
+                    })}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 8px',
+                      minHeight: 36,
+                      textAlign: 'left',
+                      border: e.name === def ? '1px solid var(--accent, #4a90d9)' : '1px solid var(--border, #444)',
+                      borderRadius: 4,
+                      background: 'var(--surface-2, transparent)',
+                      color: 'inherit',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {e.name}
+                      {e.name === def && (
+                        <span style={{ marginLeft: 6, opacity: 0.7, fontSize: '0.8em' }}>
+                          {t('solder.gerber.suggested', '(suggested)')}
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ opacity: 0.7, fontSize: '0.8em', flexShrink: 0 }}>{layerRoleText(e.role)}</span>
+                  </button>
+                ))}
+              </div>
+            )
+          })()}
+        </div>
+      )}
 
       {/* Live status strip: point + line counts, auto-synced to the Program tab. */}
       <div className="sp-status">

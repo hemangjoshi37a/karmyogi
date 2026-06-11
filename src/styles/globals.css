@@ -172,11 +172,13 @@ textarea { min-height: auto; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   padding: 6px 14px;
   border-radius: 18px;
   white-space: nowrap;
   background: var(--bg-input);
 }
+.mobile-tab-ico { flex: 0 0 auto; }
 .mobile-tab.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .mobile-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mobile-panel { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }

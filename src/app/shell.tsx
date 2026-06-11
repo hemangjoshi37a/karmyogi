@@ -8,6 +8,7 @@ import {
   type SerializedDockview,
 } from 'dockview'
 import { panelComponents, availablePanels, type PanelSpec } from './panelRegistry'
+import { PanelIcon } from './panelIcons'
 import { useSettings, useLayout } from '../store'
 import { useIsMobile } from './useIsMobile'
 import { MobileShell } from './MobileShell'
@@ -46,7 +47,6 @@ const LEFT_TABS = [
   { id: 'laser', title: 'Laser Cutting' },
   { id: 'welding', title: 'Welding' },
   { id: 'camera', title: 'Camera' },
-  { id: 'aigcode', title: 'AI G-code' },
 ]
 
 // Per-tab hover tooltips shown on the dock TAB name. The 2D/3D Carving tab
@@ -57,6 +57,10 @@ const TAB_TOOLTIPS: Record<string, { key: string; en: string }> = {
     key: 'cc.introMulti',
     en: 'Import one or more STL models — each becomes a job that auto-nests on the bed and carves in a single combined program. DXF / vector files do 2D engrave · profile · pocket.',
   },
+  pnp: {
+    key: 'pnp.intro.tab',
+    en: 'Move parts from a pick point to a place point — the head grabs with the spindle output (M3 on / M5 off). Build the operations; the program auto-syncs to the Visualizer and Program tab for streaming.',
+  },
 }
 
 /** Dock tab = the default dockview tab + a native hover tooltip (per-panel explainer). */
@@ -66,9 +70,20 @@ function DockTab(props: IDockviewPanelHeaderProps) {
   const tip = spec ? t(spec.key, spec.en) : props.api.title ?? ''
   return (
     <div className="dv-tab-tip" title={tip}>
+      <PanelIcon id={props.api.id} size={13} className="dv-tab-ico" />
       <DockviewDefaultTab {...props} />
     </div>
   )
+}
+
+/**
+ * Re-show the floating AI assistant bubble (it persists `closed` when the user
+ * dismisses it). The bubble (mounted globally in App.tsx) listens for this
+ * window event and clears its closed state — keeping the shell decoupled from
+ * the bubble's internal store.
+ */
+function openAiBubble() {
+  window.dispatchEvent(new Event('karmyogi:openAiBubble'))
 }
 
 // Project links (the live app + its source). Used by the top-bar icon buttons
@@ -343,6 +358,7 @@ export function Shell() {
                   : t('topbar.theme.dark', 'Dark theme')
               }
               aboutLabel={t('topbar.about', 'About karmyogi')}
+              aiLabel={t('ai.bubble.reopen', 'Open the AI assistant')}
               theme={theme}
               uiScale={uiScale}
               onZoomIn={zoomIn}
@@ -493,6 +509,7 @@ interface MobileMoreProps {
   zoomLabel: string
   themeLabel: string
   aboutLabel: string
+  aiLabel: string
   theme: 'dark' | 'light'
   uiScale: number
   onZoomIn: () => void
@@ -513,6 +530,7 @@ function MobileMore({
   zoomLabel,
   themeLabel,
   aboutLabel,
+  aiLabel,
   theme,
   uiScale,
   onZoomIn,
@@ -542,6 +560,17 @@ function MobileMore({
           <div className="topbar-more-user">
             <UserChip />
           </div>
+          <button
+            className="topbar-more-item"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              openAiBubble()
+            }}
+          >
+            <span className="topbar-more-ico">✦</span>
+            <span>{aiLabel}</span>
+          </button>
           <button className="topbar-more-item" role="menuitem" onClick={onToggleTheme}>
             <span className="topbar-more-ico">{theme === 'dark' ? '☀' : '☾'}</span>
             <span>{themeLabel}</span>

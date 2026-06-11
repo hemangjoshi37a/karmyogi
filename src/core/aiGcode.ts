@@ -20,7 +20,7 @@
 // per request. This module is pure (no React/DOM) so it mirrors src/core/.
 
 /** Provider identifier. */
-export type Provider = 'openai' | 'anthropic'
+export type Provider = 'openai' | 'anthropic' | 'gemini'
 
 /** How the request authenticates. */
 export type AuthMode = 'key' | 'session'
@@ -202,6 +202,13 @@ export function buildSystemPrompt(ctx: MachineContext): string {
 // Provider calls
 // --------------------------------------------------------------------------
 
+/** Human-readable provider name for error messages. */
+function providerName(provider: Provider): string {
+  if (provider === 'openai') return 'OpenAI'
+  if (provider === 'gemini') return 'Gemini'
+  return 'Anthropic'
+}
+
 /** Turn a fetch failure / non-OK response into a helpful, user-facing Error. */
 async function explainHttpError(provider: Provider, res: Response): Promise<Error> {
   let detail = ''
@@ -215,8 +222,14 @@ async function explainHttpError(provider: Provider, res: Response): Promise<Erro
       /* ignore */
     }
   }
-  const where = provider === 'openai' ? 'OpenAI' : 'Anthropic'
-  if (res.status === 401 || res.status === 403) {
+  const where = providerName(provider)
+  // Gemini reports a bad/missing key as HTTP 400 with an API_KEY_INVALID detail
+  // (not 401/403), so treat that specific case as an auth rejection too.
+  const geminiBadKey =
+    provider === 'gemini' &&
+    res.status === 400 &&
+    /api[_\s-]?key|API_KEY_INVALID|invalid.*key/i.test(detail)
+  if (res.status === 401 || res.status === 403 || geminiBadKey) {
     return new AiError(
       'authRejected',
       `${where} rejected the credentials (HTTP ${res.status}). Check your API key — ` +
@@ -246,7 +259,7 @@ function explainNetworkError(provider: Provider, err: unknown): Error {
   }
   // An AiError already carries a code — pass it straight through.
   if (err instanceof AiError) return err
-  const where = provider === 'openai' ? 'OpenAI' : 'Anthropic'
+  const where = providerName(provider)
   // A TypeError from fetch with no HTTP status is almost always a network /
   // CORS / offline failure (the browser hides the real cause for security).
   if (err instanceof TypeError) {
@@ -396,12 +409,68 @@ export async function callAnthropic(args: CallArgs & AuthOptions): Promise<strin
   return text
 }
 
+/**
+ * Call the Google Generative Language (Gemini) REST API.
+ *
+ * API-KEY MODE ONLY — there is no first-party browser session/cookie path for
+ * Gemini, so this ignores session mode. The endpoint takes the key as a query
+ * param (`?key=...`) and carries the system prompt as `system_instruction`; the
+ * conversation maps to `contents` with role 'user' / 'model'. The reply text is
+ * `candidates[0].content.parts[].text`, then routed through the SAME
+ * extractGcode/lint pipeline as the other providers by the caller.
+ */
+export async function callGemini(args: CallArgs & AuthOptions): Promise<string> {
+  const { apiKey, model, system, messages, signal } = args
+  if (!apiKey.trim()) {
+    throw new AiError('noKey', 'Add your API key first.')
+  }
+  // Gemini uses role 'model' for the assistant turns (vs OpenAI/Anthropic 'assistant').
+  const contents = messages.map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }))
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: system }] },
+        contents,
+        generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
+      }),
+      signal,
+    })
+  } catch (err) {
+    throw explainNetworkError('gemini', err)
+  }
+  if (!res.ok) throw await explainHttpError('gemini', res)
+  const data = await res.json()
+  const parts: unknown = data?.candidates?.[0]?.content?.parts
+  let text = ''
+  if (Array.isArray(parts)) {
+    for (const p of parts) {
+      if (p && typeof p === 'object' && typeof (p as { text?: unknown }).text === 'string') {
+        text += (p as { text: string }).text
+      }
+    }
+  }
+  if (!text.trim())
+    throw new AiError('emptyResponse', 'Gemini returned an empty response.', { where: 'Gemini' })
+  return text
+}
+
 /** Dispatch to the chosen provider. */
 export async function generate(
   provider: Provider,
   args: CallArgs & AuthOptions,
 ): Promise<string> {
-  return provider === 'openai' ? callOpenAI(args) : callAnthropic(args)
+  if (provider === 'openai') return callOpenAI(args)
+  if (provider === 'gemini') return callGemini(args)
+  return callAnthropic(args)
 }
 
 // --------------------------------------------------------------------------

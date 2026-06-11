@@ -38,6 +38,7 @@ const CHAT_MAX = 60
 export const DEFAULT_MODELS: Record<Provider, string> = {
   openai: 'gpt-4o-mini',
   anthropic: 'claude-3-5-sonnet-latest',
+  gemini: 'gemini-2.0-flash',
 }
 
 /** A few suggested models per provider for the dropdown (custom is also allowed). */
@@ -49,6 +50,7 @@ export const MODEL_OPTIONS: Record<Provider, string[]> = {
     'claude-3-7-sonnet-latest',
     'claude-sonnet-4-5',
   ],
+  gemini: ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
 }
 
 /** A recent prompt the user generated from, for quick re-use. */
@@ -65,15 +67,19 @@ interface AiGcodeState {
   provider: Provider
   /** Auth mode: 'key' (official API) or 'session' (pasted cookie via a relay). */
   authMode: AuthMode
-  /** Per-provider keys so a user can keep both without re-pasting. */
-  apiKeys: { openai: string; anthropic: string }
+  /** Per-provider keys so a user can keep all without re-pasting. */
+  apiKeys: Record<Provider, string>
   /** Per-provider chosen model (custom free-text allowed). */
-  models: { openai: string; anthropic: string }
+  models: Record<Provider, string>
   /** session mode: pasted logged-in cookie, per provider. */
-  sessionCookies: { openai: string; anthropic: string }
+  sessionCookies: Record<Provider, string>
   /** session mode: user-supplied relay/proxy base URL, per provider. */
-  proxyUrls: { openai: string; anthropic: string }
+  proxyUrls: Record<Provider, string>
   lastPrompt: string
+  /** Optional free-text tool description fed into the system prompt. */
+  tool: string
+  /** Optional free-text material description fed into the system prompt. */
+  material: string
   history: HistoryItem[]
   /** The persisted chat conversation (browser-cached), oldest→newest. */
   chat: ChatTurn[]
@@ -85,6 +91,8 @@ interface AiGcodeState {
   setSessionCookie: (p: Provider, cookie: string) => void
   setProxyUrl: (p: Provider, url: string) => void
   setLastPrompt: (prompt: string) => void
+  setTool: (tool: string) => void
+  setMaterial: (material: string) => void
   pushHistory: (item: HistoryItem) => void
   clearHistory: () => void
   /** Append a chat turn (capped at CHAT_MAX). */
@@ -104,14 +112,17 @@ export const useAiGcode = create<AiGcodeState>()(
     (set) => ({
       provider: 'openai',
       authMode: 'key',
-      apiKeys: { openai: '', anthropic: '' },
+      apiKeys: { openai: '', anthropic: '', gemini: '' },
       models: {
         openai: DEFAULT_MODELS.openai,
         anthropic: DEFAULT_MODELS.anthropic,
+        gemini: DEFAULT_MODELS.gemini,
       },
-      sessionCookies: { openai: '', anthropic: '' },
-      proxyUrls: { openai: '', anthropic: '' },
+      sessionCookies: { openai: '', anthropic: '', gemini: '' },
+      proxyUrls: { openai: '', anthropic: '', gemini: '' },
       lastPrompt: '',
+      tool: '',
+      material: '',
       history: [],
       chat: [],
 
@@ -126,6 +137,8 @@ export const useAiGcode = create<AiGcodeState>()(
       setProxyUrl: (p, url) =>
         set((s) => ({ proxyUrls: { ...s.proxyUrls, [p]: url } })),
       setLastPrompt: (lastPrompt) => set({ lastPrompt }),
+      setTool: (tool) => set({ tool }),
+      setMaterial: (material) => set({ material }),
       pushHistory: (item) =>
         set((s) => {
           // De-dupe an identical consecutive prompt; cap the list length.
@@ -142,9 +155,9 @@ export const useAiGcode = create<AiGcodeState>()(
         set((s) => {
           if (!p) {
             return {
-              apiKeys: { openai: '', anthropic: '' },
-              sessionCookies: { openai: '', anthropic: '' },
-              proxyUrls: { openai: '', anthropic: '' },
+              apiKeys: { openai: '', anthropic: '', gemini: '' },
+              sessionCookies: { openai: '', anthropic: '', gemini: '' },
+              proxyUrls: { openai: '', anthropic: '', gemini: '' },
             }
           }
           return {
@@ -156,6 +169,24 @@ export const useAiGcode = create<AiGcodeState>()(
     }),
     {
       name: 'karmyogi.aiGcode',
+      // Backfill any per-provider slot missing from an older persisted blob (e.g.
+      // a store saved before Gemini existed had no `gemini` key) so switching to
+      // a newly-added provider never reads `undefined`.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<AiGcodeState>
+        const fillRec = (
+          saved: Partial<Record<Provider, string>> | undefined,
+          base: Record<Provider, string>,
+        ): Record<Provider, string> => ({ ...base, ...(saved ?? {}) })
+        return {
+          ...current,
+          ...p,
+          apiKeys: fillRec(p.apiKeys, current.apiKeys),
+          models: fillRec(p.models, current.models),
+          sessionCookies: fillRec(p.sessionCookies, current.sessionCookies),
+          proxyUrls: fillRec(p.proxyUrls, current.proxyUrls),
+        }
+      },
       partialize: (s) => ({
         provider: s.provider,
         authMode: s.authMode,
@@ -164,6 +195,8 @@ export const useAiGcode = create<AiGcodeState>()(
         sessionCookies: s.sessionCookies,
         proxyUrls: s.proxyUrls,
         lastPrompt: s.lastPrompt,
+        tool: s.tool,
+        material: s.material,
         history: s.history,
         chat: s.chat,
       }),

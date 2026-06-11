@@ -19,8 +19,9 @@ import { PlacementGizmo } from './PlacementGizmo'
 import { CameraBedPlane } from './CameraBedPlane'
 import { JobBox } from './JobBox'
 import { ViewportShapes } from './ViewportShapes'
-import { Dimensions } from './Dimensions'
+import { Dimensions, type PerFileDimension } from './Dimensions'
 import { ToolpathStartMarker } from './ToolpathStartMarker'
+import { CameraQuatReporter, AxisOverlay } from './AxisOverlay'
 import { useViewportShapes } from '../store/viewportShapes'
 import { shapesToGcode } from '../core/viewportShapeGcode'
 import { useProgram } from '../store/program'
@@ -34,6 +35,28 @@ import {
 } from './viewControls'
 import { useSettings } from '../store'
 import { useBed } from '../store/bed'
+
+// --- Orientation CUBE (the clickable view gizmo) ---
+// drei renders only ONE GizmoHelper at a time, so this helper holds JUST the cube;
+// the colored XYZ axis triad is a SEPARATE independent overlay (see AxisOverlay).
+function OrientationGizmo({ theme }: { theme: string }) {
+  return (
+    <GizmoHelper alignment="top-right" margin={[72, 116]}>
+      {/* Cube — centred + enlarged so the face names are readable. */}
+      <group scale={0.78}>
+        <GizmoViewcube
+          // Relabel for our Z-up world (drei's cube assumes Y-up). Material order
+          // is [+X, -X, +Y, -Y, +Z, -Z]: +Z is Top, -Z Bottom, +Y Back, -Y Front.
+          faces={['Right', 'Left', 'Back', 'Front', 'Top', 'Bottom']}
+          color={theme === 'dark' ? '#2a2f37' : '#dfe6ee'}
+          textColor={theme === 'dark' ? '#cfd6dd' : '#1c2128'}
+          strokeColor={theme === 'dark' ? '#5eead4' : '#0e7c66'}
+          hoverColor={theme === 'dark' ? '#5eead4' : '#0e7c66'}
+        />
+      </group>
+    </GizmoHelper>
+  )
+}
 
 export interface ViewerHandle {
   /** Fit the toolpath to the viewport, keeping the current angle. */
@@ -252,6 +275,34 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     ? { min: parsed.bounds.min, max: parsed.bounds.max }
     : null
 
+  // ---- Dimension extents -----------------------------------------------------
+  // The dimension overlay measures the toolpath's ACTUAL size (Δx, Δy, Δz). We
+  // compute it from the segment endpoints (the real moves), NOT from
+  // `parsed.bounds` — that bound seeds the work origin (0,0,0) into the box, so a
+  // job sitting away from zero would otherwise read its distance-from-origin
+  // instead of its own width/depth/height.
+  const programSections = useProgram((s) => s.sections)
+  // Per-file extents: when multiple files/models are loaded, derive each one's
+  // own extent from its section's segments (preferring the per-section paths the
+  // panel already parses; falling back to the program-store section names).
+  const isRevealing = revealIndex !== undefined && revealIndex >= 0
+  const perFileDims = useMemo<PerFileDimension[] | undefined>(() => {
+    if (isRevealing || !sectionPaths || sectionPaths.length === 0) return undefined
+    const nameById = new Map(programSections.map((s) => [s.id, s.name]))
+    const out: PerFileDimension[] = []
+    for (const sp of sectionPaths) {
+      const b = boundsOf(sp.segments)
+      if (b) out.push({ id: sp.id, name: nameById.get(sp.id) ?? sp.id, bounds: b })
+    }
+    return out.length > 0 ? out : undefined
+  }, [sectionPaths, programSections, isRevealing])
+  // Combined extent for the 3D arrow annotation: the union of the per-file
+  // extents when available, else the extent of the single parsed program.
+  const dimExtent = useMemo<Bounds | null>(() => {
+    if (perFileDims && perFileDims.length > 0) return unionBounds(perFileDims.map((f) => f.bounds))
+    return boundsOf(parsed.segments)
+  }, [perFileDims, parsed.segments])
+
   const apiRef = useRef<ViewerHandle>({ fit: () => {}, setView: () => {} })
   useImperativeHandle(ref, () => ({
     fit: () => apiRef.current.fit(),
@@ -267,7 +318,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // Group wrapping the SELECTED section's toolpath — the placement gizmo drives
   // its matrix imperatively during a drag for a smooth, re-bake-free preview.
   const liveGroupRef = useRef<THREE.Group>(null)
-  const revealing = revealIndex !== undefined && revealIndex >= 0
+  const revealing = isRevealing
   // Only the selected section is "live" (gizmo-transformable) while the gizmo is on.
   const liveSectionId = gizmo ? selectedSectionId ?? null : null
 
@@ -516,9 +567,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         )}
       </group>
       {parsed.bounds && <BoundsBox bounds={parsed.bounds} dark={theme === 'dark'} />}
-      {/* Engineering-style 3D dimension annotations (toggleable from the toolbar). */}
-      {showDimensions && parsed.bounds && (
-        <Dimensions bounds={parsed.bounds} dark={theme === 'dark'} />
+      {/* Engineering-style 3D dimension annotations (toggleable from the toolbar).
+          Measures the toolpath's actual EXTENT (Δx, Δy, Δz from segment endpoints),
+          NOT the origin→extent distance: `gcodeToPolylines` seeds its bounds with
+          the work origin (0,0,0), which would otherwise inflate the size of any
+          job not starting at zero — so we recompute from the moves themselves. */}
+      {showDimensions && dimExtent && (
+        <Dimensions bounds={dimExtent} dark={theme === 'dark'} perFile={perFileDims} />
       )}
       {/* Red sphere marking the toolpath START (where work-zero / "Zero all" sits). */}
       {parsed.segments.length > 0 && (
@@ -599,27 +654,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       {/* Live camera → 3D overlay (self-gated on the camera-calib store's `enabled`). */}
       <CameraBedPlane />
       <JobBox />
+      <CameraQuatReporter />
       <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.1} />
       {/* SolidWorks/FreeCAD-style orientation cube (upper-right). Clicking a
           face/edge/corner tweens the camera to that view. It drives the default
           OrbitControls, so it stays in sync with manual orbiting. */}
-      {/* Pushed down (marginY) so the toolbar buttons don't overlap it, and
-          scaled to ~80% via an inner group (GizmoHelper has no size prop). */}
-      <GizmoHelper alignment="top-right" margin={[60, 108]}>
-        <group scale={0.8}>
-          <GizmoViewcube
-            // Relabel for our Z-up world (drei's cube assumes Y-up). Material order
-            // is [+X, -X, +Y, -Y, +Z, -Z]: +Z is Top, -Z Bottom, +Y Back, -Y Front.
-            faces={['Right', 'Left', 'Back', 'Front', 'Top', 'Bottom']}
-            color={theme === 'dark' ? '#2a2f37' : '#dfe6ee'}
-            textColor={theme === 'dark' ? '#cfd6dd' : '#1c2128'}
-            strokeColor={theme === 'dark' ? '#5eead4' : '#0e7c66'}
-            hoverColor={theme === 'dark' ? '#5eead4' : '#0e7c66'}
-          />
-        </group>
-      </GizmoHelper>
+      {/* Orientation CUBE (clickable faces), top-right. The colored XYZ axis triad
+          is a SEPARATE overlay (AxisOverlay, below) — drei renders only one gizmo
+          helper, so the axis can't share this one. */}
+      <OrientationGizmo theme={theme} />
       <ViewController bounds={controlBounds} bedSize={bedSize} apiRef={apiRef} />
       </Canvas>
+      {/* Independent axis-arrow indicator (mirrors the main camera), bottom-left. */}
+      <AxisOverlay theme={theme} />
       {/* Lasso DRAW surface (HTML, captures the freeform polygon in canvas px).
           Shown only while in lasso mode with no pending selection. */}
       {lasso && !lassoSel && (
@@ -1130,6 +1177,20 @@ function SelectedSegments({ segments, indices }: { segments: Segment[]; indices:
       <lineBasicMaterial color="#ef4444" depthTest={false} transparent opacity={0.95} />
     </lineSegments>
   )
+}
+
+/** Union of several axis-aligned bounds (skips nulls); null if none given. */
+function unionBounds(list: Bounds[]): Bounds | null {
+  if (list.length === 0) return null
+  const min: [number, number, number] = [Infinity, Infinity, Infinity]
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
+  for (const b of list) {
+    for (let i = 0; i < 3; i++) {
+      if (b.min[i] < min[i]) min[i] = b.min[i]
+      if (b.max[i] > max[i]) max[i] = b.max[i]
+    }
+  }
+  return { min, max }
 }
 
 /** Axis-aligned bounds of pre-parsed segments (when caller supplies segments). */

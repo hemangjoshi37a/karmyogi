@@ -272,7 +272,13 @@ export function ScrewFittingPanel() {
   )
 
   const gcode = useMemo(() => generateScrewDriving(points, safeParams), [points, safeParams])
-  const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
+  // With no screw points there is nothing to drive, so report ZERO lines (and
+  // never push a body-less program to the store) — the status strip must not
+  // claim a line count while the list is empty.
+  const lineCount = useMemo(
+    () => (points.length === 0 ? 0 : gcodeLines(gcode).length),
+    [gcode, points.length],
+  )
 
   // Warn when the pick Z is at or above safe-Z: the bit would never descend onto
   // the loader to grab a screw (a degenerate pick).
@@ -355,14 +361,6 @@ export function ScrewFittingPanel() {
     a.click()
     URL.revokeObjectURL(url)
     notify('success', t('screw.downloaded', 'Downloaded the screw-driving program.'))
-  }
-
-  // Push the current program to the shared store immediately (bypassing the
-  // live-sync debounce) so it appears in the Program tab / Visualizer right away.
-  function sendToProgram() {
-    if (points.length === 0) return
-    setProgram('screwfitting', gcode)
-    notify('success', t('screw.send.done', 'Sent {n} line(s) to the Program tab.', { n: lineCount }))
   }
 
   // Live generation: push the freshly-computed program to the store (debounced)
@@ -877,24 +875,6 @@ export function ScrewFittingPanel() {
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Send-to-Program action row. */}
-      <div className="swd-status">
-        <button
-          type="button"
-          className="swd-ico swd-ico-primary"
-          style={{ width: 'auto', padding: '0 12px', gap: 6 }}
-          onClick={sendToProgram}
-          disabled={points.length === 0}
-          title={t('screw.send.title', 'Send the generated program to the Program tab')}
-        >
-          <span aria-hidden="true"><Icon name="play" size={14} /></span>
-          {t('screw.send.btn', 'Send to Program')}
-        </button>
-        <span className="swd-status-sync" title={t('screw.live.title', 'Lines auto-synced to the Program tab')}>
-          {t('screw.status.autosync', 'auto-synced')}
-        </span>
       </div>
     </div>
       <PresetSaveBar

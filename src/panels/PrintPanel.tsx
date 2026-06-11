@@ -15,6 +15,10 @@ import { IconButton } from '../components/IconButton'
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
 import { grbl } from '../serial/controller'
+import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import {
   parseStl,
   STL_STRIDE,
@@ -67,6 +71,40 @@ const DEFAULTS: PrintSettings = {
   firstLayerTemp: 215,
   firstLayerSpeed: 900,
   skirt: true,
+}
+
+/** Coerce an (untrusted) value to a finite number, else the fallback. */
+const numOr = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback
+/** Coerce an (untrusted) value to a boolean, else the fallback. */
+const boolOr = (v: unknown, fallback: boolean): boolean =>
+  typeof v === 'boolean' ? v : fallback
+
+/**
+ * Restore a (possibly corrupt / partial) persisted settings snapshot into a
+ * fully-resolved {@link PrintSettings}, coercing every field so a bad preset
+ * slot can never feed a NaN to the slicer. Speeds/temps/counts are floored at
+ * sensible minimums, infill clamped to 0–100, perimeters to a whole number ≥ 1.
+ */
+function coercePrintSettings(v: unknown, base: PrintSettings): PrintSettings {
+  const o = (v ?? {}) as Record<string, unknown>
+  return {
+    layerHeight: Math.max(0.01, numOr(o.layerHeight, base.layerHeight)),
+    nozzleTemp: Math.max(0, numOr(o.nozzleTemp, base.nozzleTemp)),
+    bedTemp: Math.max(0, numOr(o.bedTemp, base.bedTemp)),
+    printSpeed: Math.max(1, numOr(o.printSpeed, base.printSpeed)),
+    infill: Math.max(0, Math.min(100, numOr(o.infill, base.infill))),
+    perimeters: Math.max(1, Math.round(numOr(o.perimeters, base.perimeters))),
+    fan: boolOr(o.fan, base.fan),
+    filamentDiameter: Math.max(0.1, numOr(o.filamentDiameter, base.filamentDiameter)),
+    lineWidth: Math.max(0.01, numOr(o.lineWidth, base.lineWidth)),
+    travelSpeed: Math.max(1, numOr(o.travelSpeed, base.travelSpeed)),
+    retractDistance: Math.max(0, numOr(o.retractDistance, base.retractDistance)),
+    retractSpeed: Math.max(1, numOr(o.retractSpeed, base.retractSpeed)),
+    firstLayerTemp: Math.max(0, numOr(o.firstLayerTemp, base.firstLayerTemp)),
+    firstLayerSpeed: Math.max(1, numOr(o.firstLayerSpeed, base.firstLayerSpeed)),
+    skirt: boolOr(o.skirt, base.skirt),
+  }
 }
 
 /** Object placement on the bed. */
@@ -155,6 +193,18 @@ export function PrintPanel() {
     DEFAULTS,
   )
   const [showAdvanced, setShowAdvanced] = useState(false)
+
+  // ---- colour-coded setting PRESETS (slicing/print params, NOT the model) ----
+  // Snapshot the current resolved print settings into a serializable preset, and
+  // restore one defensively so a corrupt slot can never feed a NaN to the slicer.
+  const captureSettings = (): PrintSettings => ({ ...settings })
+  const applySettings = (s: PrintSettings) =>
+    setSettings((prev) => coercePrintSettings(s, prev))
+  const presets = usePresets<PrintSettings>({
+    storageKey: 'karmyogi.print.presets',
+    capture: captureSettings,
+    onApply: applySettings,
+  })
 
   const [slicing, setSlicing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -551,6 +601,14 @@ export function PrintPanel() {
   }
 
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('print.presets.aria', '3D printing setting presets')}
+      />
     <div className="print-panel">
       <div className="print-scroll">
         <p className="print-intro">
@@ -864,6 +922,26 @@ export function PrintPanel() {
         </section>
         </div>
       </div>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={settings}
+            onLoad={(data) => applySettings(data as PrintSettings)}
+            fileBase="print-settings"
+            ext="kprintcfg"
+            saveTitle={`${t('print.settings.save', 'Save print settings')} — ${t('print.settings.save.body', 'slicing parameters only, no model')}`}
+            loadTitle={`${t('print.settings.load', 'Load print settings')} — ${t('print.settings.load.body', 'replaces the current parameters')}`}
+            onError={setLoadError}
+          />
+        }
+      />
     </div>
   )
 }

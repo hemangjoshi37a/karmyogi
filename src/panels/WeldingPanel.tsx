@@ -434,6 +434,10 @@ export function WeldingPanel() {
   )
   const gcode = useMemo(() => generateWelding(objects, safeParams), [objects, safeParams])
   const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
+  // With NO objects the emitter still produces a preamble/footer-only program,
+  // but the live-sync below DROPS the section (nothing reaches the Program tab) —
+  // so the status strip must report 0 lines until there is at least one object.
+  const effectiveLines = objects.length === 0 ? 0 : lineCount
   const weldLen = useMemo(() => totalWeldLength(objects), [objects])
   const nLines = useMemo(() => countLines(objects), [objects])
   const estSeconds = useMemo(
@@ -625,7 +629,7 @@ export function WeldingPanel() {
         </span>
         <span className="wp-status-sep" aria-hidden="true">·</span>
         <span className="wp-status-pill">
-          <b>{lineCount}</b> {t('weld.status.gcode', 'G-code lines')}
+          <b>{effectiveLines}</b> {t('weld.status.gcode', 'G-code lines')}
         </span>
         <span className="wp-status-sep" aria-hidden="true">·</span>
         <span

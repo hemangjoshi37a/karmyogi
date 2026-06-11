@@ -39,3 +39,8 @@ test_stl_files/
 
 # Stray editor/agent config (do not track)
 .antigravitycli/
+
+# Interrupted-upload temp leftovers in controllers_3d/ (often root-owned and
+# unreadable, which aborts `git add .`). The real models — controllers_3d/*.step
+# and public/controllers_3d/ — are tracked normally.
+controllers_3d/*.tmp-*

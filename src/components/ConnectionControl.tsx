@@ -160,14 +160,6 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
       {!connected ? (
         <>
           <ConnectMenu connecting={connecting} liveConnect={liveConnect} profileNotes={profile.notes} profileLabel={profile.label} />
-          <button
-            className="km-conn-btn"
-            disabled={connecting}
-            onClick={() => grbl.connect(new MockPort(), { meta: { kind: 'mock', label: 'Mock' } }).catch(() => {})}
-            title={t('conn.mock.title', 'Connect to an in-browser mock GRBL device (no hardware)')}
-          >
-            {t('conn.mock', 'Mock')}
-          </button>
           {!liveConnect && (
             <span
               className="km-conn-state"
@@ -561,7 +553,7 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
                 className="km-cx-input km-cx-port"
                 type="text"
                 inputMode="numeric"
-                placeholder={t('conn.wifi.port', 'Port 81')}
+                placeholder={t('conn.wifi.port', 'Port (auto)')}
                 value={port}
                 onChange={(e) => setPort(e.target.value)}
                 onKeyDown={(e) => {
@@ -589,7 +581,7 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
                     )
                   : t(
                       'conn.wifi.hint',
-                      'For ESP3D / FluidNC / MKS DLC32 (default WebSocket port 81). Bare host → ws://host:81/.',
+                      'For ESP3D / FluidNC / MKS DLC32. Leave the port blank to auto-detect (tries 81, 82, 8080, 80) — or type it if you know it.',
                     )}
               </div>
             )}
@@ -600,6 +592,43 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
               )}
             </div>
           </div>
+          <div className="km-cx-sep" aria-hidden="true" />
+          {/* Mock device — moved here from a standalone top-bar button so all
+              connection options live in one menu (USB · Bluetooth · Wi-Fi · Mock). */}
+          <button
+            className="km-cx-row"
+            role="menuitem"
+            disabled={connecting}
+            onClick={() => {
+              setOpen(false)
+              grbl.connect(new MockPort(), { meta: { kind: 'mock', label: 'Mock' } }).catch(() => {})
+            }}
+            title={t('conn.mock.title', 'Connect to an in-browser mock GRBL device — no hardware needed')}
+          >
+            <span className="km-cx-row-ico">
+              <svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 3h6" />
+                <path d="M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3" />
+                <path d="M7.5 14h9" />
+              </svg>
+            </span>
+            <span className="km-cx-row-txt">
+              <span className="km-cx-row-title">{t('conn.mock', 'Mock device')}</span>
+              <span className="km-cx-row-sub">
+                {t('conn.mock.sub', 'In-browser GRBL simulator — try the app with no hardware.')}
+              </span>
+            </span>
+          </button>
         </div>
       )}
     </span>

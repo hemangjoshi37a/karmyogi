@@ -30,6 +30,14 @@
   container-type: inline-size;
   container-name: ppscroll;
 }
+/* Pin every direct child to its natural height so the flex column never shrinks
+   the header below its content. Without this, when the panel is thin and the
+   toolbar wraps to multiple rows, the header would be squeezed and its wrapped
+   buttons would overflow DOWN onto the status strip (the classic flex-shrink
+   overlap bug). */
+.pp-scroll > * {
+  flex-shrink: 0;
+}
 
 /* When wrapped in the shared preset host (.cc-presets-host adds a floating left
    rail + footer save-bar), fill the band between the top and the save-bar, and
@@ -50,36 +58,24 @@
 }
 
 /* ───────────────────────── header ───────────────────────── */
+/* The panel title now lives on the dock tab tooltip, so the header is just the
+   icon toolbar. It is full-width and right-aligned, and wraps cleanly onto more
+   rows at narrow widths (the .pp-scroll > * pin keeps it from overlapping the
+   status strip below). */
 .pp-head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-1) var(--sp-3);
   min-height: var(--ctl-h-lg);
 }
-.pp-head-title {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  min-width: 0;
-}
-.pp-head-name {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
-/* icon toolbar pinned to the right of the header */
+/* icon toolbar — fills the header, buttons cluster to the right and wrap */
 .pp-tools {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: var(--sp-1);
-  margin-left: auto;
+  width: 100%;
 }
 .pp-tools-sep {
   width: 1px;
@@ -134,6 +130,18 @@
 .pp-ico-danger:hover:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);
+}
+/* Subtle color cues for the two capture actions so Set-pick vs Set-place read
+   as distinct at a glance (the glyphs differ too: crosshair vs map-pin). */
+.pp-ico-pick:not(:disabled) {
+  color: var(--accent);
+}
+.pp-ico-place:not(:disabled) {
+  color: var(--success, #3fb950);
+}
+.pp-ico-place:hover:not(:disabled) {
+  border-color: var(--success, #3fb950);
+  color: var(--success, #3fb950);
 }
 /* icon + short word buttons (Set pick / Set place) — same chrome, auto width */
 .pp-ico-text {
@@ -240,26 +248,20 @@
   min-width: 0;
 }
 
-/* Subtle accent edge marks the primary action card. */
-.pp-send-card {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-}
-
-/* --- generic inline rows --- */
-.pp-row {
+/* --- head-selector row ---
+   NOTE: renamed from the generic `.pp-row` to avoid a global class-name
+   collision with the Program panel (program.css `.pp-row { position:absolute }`
+   for its virtualized line list) — that absolute positioning made this row
+   "float" out of flow and not scroll with the panel. */
+.pp-headrow {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
 }
-.pp-row button {
+.pp-headrow button {
   min-height: var(--ctl-h);
-}
-.pp-meta {
-  color: var(--fg-muted);
-  font-size: var(--fs-body);
-  font-variant-numeric: tabular-nums;
 }
 
 /* --- head-type selector --- */
@@ -551,39 +553,27 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* --- advanced collapsible --- */
-.pp-collapsible > h3 {
-  padding: 0;
-  border-bottom: none;
-}
-.pp-collapsible.is-open > h3 {
-  border-bottom: 1px solid var(--border);
-}
-.pp-toggle {
-  width: 100%;
+/* --- settings modal: Motion + Advanced parameter groups --- */
+.pp-settings {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.pp-settings-group {
+  display: flex;
+  flex-direction: column;
   gap: var(--sp-2);
-  min-height: var(--ctl-h);
-  padding: var(--sp-1) var(--pad-card-x);
+  min-width: 0;
+}
+.pp-settings-group > h4 {
+  margin: 0;
+  padding-bottom: var(--sp-1);
   font-size: var(--fs-section);
   font-weight: 600;
+  color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--fg-muted);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-}
-.pp-toggle:hover {
-  color: var(--fg);
-}
-.pp-toggle .pp-toggle-note {
-  margin-left: auto;
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
+  border-bottom: 1px solid var(--border);
 }
 
 /* --- hint --- */
@@ -592,64 +582,6 @@
   font-size: var(--fs-label);
   line-height: 1.45;
   color: var(--fg-muted);
-}
-
-/* --- generate / send --- */
-.pp-generate {
-  gap: var(--sp-3);
-}
-.pp-play {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-1);
-  flex: 1 1 auto;
-  min-height: var(--ctl-h-lg);
-  font-weight: 600;
-}
-/* Stop swaps in while a program is streaming — danger-colored. */
-.pp-stop {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: var(--bg);
-}
-.pp-stop:hover {
-  filter: brightness(1.08);
-}
-
-/* --- raw G-code (collapsible) --- */
-.pp-raw-toggle {
-  align-self: flex-start;
-  min-height: var(--ctl-h);
-  padding: 0 var(--sp-3);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.pp-raw-toggle:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--fg);
-}
-.pp-raw-toggle:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.pp-preview {
-  margin: 0;
-  padding: var(--sp-2) var(--sp-3);
-  max-height: 220px;
-  overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: var(--fs-mono);
-  line-height: 1.45;
-  color: var(--fg);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  white-space: pre;
 }
 
 /* --- narrow panel (≤560px): collapse the card grid to a single column ---
@@ -734,9 +666,7 @@
   .pp-headsel select,
   .pp-input input,
   .pp-table input,
-  .pp-empty-add,
-  .pp-raw-toggle,
-  .pp-toggle {
+  .pp-empty-add {
     min-height: var(--ctl-h-touch);
     height: auto;
   }
@@ -759,9 +689,6 @@
   .pp-row-btn {
     flex: 1 1 auto;
   }
-  .pp-play {
-    min-height: 44px;
-  }
 }
 
 /* Fallback for browsers without container-query support: key off the window so
@@ -777,9 +704,7 @@
     .pp-headsel select,
     .pp-input input,
     .pp-table input,
-    .pp-empty-add,
-    .pp-raw-toggle,
-    .pp-toggle {
+    .pp-empty-add {
       min-height: var(--ctl-h-touch);
       height: auto;
     }
@@ -794,9 +719,6 @@
     .pp-row-btn.icon-btn {
       min-width: var(--ctl-h-touch);
       min-height: var(--ctl-h-touch);
-    }
-    .pp-play {
-      min-height: 44px;
     }
   }
 }

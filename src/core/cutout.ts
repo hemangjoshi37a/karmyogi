@@ -216,6 +216,41 @@ export function traceCoveredOutline(hm: Heightmap): Polyline[] {
   }
   const used = new Uint8Array(segs.length);
 
+  // PINCH-POINT DISAMBIGUATION: at a lattice node where several boundary segments
+  // meet (a diagonal/4-way touch between islands), more than one unused segment
+  // can start at the corner where the current one ends. Picking "any" unused
+  // segment can connect the WRONG pair, merging two islands into a single
+  // self-crossing loop and producing an erratic path. Because every segment is
+  // oriented material-on-LEFT (CCW), the correct continuation is the one that
+  // turns the SHARPEST to the RIGHT (most clockwise) relative to the incoming
+  // direction — that hugs the same material region and keeps the loops separate.
+  const pickNext = (s: Seg): number => {
+    const cand = startMap.get(cornerKey(s.bx, s.by));
+    if (!cand) return -1;
+    // Incoming direction (into the shared corner).
+    const idx = s.bx - s.ax;
+    const idy = s.by - s.ay;
+    let best = -1;
+    let bestKey = Infinity; // smaller = sharper clockwise turn
+    for (const c of cand) {
+      if (used[c]) continue;
+      const o = segs[c];
+      const odx = o.bx - o.ax;
+      const ody = o.by - o.ay;
+      // Signed turn angle from incoming to outgoing direction. cross>0 = left
+      // turn, cross<0 = right turn; dot disambiguates the half. We want the most
+      // CLOCKWISE (rightmost) turn, i.e. the smallest signed angle.
+      const cross = idx * ody - idy * odx;
+      const dot = idx * odx + idy * ody;
+      const ang = Math.atan2(cross, dot); // (-π, π]; -π/2 = hard right
+      if (ang < bestKey) {
+        bestKey = ang;
+        best = c;
+      }
+    }
+    return best;
+  };
+
   const loops: { x: number; y: number }[][] = [];
   for (let i = 0; i < segs.length; i++) {
     if (used[i]) continue;
@@ -227,19 +262,7 @@ export function traceCoveredOutline(hm: Heightmap): Polyline[] {
       used[cur] = 1;
       const s = segs[cur];
       loop.push({ x: s.ax, y: s.ay });
-      // Find a segment starting where this one ends. Prefer an UNUSED one; if
-      // several share the corner (a pinch point), take any unused.
-      const cand = startMap.get(cornerKey(s.bx, s.by));
-      let next = -1;
-      if (cand) {
-        for (const c of cand) {
-          if (!used[c]) {
-            next = c;
-            break;
-          }
-        }
-      }
-      cur = next;
+      cur = pickNext(s);
     }
     if (loop.length >= 3) loops.push(loop);
   }
@@ -539,6 +562,11 @@ function emitProfileRing(ring: Polyline, ctx: ProfileCtx): boolean {
     // the first level from safe-Z; otherwise we're already on the contour).
     if (prevZ < safeZ - 1e-6) tp.rapid({ x: start.x, y: start.y, z: prevZ });
 
+    // `rampEndS` is the arc-length at which the helical ramp finished (0 when a
+    // straight plunge was used). The full pass MUST continue from there rather
+    // than restarting at arc-length 0 — restarting cut a straight chord from the
+    // ramp end back across the part to `start` once per level (the erratic path).
+    let rampEndS = 0;
     if (drop <= maxStraight + 1e-6 || tanRamp <= 1e-6) {
       // Tiny descent — a short capped plunge is fine.
       tp.plunge({ x: start.x, y: start.y, z: tabbedZ(0, level, levelBelowTabTop) });
@@ -560,16 +588,24 @@ function emitProfileRing(ring: Polyline, ctx: ProfileCtx): boolean {
         const z = levelBelowTabTop ? Math.max(zNow, tabbedZ(sWrap, level, true)) : zNow;
         tp.feed({ x: p.x, y: p.y, z });
       }
+      rampEndS = sDone;
     }
 
-    // Full pass around the ring at the level (honouring tabs).
-    let s = sampleStep;
+    // Full pass CONTINUING from the ramp end: the ramp already cut the contour
+    // over arc-lengths [0 .. rampEndS] (mod total), so we now walk from rampEndS
+    // forward through the remaining perimeter and CLOSE back at `start`
+    // (arc-length total). Ramp + pass together cover the whole ring once with no
+    // straight cross-ring chord, and the level still ENDS at `start` so the next
+    // level's reposition/ramp begins from the same point (no rapid through stock).
     const end = rp.total;
-    while (s < end - 1e-6) {
+    let s = rampEndS + sampleStep;
+    const closeAt = Math.ceil(rampEndS / end) * end || end; // first multiple of total past rampEndS
+    while (s < closeAt - 1e-6) {
       const p = pointAt(rp, s);
-      tp.feed({ x: p.x, y: p.y, z: tabbedZ(s, level, levelBelowTabTop) });
+      tp.feed({ x: p.x, y: p.y, z: tabbedZ(s % end, level, levelBelowTabTop) });
       s += sampleStep;
     }
+    // Close at `start` (arc-length ≡ 0).
     tp.feed({ x: start.x, y: start.y, z: tabbedZ(0, level, levelBelowTabTop) });
     prevZ = level;
   }

@@ -684,15 +684,6 @@ export function GluePanel() {
     notify('success', t('glue.undone', 'Restored {n} shape(s).', { n: undoShapes.length }))
   }
 
-  // Push the current program to the shared store immediately (bypassing the
-  // debounce) and confirm — the program then appears in the Program tab /
-  // Visualizer, ready to stream. Un-dismisses the section if it was deleted there.
-  function sendToProgram() {
-    if (shapes.length === 0) return
-    setProgram('glue', gcode)
-    notify('success', t('glue.send.done', 'Sent {n} line(s) to the Program tab.', { n: lineCount }))
-  }
-
   const hint =
     tool === 'select'
       ? t('glue.hint.select', 'Drag a shape to move it · Delete removes the selected one')
@@ -1123,29 +1114,13 @@ export function GluePanel() {
           </section>
 
           {/* Generated program — auto-synced live to the Program tab / Visualizer.
-              The button forces an immediate push (and re-adds a section that was
-              deleted in the Program tab); streaming itself happens there. */}
+              Streaming itself happens from the Program tab. */}
           <section className="gp-card gp-card-wide gp-send">
             <p className="gp-meta gp-send-note">
               {shapes.length === 0
                 ? t('glue.send.empty', 'No program yet — draw a shape on the bed.')
                 : t('glue.send.live', 'Live · {n} lines → Program', { n: lineCount })}
             </p>
-
-            <button
-              type="button"
-              className="gp-send-btn"
-              onClick={sendToProgram}
-              disabled={shapes.length === 0 || streaming}
-              title={
-                streaming
-                  ? t('glue.send.streamingTitle', 'A job is streaming — sync is paused so it is not reset.')
-                  : t('glue.send.btn.title', 'Push this program to the Program tab, ready to stream')
-              }
-            >
-              <Icon name="play" size={14} />
-              {t('glue.send.btn', 'Send to Program tab')}
-            </button>
 
             {/* Raw G-code (collapsed by default; disabled until a shape exists,
                 matching the empty program the store actually receives) */}

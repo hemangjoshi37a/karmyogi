@@ -9,6 +9,16 @@
    container widths bump controls back to ≥36px touch targets.
    The whole panel is the only scroll container — vertical only, never sideways. */
 
+/* Left gutter so the floating preset rail never overlaps the panel content
+   (mirrors presets.css for the sp/wr panels). */
+.cc-presets-host > .wp-panel {
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .wp-panel {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
 .wp-panel {
   height: 100%;
   min-height: 0;
@@ -28,7 +38,10 @@
 .wp-head {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2) var(--sp-3);
+  /* The icon toolbar has many buttons; let the header wrap so the tools never
+     spill past the panel's right edge at a narrow docked width. */
+  flex-wrap: wrap;
   min-height: var(--ctl-h-lg);
 }
 .wp-head-title {
@@ -48,8 +61,13 @@
 .wp-tools {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-1);
   margin-left: auto;
+  /* Never push past the panel edge: allow the toolbar to shrink/wrap its
+     buttons instead of overflowing the header. */
+  min-width: 0;
+  justify-content: flex-end;
 }
 .wp-tools-sep {
   width: 1px;

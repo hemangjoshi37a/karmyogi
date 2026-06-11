@@ -342,45 +342,120 @@
   border-color: var(--ok);
 }
 .cc-use-rec:hover { filter: brightness(1.08); }
-/* subtle per-input recommendation hint next to a manual field */
+/* subtle per-input recommendation hint next to a manual field.
+   Inside an .cc-ifield row it is forced onto its OWN full-width line BELOW the
+   field (flex-basis:100% in the wrapping row) so it can never overlap the label
+   or the input box; it stays left-aligned and truncates if absurdly long. */
 .cc-rechint {
   font-size: 10px;
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
 }
+.cc-ifield .cc-rechint {
+  flex: 0 0 100%;
+  min-width: 0;
+  margin-top: 0;
+  /* quiet helper text, right-aligned to sit under the value column it annotates */
+  text-align: right;
+  line-height: 1.25;
+  opacity: 0.9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-/* --- operation selector (segmented) --- */
-.cc-ops {
-  display: flex;
-  flex-wrap: wrap;
+/* --- operation selector (graphical segmented) ---
+   Thin, icon-led row buttons: glyph + label sit INLINE so Engrave / Profile /
+   Pocket pack into one tidy row at the docked width (no lone wrap). */
+.cc-opseg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--sp-1);
 }
-.cc-op-btn {
-  flex: 1 1 auto;
-  min-height: var(--ctl-h-lg);
-  min-width: 64px;
+.cc-opseg-btn {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 3px;
+  min-height: var(--ctl-h);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  line-height: 1.1;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.cc-op-btn.active {
+.cc-opseg-btn:hover { border-color: var(--accent); color: var(--fg); }
+.cc-opseg-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.cc-opseg-ico svg { width: 15px; height: 15px; }
+.cc-opseg-lbl {
+  font-size: var(--fs-ctl);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-opseg-btn.active {
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
 }
-.cc-subops {
-  display: flex;
-  flex-wrap: wrap;
+.cc-opseg-btn.active .cc-opseg-ico { color: var(--accent-fg); }
+
+/* --- profile-side selector (custom spatial SVGs) ---
+   Tight row buttons: the small spatial glyph sits beside its label. */
+.cc-sideseg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--sp-1);
+  margin-top: var(--sp-1);
 }
-.cc-subop-btn {
-  flex: 1 1 auto;
+.cc-sideseg-btn {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 3px;
   min-height: var(--ctl-h);
-  min-width: 56px;
-  font-size: var(--fs-ctl);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  line-height: 1.1;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.cc-subop-btn.active {
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
+.cc-sideseg-btn:hover { border-color: var(--accent); color: var(--fg); }
+.cc-sideseg-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.cc-sideseg-ico svg { width: 26px; height: 20px; }
+.cc-sideseg-lbl {
+  font-size: var(--fs-ctl);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-sideseg-btn.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   border-color: var(--accent);
   color: var(--fg);
 }
+.cc-sideseg-btn.active .cc-sideseg-ico { color: var(--fg); }
 .cc-warn-line {
   display: flex;
   align-items: flex-start;
@@ -418,6 +493,381 @@
 }
 .cc-field input:invalid { border-color: var(--danger); }
 
+/* --- icon-led form rows (shared "icon + label + field + unit" pattern) ---
+   Used by Position & size / Tool & cut / Z-mode / Advanced. A leading glyph
+   signals each field's meaning; the unit sits INLINE inside the input frame so
+   values + units align down the column. Denser than .cc-grid: a wider field min
+   keeps icon + label + value on one line and wraps cleanly at narrow widths. */
+.cc-igrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: start;
+}
+.cc-ifield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  /* Column gap separates label↔input; the small row gap is the breathing room
+     between the field row and a wrapped `.cc-rechint` on its own line below. */
+  gap: 3px 8px;
+  min-width: 0;
+  /* Even vertical rhythm + a quiet hover lift so the row reads as an interactive
+     control without boxing every field. Padding keeps a consistent touch zone. */
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.cc-ifield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.cc-ifield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Flex AND shrink, but allow shrinking below content so the label never pushes
+     the fixed-width input out of the cell — the text truncates with ellipsis
+     instead (see .cc-ifield-txt). The basis keeps the label-beside-input default
+     while leaving room for the 88px input + gap. */
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+/* When the operator is editing a field, brighten its label so the active row
+   stands out from its quiet neighbours. */
+.cc-ifield:focus-within .cc-ifield-lbl { color: var(--fg); }
+.cc-ifield-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
+}
+/* icon picks up the accent + full opacity while its field is focused */
+.cc-ifield:focus-within .cc-ifield-ico { color: var(--accent); opacity: 1; }
+.cc-ifield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Give the label a sensible floor so it isn't crushed to a sliver of ellipsis
+     beside the 88px input. If even this floor + the input can't share a line at
+     the narrowest cell, the wrapping row drops the input onto its own line below
+     the label (graceful stack) — only when truly too narrow; the normal width
+     keeps label-beside-input. */
+  flex: 1 1 auto;
+  min-width: 4ch;
+}
+/* The input + inline unit share one bordered frame so the unit reads as a
+   suffix; the real <input> is borderless inside it and keeps all its wiring. */
+.cc-ifield-input {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 88px;
+  height: var(--ctl-h);
+  padding: 0 7px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.cc-ifield-input:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cc-ifield-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cc-ifield-input input,
+.cc-ifield-input select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  /* RIGHT-aligned numeric values with tabular figures so digits + the trailing
+     unit line up cleanly down the column (the enterprise-CAM convention). */
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+}
+.cc-ifield-input select { text-align: left; font-weight: 400; }
+.cc-ifield-input input:focus,
+.cc-ifield-input select:focus { outline: none; box-shadow: none; }
+.cc-ifield-input input:disabled { opacity: 0.5; }
+.cc-ifield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* --- slider parameter rows (icon + label + themed slider + number + unit) ---
+   Used by Position & size / Tool & cut / Z-mode / Advanced. Each is a FULL-WIDTH
+   row (one per line, like the Controller jog "Feed") so the slider has room to
+   drag, so the grid is a SINGLE column. The slider styling mirrors the Controller
+   tab's `.mc-slider` (themed track + thumb via vars, accent fill to the thumb).
+   Replicated LOCALLY here as `.cc-slider` so cadcam.css doesn't import
+   controller.css. */
+.cc-sgrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: center;
+}
+.cc-sfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.cc-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.cc-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Fixed-ish label column so the sliders all start at the same x. Shrinkable so
+     it never pushes the slider/number off the row; truncates with ellipsis. */
+  flex: 0 1 auto;
+  width: 86px;
+  min-width: 38px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.cc-sfield:focus-within .cc-sfield-lbl { color: var(--fg); }
+.cc-sfield-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
+}
+.cc-sfield:focus-within .cc-sfield-ico { color: var(--accent); opacity: 1; }
+.cc-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Optional trailing control (e.g. the "apply to all jobs" ⇄ button) tucked at the
+   end of a slider row. Never shrinks; sits after the number frame. */
+.cc-sfield-action {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+/* The number-input + unit share one bordered frame (matches .cc-ifield-input) so
+   the unit reads as a suffix; the real <input> is borderless inside it. */
+.cc-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 76px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.cc-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cc-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cc-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Aspect-link PAIR: two SliderFields bracketing a compact chain-link toggle
+   (Adobe-style). The link sits as a slim column between the stacked fields and
+   draws a faint bracket connecting them, so the lock visually binds the pair. */
+.cc-linkpair {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'top  link'
+    'bot  link';
+  align-items: center;
+  column-gap: 6px;
+}
+.cc-linkpair > .cc-sfield:first-of-type { grid-area: top; }
+.cc-linkpair > .cc-sfield:last-of-type { grid-area: bot; }
+.cc-aspectlink {
+  grid-area: link;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 22px;
+  margin: 2px 0;
+  padding: 0;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.cc-aspectlink:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.cc-aspectlink.is-locked {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent) inset;
+}
+.cc-aspectlink:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Themed draggable slider — mirrors .mc-slider from controller.css. Track + thumb
+   use theme vars (follows light/dark); the accent fill to the LEFT of the thumb
+   comes from the inline `--mc-pct` (WebKit/Blink gradient) and from
+   ::-moz-range-progress (Firefox). */
+.cc-slider {
+  /* basis 0 (not auto) so the range input doesn't claim its ~129px default width
+     and push the number box onto a 2nd line; it grows to fill instead, keeping
+     label + slider + number on ONE row even in a slim docked column. */
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.cc-slider:disabled { opacity: 0.5; cursor: not-allowed; }
+/* track */
+.cc-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--mc-pct, 0%),
+    var(--bg-elev) var(--mc-pct, 0%) 100%
+  );
+}
+.cc-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.cc-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+/* thumb */
+.cc-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.cc-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.cc-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.cc-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.cc-slider:focus-visible { outline: none; }
+.cc-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.cc-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* the small typable number input inside the bordered .cc-sfield-num frame */
+.cc-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.cc-slider-num:focus { outline: none; box-shadow: none; }
+.cc-slider-num:disabled { opacity: 0.5; }
+.cc-slider-num::-webkit-outer-spin-button,
+.cc-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so the slider is grabbable
+   on a phone (matches the jog slider's coarse sizing). */
+@media (pointer: coarse) {
+  .cc-slider { height: 24px; }
+  .cc-slider::-webkit-slider-runnable-track,
+  .cc-slider::-moz-range-track,
+  .cc-slider::-moz-range-progress { height: 6px; }
+  .cc-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .cc-slider::-moz-range-thumb { width: 17px; height: 17px; }
+}
+/* The recommendation hint flows onto its own full-width line below the row. */
+.cc-sfield .cc-rechint {
+  flex: 0 0 100%;
+  min-width: 0;
+  text-align: right;
+  line-height: 1.25;
+  opacity: 0.9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --- nudge row (numeric input flanked by +/- buttons) --- */
 .cc-nudge {
   display: flex;
@@ -441,15 +891,36 @@
   line-height: 1;
 }
 
-/* --- z-mode toggle --- */
+/* --- z-mode toggle — compact segmented control ---
+   Sleek content-width pills in a tight row (like .cc-opseg), NOT stretched
+   full-width buttons. Icon + short label sit inline; the row wraps if it must.
+   The selected pill gets the accent fill. */
 .cc-zmode {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-1);
+  align-items: center;
 }
 .cc-zmode button {
-  flex: 1 1 auto;
-  min-height: var(--ctl-h-lg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: var(--ctl-h);
+  padding: 3px 12px;
+  font-size: var(--fs-ctl);
+  line-height: 1.1;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
+.cc-zmode button:hover { border-color: var(--accent); color: var(--fg); }
 .cc-zmode button.active {
   background: var(--accent);
   color: var(--accent-fg);
@@ -753,72 +1224,6 @@
 .cc-matselect { flex: 1 1 auto; min-width: 0; }
 .cc-matinfo-btn { flex: 0 0 auto; font-size: 13px; }
 
-/* --- Advanced (auto) read-only rows --- */
-.cc-autoadv { border-color: color-mix(in srgb, var(--ok) 30%, var(--border)); }
-.cc-autogrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: var(--sp-1) var(--sp-4);
-}
-.cc-autorow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  padding: 3px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
-  min-height: var(--ctl-h);
-}
-.cc-autorow-lbl {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  min-width: 0;
-}
-.cc-autorow-val {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-.cc-autorow-val b { color: var(--fg); font-variant-numeric: tabular-nums; font-size: 12px; }
-.cc-autorow-unit { font-size: var(--fs-label); color: var(--fg-muted); }
-/* compact editable number on the auto rows — never stretches the row */
-.cc-auto-input {
-  width: 64px;
-  min-height: 0;
-  height: var(--ctl-h);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* small "auto" pill on each computed value */
-.cc-auto-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  border-radius: 9px;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
-}
-
-/* the two editable fields (Plunge-Z, Safe-Z) span the auto grid full width and
-   sit slightly apart from the read-only rows */
-/* the two editable fields (Plunge-Z, Safe-Z) sit half-width side-by-side and
-   slightly apart from the read-only rows */
-.cc-autofield {
-  grid-column: auto;
-  margin-top: 2px;
-}
-.cc-autofield input { min-height: 0; height: var(--ctl-h); }
 .cc-strip-row {
   display: flex;
   flex-wrap: wrap;
@@ -959,17 +1364,18 @@
   .cc-strip-field input { min-height: var(--ctl-h-touch); }
   .cc-field input,
   .cc-field select,
+  .cc-ifield-input,
+  .cc-sfield-num,
   .cc-prim-select,
   .cc-prim-input,
-  .cc-auto-input,
-  .cc-autofield input,
   .cc-nudge input,
   .cc-nudge button { height: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
   .cc-nudge button { min-width: var(--ctl-h-touch); }
   .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
+  .cc-igrid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
   .cc-prim-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
-  .cc-autogrid { grid-template-columns: 1fr; }
-  .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
+  .cc-op-btn, .cc-subop-btn,
+  .cc-opseg-btn, .cc-sideseg-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
   .cc-zmode button { min-height: var(--ctl-h-touch); }
   .cc-raw-toggle { min-width: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
   .cc-load-btn,
@@ -985,8 +1391,10 @@
    the 480px block so it wins the cascade at the narrowest widths. */
 @container cadcampanel (max-width: 300px) {
   .cc-grid,
+  .cc-igrid,
   .cc-prim-grid { grid-template-columns: 1fr; }
-  .cc-op-btn, .cc-subop-btn { flex: 1 1 100%; min-width: 0; }
+  .cc-op-btn, .cc-subop-btn,
+  .cc-opseg-btn, .cc-sideseg-btn { flex: 1 1 100%; min-width: 0; }
   .cc-pickgrid { grid-template-columns: 1fr; }
   .cc-chip { flex: 1 1 100%; justify-content: center; }
 }
@@ -998,14 +1406,15 @@
   .cc-cards { grid-template-columns: 1fr; }
   .cc-field input,
   .cc-field select,
+  .cc-ifield-input,
+  .cc-sfield-num,
   .cc-prim-select,
   .cc-prim-input,
-  .cc-auto-input,
-  .cc-autofield input,
   .cc-nudge input,
   .cc-nudge button { height: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
   .cc-nudge button { min-width: var(--ctl-h-touch); }
-  .cc-op-btn, .cc-subop-btn, .cc-zmode button { min-height: var(--ctl-h-touch); }
+  .cc-op-btn, .cc-subop-btn,
+  .cc-opseg-btn, .cc-sideseg-btn, .cc-zmode button { min-height: var(--ctl-h-touch); }
 }
 
 /* --- Cutout (cut part free from stock) card --- */
@@ -1068,6 +1477,23 @@
 /* The flip / re-zero corner selector wraps to two-up on narrow panels. */
 .cc-ts-corners { flex-wrap: wrap; }
 .cc-ts-corners .cc-subop-btn { flex: 1 1 40%; min-width: 0; }
+/* Flip-axis segmented control: two equal pills, each with a leading flip icon over
+   its label so the gesture (turn-over direction) reads at a glance. */
+.cc-ts-axis .cc-ts-axis-btn { flex: 1 1 0; }
+.cc-ts-axis-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.cc-ts-axis-ico {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-muted);
+  opacity: 0.9;
+}
+.cc-ts-axis-btn:hover .cc-ts-axis-ico { color: var(--fg); }
+.cc-ts-axis-btn.active .cc-ts-axis-ico { color: var(--accent); opacity: 1; }
 
 /* The up-front SHAPE choice: two large, clearly-readable segmented buttons with
    an icon over a label — "Part outline" vs "Rectangle". */
@@ -1125,7 +1551,8 @@
   }
   @media (max-width: 480px) {
     .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
-    .cc-op-btn, .cc-subop-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
+    .cc-op-btn, .cc-subop-btn,
+    .cc-opseg-btn, .cc-sideseg-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
     .cc-regen, .cc-raw-toggle { min-height: var(--ctl-h-touch); }
     .cc-raw-toggle { min-width: var(--ctl-h-touch); }
     .cc-adv-toggle, .cc-check { min-height: var(--ctl-h-touch); }

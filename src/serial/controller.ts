@@ -370,7 +370,60 @@ class GrblController {
     endpoint: string,
     opts?: { defaultPort?: number; label?: string; machineId?: string; streamMode?: StreamMode },
   ): Promise<void> {
-    const url = normalizeWsUrl(endpoint, opts?.defaultPort ?? 81)
+    const raw = endpoint.trim()
+    if (!raw) {
+      const msg = 'Enter a host or IP address.'
+      useMachine.getState().setError(msg)
+      throw new Error(msg)
+    }
+    // If the input already pins a port — a full ws(s):// URL, a host:port, or a
+    // user-typed port (opts.defaultPort) — connect to exactly that. Otherwise
+    // AUTO-DETECT: FluidNC/ESP3D users usually know the IP but not the WebSocket
+    // port, so probe the common ones and use the first that answers.
+    const authority = raw.replace(/^wss?:\/\//i, '').split('/')[0]
+    const inputHasPort =
+      /]:\d+$/.test(authority) || (!authority.includes(']') && /:\d+$/.test(authority))
+    if (/^wss?:\/\//i.test(raw) || inputHasPort || opts?.defaultPort != null) {
+      await this.connectWsUrl(normalizeWsUrl(raw, opts?.defaultPort ?? 81), opts)
+      return
+    }
+    const CANDIDATE_PORTS = [81, 82, 8080, 80]
+    // Mixed-content blocking is identical for every candidate (same scheme + host),
+    // so fail once up front rather than probing ports that can never connect.
+    const blocked = mixedContentReason(normalizeWsUrl(raw, CANDIDATE_PORTS[0]))
+    if (blocked) {
+      useConsole.getState().push('error', blocked)
+      useMachine.getState().setError(blocked)
+      throw new Error(blocked)
+    }
+    useMachine.getState().setError(null)
+    useMachine.getState().setConnection('connecting')
+    useConsole
+      .getState()
+      .push('info', `Auto-detecting WebSocket port — trying ${CANDIDATE_PORTS.join(', ')}…`)
+    for (const cp of CANDIDATE_PORTS) {
+      const url = normalizeWsUrl(raw, cp)
+      if (await this.probeWs(url, 2500)) {
+        useConsole.getState().push('info', `Port ${cp} answered — connecting.`)
+        // Let the probe socket fully close before the real connection (some
+        // controllers accept only one WebSocket client at a time).
+        await new Promise((r) => setTimeout(r, 200))
+        await this.connectWsUrl(url, opts)
+        return
+      }
+    }
+    useMachine.getState().setConnection('disconnected')
+    const fail = `Couldn't reach ${authority} on any common WebSocket port (${CANDIDATE_PORTS.join(', ')}). Check the IP, make sure the controller's Wi-Fi/WebSocket is on, or enter the port manually if you know it.`
+    useConsole.getState().push('error', fail)
+    useMachine.getState().setError(fail)
+    throw new Error(fail)
+  }
+
+  /** Connect to one fully-resolved ws(s):// URL — the single, explicit-port path. */
+  private async connectWsUrl(
+    url: string,
+    opts?: { label?: string; machineId?: string; streamMode?: StreamMode },
+  ): Promise<void> {
     // Pre-flight the mixed-content rule so the UI gets a clean message instead of
     // an opaque socket failure (the WsPort ctor also enforces this).
     const blocked = mixedContentReason(url)
@@ -382,11 +435,40 @@ class GrblController {
     const port = new WsPort(url)
     await this.connect(port, {
       streamMode: opts?.streamMode,
-      meta: {
-        kind: 'websocket',
-        label: opts?.label ?? url,
-        machineId: opts?.machineId,
-      },
+      meta: { kind: 'websocket', label: opts?.label ?? url, machineId: opts?.machineId },
+    })
+  }
+
+  /**
+   * Quickly test whether a WebSocket OPENS at `url` within `timeoutMs`, then close
+   * the probe. Used to auto-detect a controller's port without running the full
+   * GRBL handshake against every candidate.
+   */
+  private probeWs(url: string, timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (typeof WebSocket === 'undefined') return resolve(false)
+      let settled = false
+      let ws: WebSocket | null = null
+      const finish = (ok: boolean) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        try {
+          ws?.close()
+        } catch {
+          /* ignore */
+        }
+        resolve(ok)
+      }
+      const timer = setTimeout(() => finish(false), timeoutMs)
+      try {
+        ws = new WebSocket(url)
+        ws.onopen = () => finish(true)
+        ws.onerror = () => finish(false)
+        ws.onclose = () => finish(false)
+      } catch {
+        finish(false)
+      }
     })
   }
 

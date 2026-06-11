@@ -21,11 +21,36 @@
   container-name: screwdrivepanel;
 }
 
+/* Panel children must NOT flex-shrink: in this scrolling flex column a shrinkable
+   child (esp. the header) collapses below its content height, so the wrapped
+   toolbar overflowed downward and overlapped the status strip. Pinning
+   flex-shrink:0 keeps natural heights so the PANEL scrolls instead. */
+.swd-panel > * {
+  flex-shrink: 0;
+}
+
+/* Left gutter so the floating preset rail never overlaps the panel content
+   (mirrors presets.css for the .sp-panel / .wr-panel hosts). */
+.cc-presets-host > .swd-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .swd-panel {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
+
 /* ───────────────────────── header ───────────────────────── */
 .swd-head {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2) var(--sp-3);
+  /* Let the title + toolbar share one row when there's room, and drop the
+     toolbar cleanly to its OWN line (never overlapping the title) when narrow. */
+  flex-wrap: wrap;
   min-height: var(--ctl-h-lg);
 }
 .swd-head-title {
@@ -33,6 +58,8 @@
   align-items: center;
   gap: var(--sp-1);
   min-width: 0;
+  flex: 1 1 auto;
+  min-height: var(--ctl-h);
 }
 .swd-head-name {
   font-size: 13px;
@@ -49,6 +76,7 @@
   margin-left: auto;
   flex-wrap: wrap;
   justify-content: flex-end;
+  flex: 0 1 auto;
 }
 .swd-tools-sep {
   width: 1px;
@@ -124,18 +152,31 @@
   border-radius: var(--radius);
   font-variant-numeric: tabular-nums;
 }
+.swd-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
 .swd-status-pill b {
   color: var(--fg);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .swd-status-sep {
   color: var(--border);
 }
 .swd-status-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
   color: var(--accent);
   font-weight: 600;
   white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .swd-warn {

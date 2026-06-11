@@ -98,9 +98,6 @@ const lazyPanels: Record<string, LazyExoticComponent<ComponentType<IDockviewPane
   camera: lazy(() =>
     import('../panels/CameraPanel').then((m) => ({ default: pick(m, 'CameraPanel') })),
   ),
-  aigcode: lazy(() =>
-    import('../panels/AiGcodePanel').then((m) => ({ default: pick(m, 'AiGcodePanel') })),
-  ),
 }
 
 /** Pick a named export from a module, asserting it exists (dev safety). */
@@ -146,7 +143,6 @@ const PANEL_SCOPE: Record<string, string> = {
   laser: 'Laser Cutting',
   welding: 'Welding',
   camera: 'Camera',
-  aigcode: 'AI G-code',
 }
 
 /**
@@ -201,5 +197,4 @@ export const availablePanels: PanelSpec[] = [
   { id: 'laser', component: 'laser', title: 'Laser Cutting' },
   { id: 'welding', component: 'welding', title: 'Welding' },
   { id: 'camera', component: 'camera', title: 'Camera' },
-  { id: 'aigcode', component: 'aigcode', title: 'AI G-code' },
 ]

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { importDxfString } from '../core/dxf'
 import { Drawing } from '../core/entity'
 import { engrave, profileContours, pocket, ProfileSide, type CamParams } from '../core/cam'
@@ -25,6 +25,7 @@ import {
   buildTwoSidedProgram,
   defaultTwoSidedParams,
   flipCornerLabel,
+  flippedCorner,
   type TwoSidedParams,
   type FlipAxis,
   type FlipCorner,
@@ -34,7 +35,6 @@ import {
   useCarveJobs,
   type CarveJob,
   type ApplyAllKey,
-  type JobSpeeds,
   type JobDefaults,
   type GlobalCarveSettings,
 } from '../store/carveJobs'
@@ -54,6 +54,31 @@ import { useExperimentalAI } from '../experimental'
 import { Modal } from '../components/Modal'
 import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
+import {
+  PenLine,
+  Frame,
+  Grid2x2,
+  MoveHorizontal,
+  MoveVertical,
+  MoveDiagonal,
+  Drill,
+  ArrowDownToLine,
+  Layers,
+  ArrowUpToLine,
+  AlignVerticalSpaceBetween,
+  Gauge,
+  FastForward,
+  Hash,
+  ChevronsLeftRightEllipsis,
+  Grip,
+  Link2,
+  Link2Off,
+  RotateCw,
+  Maximize2,
+  Ruler,
+  FlipHorizontal2,
+  FlipVertical2,
+} from 'lucide-react'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
@@ -111,56 +136,128 @@ function Tip({ id, title, body }: { id: string; title: string; body: string }) {
 }
 
 /**
- * One auto-computed value row in the "Advanced (auto)" panel: a label (+ hover
- * explainer), an "auto" badge, and the value as an EDITABLE number input. The
- * value is auto-derived from bit + material, but the operator can override it
- * (the override holds until they change the bit/material, which re-derives it).
+ * Sleek slider + number-input + unit row for the carving parameter fields,
+ * modelled on the Controller tab's jog "Feed" control. A full-width row: leading
+ * glyph + label, a themed draggable `.cc-slider` (accent fill via the inline
+ * `--mc-pct` var), a small typable `.cc-slider-num` clamped to [min, max] for the
+ * slider but allowing exact entry, and an inline unit suffix. The optional
+ * `.cc-rechint` recommendation flows onto its own line below (same as IconField).
+ *
+ * `value`/`onChange` carry the field's existing wiring untouched — only the input
+ * WIDGET changes (number box → slider + input). `disabled` greys it out when a
+ * field has no meaningful value (e.g. Width/Height with no geometry).
  */
-function AutoRow({
+function SliderField({
+  icon,
   label,
-  value,
+  htmlFor,
   unit,
+  hint,
+  value,
   onChange,
-  tip,
-  t,
-  step = 1,
-  min = 0,
+  min,
+  max,
+  step,
+  disabled,
+  title,
+  action,
 }: {
+  icon: ReactNode
   label: string
+  htmlFor: string
+  unit?: string
+  hint?: ReactNode
   value: number
-  unit: string
   onChange: (n: number) => void
-  tip: string
-  t: ReturnType<typeof useT>
-  step?: number
-  min?: number
+  min: number
+  max: number
+  step: number
+  disabled?: boolean
+  title?: string
+  /** Optional trailing control in the label area (e.g. an "apply to all" button). */
+  action?: ReactNode
 }) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the slider's accent fill (read as --mc-pct by the
+  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress). Uses the
+  // CLAMPED value so an out-of-range typed value doesn't overflow the fill.
+  const pct =
+    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <div className="cc-autorow">
-      <span className="cc-autorow-lbl">
-        {label}
-        <Tip id={label} title={label} body={tip} />
-      </span>
-      <span className="cc-autorow-val">
-        <span className="cc-auto-badge" title={t('cc.autoBadgeTip', 'Auto-set from your bit + material — editable')}>
-          {t('cc.autoBadge', 'auto')}
+    <div className="cc-sfield" title={title}>
+      <label className="cc-sfield-lbl" htmlFor={htmlFor}>
+        <span className="cc-sfield-ico" aria-hidden>
+          {icon}
         </span>
+        <span className="cc-sfield-txt">{label}</span>
+      </label>
+      <input
+        type="range"
+        className="cc-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        disabled={disabled}
+        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="cc-sfield-num">
         <input
-          className="cc-auto-input"
+          id={htmlFor}
           type="number"
+          className="cc-slider-num"
           min={min}
+          max={max}
           step={step}
           value={String(value)}
+          disabled={disabled}
+          aria-label={label}
           onChange={(e) => {
-            const n = parseFloat(e.target.value)
-            // Keep the current value on a blank/NaN entry — never coerce to 0,
-            // which would feed the live preview a 0-speed / 0-depth pass.
-            onChange(Number.isFinite(n) ? n : value)
+            // Allow EXACT entry (don't clamp the typed number) — a half-typed or
+            // out-of-slider-range value is still committed verbatim; only blank/NaN
+            // is rejected by the caller's own num2d/onChange guard.
+            const v = parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
           }}
         />
-        <span className="cc-autorow-unit">{unit}</span>
+        {unit ? <span className="cc-sfield-unit">{unit}</span> : null}
       </span>
+      {action ? <span className="cc-sfield-action">{action}</span> : null}
+      {hint ? <span className="cc-rechint">{hint}</span> : null}
     </div>
+  )
+}
+
+/**
+ * Adobe-style chain-link toggle that sits BETWEEN a pair of SliderFields (Scale
+ * X/Y and Width/Height) to lock/unlock their aspect ratio. One shared boolean
+ * drives both link buttons (locking scale ⇔ locking W/H is the same constraint).
+ */
+function AspectLink({
+  locked,
+  onToggle,
+  disabled,
+  title,
+}: {
+  locked: boolean
+  onToggle: () => void
+  disabled?: boolean
+  title?: string
+}) {
+  return (
+    <button
+      type="button"
+      className={`cc-aspectlink${locked ? ' is-locked' : ''}`}
+      aria-pressed={locked}
+      disabled={disabled}
+      title={title}
+      onClick={onToggle}
+    >
+      {locked ? <Link2 size={13} strokeWidth={1.9} /> : <Link2Off size={13} strokeWidth={1.9} />}
+    </button>
   )
 }
 
@@ -261,10 +358,14 @@ interface Params2D {
   penDownZ: number
   decimals: number
   lineNumbers: boolean
-  /** Position/size placement of the imported 2D drawing (mm / uniform factor). */
+  /** Position/size placement of the imported 2D drawing (mm / per-axis factor). */
   offsetX: number
   offsetY: number
-  scale: number
+  /** Independent X/Y scale factors (non-uniform allowed when aspect unlocked). */
+  scaleX: number
+  scaleY: number
+  /** When true the X/Y scale (and thus Width/Height) are locked to one ratio. */
+  aspectLocked: boolean
 }
 
 const DEFAULT_2D: Params2D = (() => {
@@ -286,7 +387,9 @@ const DEFAULT_2D: Params2D = (() => {
     lineNumbers: false,
     offsetX: 0,
     offsetY: 0,
-    scale: 1,
+    scaleX: 1,
+    scaleY: 1,
+    aspectLocked: true,
   }
 })()
 
@@ -359,8 +462,19 @@ function parseP2d(v: unknown, base: Params2D): Params2D {
     lineNumbers: boolOr(v.lineNumbers, base.lineNumbers),
     offsetX: numOr(v.offsetX, base.offsetX),
     offsetY: numOr(v.offsetY, base.offsetY),
-    scale: numOr(v.scale, base.scale) > 0 ? numOr(v.scale, base.scale) : base.scale,
+    // MIGRATION: an older persisted blob carried a single uniform `scale`. Map it
+    // to scaleX = scaleY = scale so saved layouts/presets keep their size. New
+    // blobs carry scaleX/scaleY directly; fall back to the (migrated) uniform.
+    scaleX: posScale(v.scaleX, posScale(v.scale, base.scaleX)),
+    scaleY: posScale(v.scaleY, posScale(v.scale, base.scaleY)),
+    aspectLocked: boolOr(v.aspectLocked, base.aspectLocked),
   }
+}
+
+/** A strictly-positive scale factor, else the fallback (also forced positive). */
+function posScale(v: unknown, fallback: number): number {
+  const n = numOr(v, fallback)
+  return n > 0 ? n : (fallback > 0 ? fallback : 1)
 }
 
 /** Classify a picked file by its extension. */
@@ -460,15 +574,6 @@ export function CadCamPanel() {
     () => jobs.find((j) => j.id === selectedId) ?? null,
     [jobs, selectedId]
   )
-
-  // Effective per-job speeds/stepover for the editable "auto" rows: bind to the
-  // selected job when there is one, else to the defaults that new jobs inherit.
-  const effSpeeds = selectedJob?.speeds ?? carveDefaults.speeds
-  const effStepover = selectedJob?.stepover ?? carveDefaults.stepover
-  const setEffSpeeds = (patch: Partial<JobSpeeds>) =>
-    selectedJob ? setJobSpeeds(selectedJob.id, patch) : setDefaults({ speeds: patch })
-  const setEffStepover = (n: number) =>
-    selectedJob ? updateJob(selectedJob.id, { stepover: n }) : setDefaults({ stepover: n })
 
   // Stock / material live in the persisted stock store so the 3D Visualizer can
   // render the same block + material the user picks (used by 2D + as a bed-fit
@@ -858,21 +963,23 @@ export function CadCamPanel() {
   // by the offset. Identity placement returns the raw polylines untouched.
   const polylines = useMemo<Polyline[]>(() => {
     if (rawPolylines.length === 0) return []
-    const s = p2d.scale > 0 ? p2d.scale : 1
+    // Non-uniform: independent X/Y scale about the drawing's lower-left corner.
+    const sx = p2d.scaleX > 0 ? p2d.scaleX : 1
+    const sy = p2d.scaleY > 0 ? p2d.scaleY : 1
     const ox = p2d.offsetX || 0
     const oy = p2d.offsetY || 0
-    if (s === 1 && ox === 0 && oy === 0) return rawPolylines
+    if (sx === 1 && sy === 1 && ox === 0 && oy === 0) return rawPolylines
     const minx = naturalBounds ? naturalBounds.min.x : 0
     const miny = naturalBounds ? naturalBounds.min.y : 0
     return rawPolylines.map((pl) => {
       const c = pl.clone()
       for (const p of c.points) {
-        p.x = (p.x - minx) * s + minx + ox
-        p.y = (p.y - miny) * s + miny + oy
+        p.x = (p.x - minx) * sx + minx + ox
+        p.y = (p.y - miny) * sy + miny + oy
       }
       return c
     })
-  }, [rawPolylines, naturalBounds, p2d.scale, p2d.offsetX, p2d.offsetY])
+  }, [rawPolylines, naturalBounds, p2d.scaleX, p2d.scaleY, p2d.offsetX, p2d.offsetY])
   const closedCount = useMemo(
     () => polylines.filter((p) => p.closed && p.points.length >= 3).length,
     [polylines]
@@ -1177,10 +1284,19 @@ export function CadCamPanel() {
     return el.offsetParent !== null || el.getClientRects().length > 0
   }
 
-  // Live G-code: regenerate (debounced) whenever inputs change, off the UI
-  // critical path so a heavy carve never blocks typing. For 3D the heavy compute
-  // runs in a Web Worker (generate3D posts to it), so the timeout body never
-  // blocks; for 2D it's a quick synchronous emit.
+  // requestAnimationFrame handle for the LIVE regen below (held in a ref so an
+  // unmount / superseding edit can cancel a still-pending frame).
+  const regenRafRef = useRef<number | null>(null)
+
+  // Live G-code: regenerate whenever inputs change, COALESCED to one regen per
+  // animation frame so the toolpath, G-code and 3D Visualizer track a dragged
+  // slider in REAL TIME (no wait-for-mouse-release). Previously a 300ms debounce
+  // gated this, so the preview only refreshed after the drag ended. We depend on
+  // STABLE keys (genKey + geometry identity), not whole objects, and call through
+  // generateRef so the frame body always runs the LATEST closure (no stale
+  // jobs/global/cutout/p2d reads). For 3D the heavy compute runs in a Web Worker
+  // (generate3D posts to it), so coalescing to one post-per-frame keeps it from
+  // churning a Worker dozens of times per frame; for 2D it's a quick sync emit.
   useEffect(() => {
     if (mode !== '2d' && mode !== '3d') return
     // No enabled 3D jobs (e.g. the last job was removed) → tear down the worker
@@ -1195,21 +1311,23 @@ export function CadCamPanel() {
       return
     }
     setBusy(true)
-    // Single debounced, coalesced timeout. We depend on STABLE keys (genKey +
-    // geometry identity), not whole objects, so a burst of keystrokes resets one
-    // timer instead of spinning up + tearing down a Worker on each — and we call
-    // through generateRef so the body always runs the LATEST closure (no stale
-    // jobs/global/cutout/p2d reads). The original pipeline is preserved exactly.
-    const id = window.setTimeout(() => {
+    // Cancel any frame still pending from a previous edit so a burst of slider
+    // updates coalesces into a SINGLE regen on the next frame (not one per event).
+    if (regenRafRef.current !== null) cancelAnimationFrame(regenRafRef.current)
+    regenRafRef.current = requestAnimationFrame(() => {
+      regenRafRef.current = null
       try {
         if (!isPanelVisible()) return
         generateRef.current()
       } finally {
         setBusy(false)
       }
-    }, 300)
+    })
     return () => {
-      window.clearTimeout(id)
+      if (regenRafRef.current !== null) {
+        cancelAnimationFrame(regenRafRef.current)
+        regenRafRef.current = null
+      }
       setBusy(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1266,18 +1384,19 @@ export function CadCamPanel() {
   }
 
   // ---- param input helpers ------------------------------------------------
-  // Coerce a blank/NaN entry to the PREVIOUS value (not 0) so a half-typed or
-  // cleared field never feeds the live preview a 0-feed / 0-depth toolpath.
-  function num2d<K extends keyof Params2D>(key: K) {
+  // Slider value/onChange wiring for a Params2D key: coerce a blank/NaN entry to
+  // the PREVIOUS value (not 0) so a half-typed or cleared field never feeds the
+  // live preview a 0-feed / 0-depth toolpath.
+  function slider2d<K extends keyof Params2D>(key: K) {
     return {
-      type: 'number' as const,
-      value: String(p2d[key]),
-      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
-        const v = parseFloat(e.target.value)
-        setP2d((prev) => ({ ...prev, [key]: Number.isFinite(v) ? v : prev[key] }))
-      },
+      value: p2d[key] as number,
+      onChange: (n: number) =>
+        setP2d((prev) => ({ ...prev, [key]: Number.isFinite(n) ? n : prev[key] })),
     }
   }
+  // Bed XY extents, used for the position/size slider ranges.
+  const bedW = bed.width
+  const bedH = bed.depth
 
   const isPen = p2d.zMode === ZMode.Pen
   const hasGeometry = polylines.length > 0
@@ -1286,9 +1405,40 @@ export function CadCamPanel() {
   // auto-compute the uniform scale ("fit to this size") instead of a raw factor.
   const natW = naturalBounds ? naturalBounds.width() : 0
   const natH = naturalBounds ? naturalBounds.height() : 0
-  const curScale2D = p2d.scale > 0 ? p2d.scale : 1
-  const setScale2D = (s: number) =>
-    setP2d((p) => ({ ...p, scale: Number.isFinite(s) && s > 0 ? s : p.scale }))
+  const curScaleX = p2d.scaleX > 0 ? p2d.scaleX : 1
+  const curScaleY = p2d.scaleY > 0 ? p2d.scaleY : 1
+  const aspectLocked = p2d.aspectLocked
+  // Set the X scale. When the aspect is locked the Y scale follows (uniform).
+  const setScaleX = (s: number) =>
+    setP2d((p) =>
+      Number.isFinite(s) && s > 0
+        ? { ...p, scaleX: s, scaleY: p.aspectLocked ? s : p.scaleY }
+        : p,
+    )
+  // Set the Y scale. When the aspect is locked the X scale follows (uniform).
+  const setScaleY = (s: number) =>
+    setP2d((p) =>
+      Number.isFinite(s) && s > 0
+        ? { ...p, scaleY: s, scaleX: p.aspectLocked ? s : p.scaleX }
+        : p,
+    )
+  // Width edits drive scaleX (= W/natW); locked → scaleY follows so Height tracks.
+  const setWidth2D = (w: number) => {
+    if (!(Number.isFinite(w) && w > 0 && natW > 0)) return
+    setScaleX(w / natW)
+  }
+  // Height edits drive scaleY (= H/natH); locked → scaleX follows so Width tracks.
+  const setHeight2D = (h: number) => {
+    if (!(Number.isFinite(h) && h > 0 && natH > 0)) return
+    setScaleY(h / natH)
+  }
+  const toggleAspectLock = () =>
+    setP2d((p) =>
+      // Re-locking from a non-uniform state snaps Y to X so the ratio is defined.
+      p.aspectLocked
+        ? { ...p, aspectLocked: false }
+        : { ...p, aspectLocked: true, scaleY: p.scaleX },
+    )
   const round2 = (n: number) => Math.round(n * 100) / 100
   const enabledJobs = jobs.filter((j) => j.enabled).length
 
@@ -1379,133 +1529,6 @@ export function CadCamPanel() {
     setLoadError('')
   }
 
-  // The "Advanced (auto)" card — auto-computed feeds/depths (read-only with an
-  // "auto" badge); only Plunge-Z and Safe-Z are editable. Defined here so it can
-  // be placed AFTER the operation/strategy step in the top-down flow.
-  const advancedAutoSection = (
-    <section className="cc-section cc-advanced cc-autoadv">
-      <button
-        className="cc-adv-toggle"
-        onClick={() => setShowAdvanced((v) => !v)}
-        aria-expanded={showAdvanced}
-        title={t('cc.advAutoTip', 'Auto-computed speeds & depths from your bit + material. Plunge-Z is editable; the rest are derived for you.')}
-      >
-        <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={13} />{' '}
-        {t('cc.advancedAuto', 'Advanced (auto) speeds & depths')}
-      </button>
-      {showAdvanced && (
-        <div className="cc-section-body">
-          <div className="cc-autogrid">
-            <AutoRow
-              label={t('cc.cuttingSpeed', 'Cutting speed')}
-              unit={t('cc.unitMmMin', 'mm/min')}
-              value={Math.round(effSpeeds.cutSpeedMmS * 60)}
-              onChange={(n) => setEffSpeeds({ cutSpeedMmS: n / 60 })}
-              step={10}
-              tip={t('cc.tipCuttingSpeed', 'How fast the bit moves while cutting — auto-derived from the material + bit so it cuts cleanly without stalling. Override if you know better.')}
-              t={t}
-            />
-            <AutoRow
-              label={t('cc.depthPerPass', 'Depth of cut / pass')}
-              unit={t('cc.unitMm', 'mm')}
-              value={effSpeeds.cutDepthMm}
-              onChange={(n) => setEffSpeeds({ cutDepthMm: n })}
-              step={0.1}
-              tip={t('cc.tipDepthPass', 'How much material each downward pass removes — kept shallow enough for your bit + material to stay safe. Lower it for hard material.')}
-              t={t}
-            />
-            <AutoRow
-              label={t('cc.freeSpeed', 'Free / travel speed')}
-              unit={t('cc.unitMmMin', 'mm/min')}
-              value={Math.round(effSpeeds.freeSpeedMmS * 60)}
-              onChange={(n) => setEffSpeeds({ freeSpeedMmS: n / 60 })}
-              step={50}
-              tip={t('cc.tipFreeSpeed', 'Speed for non-cutting moves between cuts. Defaults to the machine maximum (rapid); lower it if rapids are too aggressive.')}
-              t={t}
-            />
-            <AutoRow
-              label={t('cc.pullUpSpeed', 'Pull-up Z speed')}
-              unit={t('cc.unitMmMin', 'mm/min')}
-              value={carveGlobal.retractFeedMmMin}
-              onChange={(n) => setGlobal({ retractFeedMmMin: n })}
-              step={50}
-              tip={t('cc.tipPullUp', 'How fast the bit retracts out of the cut. 0 = maximum (rapid G0). Set a value (mm/min) to lift more gently.')}
-              t={t}
-            />
-            <AutoRow
-              label={t('cc.spindleRPM', 'Spindle RPM')}
-              unit={t('cc.unitRpm', 'RPM')}
-              value={carveGlobal.spindleRPM}
-              onChange={(n) => setGlobal({ spindleRPM: n })}
-              step={500}
-              tip={t('cc.tipSpindle', 'Spindle speed suggested for this material — slower for plastics/metal, faster for wood. Override for your bit/spindle.')}
-              t={t}
-            />
-            <AutoRow
-              label={t('cc.stepover', 'Stepover')}
-              unit={t('cc.unitMm', 'mm')}
-              value={effStepover}
-              onChange={(n) => setEffStepover(n)}
-              step={0.1}
-              tip={t('cc.tipStepover', 'Sideways spacing between cutting lines — finer means smoother but slower.')}
-              t={t}
-            />
-            {/* Editable: Plunge-Z */}
-            <div className="cc-field cc-autofield">
-              <label>
-                {t('cc.plungeZ', 'Plunge Z speed (mm/min)')}
-                <Tip
-                  id="plungeZ"
-                  title={t('cc.plungeZ', 'Plunge Z speed (mm/min)')}
-                  body={t(
-                    'cc.tipPlungeZ',
-                    'How fast the bit drives straight DOWN into the stock. Auto-set to a safe fraction of the cutting speed — lower it if your bit chatters when entering the cut.',
-                  )}
-                />
-              </label>
-              <input
-                type="number"
-                min={0}
-                step={10}
-                value={String(carveGlobal.feedZ)}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value)
-                  setGlobal({ feedZ: Number.isFinite(v) ? v : carveGlobal.feedZ })
-                }}
-              />
-            </div>
-            {/* Editable: Safe-Z (needed, kept) */}
-            <div className="cc-field cc-autofield">
-              <label>
-                {t('cc.safeZ', 'Safe Z (mm)')}
-                <Tip
-                  id="safeZ"
-                  title={t('cc.safeZ', 'Safe Z (mm)')}
-                  body={t(
-                    'cc.tipSafeZ',
-                    'Height the bit lifts to before moving across the stock. Must clear any clamps and the tallest part of your model.',
-                  )}
-                />
-              </label>
-              <input
-                type="number"
-                step={0.5}
-                value={String(carveGlobal.safeZ)}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value)
-                  setGlobal({ safeZ: Number.isFinite(v) ? v : carveGlobal.safeZ })
-                }}
-              />
-            </div>
-          </div>
-          <span className="cc-hint">
-            {t('cc.autoFootnote', 'These update automatically when you change the bit or material. Only Plunge-Z and Safe-Z are yours to tweak.')}
-          </span>
-        </div>
-      )}
-    </section>
-  )
-
   return (
     <div
       ref={panelRef}
@@ -1528,7 +1551,31 @@ export function CadCamPanel() {
         <div className="cc-cards">
           {/* ================= 1 · IMPORT / DROP ================= */}
           <section className="cc-section cc-span">
-            <h3>{t('cc.model', 'Model')}</h3>
+            <h3>
+              {mode === '3d' ? t('cc.models', 'Models') : t('cc.model', 'Model')}
+              {mode === '3d' && (
+                <span className="cc-h3-actions">
+                  <button
+                    className="cc-iconbtn"
+                    onClick={doRenest}
+                    disabled={enabledJobs === 0}
+                    title={t('cc.renest', 'Re-nest all jobs on the bed (no overlap)')}
+                    aria-label={t('cc.renest', 'Re-nest all jobs on the bed')}
+                  >
+                    <Icon name="frame" size={14} />
+                  </button>
+                  <button
+                    className="cc-iconbtn danger"
+                    onClick={clearAllJobs}
+                    disabled={jobs.length === 0}
+                    title={t('cc.clearAll', 'Clear all jobs / start over')}
+                    aria-label={t('cc.clearAll', 'Clear all jobs / start over')}
+                  >
+                    <Icon name="trash" size={14} />
+                  </button>
+                </span>
+              )}
+            </h3>
             <div className={'cc-section-body' + (dragOver ? ' cc-dragover' : '')}>
               {/* Compact upload row: accepted extensions + a rectangular upload
                   icon button (drag-drop onto the panel still works too). */}
@@ -1555,14 +1602,27 @@ export function CadCamPanel() {
                 />
               </div>
 
-              {/* Uploaded model files, listed right here in the Model section. */}
+              {/* Uploaded model files / jobs, listed right here in the Model
+                  section. In 3D this is the single canonical models list with
+                  per-model visibility, select-to-edit, duplicate & remove. */}
               <ModelFilesList
                 mode={mode}
                 jobs={jobs}
                 selectedId={selectedId}
                 fileName={fileName}
                 onSelect={selectJob}
-                onRemoveJob={removeJob}
+                onToggleJob={(id, enabled) => updateJob(id, { enabled })}
+                onDuplicateJob={(id) => {
+                  duplicateJob(id)
+                  const res = renest(bed.width, bed.depth)
+                  setNestWarn(res.warnings)
+                }}
+                onRemoveJob={(id, name) => {
+                  if (!window.confirm(t('cc.jobRemoveConfirm', 'Remove “{name}”?', { name }))) return
+                  removeJob(id)
+                  const res = renest(bed.width, bed.depth)
+                  setNestWarn(res.warnings)
+                }}
                 onRemove2D={() => {
                   setMode('none')
                   setFileName(null)
@@ -1573,6 +1633,32 @@ export function CadCamPanel() {
                 }}
                 t={t}
               />
+
+              {/* 3D multi-model: empty-state, nesting warnings & bed hint —
+                  moved here from the old standalone "Jobs" section. */}
+              {mode === '3d' && jobs.length === 0 && (
+                <span className="cc-hint">
+                  {t('cc.noJobs', 'No models yet — Add a model above. Import again to nest more side-by-side.')}
+                </span>
+              )}
+              {mode === '3d' && nestWarn.length > 0 && (
+                <ul className="cc-warnings">
+                  {nestWarn.slice(0, 4).map((w, i) => (
+                    <li key={i}>
+                      <Icon name="warning" size={12} /> {w}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {mode === '3d' && jobs.length > 0 && (
+                <span className="cc-hint">
+                  {t('cc.bedHint', 'Bed {w}×{d}mm — jobs auto-nest with a {m}mm gap.', {
+                    w: bed.width,
+                    d: bed.depth,
+                    m: carveGlobal.nestMargin,
+                  })}
+                </span>
+              )}
 
               {importError && <div className="cc-error">{importError}</div>}
 
@@ -1671,122 +1757,8 @@ export function CadCamPanel() {
             </div>
           </section>
 
-          {/* ================= JOBS LIST (3D multi-model) ================= */}
-          {mode === '3d' && (
-            <section className="cc-section">
-              <h3>
-                {t('cc.jobs', 'Jobs')} ({jobs.length})
-                <span className="cc-h3-actions">
-                  <button
-                    className="cc-iconbtn"
-                    onClick={doRenest}
-                    disabled={enabledJobs === 0}
-                    title={t('cc.renest', 'Re-nest all jobs on the bed (no overlap)')}
-                    aria-label={t('cc.renest', 'Re-nest all jobs on the bed')}
-                  >
-                    <Icon name="frame" size={14} />
-                  </button>
-                  <button
-                    className="cc-iconbtn danger"
-                    onClick={clearAllJobs}
-                    disabled={jobs.length === 0}
-                    title={t('cc.clearAll', 'Clear all jobs / start over')}
-                    aria-label={t('cc.clearAll', 'Clear all jobs / start over')}
-                  >
-                    <Icon name="trash" size={14} />
-                  </button>
-                </span>
-              </h3>
-              <div className="cc-section-body">
-                {jobs.length === 0 && (
-                  <span className="cc-hint">
-                    {t('cc.noJobs', 'No models yet — Add a model above. Import again to nest more side-by-side.')}
-                  </span>
-                )}
-                {jobs.length > 0 && (
-                  <ul className="cc-joblist">
-                    {jobs.map((job) => (
-                      <li
-                        key={job.id}
-                        className={'cc-jobrow' + (job.id === selectedId ? ' active' : '')}
-                      >
-                        <button
-                          className={'cc-iconbtn cc-job-eye' + (job.enabled ? '' : ' hidden')}
-                          onClick={() => updateJob(job.id, { enabled: !job.enabled })}
-                          title={
-                            job.enabled
-                              ? t('cc.jobHide', 'Visible — click to hide this model from the toolpath & 3D view')
-                              : t('cc.jobShow', 'Hidden — click to show this model in the toolpath & 3D view')
-                          }
-                          aria-label={
-                            job.enabled
-                              ? t('cc.jobHide', 'Hide this model from the toolpath')
-                              : t('cc.jobShow', 'Show this model in the toolpath')
-                          }
-                          aria-pressed={!job.enabled}
-                        >
-                          <Icon name={job.enabled ? 'eye' : 'eye-off'} size={14} />
-                        </button>
-                        <button
-                          className={'cc-job-name' + (job.enabled ? '' : ' hidden')}
-                          onClick={() => selectJob(job.id)}
-                          title={t('cc.jobSelect', 'Select to edit this job’s settings')}
-                        >
-                          <span className="cc-job-label">{job.name}</span>
-                        </button>
-                        <button
-                          className="cc-iconbtn"
-                          onClick={() => {
-                            duplicateJob(job.id)
-                            const res = renest(bed.width, bed.depth)
-                            setNestWarn(res.warnings)
-                          }}
-                          title={t('cc.jobDup', 'Duplicate this job')}
-                          aria-label={t('cc.jobDup', 'Duplicate this job')}
-                        >
-                          <Icon name="duplicate" size={14} />
-                        </button>
-                        <button
-                          className="cc-iconbtn danger"
-                          onClick={() => {
-                            if (
-                              !window.confirm(
-                                t('cc.jobRemoveConfirm', 'Remove “{name}”?', { name: job.name }),
-                              )
-                            )
-                              return
-                            removeJob(job.id)
-                            const res = renest(bed.width, bed.depth)
-                            setNestWarn(res.warnings)
-                          }}
-                          title={t('cc.jobRemove', 'Remove this job')}
-                          aria-label={t('cc.jobRemove', 'Remove this job')}
-                        >
-                          <Icon name="close" size={14} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {nestWarn.length > 0 && (
-                  <ul className="cc-warnings">
-                    {nestWarn.slice(0, 4).map((w, i) => (
-                      <li key={i}>
-                        <Icon name="warning" size={12} /> {w}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <span className="cc-hint">
-                  {t('cc.bedHint', 'Bed {w}×{d}mm — jobs auto-nest with a {m}mm gap.', {
-                    w: bed.width,
-                    d: bed.depth,
-                    m: carveGlobal.nestMargin,
-                  })}
-                </span>
-              </div>
-            </section>
-          )}
+          {/* The standalone "Jobs" section was merged into the "Models" section
+              above (single canonical models list). */}
 
           {/* ================= SELECTED JOB SETTINGS (3D) ================= */}
           {mode === '3d' && selectedJob && (
@@ -1802,15 +1774,10 @@ export function CadCamPanel() {
               setJobSpeeds={setJobSpeeds}
               setJobStock={setJobStock}
               setJobPlacement={setJobPlacement}
-              renest={() => {
-                const res = renest(bed.width, bed.depth)
-                setNestWarn(res.warnings)
-              }}
+              carveGlobal={carveGlobal}
+              setGlobal={setGlobal}
             />
           )}
-
-          {/* ============ 4 · ADVANCED (AUTO) speeds & depths (3D) ============ */}
-          {mode === '3d' && jobs.length > 0 && advancedAutoSection}
 
           {/* ============ 5 · CUTOUT (cut part free from stock) ============ */}
           {mode === '3d' && jobs.length > 0 && (
@@ -1822,8 +1789,8 @@ export function CadCamPanel() {
             <TwoSidedCard t={t} twoSided={twoSided} setTwoSided={setTwoSided} />
           )}
 
-          {/* Material + recommended-passes now live in the primary section and
-              the Advanced (auto) panel above; speeds/depths apply themselves. */}
+          {/* Material + recommended-passes live in the primary section; the
+              per-job Editing card carries every speed/depth/spindle control. */}
 
           {/* ================= 2D CONTROLS ================= */}
           {mode === '2d' && (
@@ -1831,28 +1798,34 @@ export function CadCamPanel() {
               <section className="cc-section">
                 <h3>{t('cc.operation', 'Operation')}</h3>
                 <div className="cc-section-body">
-                  <div className="cc-ops">
+                  <div className="cc-opseg" role="group" aria-label={t('cc.operation', 'Operation')}>
                     {(['Engrave', 'Profile', 'Pocket'] as Op[]).map((o) => (
                       <button
                         key={o}
-                        className={'cc-op-btn' + (op === o ? ' active' : '')}
+                        type="button"
+                        className={'cc-opseg-btn' + (op === o ? ' active' : '')}
+                        aria-pressed={op === o}
                         onClick={() => setOp(o)}
-                        title={opHelp(t, o)}
+                        title={`${opLabelText(t, o)} — ${opHelp(t, o)}`}
                       >
-                        {opLabelText(t, o)}
+                        <span className="cc-opseg-ico">{opIcon(o)}</span>
+                        <span className="cc-opseg-lbl">{opLabelText(t, o)}</span>
                       </button>
                     ))}
                   </div>
                   {op === 'Profile' && (
-                    <div className="cc-subops">
+                    <div className="cc-sideseg" role="group" aria-label={t('cc.profile', 'Profile')}>
                       {[ProfileSide.On, ProfileSide.Inside, ProfileSide.Outside].map((s) => (
                         <button
                           key={s}
-                          className={'cc-subop-btn' + (side === s ? ' active' : '')}
+                          type="button"
+                          className={'cc-sideseg-btn' + (side === s ? ' active' : '')}
+                          aria-pressed={side === s}
                           onClick={() => setSide(s)}
-                          title={t('cc.profileSideTip', 'Cut {side} the contour', { side: profileSideLabel(t, s).toLowerCase() })}
+                          title={`${profileSideLabel(t, s)} — ${profileSideHelp(t, s)}`}
                         >
-                          {profileSideLabel(t, s)}
+                          <span className="cc-sideseg-ico">{sideIcon(s)}</span>
+                          <span className="cc-sideseg-lbl">{profileSideLabel(t, s)}</span>
                         </button>
                       ))}
                     </div>
@@ -1871,64 +1844,105 @@ export function CadCamPanel() {
               <section className="cc-section">
                 <h3>{t('cc.posSize', 'Position & size')}</h3>
                 <div className="cc-section-body">
-                  <div className="cc-grid">
-                    <div className="cc-field">
-                      <label htmlFor="cc-2d-offx">{t('cc.offsetX', 'Offset X (mm)')}</label>
-                      <input id="cc-2d-offx" step={1} {...num2d('offsetX')} />
-                    </div>
-                    <div className="cc-field">
-                      <label htmlFor="cc-2d-offy">{t('cc.offsetY', 'Offset Y (mm)')}</label>
-                      <input id="cc-2d-offy" step={1} {...num2d('offsetY')} />
-                    </div>
-                    <div className="cc-field">
-                      <label htmlFor="cc-2d-scale">{t('cc.scaleX', 'Scale ×')}</label>
-                      <input
-                        id="cc-2d-scale"
-                        type="number"
-                        min={0.01}
-                        step={0.1}
-                        value={String(round2(curScale2D))}
-                        title={t('cc.scaleTip', 'Uniform scale factor (1 = original size)')}
-                        onChange={(e) => setScale2D(parseFloat(e.target.value))}
+                  <div className="cc-sgrid">
+                    <SliderField
+                      icon={<MoveHorizontal size={14} strokeWidth={1.8} />}
+                      label={t('cc.offsetXShort', 'Offset X')}
+                      htmlFor="cc-2d-offx"
+                      unit="mm"
+                      min={-bedW}
+                      max={bedW}
+                      step={1}
+                      {...slider2d('offsetX')}
+                    />
+                    <SliderField
+                      icon={<MoveVertical size={14} strokeWidth={1.8} />}
+                      label={t('cc.offsetYShort', 'Offset Y')}
+                      htmlFor="cc-2d-offy"
+                      unit="mm"
+                      min={-bedH}
+                      max={bedH}
+                      step={1}
+                      {...slider2d('offsetY')}
+                    />
+                    <div className="cc-linkpair">
+                      <SliderField
+                        icon={<MoveHorizontal size={14} strokeWidth={1.8} />}
+                        label={t('cc.scaleXAxis', 'Scale X')}
+                        htmlFor="cc-2d-scalex"
+                        unit="×"
+                        min={0.05}
+                        max={10}
+                        step={0.05}
+                        value={round2(curScaleX)}
+                        onChange={(n) => setScaleX(n)}
+                        title={t('cc.scaleXTip', 'Horizontal scale factor (1 = original size)')}
+                      />
+                      <AspectLink
+                        locked={aspectLocked}
+                        onToggle={toggleAspectLock}
+                        title={
+                          aspectLocked
+                            ? t('cc.aspectLockedTip', 'Aspect locked — X and Y scale together. Click to unlock.')
+                            : t('cc.aspectUnlockedTip', 'Aspect unlocked — X and Y scale independently. Click to lock.')
+                        }
+                      />
+                      <SliderField
+                        icon={<MoveVertical size={14} strokeWidth={1.8} />}
+                        label={t('cc.scaleYAxis', 'Scale Y')}
+                        htmlFor="cc-2d-scaley"
+                        unit="×"
+                        min={0.05}
+                        max={10}
+                        step={0.05}
+                        value={round2(curScaleY)}
+                        onChange={(n) => setScaleY(n)}
+                        title={t('cc.scaleYTip', 'Vertical scale factor (1 = original size)')}
                       />
                     </div>
-                    <div className="cc-field">
-                      <label htmlFor="cc-2d-w">{t('cc.targetW', 'Width (mm)')}</label>
-                      <input
-                        id="cc-2d-w"
-                        type="number"
-                        min={0}
+                    <div className="cc-linkpair">
+                      <SliderField
+                        icon={<MoveDiagonal size={14} strokeWidth={1.8} />}
+                        label={t('cc.targetWShort', 'Width')}
+                        htmlFor="cc-2d-w"
+                        unit="mm"
+                        min={1}
+                        max={Math.max(bedW, 500)}
                         step={1}
                         disabled={!(natW > 0)}
-                        value={natW > 0 ? String(round2(natW * curScale2D)) : ''}
-                        title={t('cc.targetWTip', 'Target width — sets the scale to fit this size (aspect kept)')}
-                        onChange={(e) => {
-                          const v = parseFloat(e.target.value)
-                          if (Number.isFinite(v) && v > 0 && natW > 0) setScale2D(v / natW)
-                        }}
+                        value={natW > 0 ? round2(natW * curScaleX) : 0}
+                        onChange={(v) => setWidth2D(v)}
+                        title={t('cc.targetWTip', 'Target width (mm). Drives the X scale; locked → height follows.')}
                       />
-                    </div>
-                    <div className="cc-field">
-                      <label htmlFor="cc-2d-h">{t('cc.targetH', 'Height (mm)')}</label>
-                      <input
-                        id="cc-2d-h"
-                        type="number"
-                        min={0}
+                      <AspectLink
+                        locked={aspectLocked}
+                        onToggle={toggleAspectLock}
+                        disabled={!(natW > 0) || !(natH > 0)}
+                        title={
+                          aspectLocked
+                            ? t('cc.aspectLockedTip', 'Aspect locked — X and Y scale together. Click to unlock.')
+                            : t('cc.aspectUnlockedTip', 'Aspect unlocked — X and Y scale independently. Click to lock.')
+                        }
+                      />
+                      <SliderField
+                        icon={<MoveDiagonal size={14} strokeWidth={1.8} style={{ transform: 'rotate(90deg)' }} />}
+                        label={t('cc.targetHShort', 'Height')}
+                        htmlFor="cc-2d-h"
+                        unit="mm"
+                        min={1}
+                        max={Math.max(bedH, 500)}
                         step={1}
                         disabled={!(natH > 0)}
-                        value={natH > 0 ? String(round2(natH * curScale2D)) : ''}
-                        title={t('cc.targetHTip', 'Target height — sets the scale to fit this size (aspect kept)')}
-                        onChange={(e) => {
-                          const v = parseFloat(e.target.value)
-                          if (Number.isFinite(v) && v > 0 && natH > 0) setScale2D(v / natH)
-                        }}
+                        value={natH > 0 ? round2(natH * curScaleY) : 0}
+                        onChange={(v) => setHeight2D(v)}
+                        title={t('cc.targetHTip', 'Target height (mm). Drives the Y scale; locked → width follows.')}
                       />
                     </div>
                   </div>
                   <span className="cc-hint">
                     {t(
                       'cc.posSizeHint',
-                      'Shift the drawing with Offset X/Y. Scale uniformly, or type a target Width or Height to auto-fit (aspect ratio kept).',
+                      'Shift the drawing with Offset X/Y. Lock the chain link to scale X and Y together (aspect kept), or unlock it to set Width and Height independently.',
                     )}
                   </span>
                 </div>
@@ -1937,48 +1951,73 @@ export function CadCamPanel() {
               <section className="cc-section">
                 <h3>{t('cc.toolCut', 'Tool & cut')}</h3>
                 <div className="cc-section-body">
-                  <div className="cc-grid">
-                    <div className="cc-field">
-                      <label htmlFor="cc-diameter">{t('cc.toolDia', 'Tool ⌀ (mm)')}</label>
-                      <input id="cc-diameter" min={0} step={0.1} {...num2d('diameter')} />
-                      <span className="cc-rechint">{t('cc.fromBit', 'from bit')}: {bit.diameter}</span>
-                    </div>
-                    <div className="cc-field">
-                      <label htmlFor="cc-cutdepth">{t('cc.cutDepth', 'Cut depth (mm)')}</label>
-                      <input id="cc-cutdepth" min={0} step={0.1} {...num2d('cutDepth')} />
-                    </div>
-                    <div className="cc-field">
-                      <label htmlFor="cc-stepdown">{t('cc.stepdownPass', 'Stepdown / pass (mm)')}</label>
-                      <input id="cc-stepdown" min={0} step={0.1} {...num2d('stepdown')} />
-                      <span className="cc-rechint">{t('common.recommended', 'Recommended')}: {rec.stepdown}</span>
-                    </div>
+                  <div className="cc-sgrid">
+                    <SliderField
+                      icon={<Drill size={14} strokeWidth={1.8} />}
+                      label={t('cc.toolDiaShort', 'Tool ⌀')}
+                      htmlFor="cc-diameter"
+                      unit="mm"
+                      min={0.1}
+                      max={25}
+                      step={0.1}
+                      hint={<>{t('cc.fromBit', 'from bit')}: {bit.diameter}</>}
+                      {...slider2d('diameter')}
+                    />
+                    <SliderField
+                      icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
+                      label={t('cc.cutDepthShort', 'Cut depth')}
+                      htmlFor="cc-cutdepth"
+                      unit="mm"
+                      min={0}
+                      max={60}
+                      step={0.1}
+                      {...slider2d('cutDepth')}
+                    />
+                    <SliderField
+                      icon={<Layers size={14} strokeWidth={1.8} />}
+                      label={t('cc.stepdownPassShort', 'Stepdown / pass')}
+                      htmlFor="cc-stepdown"
+                      unit="mm"
+                      min={0.05}
+                      max={10}
+                      step={0.05}
+                      hint={<>{t('common.recommended', 'Recommended')}: {rec.stepdown}</>}
+                      {...slider2d('stepdown')}
+                    />
+                    <SliderField
+                      icon={<AlignVerticalSpaceBetween size={14} strokeWidth={1.8} />}
+                      label={t('cc.surfaceZShort', 'Surface Z')}
+                      htmlFor="cc-surfacez"
+                      unit="mm"
+                      min={-50}
+                      max={50}
+                      step={0.1}
+                      title={t('cc.surfaceZTip', 'Z of the stock top — cuts go from here down to Cut depth')}
+                      {...slider2d('surfaceZ')}
+                    />
+                    <SliderField
+                      icon={<ArrowUpToLine size={14} strokeWidth={1.8} />}
+                      label={t('cc.safeZShort', 'Safe Z')}
+                      htmlFor="cc-safez"
+                      unit="mm"
+                      min={0}
+                      max={50}
+                      step={0.5}
+                      {...slider2d('safeZ')}
+                    />
                     {op === 'Pocket' && (
-                      <div className="cc-field">
-                        <label htmlFor="cc-stepover">{t('cc.stepoverFrac', 'Stepover (×⌀)')}</label>
-                        <input
-                          id="cc-stepover"
-                          min={0.05}
-                          max={1}
-                          step={0.05}
-                          title={t('cc.stepoverFracTip', 'Sideways overlap between pocket passes, as a fraction of tool ⌀')}
-                          {...num2d('stepover')}
-                        />
-                        <span className="cc-rechint">{t('common.recommended', 'Recommended')}: {rec.stepoverFraction}</span>
-                      </div>
-                    )}
-                    <div className="cc-field">
-                      <label htmlFor="cc-safez">{t('cc.safeZ', 'Safe Z (mm)')}</label>
-                      <input id="cc-safez" step={0.5} {...num2d('safeZ')} />
-                    </div>
-                    <div className="cc-field">
-                      <label htmlFor="cc-surfacez">{t('cc.surfaceZ', 'Surface Z (mm)')}</label>
-                      <input
-                        id="cc-surfacez"
-                        step={0.5}
-                        title={t('cc.surfaceZTip', 'Z of the stock top — cuts go from here down to Cut depth')}
-                        {...num2d('surfaceZ')}
+                      <SliderField
+                        icon={<ChevronsLeftRightEllipsis size={14} strokeWidth={1.8} />}
+                        label={t('cc.stepoverFrac', 'Stepover (×⌀)')}
+                        htmlFor="cc-stepover"
+                        min={0.05}
+                        max={0.95}
+                        step={0.05}
+                        hint={<>{t('common.recommended', 'Recommended')}: {rec.stepoverFraction}</>}
+                        title={t('cc.stepoverFracTip', 'Sideways overlap between pocket passes, as a fraction of tool ⌀')}
+                        {...slider2d('stepover')}
                       />
-                    </div>
+                    )}
                   </div>
                 </div>
               </section>
@@ -2002,24 +2041,42 @@ export function CadCamPanel() {
                       ✒ {t('cc.pen', 'Pen')}
                     </button>
                   </div>
-                  <div className="cc-grid">
+                  <div className="cc-sgrid">
                     {!isPen && (
-                      <div className="cc-field">
-                        <label htmlFor="cc-rpm">{t('cc.spindleRPM', 'Spindle RPM')}</label>
-                        <input id="cc-rpm" min={0} step={500} {...num2d('spindleRPM')} />
-                        <span className="cc-rechint">{t('common.recommended', 'Recommended')}: {rec.spindleRPM}</span>
-                      </div>
+                      <SliderField
+                        icon={<Icon name="spindle" size={14} />}
+                        label={t('cc.spindleRPM', 'Spindle RPM')}
+                        htmlFor="cc-rpm"
+                        unit={t('cc.unitRpm', 'RPM')}
+                        min={0}
+                        max={30000}
+                        step={500}
+                        hint={<>{t('common.recommended', 'Recommended')}: {rec.spindleRPM}</>}
+                        {...slider2d('spindleRPM')}
+                      />
                     )}
                     {isPen && (
                       <>
-                        <div className="cc-field">
-                          <label htmlFor="cc-penup">{t('cc.penUpZ', 'Pen up Z (mm)')}</label>
-                          <input id="cc-penup" step={0.5} {...num2d('penUpZ')} />
-                        </div>
-                        <div className="cc-field">
-                          <label htmlFor="cc-pendown">{t('cc.penDownZ', 'Pen down Z (mm)')}</label>
-                          <input id="cc-pendown" step={0.5} {...num2d('penDownZ')} />
-                        </div>
+                        <SliderField
+                          icon={<ArrowUpToLine size={14} strokeWidth={1.8} />}
+                          label={t('cc.penUpZShort', 'Pen up Z')}
+                          htmlFor="cc-penup"
+                          unit="mm"
+                          min={0}
+                          max={50}
+                          step={0.5}
+                          {...slider2d('penUpZ')}
+                        />
+                        <SliderField
+                          icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
+                          label={t('cc.penDownZShort', 'Pen down Z')}
+                          htmlFor="cc-pendown"
+                          unit="mm"
+                          min={-20}
+                          max={20}
+                          step={0.1}
+                          {...slider2d('penDownZ')}
+                        />
                       </>
                     )}
                   </div>
@@ -2043,28 +2100,39 @@ export function CadCamPanel() {
                 </button>
                 {showAdvanced && (
                   <div className="cc-section-body">
-                    <div className="cc-grid">
-                      <div className="cc-field">
-                        <label htmlFor="cc-feedxy">{t('cc.feedXYmm', 'Feed XY (mm/min)')}</label>
-                        <input id="cc-feedxy" min={0} step={10} {...num2d('feedXY')} />
-                        <span className="cc-rechint">{t('common.recommended', 'Recommended')}: {rec.feedXY}</span>
-                      </div>
-                      <div className="cc-field">
-                        <label htmlFor="cc-feedz">{t('cc.feedZmm', 'Feed Z / plunge (mm/min)')}</label>
-                        <input id="cc-feedz" min={0} step={10} {...num2d('feedZ')} />
-                        <span className="cc-rechint">{t('common.recommended', 'Recommended')}: {rec.feedZ}</span>
-                      </div>
-                      <div className="cc-field">
-                        <label htmlFor="cc-decimals">{t('cc.decimals', 'Decimals')}</label>
-                        <input
-                          id="cc-decimals"
-                          min={1}
-                          max={6}
-                          step={1}
-                          title={t('cc.decimalsTip', 'Number of decimal places in emitted coordinates')}
-                          {...num2d('decimals')}
-                        />
-                      </div>
+                    <div className="cc-sgrid">
+                      <SliderField
+                        icon={<Gauge size={14} strokeWidth={1.8} />}
+                        label={t('cc.feedXYShort', 'Feed XY')}
+                        htmlFor="cc-feedxy"
+                        unit={t('cc.mmMin', 'mm/min')}
+                        min={0}
+                        max={6000}
+                        step={50}
+                        hint={<>{t('common.recommended', 'Recommended')}: {rec.feedXY}</>}
+                        {...slider2d('feedXY')}
+                      />
+                      <SliderField
+                        icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
+                        label={t('cc.feedZShort', 'Plunge Z')}
+                        htmlFor="cc-feedz"
+                        unit={t('cc.mmMin', 'mm/min')}
+                        min={0}
+                        max={3000}
+                        step={10}
+                        hint={<>{t('common.recommended', 'Recommended')}: {rec.feedZ}</>}
+                        {...slider2d('feedZ')}
+                      />
+                      <SliderField
+                        icon={<Hash size={14} strokeWidth={1.8} />}
+                        label={t('cc.decimals', 'Decimals')}
+                        htmlFor="cc-decimals"
+                        min={0}
+                        max={6}
+                        step={1}
+                        title={t('cc.decimalsTip', 'Number of decimal places in emitted coordinates')}
+                        {...slider2d('decimals')}
+                      />
                     </div>
                     <label className="cc-check">
                       <input
@@ -2421,6 +2489,8 @@ function ModelFilesList({
   selectedId,
   fileName,
   onSelect,
+  onToggleJob,
+  onDuplicateJob,
   onRemoveJob,
   onRemove2D,
   t,
@@ -2430,7 +2500,9 @@ function ModelFilesList({
   selectedId: string | null
   fileName: string | null
   onSelect: (id: string) => void
-  onRemoveJob: (id: string) => void
+  onToggleJob: (id: string, enabled: boolean) => void
+  onDuplicateJob: (id: string) => void
+  onRemoveJob: (id: string, name: string) => void
   onRemove2D: () => void
   t: ReturnType<typeof useT>
 }) {
@@ -2438,31 +2510,63 @@ function ModelFilesList({
   const has2D = (mode === '2d' || mode === 'cdr' || mode === 'step') && !!fileName
   // Nothing uploaded yet → render nothing (no placeholder text).
   if (!has3D && !has2D) return null
-  return (
-    <ul className="cc-modelfiles">
-      {has3D &&
-        jobs.map((job) => (
-          <li key={job.id} className={'cc-modelfile' + (job.id === selectedId ? ' is-sel' : '')}>
+  // 3D — the single canonical models list: per-model visibility (eye),
+  // select-to-edit, duplicate & remove. (Merged from the old "Jobs" section.)
+  if (has3D) {
+    return (
+      <ul className="cc-joblist">
+        {jobs.map((job) => (
+          <li
+            key={job.id}
+            className={'cc-jobrow' + (job.id === selectedId ? ' active' : '')}
+          >
             <button
-              type="button"
-              className="cc-modelfile-pick"
-              onClick={() => onSelect(job.id)}
-              title={t('cc.modelfilePick', 'Select “{name}” (edit its placement)', { name: job.name })}
+              className={'cc-iconbtn cc-job-eye' + (job.enabled ? '' : ' hidden')}
+              onClick={() => onToggleJob(job.id, !job.enabled)}
+              title={
+                job.enabled
+                  ? t('cc.jobHide', 'Visible — click to hide this model from the toolpath & 3D view')
+                  : t('cc.jobShow', 'Hidden — click to show this model in the toolpath & 3D view')
+              }
+              aria-label={
+                job.enabled
+                  ? t('cc.jobHide', 'Hide this model from the toolpath')
+                  : t('cc.jobShow', 'Show this model in the toolpath')
+              }
+              aria-pressed={!job.enabled}
             >
-              <span className="cc-modelfile-ext" aria-hidden="true">3D</span>
-              <span className="cc-modelfile-name">{job.name}</span>
+              <Icon name={job.enabled ? 'eye' : 'eye-off'} size={14} />
             </button>
             <button
-              type="button"
-              className="cc-modelfile-x"
-              onClick={() => onRemoveJob(job.id)}
-              title={t('cc.removeFile', 'Remove this model')}
-              aria-label={t('cc.removeFileAria', 'Remove {name}', { name: job.name })}
+              className={'cc-job-name' + (job.enabled ? '' : ' hidden')}
+              onClick={() => onSelect(job.id)}
+              title={t('cc.jobSelect', 'Select to edit this job’s settings')}
             >
-              ✕
+              <span className="cc-job-label">{job.name}</span>
+            </button>
+            <button
+              className="cc-iconbtn"
+              onClick={() => onDuplicateJob(job.id)}
+              title={t('cc.jobDup', 'Duplicate this job')}
+              aria-label={t('cc.jobDup', 'Duplicate this job')}
+            >
+              <Icon name="duplicate" size={14} />
+            </button>
+            <button
+              className="cc-iconbtn danger"
+              onClick={() => onRemoveJob(job.id, job.name)}
+              title={t('cc.jobRemove', 'Remove this job')}
+              aria-label={t('cc.jobRemove', 'Remove this job')}
+            >
+              <Icon name="close" size={14} />
             </button>
           </li>
         ))}
+      </ul>
+    )
+  }
+  return (
+    <ul className="cc-modelfiles">
       {has2D && fileName && (
         <li className="cc-modelfile is-sel">
           <span className="cc-modelfile-pick" title={fileName}>
@@ -2500,7 +2604,9 @@ interface SelectedJobCardProps {
   setJobSpeeds: (id: string, s: Partial<CarveJob['speeds']>) => void
   setJobStock: (id: string, s: Partial<CarveJob['stock']>) => void
   setJobPlacement: (id: string, p: Partial<CarveJob['placement']>) => void
-  renest: () => void
+  /** GLOBAL motion settings (one bit cuts every job): plunge/pull-up/spindle/safe-Z. */
+  carveGlobal: GlobalCarveSettings
+  setGlobal: (g: Partial<GlobalCarveSettings>) => void
 }
 
 /** "Apply to all jobs" mini-button. */
@@ -2541,8 +2647,6 @@ function CutoutCard({
   cutout: CutoutParams
   setCutout: (updater: CutoutParams | ((prev: CutoutParams) => CutoutParams)) => void
 }) {
-  const num = (v: string, fallback = 0) => (Number.isFinite(+v) ? +v : fallback)
-  const fNum = (n: number) => String(Math.round(n * 1000) / 1000)
   // Normalise prev through defaults so writes against an older saved shape (no
   // shape/clearAround/rect fields) never read undefined nested objects.
   const patch = (p: Partial<CutoutParams>) =>
@@ -2632,64 +2736,71 @@ function CutoutCard({
                   {t('cc.cutoutRectManual', 'Custom size')}
                 </button>
               </div>
-              <div className="cc-grid">
+              <div className="cc-sgrid">
                 {!isManual && (
-                  <div className="cc-field">
-                    <label>{t('cc.cutoutMargin', 'Margin around part (mm)')}</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.5}
-                      value={fNum(cutout.rect.marginMm)}
-                      title={t('cc.cutoutMarginTip', 'Extra space left around the part’s bounding box on every side')}
-                      onChange={(e) => patchRect({ marginMm: num(e.target.value) })}
-                    />
-                  </div>
+                  <SliderField
+                    icon={<Maximize2 size={14} strokeWidth={1.8} style={{ color: '#38bdf8' }} />}
+                    label={t('cc.cutoutMargin', 'Margin around part')}
+                    htmlFor="cc-cut-margin"
+                    unit="mm"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    title={t('cc.cutoutMarginTip', 'Extra space left around the part’s bounding box on every side')}
+                    value={cutout.rect.marginMm}
+                    onChange={(v) => patchRect({ marginMm: Math.max(0, v) })}
+                  />
                 )}
                 {isManual && (
                   <>
-                    <div className="cc-field">
-                      <label>{t('cc.cutoutRectX', 'Origin X (mm)')}</label>
-                      <input
-                        type="number"
-                        step={1}
-                        value={fNum(cutout.rect.x)}
-                        title={t('cc.cutoutRectXTip', 'Lower-left X of the rectangle in bed coordinates')}
-                        onChange={(e) => patchRect({ x: num(e.target.value) })}
-                      />
-                    </div>
-                    <div className="cc-field">
-                      <label>{t('cc.cutoutRectY', 'Origin Y (mm)')}</label>
-                      <input
-                        type="number"
-                        step={1}
-                        value={fNum(cutout.rect.y)}
-                        title={t('cc.cutoutRectYTip', 'Lower-left Y of the rectangle in bed coordinates')}
-                        onChange={(e) => patchRect({ y: num(e.target.value) })}
-                      />
-                    </div>
-                    <div className="cc-field">
-                      <label>{t('cc.cutoutRectW', 'Width (mm)')}</label>
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={fNum(cutout.rect.width)}
-                        title={t('cc.cutoutRectWTip', 'Rectangle width along X')}
-                        onChange={(e) => patchRect({ width: Math.max(0, num(e.target.value)) })}
-                      />
-                    </div>
-                    <div className="cc-field">
-                      <label>{t('cc.cutoutRectH', 'Height (mm)')}</label>
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={fNum(cutout.rect.height)}
-                        title={t('cc.cutoutRectHTip', 'Rectangle height along Y')}
-                        onChange={(e) => patchRect({ height: Math.max(0, num(e.target.value)) })}
-                      />
-                    </div>
+                    <SliderField
+                      icon={<MoveHorizontal size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.x }} />}
+                      label={t('cc.cutoutRectX', 'Origin X')}
+                      htmlFor="cc-cut-x"
+                      unit="mm"
+                      min={0}
+                      max={1000}
+                      step={1}
+                      title={t('cc.cutoutRectXTip', 'Lower-left X of the rectangle in bed coordinates')}
+                      value={cutout.rect.x}
+                      onChange={(v) => patchRect({ x: v })}
+                    />
+                    <SliderField
+                      icon={<MoveVertical size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.y }} />}
+                      label={t('cc.cutoutRectY', 'Origin Y')}
+                      htmlFor="cc-cut-y"
+                      unit="mm"
+                      min={0}
+                      max={1000}
+                      step={1}
+                      title={t('cc.cutoutRectYTip', 'Lower-left Y of the rectangle in bed coordinates')}
+                      value={cutout.rect.y}
+                      onChange={(v) => patchRect({ y: v })}
+                    />
+                    <SliderField
+                      icon={<Ruler size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.x }} />}
+                      label={t('cc.cutoutRectW', 'Width')}
+                      htmlFor="cc-cut-w"
+                      unit="mm"
+                      min={0}
+                      max={1000}
+                      step={1}
+                      title={t('cc.cutoutRectWTip', 'Rectangle width along X')}
+                      value={cutout.rect.width}
+                      onChange={(v) => patchRect({ width: Math.max(0, v) })}
+                    />
+                    <SliderField
+                      icon={<Ruler size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.y, transform: 'rotate(90deg)' }} />}
+                      label={t('cc.cutoutRectH', 'Height')}
+                      htmlFor="cc-cut-h"
+                      unit="mm"
+                      min={0}
+                      max={1000}
+                      step={1}
+                      title={t('cc.cutoutRectHTip', 'Rectangle height along Y')}
+                      value={cutout.rect.height}
+                      onChange={(v) => patchRect({ height: Math.max(0, v) })}
+                    />
                   </>
                 )}
               </div>
@@ -2737,79 +2848,84 @@ function CutoutCard({
           )}
 
           <div className="cc-rowlabel">{t('cc.cutoutDepth', 'Depth & edge')}</div>
-          <div className="cc-grid">
-            <div className="cc-field">
-              <label>{t('cc.cutStepdown', 'Stepdown / pass (mm)')}</label>
-              <input
-                type="number"
-                min={0.1}
-                step={0.1}
-                value={fNum(cutout.cutStepdownMm)}
-                title={t('cc.cutStepdownTip', 'Depth removed per profile pass through the stock')}
-                onChange={(e) => patch({ cutStepdownMm: num(e.target.value, cutout.cutStepdownMm) })}
-              />
-            </div>
-            <div className="cc-field">
-              <label>{t('cc.breakThrough', 'Break-through (mm)')}</label>
-              <input
-                type="number"
-                min={0}
-                step={0.1}
-                value={fNum(cutout.breakThroughMm)}
-                title={t('cc.breakThroughTip', 'Extra depth below the stock bottom so the cut goes fully through')}
-                onChange={(e) => patch({ breakThroughMm: num(e.target.value) })}
-              />
-            </div>
+          <div className="cc-sgrid">
+            <SliderField
+              icon={<Layers size={14} strokeWidth={1.8} style={{ color: '#f59e0b' }} />}
+              label={t('cc.cutStepdown', 'Stepdown / pass')}
+              htmlFor="cc-cut-stepdown"
+              unit="mm"
+              min={0.1}
+              max={20}
+              step={0.1}
+              title={t('cc.cutStepdownTip', 'Depth removed per profile pass through the stock')}
+              value={cutout.cutStepdownMm}
+              onChange={(v) => patch({ cutStepdownMm: v > 0 ? v : cutout.cutStepdownMm })}
+            />
+            <SliderField
+              icon={<ArrowDownToLine size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.z }} />}
+              label={t('cc.breakThrough', 'Break-through')}
+              htmlFor="cc-cut-breakthrough"
+              unit="mm"
+              min={0}
+              max={10}
+              step={0.1}
+              title={t('cc.breakThroughTip', 'Extra depth below the stock bottom so the cut goes fully through')}
+              value={cutout.breakThroughMm}
+              onChange={(v) => patch({ breakThroughMm: Math.max(0, v) })}
+            />
             {!isRect && (
-              <div className="cc-field">
-                <label>{t('cc.finishAllowance', 'Finish allowance (mm)')}</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.1}
-                  value={fNum(cutout.finishAllowanceMm)}
-                  title={t('cc.finishAllowanceTip', 'Extra clearance beyond the tool radius left on the part edge')}
-                  onChange={(e) => patch({ finishAllowanceMm: num(e.target.value) })}
-                />
-              </div>
+              <SliderField
+                icon={<ChevronsLeftRightEllipsis size={14} strokeWidth={1.8} style={{ color: '#a78bfa' }} />}
+                label={t('cc.finishAllowance', 'Finish allowance')}
+                htmlFor="cc-cut-finish"
+                unit="mm"
+                min={0}
+                max={5}
+                step={0.1}
+                title={t('cc.finishAllowanceTip', 'Extra clearance beyond the tool radius left on the part edge')}
+                value={cutout.finishAllowanceMm}
+                onChange={(v) => patch({ finishAllowanceMm: Math.max(0, v) })}
+              />
             )}
           </div>
 
           <div className="cc-rowlabel">{t('cc.holdingTabs', 'Holding tabs')}</div>
-          <div className="cc-grid">
-            <div className="cc-field">
-              <label>{t('cc.tabCount', 'Count')}</label>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={String(cutout.tabs.count)}
-                title={t('cc.tabCountTip', 'Number of bridges spaced evenly around the part')}
-                onChange={(e) => patchTabs({ count: Math.max(0, Math.round(num(e.target.value))) })}
-              />
-            </div>
-            <div className="cc-field">
-              <label>{t('cc.tabLength', 'Length (mm)')}</label>
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={fNum(cutout.tabs.lengthMm)}
-                title={t('cc.tabLengthTip', 'Width of each tab along the perimeter')}
-                onChange={(e) => patchTabs({ lengthMm: num(e.target.value) })}
-              />
-            </div>
-            <div className="cc-field">
-              <label>{t('cc.tabHeight', 'Height (mm)')}</label>
-              <input
-                type="number"
-                min={0}
-                step={0.1}
-                value={fNum(cutout.tabs.heightMm)}
-                title={t('cc.tabHeightTip', 'Material left under each tab, measured up from the stock bottom')}
-                onChange={(e) => patchTabs({ heightMm: num(e.target.value) })}
-              />
-            </div>
+          <div className="cc-sgrid">
+            <SliderField
+              icon={<Hash size={14} strokeWidth={1.8} style={{ color: '#38bdf8' }} />}
+              label={t('cc.tabCount', 'Count')}
+              htmlFor="cc-cut-tabcount"
+              min={0}
+              max={20}
+              step={1}
+              title={t('cc.tabCountTip', 'Number of bridges spaced evenly around the part')}
+              value={cutout.tabs.count}
+              onChange={(v) => patchTabs({ count: Math.max(0, Math.round(v)) })}
+            />
+            <SliderField
+              icon={<Grip size={14} strokeWidth={1.8} style={{ color: '#f59e0b' }} />}
+              label={t('cc.tabLength', 'Length')}
+              htmlFor="cc-cut-tablen"
+              unit="mm"
+              min={0}
+              max={30}
+              step={0.5}
+              title={t('cc.tabLengthTip', 'Width of each tab along the perimeter')}
+              value={cutout.tabs.lengthMm}
+              onChange={(v) => patchTabs({ lengthMm: Math.max(0, v) })}
+            />
+            <SliderField
+              icon={<ArrowUpToLine size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.z }} />}
+              label={t('cc.tabHeight', 'Height')}
+              htmlFor="cc-cut-tabh"
+              unit="mm"
+              min={0}
+              max={10}
+              step={0.1}
+              title={t('cc.tabHeightTip', 'Material left under each tab, measured up from the stock bottom')}
+              value={cutout.tabs.heightMm}
+              onChange={(v) => patchTabs({ heightMm: Math.max(0, v) })}
+            />
           </div>
           <span className="cc-hint">
             {isRect
@@ -2848,8 +2964,6 @@ function TwoSidedCard({
   const [open, setOpen] = useState(false)
   const patch = (p: Partial<TwoSidedParams>) =>
     setTwoSided((c) => ({ ...defaultTwoSidedParams(c), ...p }))
-  const num = (v: string, fallback: number) => (Number.isFinite(+v) ? +v : fallback)
-  const fNum = (n: number) => String(Math.round(n * 1000) / 1000)
 
   const CORNERS: { id: FlipCorner; label: string }[] = [
     { id: 'back-left', label: t('cc.ts.cornerBL', 'Back-left') },
@@ -2894,32 +3008,35 @@ function TwoSidedCard({
 
           {twoSided.enabled && (
             <>
-              <div className="cc-grid">
-                <div className="cc-field">
-                  <label>{t('cc.ts.thickness', 'Stock thickness (mm)')}</label>
-                  <input
-                    type="number"
-                    min={0.1}
-                    step={0.5}
-                    value={fNum(twoSided.stockThicknessMm)}
-                    title={t(
-                      'cc.ts.thicknessTip',
-                      'Total block thickness — the back-side cut depths are referenced from the new (flipped) top face using this.',
-                    )}
-                    onChange={(e) =>
-                      patch({ stockThicknessMm: num(e.target.value, twoSided.stockThicknessMm) })
-                    }
-                  />
-                </div>
+              <div className="cc-sgrid">
+                <SliderField
+                  icon={<Layers size={14} strokeWidth={1.8} style={{ color: '#f59e0b' }} />}
+                  label={t('cc.ts.thicknessShort', 'Thickness')}
+                  htmlFor="cc-ts-thickness"
+                  unit={t('unit.mm', 'mm')}
+                  min={0.5}
+                  max={100}
+                  step={0.5}
+                  title={t(
+                    'cc.ts.thicknessTip',
+                    'Total block thickness — the back-side cut depths are referenced from the new (flipped) top face using this.',
+                  )}
+                  value={Math.round(twoSided.stockThicknessMm * 1000) / 1000}
+                  onChange={(v) => patch({ stockThicknessMm: v })}
+                />
               </div>
 
               <div className="cc-rowlabel">{t('cc.ts.flipAxis', 'Flip axis')}</div>
-              <div className="cc-subops" role="group" aria-label={t('cc.ts.flipAxis', 'Flip axis')}>
+              <div
+                className="cc-subops cc-ts-axis"
+                role="group"
+                aria-label={t('cc.ts.flipAxis', 'Flip axis')}
+              >
                 {(['x', 'y'] as FlipAxis[]).map((ax) => (
                   <button
                     key={ax}
                     type="button"
-                    className={'cc-subop-btn' + (twoSided.flipAxis === ax ? ' active' : '')}
+                    className={'cc-subop-btn cc-ts-axis-btn' + (twoSided.flipAxis === ax ? ' active' : '')}
                     onClick={() => patch({ flipAxis: ax })}
                     aria-pressed={twoSided.flipAxis === ax}
                     title={
@@ -2928,15 +3045,24 @@ function TwoSidedCard({
                         : t('cc.ts.flipYTip', 'Turn the stock over about the Y axis (X mirrors)')
                     }
                   >
-                    {ax === 'x'
-                      ? t('cc.ts.flipX', 'About X')
-                      : t('cc.ts.flipY', 'About Y')}
+                    <span className="cc-ts-axis-ico" aria-hidden>
+                      {ax === 'x' ? (
+                        <FlipVertical2 size={15} strokeWidth={1.8} />
+                      ) : (
+                        <FlipHorizontal2 size={15} strokeWidth={1.8} />
+                      )}
+                    </span>
+                    {ax === 'x' ? t('cc.ts.flipX', 'About X') : t('cc.ts.flipY', 'About Y')}
                   </button>
                 ))}
               </div>
 
-              <div className="cc-rowlabel">{t('cc.ts.corner', 'Flip / re-zero corner')}</div>
-              <div className="cc-subops cc-ts-corners" role="group" aria-label={t('cc.ts.corner', 'Flip / re-zero corner')}>
+              <div className="cc-rowlabel">{t('cc.ts.corner', 'Front zero / re-zero corner')}</div>
+              <div
+                className="cc-subops cc-ts-corners"
+                role="group"
+                aria-label={t('cc.ts.corner', 'Front zero / re-zero corner')}
+              >
                 {CORNERS.map((c) => (
                   <button
                     key={c.id}
@@ -2944,7 +3070,10 @@ function TwoSidedCard({
                     className={'cc-subop-btn' + (twoSided.flipCorner === c.id ? ' active' : '')}
                     onClick={() => patch({ flipCorner: c.id })}
                     aria-pressed={twoSided.flipCorner === c.id}
-                    title={t('cc.ts.cornerTip', 'Re-zero the tool against this corner after flipping')}
+                    title={t(
+                      'cc.ts.cornerTip',
+                      'The corner the FRONT is zeroed against — the back instruction tells you where it lands after the flip',
+                    )}
                   >
                     {c.label}
                   </button>
@@ -2954,10 +3083,10 @@ function TwoSidedCard({
               <span className="cc-hint">
                 {t(
                   'cc.ts.hint',
-                  'The program runs the front, lifts to safe-Z, stops the spindle and PAUSES (M0). Flip the stock about {axis}, re-zero the tool at the {corner} corner, then resume to cut the back.',
+                  'The program runs the front, lifts to safe-Z, stops the spindle and PAUSES (M0). Flip the stock about {axis}, re-zero the tool (X0 Y0) at the {corner} corner, then resume to cut the back.',
                   {
                     axis: twoSided.flipAxis === 'x' ? 'X' : 'Y',
-                    corner: flipCornerLabel(twoSided.flipCorner),
+                    corner: flipCornerLabel(flippedCorner(twoSided.flipCorner, twoSided.flipAxis)),
                   },
                 )}
               </span>
@@ -2981,7 +3110,8 @@ function SelectedJobCard({
   setJobSpeeds,
   setJobStock,
   setJobPlacement,
-  renest,
+  carveGlobal,
+  setGlobal,
 }: SelectedJobCardProps) {
   const tris = job.mesh.triangleCount
   const size = {
@@ -2989,7 +3119,7 @@ function SelectedJobCard({
     y: job.mesh.bbox.max[1] - job.mesh.bbox.min[1],
     z: job.mesh.bbox.max[2] - job.mesh.bbox.min[2],
   }
-  const fNum = (n: number) => String(Math.round(n * 1000) / 1000)
+  const round2 = (n: number) => Math.round(n * 100) / 100
   // Archival AI/camera feature — visible only to the owner (or local dev opt-in).
   const showExperimentalAI = useExperimentalAI()
 
@@ -3018,85 +3148,125 @@ function SelectedJobCard({
         <div className="cc-rowlabel">
           {t('cc.speedsDepth', 'Speeds & cut depth')}
         </div>
-        <div className="cc-grid">
-          <div className="cc-field">
-            <label>
-              {t('cc.cutSpeed', 'Cut speed (mm/s)')}
-              <ApplyAll t={t} onClick={() => applyToAll('speeds')} />
-            </label>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={fNum(job.speeds.cutSpeedMmS)}
-              title={t('cc.cutSpeedTip', 'Cutting feed while the tool is engaged in material')}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value)
-                setJobSpeeds(job.id, { cutSpeedMmS: Number.isFinite(v) ? v : job.speeds.cutSpeedMmS })
-              }}
-            />
-          </div>
-          <div className="cc-field">
-            <label>{t('cc.freeSpeed', 'Free speed (mm/s)')}</label>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={fNum(job.speeds.freeSpeedMmS)}
-              title={t('cc.freeSpeedTip', 'Travel feed for non-cutting links between one cut and the next')}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value)
-                setJobSpeeds(job.id, { freeSpeedMmS: Number.isFinite(v) ? v : job.speeds.freeSpeedMmS })
-              }}
-            />
-          </div>
-          <div className="cc-field">
-            <label>{t('cc.cutDepthPass', 'Cut depth / pass (mm)')}</label>
-            <input
-              type="number"
-              min={0.05}
-              step={0.1}
-              value={fNum(job.speeds.cutDepthMm)}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value)
-                setJobSpeeds(job.id, { cutDepthMm: Number.isFinite(v) ? v : job.speeds.cutDepthMm })
-              }}
-            />
-            <span className="cc-rechint">{t('common.recommended', 'Recommended')}: {rec.stepdown}</span>
-          </div>
-          <div className="cc-field">
-            <label>
-              {t('cc.maxDepth', 'Max carve depth (mm)')}
-              <ApplyAll t={t} onClick={() => applyToAll('maxDepth')} />
-            </label>
-            <input
-              type="number"
-              min={0}
-              step={0.5}
-              value={fNum(job.maxDepth)}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value)
-                updateJob(job.id, { maxDepth: Number.isFinite(v) ? v : job.maxDepth })
-              }}
-            />
-          </div>
-          <div className="cc-field">
-            <label>
-              {t('cc.stepoverMm', 'Stepover (mm)')}
-              <ApplyAll t={t} onClick={() => applyToAll('stepover')} />
-            </label>
-            <input
-              type="number"
-              min={0.05}
-              step={0.1}
-              value={fNum(job.stepover)}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value)
-                updateJob(job.id, { stepover: Number.isFinite(v) ? v : job.stepover })
-              }}
-            />
-            <span className="cc-rechint">{t('common.recommended', 'Recommended')}: {rec.stepover}</span>
-          </div>
+        <div className="cc-sgrid">
+          <SliderField
+            icon={<Gauge size={14} strokeWidth={1.8} style={{ color: '#22c55e' }} />}
+            label={t('cc.cutSpeedShort', 'Cut speed')}
+            htmlFor="cc-3d-cutspeed"
+            unit={t('cc.mmS', 'mm/s')}
+            min={0}
+            max={200}
+            step={1}
+            title={t('cc.cutSpeedTip', 'Cutting feed while the tool is engaged in material')}
+            action={<ApplyAll t={t} onClick={() => applyToAll('speeds')} />}
+            value={round2(job.speeds.cutSpeedMmS)}
+            onChange={(v) => setJobSpeeds(job.id, { cutSpeedMmS: v })}
+          />
+          <SliderField
+            icon={<FastForward size={14} strokeWidth={1.8} style={{ color: '#38bdf8' }} />}
+            label={t('cc.freeSpeedShort', 'Free speed')}
+            htmlFor="cc-3d-freespeed"
+            unit={t('cc.mmS', 'mm/s')}
+            min={0}
+            max={500}
+            step={1}
+            title={t('cc.freeSpeedTip', 'Travel feed for non-cutting links between one cut and the next')}
+            value={round2(job.speeds.freeSpeedMmS)}
+            onChange={(v) => setJobSpeeds(job.id, { freeSpeedMmS: v })}
+          />
+          <SliderField
+            icon={<Layers size={14} strokeWidth={1.8} style={{ color: '#f59e0b' }} />}
+            label={t('cc.cutDepthPassShort', 'Cut depth / pass')}
+            htmlFor="cc-3d-cutdepth"
+            unit="mm"
+            min={0.05}
+            max={20}
+            step={0.05}
+            hint={<>{t('common.recommended', 'Recommended')}: {rec.stepdown}</>}
+            value={round2(job.speeds.cutDepthMm)}
+            onChange={(v) => setJobSpeeds(job.id, { cutDepthMm: v })}
+          />
+          <SliderField
+            icon={<ArrowDownToLine size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.z }} />}
+            label={t('cc.maxDepthShort', 'Max carve depth')}
+            htmlFor="cc-3d-maxdepth"
+            unit="mm"
+            min={0}
+            max={100}
+            step={0.5}
+            title={t('cc.maxDepth', 'Max carve depth (mm)')}
+            action={<ApplyAll t={t} onClick={() => applyToAll('maxDepth')} />}
+            value={round2(job.maxDepth)}
+            onChange={(v) => updateJob(job.id, { maxDepth: v })}
+          />
+          <SliderField
+            icon={<ChevronsLeftRightEllipsis size={14} strokeWidth={1.8} style={{ color: '#a78bfa' }} />}
+            label={t('cc.stepoverMmShort', 'Stepover')}
+            htmlFor="cc-3d-stepover"
+            unit="mm"
+            min={0.05}
+            max={10}
+            step={0.05}
+            hint={<>{t('common.recommended', 'Recommended')}: {rec.stepover}</>}
+            action={<ApplyAll t={t} onClick={() => applyToAll('stepover')} />}
+            value={round2(job.stepover)}
+            onChange={(v) => updateJob(job.id, { stepover: v })}
+          />
+        </div>
+
+        {/* Motion (GLOBAL — one bit cuts every job). Moved here from the old
+            "Advanced (auto)" section: plunge / pull-up / spindle / safe-Z. These
+            are auto-set from the bit + material but remain editable. */}
+        <div className="cc-rowlabel">{t('cc.motion', 'Motion & spindle (all jobs)')}</div>
+        <div className="cc-sgrid">
+          <SliderField
+            icon={<ArrowDownToLine size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.z }} />}
+            label={t('cc.plungeZShort', 'Plunge Z')}
+            htmlFor="cc-3d-plungez"
+            unit={t('cc.unitMmMin', 'mm/min')}
+            min={0}
+            max={2000}
+            step={10}
+            title={t('cc.tipPlungeZ', 'How fast the bit drives straight DOWN into the stock. Auto-set to a safe fraction of the cutting speed — lower it if your bit chatters when entering the cut.')}
+            value={carveGlobal.feedZ}
+            onChange={(v) => setGlobal({ feedZ: v })}
+          />
+          <SliderField
+            icon={<ArrowUpToLine size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.z }} />}
+            label={t('cc.pullUpZShort', 'Pull-up Z')}
+            htmlFor="cc-3d-pullupz"
+            unit={t('cc.unitMmMin', 'mm/min')}
+            min={0}
+            max={3000}
+            step={50}
+            title={t('cc.tipPullUp', 'How fast the bit retracts out of the cut. 0 = maximum (rapid G0). Set a value (mm/min) to lift more gently.')}
+            value={carveGlobal.retractFeedMmMin}
+            onChange={(v) => setGlobal({ retractFeedMmMin: v })}
+          />
+          <SliderField
+            icon={<RotateCw size={14} strokeWidth={1.8} style={{ color: '#22c55e' }} />}
+            label={t('cc.spindleRPM', 'Spindle RPM')}
+            htmlFor="cc-3d-spindle"
+            unit={t('cc.unitRpm', 'RPM')}
+            min={0}
+            max={30000}
+            step={500}
+            title={t('cc.tipSpindle', 'Spindle speed suggested for this material — slower for plastics/metal, faster for wood. Override for your bit/spindle.')}
+            value={carveGlobal.spindleRPM}
+            onChange={(v) => setGlobal({ spindleRPM: v })}
+          />
+          <SliderField
+            icon={<ArrowUpToLine size={14} strokeWidth={1.8} style={{ color: '#38bdf8' }} />}
+            label={t('cc.safeZ', 'Safe Z (mm)')}
+            htmlFor="cc-3d-safez"
+            unit="mm"
+            min={0}
+            max={60}
+            step={0.5}
+            title={t('cc.tipSafeZ', 'Height the bit lifts to before moving across the stock. Must clear any clamps and the tallest part of your model.')}
+            value={round2(carveGlobal.safeZ)}
+            onChange={(v) => setGlobal({ safeZ: v })}
+          />
         </div>
 
         {/* Strategy */}
@@ -3139,121 +3309,55 @@ function SelectedJobCard({
 
         {/* Place this job */}
         <div className="cc-rowlabel">{t('cc.placement', 'Place model')}</div>
-        <div className="cc-grid">
-          <div className="cc-field">
-            <label style={{ color: AXIS_COLOR.x }}>{t('cc.offsetX', 'X offset (mm)')}</label>
-            <div className="cc-nudge">
-              <button
-                type="button"
-                onClick={() => setJobPlacement(job.id, { dx: job.placement.dx - 1 })}
-                title={t('cc.nudgeMinus', 'Nudge −1')}
-                aria-label={t('cc.nudgeMinus', 'Nudge −1')}
-              >−</button>
-              <input
-                type="number"
-                step={0.5}
-                value={fNum(job.placement.dx)}
-                onChange={(e) =>
-                  setJobPlacement(job.id, { dx: Number.isFinite(+e.target.value) ? +e.target.value : 0 })
-                }
-              />
-              <button
-                type="button"
-                onClick={() => setJobPlacement(job.id, { dx: job.placement.dx + 1 })}
-                title={t('cc.nudgePlus', 'Nudge +1')}
-                aria-label={t('cc.nudgePlus', 'Nudge +1')}
-              >+</button>
-            </div>
-          </div>
-          <div className="cc-field">
-            <label style={{ color: AXIS_COLOR.y }}>{t('cc.offsetY', 'Y offset (mm)')}</label>
-            <div className="cc-nudge">
-              <button
-                type="button"
-                onClick={() => setJobPlacement(job.id, { dy: job.placement.dy - 1 })}
-                title={t('cc.nudgeMinus', 'Nudge −1')}
-                aria-label={t('cc.nudgeMinus', 'Nudge −1')}
-              >−</button>
-              <input
-                type="number"
-                step={0.5}
-                value={fNum(job.placement.dy)}
-                onChange={(e) =>
-                  setJobPlacement(job.id, { dy: Number.isFinite(+e.target.value) ? +e.target.value : 0 })
-                }
-              />
-              <button
-                type="button"
-                onClick={() => setJobPlacement(job.id, { dy: job.placement.dy + 1 })}
-                title={t('cc.nudgePlus', 'Nudge +1')}
-                aria-label={t('cc.nudgePlus', 'Nudge +1')}
-              >+</button>
-            </div>
-          </div>
-          <div className="cc-field">
-            <label style={{ color: AXIS_COLOR.z }}>{t('cc.rotation', 'Rotation (°)')}</label>
-            <div className="cc-nudge">
-              <button
-                type="button"
-                onClick={() => {
-                  setJobPlacement(job.id, { rotDeg: job.placement.rotDeg - 5 })
-                  renest()
-                }}
-                title={t('cc.nudgeRotMinus', 'Rotate −5°')}
-                aria-label={t('cc.nudgeRotMinus', 'Rotate −5°')}
-              >↺</button>
-              <input
-                type="number"
-                step={1}
-                value={fNum(job.placement.rotDeg)}
-                onChange={(e) =>
-                  setJobPlacement(job.id, { rotDeg: Number.isFinite(+e.target.value) ? +e.target.value : 0 })
-                }
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  setJobPlacement(job.id, { rotDeg: job.placement.rotDeg + 5 })
-                  renest()
-                }}
-                title={t('cc.nudgeRotPlus', 'Rotate +5°')}
-                aria-label={t('cc.nudgeRotPlus', 'Rotate +5°')}
-              >↻</button>
-            </div>
-          </div>
-          <div className="cc-field">
-            <label>{t('cc.scale', 'Scale (×)')}</label>
-            <div className="cc-nudge">
-              <button
-                type="button"
-                onClick={() => {
-                  setJobPlacement(job.id, { scale: Math.max(0.01, job.placement.scale - 0.1) })
-                  renest()
-                }}
-                title={t('cc.nudgeScaleMinus', 'Scale −0.1×')}
-                aria-label={t('cc.nudgeScaleMinus', 'Scale −0.1×')}
-              >−</button>
-              <input
-                type="number"
-                min={0.01}
-                step={0.05}
-                value={fNum(job.placement.scale)}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value)
-                  setJobPlacement(job.id, { scale: Number.isFinite(v) && v > 0 ? v : 1 })
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  setJobPlacement(job.id, { scale: job.placement.scale + 0.1 })
-                  renest()
-                }}
-                title={t('cc.nudgeScalePlus', 'Scale +0.1×')}
-                aria-label={t('cc.nudgeScalePlus', 'Scale +0.1×')}
-              >+</button>
-            </div>
-          </div>
+        <div className="cc-sgrid">
+          <SliderField
+            icon={<MoveHorizontal size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.x }} />}
+            label={t('cc.offsetXShort', 'Offset X')}
+            htmlFor="cc-3d-offx"
+            unit="mm"
+            min={-Math.max(bedW, 1)}
+            max={Math.max(bedW, 1)}
+            step={0.5}
+            title={t('cc.offsetX', 'X offset (mm)')}
+            value={round2(job.placement.dx)}
+            onChange={(v) => setJobPlacement(job.id, { dx: v })}
+          />
+          <SliderField
+            icon={<MoveVertical size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.y }} />}
+            label={t('cc.offsetYShort', 'Offset Y')}
+            htmlFor="cc-3d-offy"
+            unit="mm"
+            min={-Math.max(bedD, 1)}
+            max={Math.max(bedD, 1)}
+            step={0.5}
+            title={t('cc.offsetY', 'Y offset (mm)')}
+            value={round2(job.placement.dy)}
+            onChange={(v) => setJobPlacement(job.id, { dy: v })}
+          />
+          <SliderField
+            icon={<RotateCw size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.z }} />}
+            label={t('cc.rotationShort', 'Rotation')}
+            htmlFor="cc-3d-rot"
+            unit="°"
+            min={0}
+            max={360}
+            step={1}
+            title={t('cc.rotation', 'Rotation (°)')}
+            value={round2(job.placement.rotDeg)}
+            onChange={(v) => setJobPlacement(job.id, { rotDeg: v })}
+          />
+          <SliderField
+            icon={<Maximize2 size={14} strokeWidth={1.8} />}
+            label={t('cc.scaleShort', 'Scale')}
+            htmlFor="cc-3d-scale"
+            unit="×"
+            min={0.05}
+            max={10}
+            step={0.05}
+            title={t('cc.scale', 'Scale (×)')}
+            value={round2(job.placement.scale)}
+            onChange={(v) => setJobPlacement(job.id, { scale: v > 0 ? v : 0.01 })}
+          />
         </div>
         <span className="cc-hint">
           {t('cc.placementJobHint', 'X/Y/rotation/scale move just THIS job. Re-nest packs all jobs without overlap.')}
@@ -3264,43 +3368,43 @@ function SelectedJobCard({
           {t('cc.stock', 'Stock')}
           <ApplyAll t={t} onClick={() => applyToAll('stock')} />
         </div>
-        <div className="cc-grid">
-          <div className="cc-field">
-            <label style={{ color: AXIS_COLOR.x }}>{t('common.width', 'Width')} X</label>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={fNum(job.stock.width)}
-              onChange={(e) =>
-                setJobStock(job.id, { width: Number.isFinite(+e.target.value) ? +e.target.value : 1 })
-              }
-            />
-          </div>
-          <div className="cc-field">
-            <label style={{ color: AXIS_COLOR.y }}>{t('common.depth', 'Depth')} Y</label>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={fNum(job.stock.depth)}
-              onChange={(e) =>
-                setJobStock(job.id, { depth: Number.isFinite(+e.target.value) ? +e.target.value : 1 })
-              }
-            />
-          </div>
-          <div className="cc-field">
-            <label style={{ color: AXIS_COLOR.z }}>{t('common.thickness', 'Thickness')} Z</label>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={fNum(job.stock.height)}
-              onChange={(e) =>
-                setJobStock(job.id, { height: Number.isFinite(+e.target.value) ? +e.target.value : 1 })
-              }
-            />
-          </div>
+        <div className="cc-sgrid">
+          <SliderField
+            icon={<Ruler size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.x }} />}
+            label={t('cc.stockWidthShort', 'Width X')}
+            htmlFor="cc-3d-stockw"
+            unit="mm"
+            min={1}
+            max={Math.max(bedW, 500)}
+            step={1}
+            title={t('common.width', 'Width')}
+            value={round2(job.stock.width)}
+            onChange={(v) => setJobStock(job.id, { width: v >= 1 ? v : 1 })}
+          />
+          <SliderField
+            icon={<Ruler size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.y, transform: 'rotate(90deg)' }} />}
+            label={t('cc.stockDepthShort', 'Depth Y')}
+            htmlFor="cc-3d-stockd"
+            unit="mm"
+            min={1}
+            max={Math.max(bedD, 500)}
+            step={1}
+            title={t('common.depth', 'Depth')}
+            value={round2(job.stock.depth)}
+            onChange={(v) => setJobStock(job.id, { depth: v >= 1 ? v : 1 })}
+          />
+          <SliderField
+            icon={<AlignVerticalSpaceBetween size={14} strokeWidth={1.8} style={{ color: AXIS_COLOR.z }} />}
+            label={t('cc.stockThicknessShort', 'Thickness Z')}
+            htmlFor="cc-3d-stockh"
+            unit="mm"
+            min={1}
+            max={200}
+            step={1}
+            title={t('common.thickness', 'Thickness')}
+            value={round2(job.stock.height)}
+            onChange={(v) => setJobStock(job.id, { height: v >= 1 ? v : 1 })}
+          />
         </div>
 
         {/* Phase 1 of the AI/camera workbench — ARCHIVAL, gated out of the public
@@ -3411,6 +3515,78 @@ function opLabelText(t: (k: string, e: string) => string, op: Op): string {
       return t('cc.profile', 'Profile')
     case 'Pocket':
       return t('cc.pocket', 'Pocket')
+  }
+}
+
+/** Small graphical glyph for each 2D operation type in the segmented selector. */
+function opIcon(op: Op): ReactNode {
+  switch (op) {
+    case 'Engrave':
+      // trace-the-lines glyph
+      return <PenLine size={18} strokeWidth={1.8} aria-hidden />
+    case 'Profile':
+      // cut-around-outline glyph
+      return <Frame size={18} strokeWidth={1.8} aria-hidden />
+    case 'Pocket':
+      // clear-out-area glyph
+      return <Grid2x2 size={18} strokeWidth={1.8} aria-hidden />
+  }
+}
+
+/**
+ * Custom inline SVG depicting where the cut path sits relative to the part
+ * outline: ON the line, just INSIDE it, or just OUTSIDE it. The solid rounded
+ * rect is the part outline; the dashed accent path is the toolpath.
+ */
+function sideIcon(side: ProfileSide): ReactNode {
+  // outer = part outline; the dashed path is offset in/out (or on) the line.
+  const outline = (
+    <rect x={8} y={5} width={24} height={20} rx={4} fill="none" stroke="currentColor" strokeWidth={1.4} />
+  )
+  let path: ReactNode
+  switch (side) {
+    case ProfileSide.On:
+      path = (
+        <rect
+          x={8} y={5} width={24} height={20} rx={4}
+          fill="none" stroke="var(--accent)" strokeWidth={1.6} strokeDasharray="3 2"
+        />
+      )
+      break
+    case ProfileSide.Inside:
+      path = (
+        <rect
+          x={12} y={9} width={16} height={12} rx={3}
+          fill="none" stroke="var(--accent)" strokeWidth={1.6} strokeDasharray="3 2"
+        />
+      )
+      break
+    case ProfileSide.Outside:
+      path = (
+        <rect
+          x={4} y={1} width={32} height={28} rx={5}
+          fill="none" stroke="var(--accent)" strokeWidth={1.6} strokeDasharray="3 2"
+        />
+      )
+      break
+  }
+  return (
+    <svg width={40} height={30} viewBox="0 0 40 30" aria-hidden focusable="false">
+      {side === ProfileSide.On ? path : outline}
+      {side === ProfileSide.On ? null : path}
+    </svg>
+  )
+}
+
+/** Plain one-line explanation of a Profile side (used in the button tooltip). */
+function profileSideHelp(t: (k: string, e: string) => string, side: ProfileSide): string {
+  switch (side) {
+    case ProfileSide.On:
+      return t('cc.sideOnHelp', 'Cut centered on the line.')
+    case ProfileSide.Inside:
+      return t('cc.sideInsideHelp', 'Offset the cut inside the outline (for holes/cavities).')
+    case ProfileSide.Outside:
+      return t('cc.sideOutsideHelp', 'Offset the cut outside the outline (to keep the part to size).')
   }
 }
 

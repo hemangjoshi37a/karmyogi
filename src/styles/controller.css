@@ -160,14 +160,80 @@
 .mc-field > .mc-label { flex: 0 0 auto; min-width: 40px; }
 .mc-input-grow { width: auto; flex: 1 1 auto; min-width: 56px; }
 .mc-unit { font-size: 10px; color: var(--fg-muted); flex: 0 0 auto; }
-/* Adobe-style compact control: draggable slider + small typable number. */
+/* Adobe-style compact control: draggable slider + small typable number.
+   Fully themed (track + thumb use theme vars, so it follows light/dark), with an
+   accent-filled track to the left of the thumb. The fill % comes from the inline
+   `--mc-pct` the component sets from the value (WebKit/Blink); Firefox fills via
+   ::-moz-range-progress automatically. */
 .mc-slider {
   flex: 1 1 auto;
   min-width: 60px;
-  height: 4px;
+  height: 18px;
   margin: 0;
-  accent-color: var(--accent);
   cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* track */
+.mc-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--mc-pct, 0%),
+    var(--bg-elev) var(--mc-pct, 0%) 100%
+  );
+}
+.mc-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.mc-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+/* thumb */
+.mc-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.mc-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.mc-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.mc-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.mc-slider:focus-visible {
+  outline: none;
+}
+.mc-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.mc-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .mc-slider-num {
   flex: 0 0 auto;
@@ -181,7 +247,12 @@
   margin: 0;
 }
 @media (pointer: coarse) {
-  .mc-slider { height: 6px; }
+  .mc-slider { height: 24px; }
+  .mc-slider::-webkit-slider-runnable-track,
+  .mc-slider::-moz-range-track,
+  .mc-slider::-moz-range-progress { height: 6px; }
+  .mc-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .mc-slider::-moz-range-thumb { width: 17px; height: 17px; }
 }
 
 .mc-seg {
@@ -595,3 +666,33 @@
   .console-input-row input { min-height: 38px; }
   .dro .dro-val { font-size: clamp(14px, 6vw, 18px); }
 }
+
+/* ---- Game-controller launcher (below Overrides) ---- */
+.mc-gamepad-section { padding: 0; border: 0; background: transparent; }
+.gp-launch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  min-height: var(--ctl-h, 34px);
+}
+.gp-launch > svg { flex: 0 0 auto; color: var(--accent); }
+.gp-launch-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.gp-launch-title { font-size: 13px; font-weight: 600; }
+.gp-launch-sub {
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gp-launch-dot {
+  flex: 0 0 auto;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+}
+.gp-launch-dot.on { background: var(--success); box-shadow: 0 0 6px var(--success); }
+@media (max-width: 480px) { .gp-launch { min-height: var(--ctl-h-touch, 44px); } }

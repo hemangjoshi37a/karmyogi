@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { IDockviewPanelProps } from 'dockview'
 import { panelComponents, availablePanels } from './panelRegistry'
+import { PanelIcon } from './panelIcons'
 import { useT } from '../i18n'
 
 /**
@@ -101,7 +102,8 @@ export function MobileShell() {
               className={selected ? 'mobile-tab active' : 'mobile-tab'}
               onClick={() => setActiveId(p.id)}
             >
-              {t('tab.' + p.id, p.title)}
+              <PanelIcon id={p.id} size={15} className="mobile-tab-ico" />
+              <span className="mobile-tab-label">{t('tab.' + p.id, p.title)}</span>
             </button>
           )
         })}

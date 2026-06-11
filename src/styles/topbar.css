@@ -149,7 +149,8 @@
   border-radius: 6px;
 }
 .launcher-item:hover { background: var(--bg-input); }
-.launcher-item-title { font-size: 13px; }
+.launcher-item-ico { flex: 0 0 auto; color: var(--fg-muted); }
+.launcher-item-title { flex: 1 1 auto; min-width: 0; font-size: 13px; }
 .launcher-dot {
   width: 7px;
   height: 7px;

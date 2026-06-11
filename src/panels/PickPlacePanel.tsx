@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useT } from '../i18n'
 import { useMachine, useProgram, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
-import { grbl } from '../serial/controller'
 import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { InfoTip } from '../components/InfoTip'
+import { Modal } from '../components/Modal'
+import { Crosshair, MapPin, Settings } from 'lucide-react'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
@@ -214,15 +215,15 @@ const inBed = (x: number, y: number, w: number, h: number): boolean =>
  * safe program (travel at safe-Z, lower to pick, grip, lift, travel to place,
  * lower, release, lift). "Set pick/place" captures the live work position.
  * Generation is live + debounced into the shared program store so the
- * Visualizer previews the travel/pick/place path; Send streams it to the machine.
+ * Visualizer previews the travel/pick/place path; the job is streamed from the
+ * Program / Controller tab (like Glue / Soldering), not from this panel.
  *
  * Layout (house style): a slim header (title + ⓘ + icon toolbar), an
  * always-visible status strip (op/line counts · connection · sync hint), then a
  * vertical-only scroller whose CARD sections tile into a responsive grid — the
  * ops table and bed preview stay full width, while the motion params and the
  * collapsed Advanced section tile beside each other at wide widths (collapsing
- * to one column when the panel is narrow). The Send + raw G-code card spans
- * full width at the foot.
+ * to one column when the panel is narrow).
  */
 export function PickPlacePanel() {
   const t = useT()
@@ -258,8 +259,7 @@ export function PickPlacePanel() {
   )
 
   const [selected, setSelected] = useState(-1)
-  const [showRaw, setShowRaw] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [loadError, setLoadError] = useState('')
 
   const labels = headLabels(params.headType, t)
@@ -365,20 +365,6 @@ export function PickPlacePanel() {
     return () => window.clearTimeout(id)
   }, [gcode, ops.length, setProgram, streaming])
 
-  // Stream the program to the machine.
-  function play() {
-    const lines = gcodeLines(gcode)
-    if (lines.length === 0 || !connected || streaming) return
-    setProgram('pick-place', gcode)
-    grbl.startProgram(lines)
-  }
-
-  // Abort the active stream (soft reset) — the Send button swaps to this while
-  // a program is streaming.
-  function stop() {
-    grbl.abortProgram()
-  }
-
   // ---- Save / Load document ------------------------------------------------
   const doc: PnpDoc = { kind: 'karmyogi.pnp', version: 1, ops, params }
 
@@ -454,20 +440,9 @@ export function PickPlacePanel() {
       />
     <div className="pp-panel">
       <div className="pp-scroll">
-        {/* Slim header: title + ⓘ explainer + compact icon toolbar. */}
+        {/* Slim header: compact icon toolbar only (the dock tab carries the
+            panel name + explainer tooltip now). */}
         <header className="pp-head">
-          <div className="pp-head-title">
-            <span className="pp-head-name">{t('pnp.title', 'Pick & Place')}</span>
-            <InfoTip
-              topic="pnpMode"
-              title={t('pnp.title', 'Pick & Place')}
-              body={t(
-                'pnp.intro',
-                'Move parts from a pick point to a place point. The head grabs with the spindle output ({on} on, {off} off). Build the operations below, then Send to the machine.',
-                { on: labels.on, off: labels.off },
-              )}
-            />
-          </div>
           <div className="pp-tools">
             <ToolButton
               className="pp-ico-primary"
@@ -499,28 +474,38 @@ export function PickPlacePanel() {
             />
             <span className="pp-tools-sep" aria-hidden="true" />
             <ToolButton
-              glyph={<Icon name="zero" size={14} />}
+              className="pp-ico-pick"
+              glyph={<Crosshair size={16} />}
               onClick={() => recordInto('pick')}
               disabled={!connected}
-              text={
+              title={
                 hasSelection
                   ? t('pnp.setPick.short.sel', 'Set pick #{n}', { n: selected + 1 })
                   : t('pnp.setPick.short', 'Set pick')
               }
-              title={t('pnp.setPick.short', 'Set pick')}
               body={setBody('pick')}
             />
             <ToolButton
-              glyph={<Icon name="zero" size={14} />}
+              className="pp-ico-place"
+              glyph={<MapPin size={16} />}
               onClick={() => recordInto('place')}
               disabled={!connected}
-              text={
+              title={
                 hasSelection
                   ? t('pnp.setPlace.short.sel', 'Set place #{n}', { n: selected + 1 })
                   : t('pnp.setPlace.short', 'Set place')
               }
-              title={t('pnp.setPlace.short', 'Set place')}
               body={setBody('place')}
+            />
+            <span className="pp-tools-sep" aria-hidden="true" />
+            <ToolButton
+              glyph={<Settings size={16} />}
+              onClick={() => setShowSettings(true)}
+              title={t('pnp.settings', 'Settings')}
+              body={t(
+                'pnp.settings.body',
+                'Motion, head strength, dwell, rotation and decimal settings for the generated program.',
+              )}
             />
           </div>
         </header>
@@ -579,7 +564,7 @@ export function PickPlacePanel() {
         <section className="pp-card pp-card-wide">
           <h3>{t('pnp.ops.title', 'Operations')}</h3>
           <div className="pp-card-body">
-            <div className="pp-row">
+            <div className="pp-headrow">
               <label className="pp-headsel">
                 {t('pnp.head.label', 'Head')}
                 <select
@@ -833,10 +818,21 @@ export function PickPlacePanel() {
           </section>
         )}
 
-        {/* --- Motion params (essentials) ------------------------------ */}
-        <section className="pp-card">
-          <h3>{t('pnp.motion.title', 'Motion & {action}', { action: labels.on.toLowerCase() })}</h3>
-          <div className="pp-card-body">
+        </div>
+      </div>
+    </div>
+
+      {/* Settings modal: the Motion & {action} params plus the Advanced
+          (dwell / rotation / decimals) params, surfaced from the gear toolbar
+          button so the main view shows only Operations + Bed preview. */}
+      <Modal
+        open={showSettings}
+        title={t('pnp.settings', 'Settings')}
+        onClose={() => setShowSettings(false)}
+      >
+        <div className="pp-settings">
+          <section className="pp-settings-group">
+            <h4>{t('pnp.motion.title', 'Motion & {action}', { action: labels.on.toLowerCase() })}</h4>
             <div className="pp-fields">
               <PField
                 label={t('pnp.f.travelZ', 'Travel Z')}
@@ -941,25 +937,11 @@ export function PickPlacePanel() {
                 </span>
               </p>
             )}
-          </div>
-        </section>
+          </section>
 
-        {/* --- Advanced (collapsed) ------------------------------------ */}
-        <section className={showAdvanced ? 'pp-card pp-collapsible is-open' : 'pp-card pp-collapsible'}>
-          <h3>
-            <button
-              className="pp-toggle"
-              onClick={() => setShowAdvanced((v) => !v)}
-              aria-expanded={showAdvanced}
-            >
-              <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
-              {t('pnp.advanced', 'Advanced')}
-              <span className="pp-toggle-note">{t('pnp.advanced.note', 'dwell · rotation · decimals')}</span>
-            </button>
-          </h3>
-          {showAdvanced && (
-            <div className="pp-card-body">
-              <div className="pp-fields">
+          <section className="pp-settings-group">
+            <h4>{t('pnp.advanced', 'Advanced')}</h4>
+            <div className="pp-fields">
                 <PField
                   label={t('pnp.f.pickDwell', 'Pick dwell')}
                   unit={t('unit.ms', 'ms')}
@@ -1027,55 +1009,9 @@ export function PickPlacePanel() {
                   'Speed here is the feed rate only. Acceleration is a global machine setting ($120–$122, set in the Motion / Probe panels) and is not written here.',
                 )}
               </p>
-            </div>
-          )}
-        </section>
-
-        {/* --- Send + raw G-code --------------------------------------- */}
-        <section className="pp-card pp-card-wide pp-send-card">
-          <h3>{t('pnp.send.title', 'Generate & send')}</h3>
-          <div className="pp-card-body">
-            <div className="pp-row pp-generate">
-              {streaming ? (
-                <button
-                  className="pp-play pp-stop"
-                  onClick={stop}
-                  title={t('pnp.stop.title', 'Stop the running program (soft reset)')}
-                >
-                  <Icon name="stop" size={15} /> {t('pnp.stop.btn', 'Stop')}
-                </button>
-              ) : (
-                <button
-                  className="primary pp-play"
-                  onClick={play}
-                  disabled={ops.length === 0 || lineCount === 0 || !connected}
-                  title={connected ? t('pnp.send.btn.title.on', 'Stream this program to the machine') : t('pnp.send.btn.title.off', 'Connect to a machine to send')}
-                >
-                  <Icon name="play" size={15} /> {t('pnp.send.btn', 'Send to machine')}
-                </button>
-              )}
-              {ops.length === 0 && (
-                <span className="pp-meta">
-                  {t('pnp.send.meta.empty', 'Add an operation to generate a program')}
-                </span>
-              )}
-            </div>
-
-            <button
-              className="pp-raw-toggle"
-              onClick={() => setShowRaw((v) => !v)}
-              aria-expanded={showRaw}
-              disabled={effectiveLines === 0}
-            >
-              <Icon name={showRaw ? 'chevron-down' : 'chevron-right'} size={13} />{' '}
-              {t('pnp.raw', 'Raw G-code ({n} lines)', { n: effectiveLines })}
-            </button>
-            {showRaw && ops.length > 0 && <pre className="pp-preview">{gcode}</pre>}
-          </div>
-        </section>
+          </section>
         </div>
-      </div>
-    </div>
+      </Modal>
       <PresetSaveBar
         slots={presets.slots}
         selected={presets.selected}

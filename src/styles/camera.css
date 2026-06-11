@@ -18,6 +18,15 @@
   container-name: campanel;
 }
 
+/* Direct children must NOT flex-shrink. In this scrolling flex column a
+   shrinkable child collapses BELOW its content height to fit the panel, and
+   because each section has overflow:hidden that silently CLIPS the expanded
+   body (e.g. Bed-tracking showed 400px of 2239px). Pinning flex-shrink:0 keeps
+   natural heights so the PANEL scrolls instead of the sections clipping. */
+.cam-panel > * {
+  flex-shrink: 0;
+}
+
 /* Short muted intro line, matching the other panels. */
 .cam-intro {
   margin: 0;

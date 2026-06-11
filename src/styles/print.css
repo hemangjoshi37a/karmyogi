@@ -14,6 +14,20 @@
   container-name: printpanel;
 }
 
+/* The floating preset rail (presets.css) reserves a left gutter so it never
+   overlaps the panel content — mirror the other parametric tabs' rule. */
+.cc-presets-host > .print-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .print-panel {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
+
 /* Vertical-only scroll — content reflows so it never scrolls sideways. */
 .print-scroll {
   flex: 1 1 auto;

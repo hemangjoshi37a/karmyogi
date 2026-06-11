@@ -86,6 +86,48 @@ export function flipCornerLabel(c: FlipCorner): string {
   }
 }
 
+/**
+ * Where the FRONT reference corner physically lands after the operator turns the
+ * stock over about `axis`. This is the corner the tool must be RE-ZEROED against
+ * for the back side to register with the front, and it is fully DETERMINED by the
+ * flip — it is not a free choice. We compute it so the operator instruction is
+ * always self-consistent with the chosen flip axis (the previous version let the
+ * corner be picked independently of the flip, which could mis-instruct the
+ * operator into a misregistered setup).
+ *
+ *   • Flip about X (rotate over the X / left-right edge): NEAR↔FAR swap, the
+ *     LEFT/RIGHT side is preserved → front-left ↔ back-left, front-right ↔ back-right.
+ *   • Flip about Y (rotate over the Y / front-back edge): LEFT↔RIGHT swap, the
+ *     NEAR/FAR side is preserved → front-left ↔ front-right, back-left ↔ back-right.
+ */
+export function flippedCorner(c: FlipCorner, axis: FlipAxis): FlipCorner {
+  if (axis === 'x') {
+    // near/far flips, left/right stays
+    switch (c) {
+      case 'front-left':
+        return 'back-left';
+      case 'front-right':
+        return 'back-right';
+      case 'back-left':
+        return 'front-left';
+      case 'back-right':
+        return 'front-right';
+    }
+  } else {
+    // left/right flips, near/far stays
+    switch (c) {
+      case 'front-left':
+        return 'front-right';
+      case 'front-right':
+        return 'front-left';
+      case 'back-left':
+        return 'back-right';
+      case 'back-right':
+        return 'back-left';
+    }
+  }
+}
+
 // ---- tiny modal G-code text helpers (kept local; mirror core/transform.ts) ----
 
 interface Word {
@@ -259,11 +301,19 @@ function mirrorBackSide(
 
     if (zW !== undefined) {
       if (absolute) {
-        // Invert only cutting Z (at/below the top); leave the safe-Z retract plane.
+        // Z-INVERSION (the load-bearing depth math). A CUTTING Z `zf` (≤ top) is at
+        // physical height `th + zf` above the front bottom; after the flip that
+        // bottom is the new top (Z=0), so the same point is at `-(th + zf)` below
+        // the new top. A grazing cut (zf=0) → deepest back cut (−th); a through-cut
+        // (zf=−th) → 0 at the new top. RETRACTS / intermediate clearances (any
+        // Z > Z_CUT_TOL, including the positive safe-Z plane and positive
+        // fast-plunge clearances) are LEFT UNTOUCHED — they stay positive and still
+        // clear the re-zeroed new top, so a safe-Z never inverts into the stock.
         if (zW.value <= Z_CUT_TOL) repl.push({ w: zW, value: -(th + zW.value) });
       } else {
-        // Relative Z delta: a cut deltas negate under the bottom-referenced flip;
-        // (carve output is absolute, so this is a defensive branch).
+        // Relative Z delta: the bottom-referenced flip negates the depth axis, so a
+        // relative descent/ascent delta negates. The carve emitter is pure absolute
+        // (G90), so this is a defensive branch that never fires on real carve output.
         repl.push({ w: zW, value: -zW.value });
       }
     }
@@ -382,7 +432,17 @@ export function buildTwoSidedProgram(
   const safeRetract = findSafeRetract(footer);
   const backBody = mirrorBackSide(body.join('\n'), bounds, params.flipAxis, th).split('\n');
   const axisLabel = params.flipAxis === 'x' ? 'X' : 'Y';
-  const cornerLabel = flipCornerLabel(params.flipCorner);
+  // The corner the operator zeroed the FRONT against, and where that SAME physical
+  // corner lands after the flip (the corner the tool must be re-zeroed against so
+  // the back registers with the front). Both are surfaced so the instruction is
+  // unambiguous and self-consistent with the chosen flip axis.
+  const frontCornerLabel = flipCornerLabel(params.flipCorner);
+  const reZeroCornerLabel = flipCornerLabel(flippedCorner(params.flipCorner, params.flipAxis));
+
+  // REGISTRATION / BED INVARIANT: the back side is mirrored about the front
+  // footprint centre-line, so the back toolpath occupies the EXACT SAME XY
+  // envelope as the front (bounds unchanged). Therefore if the front program fits
+  // the bed, the back side does too — the flip introduces no new out-of-bed risk.
 
   const lines: string[] = [];
   // Shared header (units/plane/spindle + first safe-Z), reused verbatim.
@@ -395,9 +455,12 @@ export function buildTwoSidedProgram(
   lines.push(safeRetract);
   lines.push('M5');
   lines.push('(=== SIDE 1 / FRONT complete ===)');
-  lines.push(`(=== FLIP STOCK about ${axisLabel}, re-zero tool at ${cornerLabel} ===)`);
+  lines.push(
+    `(=== FLIP STOCK about ${axisLabel} (the ${frontCornerLabel} corner moves to ${reZeroCornerLabel}) ===)`,
+  );
+  lines.push(`(Re-zero the tool X0 Y0 at the ${reZeroCornerLabel} corner of the flipped stock)`);
   lines.push(`(Stock thickness ${fmt(th)}mm — back-side depths referenced to the new top face)`);
-  lines.push('M0 (pause: flip the stock and re-zero, then resume)');
+  lines.push(`M0 (pause: flip about ${axisLabel}, re-zero at ${reZeroCornerLabel}, then resume)`);
   lines.push('(=== SIDE 2 / BACK ===)');
   // Re-assert the spindle for side 2 (M5 stopped it at the boundary), then cut.
   for (const l of header) {

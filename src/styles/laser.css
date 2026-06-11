@@ -8,6 +8,16 @@
    to ≥36px touch targets via the container query at the end.
    The whole panel is the only scroll container — vertical only, never sideways. */
 
+/* Left gutter so the floating preset rail never overlaps the panel content
+   (mirrors presets.css for the sp/wr panels). */
+.cc-presets-host > .lp-panel {
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .lp-panel {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
 .lp-panel {
   height: 100%;
   min-height: 0;

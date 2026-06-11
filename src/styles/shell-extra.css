@@ -133,5 +133,11 @@
 .dv-tab-tip {
   display: flex;
   align-items: center;
+  gap: 5px;
   height: 100%;
+}
+/* Per-tab icon shown before the dockview tab title. */
+.dv-tab-ico {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
 }

@@ -1,0 +1,432 @@
+/* Game-controller modal — theme-aware, responsive, touch-usable. */
+
+.gp-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 12px);
+}
+
+/* Connection status banner */
+.gp-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  background: var(--bg-input);
+}
+.gp-status > svg { flex: 0 0 auto; color: var(--fg-muted); }
+.gp-status--ok { border-color: var(--success); }
+.gp-status--ok > svg { color: var(--success); }
+.gp-status-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gp-status-text strong { font-size: 13px; }
+.gp-status-id {
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Enable toggle row */
+.gp-enable-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  background: var(--bg-elev);
+}
+.gp-enable-text { display: flex; flex-direction: column; gap: 2px; }
+.gp-enable-text strong { font-size: 13px; }
+.gp-note { font-size: 11px; color: var(--fg-muted); }
+
+.gp-switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  padding: 0;
+}
+.gp-switch.on { background: var(--accent); border-color: var(--accent); }
+.gp-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--fg);
+  transition: transform 0.15s ease;
+}
+.gp-switch.on .gp-switch-knob { transform: translateX(20px); background: var(--accent-fg); }
+
+/* Connectivity guidance (wraps, unlike the truncated device-id line). */
+.gp-connect-how {
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.45;
+}
+
+/* Vibration intensity sub-row inside the haptics toggle row. */
+.gp-intensity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.gp-intensity-label { font-size: 11px; color: var(--fg-muted); }
+.gp-intensity input[type='range'] { flex: 1 1 auto; min-width: 80px; accent-color: var(--accent); }
+.gp-intensity-val { font-size: 11px; color: var(--fg-muted); min-width: 36px; text-align: right; }
+
+.gp-warn {
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius, 6px);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+/* Live stick deflection */
+.gp-sticks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.gp-stick {
+  position: relative;
+  aspect-ratio: 2 / 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  background:
+    radial-gradient(circle at center, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%),
+    var(--bg-input);
+  overflow: hidden;
+}
+.gp-stick-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  transition: left 0.05s linear, top 0.05s linear;
+}
+.gp-stick-label {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+/* Mapping reference */
+.gp-map h4,
+.gp-btns h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.gp-map-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+}
+.gp-map-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.gp-map-icon { flex: 0 0 auto; color: var(--accent); display: inline-flex; }
+.gp-map-control { flex: 0 0 auto; font-weight: 600; min-width: 92px; }
+.gp-map-arrow { color: var(--fg-muted); }
+.gp-map-action { color: var(--fg-muted); }
+
+/* Live button pips */
+.gp-btn-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gp-btn-pip {
+  min-width: 36px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  background: var(--bg-input);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  transition: background 0.05s ease, color 0.05s ease, border-color 0.05s ease;
+}
+.gp-btn-pip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+@media (max-width: 560px) {
+  .gp-map-grid { grid-template-columns: 1fr; }
+  .gp-sticks { grid-template-columns: 1fr; }
+  .gp-switch { width: 52px; height: 30px; }
+  .gp-switch-knob { width: 24px; height: 24px; }
+  .gp-switch.on .gp-switch-knob { transform: translateX(22px); }
+}
+
+/* ---- 3D controller carousel ---- */
+.gp3d {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 10px;
+}
+.gp3d-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 240px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: radial-gradient(
+    circle at 50% 38%,
+    color-mix(in srgb, var(--accent) 9%, var(--bg-input)) 0%,
+    var(--bg-input) 70%
+  );
+  overflow: hidden;
+  animation: gp3d-slide-r 0.28s ease;
+}
+.gp3d-stage[data-dir='l'] { animation-name: gp3d-slide-l; }
+@keyframes gp3d-slide-r {
+  from { opacity: 0; transform: translateX(26px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes gp3d-slide-l {
+  from { opacity: 0; transform: translateX(-26px); }
+  to { opacity: 1; transform: none; }
+}
+.gp3d-name {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+.gp3d-arrow {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 72px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.gp3d-arrow:hover { border-color: var(--accent); color: var(--accent); }
+.gp3d-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px;
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  font-size: 10px;
+  line-height: 1.15;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.gp3d-callout b { color: var(--accent); font-size: 10px; }
+.gp3d-callout span { color: var(--fg-muted); }
+.gp3d-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+.gp3d-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.gp3d-spin {
+  color: var(--accent);
+  animation: gp3d-rot 0.9s linear infinite;
+}
+@keyframes gp3d-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- immersive 3D space (modal becomes a controller viewport) ---- */
+.gp-space {
+  position: relative;
+  height: min(58vh, 460px);
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: radial-gradient(
+    circle at 50% 38%,
+    color-mix(in srgb, var(--accent) 9%, var(--bg-input)) 0%,
+    var(--bg-input) 72%
+  );
+}
+.gp-space .gp3d {
+  height: 100%;
+  margin: 0;
+  align-items: stretch;
+}
+.gp-space .gp3d-stage {
+  height: auto;
+  border: none;
+  background: transparent;
+}
+.gp-space .gp3d-arrow {
+  align-self: center;
+}
+/* overlays floating on the 3D model */
+.gp-ov {
+  position: absolute;
+  z-index: 5;
+}
+.gp-ov-tl {
+  top: 8px;
+  left: 46px;
+  max-width: 56%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.gp-ov-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  flex: 0 0 auto;
+}
+.gp-ov-dot.on {
+  background: var(--success, #3fb950);
+  box-shadow: 0 0 6px var(--success, #3fb950);
+}
+.gp-ov-status-txt {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+  padding: 3px 9px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+  backdrop-filter: blur(5px);
+}
+.gp-ov-status-txt strong {
+  font-size: 12px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gp-ov-id {
+  font-size: 9px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.gp-ov-tr {
+  top: 8px;
+  right: 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.gp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 76%, transparent);
+  color: var(--fg-muted);
+  cursor: pointer;
+  backdrop-filter: blur(5px);
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.gp-chip:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.gp-chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, color-mix(in srgb, var(--bg-elev) 66%, transparent));
+}
+.gp-chip-slider {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 76%, transparent);
+  backdrop-filter: blur(5px);
+}
+.gp-chip-slider input {
+  width: 86px;
+  accent-color: var(--accent);
+}
+.gp-ov-bottom {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 8px;
+  max-width: 82%;
+  text-align: center;
+  font-size: 11px;
+  color: var(--warn);
+  padding: 4px 10px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warn) 16%, color-mix(in srgb, var(--bg-elev) 70%, transparent));
+  backdrop-filter: blur(5px);
+}
+.gp-space-note {
+  margin: 0 0 12px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-align: center;
+}
