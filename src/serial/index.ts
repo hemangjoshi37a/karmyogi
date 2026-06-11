@@ -30,6 +30,7 @@ export {
   statusQueryLine,
   g91JogLines,
   isMarlinPositionLine,
+  isMarlinChatter,
   parseMarlinStatus,
   parseStatusForDialect,
 } from './dialect'
@@ -50,3 +51,5 @@ export type { MockPortOptions } from './mockPort'
 
 export { WsPort } from './wsPort'
 export type { WsPortOptions } from './wsPort'
+
+export { UsbPort } from './usbPort'

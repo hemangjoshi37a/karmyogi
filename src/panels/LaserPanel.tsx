@@ -4,6 +4,9 @@ import { useT } from '../i18n'
 import { Icon } from '../components/Icons'
 import { FrameButton } from '../components/FrameButton'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import { importDxfString } from '../core/dxf'
 import { nestFootprints, type NestItem, type NestWarning } from '../core/nesting'
 import { distance } from '../core/geometry'
@@ -144,6 +147,19 @@ interface LaserDoc {
   sheet: SheetSettings
 }
 
+/**
+ * A reusable LASER setting preset: the current mode plus BOTH mode param records
+ * and the sheet/nesting settings (NOT the imported DXF contours, which are the
+ * operator's actual work). Scoped to its own persistence key, independent of the
+ * carving / soldering / writing presets.
+ */
+interface LaserPreset {
+  mode: LaserMode
+  co2: PanelParams
+  fiber: PanelParams
+  sheet: SheetSettings
+}
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
 const numOr = (v: unknown, f: number): number =>
@@ -173,6 +189,18 @@ function parseParams(v: unknown, base: PanelParams): PanelParams {
     piercePower: numOr(v.piercePower, base.piercePower),
     pierceTime: numOr(v.pierceTime, base.pierceTime),
     decimals: numOr(v.decimals, base.decimals),
+  }
+}
+
+/** Narrow unknown into a valid SheetSettings, falling back per-field to `base`. */
+function parseSheet(v: unknown, base: SheetSettings): SheetSettings {
+  if (!isRecord(v)) return base
+  return {
+    sheetW: numOr(v.sheetW, base.sheetW),
+    sheetH: numOr(v.sheetH, base.sheetH),
+    margin: numOr(v.margin, base.margin),
+    quantity: clamp(Math.floor(numOr(v.quantity, base.quantity)), 1, MAX_QUANTITY),
+    doNest: boolOr(v.doNest, base.doNest),
   }
 }
 
@@ -380,26 +408,56 @@ export function LaserPanel() {
     sheet: { sheetW, sheetH, margin, quantity, doNest },
   }
 
+  // Restore a (possibly untrusted) settings snapshot — shared by Load and by the
+  // colour presets so corrupt persisted values can never reach the emitter.
+  // `data.mode/co2/fiber/sheet` are each coerced per-field via the parse helpers.
+  function applySettings(data: Record<string, unknown>) {
+    if (VALID_MODES.includes(data.mode as LaserMode)) setMode(data.mode as LaserMode)
+    setCo2((p) => parseParams(data.co2, p))
+    setFiber((p) => parseParams(data.fiber, p))
+    setSheetW((v) => parseSheet(data.sheet, { sheetW: v, sheetH, margin, quantity, doNest }).sheetW)
+    setSheetH((v) => parseSheet(data.sheet, { sheetW, sheetH: v, margin, quantity, doNest }).sheetH)
+    setMargin((v) => parseSheet(data.sheet, { sheetW, sheetH, margin: v, quantity, doNest }).margin)
+    setQuantity((v) => parseSheet(data.sheet, { sheetW, sheetH, margin, quantity: v, doNest }).quantity)
+    setDoNest((v) => parseSheet(data.sheet, { sheetW, sheetH, margin, quantity, doNest: v }).doNest)
+  }
+
   function loadDoc(data: unknown) {
     if (!isRecord(data)) {
       setLoadError(t('laser.load.bad', 'Could not load — not a valid laser settings file.'))
       return
     }
-    if (VALID_MODES.includes(data.mode as LaserMode)) setMode(data.mode as LaserMode)
-    setCo2((p) => parseParams(data.co2, p))
-    setFiber((p) => parseParams(data.fiber, p))
-    if (isRecord(data.sheet)) {
-      const s = data.sheet
-      setSheetW((v) => numOr(s.sheetW, v))
-      setSheetH((v) => numOr(s.sheetH, v))
-      setMargin((v) => numOr(s.margin, v))
-      setQuantity((v) => numOr(s.quantity, v))
-      setDoNest((v) => boolOr(s.doNest, v))
-    }
+    applySettings(data)
     setLoadError('')
   }
 
+  // ---- color-coded setting PRESETS (mode + both param records + sheet) -------
+  // Snapshot the current settings (NOT the imported DXF contours).
+  const captureSettings = (): LaserPreset => ({ mode, co2, fiber, sheet: { sheetW, sheetH, margin, quantity, doNest } })
+  // Restore a captured preset, coercing each field defensively (parseParams /
+  // parseSheet) so a corrupt slot can never feed a NaN to the emitter.
+  const applyPreset = (p: LaserPreset) => {
+    if (isRecord(p)) applySettings(p as unknown as Record<string, unknown>)
+  }
+  const presets = usePresets<LaserPreset>({
+    storageKey: 'karmyogi.laser.presets',
+    capture: captureSettings,
+    onApply: applyPreset,
+  })
+
+  // Settings-only payload for the preset-bar Save/Load pair (mirrors the header
+  // Save/Load doc minus the kind/version envelope) — loaded the same path.
+  const settings: LaserPreset = captureSettings()
+
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('laser.presets.aria', 'Laser setting presets')}
+      />
     <div className="lp-panel">
       {/* Header: title + mode radio + live status. */}
       <header className="lp-head">
@@ -814,6 +872,26 @@ export function LaserPanel() {
       <p className="lp-safety">
         {t('laser.safety', 'Safety: laser OFF (M5 S0) during all travel; beam on (M3/M4 S…) only on cut feeds; requires GRBL laser mode $32=1.')}
       </p>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={settings}
+            onLoad={loadDoc}
+            onError={setLoadError}
+            fileBase="laser-settings"
+            ext="klaser"
+            saveTitle={t('laser.preset.save', 'Save laser settings to file')}
+            loadTitle={t('laser.preset.load', 'Load laser settings from file')}
+          />
+        }
+      />
     </div>
   )
 }

@@ -15,18 +15,87 @@
   container-name: gluepanel;
 }
 
-/* --- one-line intro --- */
-.gp-intro {
+/* The floating preset rail (presets.css) only reserves a gutter for
+   .sp-panel/.wr-panel — mirror those rules here so the rail never overlaps the
+   toolbar, canvas or fields. (presets.css is shared; the gutter lives here.) */
+.cc-presets-host > .gp-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .gp-panel {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
+
+/* --- slim header: title + InfoTip + undo/clear + drawing save/load --- */
+.gp-head {
   flex: 0 0 auto;
-  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  min-height: var(--ctl-h-lg);
   padding: var(--sp-1) var(--pad-card-x);
-  font-size: var(--fs-body);
-  line-height: 1.4;
-  color: var(--fg-muted);
   border-bottom: 1px solid var(--border);
 }
-.gp-intro b {
+.gp-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.gp-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* action cluster pinned to the right of the header */
+.gp-head-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+/* thin divider between the destructive (undo/clear) and file (save/load)
+   clusters, so the two groups read as distinct */
+.gp-tools-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--sp-1) 2px;
+  background: var(--border);
+}
+
+/* --- live status strip: pill counters + auto-sync destination --- */
+.gp-status {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--pad-card-x);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.gp-status-pill b {
   color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.gp-status-sep {
+  color: var(--border);
+}
+.gp-status-sync {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* --- inline status banners (load error / degenerate-Z warning) --- */
@@ -108,9 +177,6 @@
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border);
 }
-.gp-spacer {
-  flex: 1 1 auto;
-}
 /* Icon-only CAD-style tool buttons: square, glyph only, tooltip on hover. */
 .gp-tool {
   flex: 0 0 auto;
@@ -133,40 +199,44 @@
 .gp-tool-svg {
   display: block;
 }
-/* Undo shares the toolbar icon-button sizing; muted until there is an action. */
-.gp-undo.icon-btn {
+.gp-tool.gp-tool-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--fg);
+}
+/* Undo / Clear are compact header icon buttons, sized to match the save/load
+   pair (.km-io-btn) beside them; muted until there is an action. */
+.gp-undo.icon-btn,
+.gp-clear.icon-btn {
   flex: 0 0 auto;
-  min-width: var(--ctl-h-lg);
-  min-height: var(--ctl-h-lg);
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  min-width: var(--icon-btn);
+  min-height: var(--icon-btn);
   color: var(--fg-muted);
 }
 .gp-undo.icon-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--fg);
 }
-.gp-undo.icon-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.gp-tool.gp-tool-on {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--fg);
-}
-/* Clear is a compact icon button in the toolbar. */
-.gp-clear.icon-btn {
-  flex: 0 0 auto;
-  min-width: var(--ctl-h-lg);
-  min-height: var(--ctl-h-lg);
-  color: var(--fg-muted);
-}
 .gp-clear.icon-btn:hover:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);
 }
+.gp-undo.icon-btn:disabled,
 .gp-clear.icon-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+/* Touch targets: grow with the adjacent .km-io-btn pair on coarse pointers. */
+@media (pointer: coarse) {
+  .gp-undo.icon-btn,
+  .gp-clear.icon-btn {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+    min-width: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
+  }
 }
 
 /* --- drawing canvas (the bed) --- */
@@ -255,6 +325,14 @@
   font-weight: 600;
 }
 
+/* In-canvas empty-state prompt (SVG text in viewBox mm units). */
+.gp-canvas-empty {
+  font-size: 10px;
+  fill: var(--fg-muted);
+  opacity: 0.5;
+  user-select: none;
+}
+
 .gp-hint {
   flex: 0 0 auto;
   display: flex;
@@ -262,10 +340,6 @@
   gap: var(--sp-3);
   font-size: var(--fs-label);
   color: var(--fg-muted);
-}
-.gp-hint .gp-meta {
-  margin-left: auto;
-  white-space: nowrap;
 }
 
 /* --- cards in the controls column --- */
@@ -296,10 +370,6 @@
 .gp-meta {
   color: var(--fg-muted);
   font-size: var(--fs-body);
-}
-.gp-meta b {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
 }
 
 /* --- shape list --- */
@@ -419,6 +489,31 @@
   width: 100%;
   min-width: 0; /* never let a number input force the field wider than its cell */
 }
+/* Inline degenerate-Z marking: the banner names the problem, the red border
+   finds it (e.g. on mobile, where the banner has scrolled away). */
+.gp-fields input.gp-input-bad {
+  border-color: var(--danger);
+}
+
+/* Slim input wrapper with an inline unit suffix (matches .sp-input). */
+.gp-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.gp-input.has-unit input {
+  /* leave room for the unit suffix so digits never overlap it */
+  padding-right: 38px;
+}
+.gp-input i {
+  position: absolute;
+  right: 7px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
 
 /* --- advanced section --- */
 .gp-adv {
@@ -493,9 +588,13 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.gp-raw-toggle:hover {
+.gp-raw-toggle:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--fg);
+}
+.gp-raw-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .gp-preview {
   margin: 0;

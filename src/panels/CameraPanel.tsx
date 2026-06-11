@@ -1,15 +1,34 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
   runAutoCalibration,
   type AutoCalibProgress,
   type KinematicsInfo,
 } from '../camera/autoCalib'
+import { generateCalibrationSheet, registrationMarkers } from '../camera/calibPdf'
+import {
+  detectGridMarkers,
+  calibrateCameraFromGrid,
+  detectCameraRoles,
+  solveSheetTransform,
+  type CameraRole,
+  type RoleProbeProgress,
+  type SheetRegistration,
+} from '../camera/qrCalib'
 import { grbl } from '../serial/controller'
 import { useT } from '../i18n'
 import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
-import { useCameraCalib, useCameraLive, useMachine } from '../store'
+import { useCameraCalib, useCameraLive, useMachine, usePersistentState } from '../store'
+import { useProgram } from '../store/program'
 import { useBed } from '../store/bed'
+import { startRecordingSession, type RecordingSession } from '../camera/recorder'
+import {
+  saveClip,
+  listClips,
+  getClipBlob,
+  deleteClip,
+  type ClipMeta,
+} from '../store/cameraClips'
 import {
   solveHomography,
   reprojectionRMS,
@@ -142,6 +161,26 @@ function fmtBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** mm:ss duration from a millisecond span (for saved clips). */
+function fmtDuration(ms: number): string {
+  return fmtElapsed(ms)
+}
+
+/** Timestamp-based clip name like `karmyogi-cam-2026-06-11_14-32-05`. */
+function timestampClipName(when: number): string {
+  const d = new Date(when)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return (
+    `karmyogi-cam-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`
+  )
+}
+
+/** File extension implied by a recorder MIME type. */
+function extForMime(mime: string): string {
+  return mime.includes('mp4') ? 'mp4' : 'webm'
+}
+
 /** Trigger a browser download of a blob URL with the given filename. */
 function downloadUrl(url: string, filename: string): void {
   const a = document.createElement('a')
@@ -158,6 +197,111 @@ function rmsQuality(rms: number | null): 'good' | 'ok' | 'poor' | null {
   if (rms <= 1.5) return 'good'
   if (rms <= 4) return 'ok'
   return 'poor'
+}
+
+/**
+ * Advanced live-camera image controls. These are NON-STANDARD MediaStreamTrack
+ * video settings (the Image Capture / constrainable-properties extensions) — not
+ * in the base `MediaTrackCapabilities`/`MediaTrackSettings` lib types — so we read
+ * capabilities/settings as plain records and write them through the
+ * `applyConstraints({ advanced: [{ <name>: value }] })` escape hatch. Only the
+ * settings the active device actually reports get a slider; the rest are hidden.
+ *
+ * Each entry carries a stable i18n key + English fallback for its label.
+ */
+interface AdvCapDef {
+  /** MediaStreamTrack constrainable-property name (e.g. 'brightness'). */
+  name: string
+  /** i18n key for the slider label. */
+  key: string
+  /** English fallback label. */
+  label: string
+}
+
+const ADV_CAP_DEFS: AdvCapDef[] = [
+  { name: 'brightness', key: 'cam.adv.brightness', label: 'Brightness' },
+  { name: 'contrast', key: 'cam.adv.contrast', label: 'Contrast' },
+  { name: 'saturation', key: 'cam.adv.saturation', label: 'Saturation' },
+  { name: 'sharpness', key: 'cam.adv.sharpness', label: 'Sharpness' },
+  { name: 'exposureCompensation', key: 'cam.adv.exposureComp', label: 'Exposure compensation' },
+  { name: 'exposureTime', key: 'cam.adv.exposureTime', label: 'Exposure time' },
+  { name: 'colorTemperature', key: 'cam.adv.colorTemperature', label: 'White balance (K)' },
+  { name: 'iso', key: 'cam.adv.iso', label: 'ISO' },
+  { name: 'focusDistance', key: 'cam.adv.focusDistance', label: 'Focus distance' },
+  { name: 'zoom', key: 'cam.adv.zoom', label: 'Zoom' },
+]
+
+/** A numeric range as reported by getCapabilities() for one setting. */
+interface AdvCapRange {
+  min: number
+  max: number
+  step: number
+}
+
+/** A discovered, adjustable setting on the active track. */
+interface AdvCap extends AdvCapDef, AdvCapRange {
+  /** Current device value (from getSettings()), if known. */
+  current: number | null
+}
+
+/** Persisted user overrides per slot: { [setting]: value }. */
+type AdvOverrides = Record<string, number>
+
+/** Read a numeric { min,max,step } range from a capabilities record entry. */
+function asRange(cap: unknown): AdvCapRange | null {
+  if (!cap || typeof cap !== 'object') return null
+  const o = cap as { min?: unknown; max?: unknown; step?: unknown }
+  const min = typeof o.min === 'number' ? o.min : null
+  const max = typeof o.max === 'number' ? o.max : null
+  if (min == null || max == null || !(max > min)) return null
+  const step = typeof o.step === 'number' && o.step > 0 ? o.step : (max - min) / 100
+  return { min, max, step }
+}
+
+/** Feature-detect: does this track expose getCapabilities/applyConstraints? */
+function trackSupportsAdvanced(track: MediaStreamTrack | null | undefined): boolean {
+  return (
+    !!track &&
+    typeof track.getCapabilities === 'function' &&
+    typeof track.applyConstraints === 'function'
+  )
+}
+
+/**
+ * A house-style collapsible SECTION card: a slim header (title + optional status
+ * badge on the right) with a chevron disclosure, and a body that shows only when
+ * open. Open/closed is owned by the caller (persisted via usePersistentState) so
+ * the operator's layout survives a reload. Keeps the panel calm: a first-time
+ * user sees a few labelled sections, not every control at once.
+ */
+function CamSection({
+  title,
+  open,
+  onToggle,
+  badge,
+  children,
+}: {
+  title: string
+  open: boolean
+  onToggle: () => void
+  badge?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section className="cam-sec" data-open={open}>
+      <button
+        type="button"
+        className="cam-sec-head"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
+        <span className="cam-sec-title">{title}</span>
+        {badge != null && <span className="cam-sec-badge">{badge}</span>}
+      </button>
+      {open && <div className="cam-sec-body">{children}</div>}
+    </section>
+  )
 }
 
 export function CameraPanel() {
@@ -225,6 +369,26 @@ export function CameraPanel() {
   const [tlFps, setTlFps] = useState('10')
   const [tlCount, setTlCount] = useState(0)
 
+  // ---- AUTO-record (record while a program streams) ----
+  // Persisted ON/OFF for the auto-record behavior (pill toggle below).
+  const [autoRecord, setAutoRecord] = usePersistentState<boolean>('karmyogi.camera.autoRecord', false)
+  // The program-streaming flag, observed READ-ONLY from the program store.
+  const streaming = useProgram((s) => s.streaming)
+  // True while an auto-record session is actively capturing (drives the live dot).
+  const [autoRecActive, setAutoRecActive] = useState(false)
+  // Saved clips (metadata only — blobs stay in IndexedDB until played/downloaded).
+  const [savedClips, setSavedClips] = useState<ClipMeta[]>([])
+  // The id of the clip currently expanded for inline playback (+ its object URL).
+  const [playingClip, setPlayingClip] = useState<{ id: number; url: string } | null>(null)
+  // Surfaced when auto-record can't start/save (no recorder, no live camera, quota).
+  const [autoRecMsg, setAutoRecMsg] = useState<string | null>(null)
+  // The in-flight auto-record session (slot 0). Held in a ref so the streaming
+  // effect can start it on stream-start and stop+persist it on stream-end.
+  const autoSessionRef = useRef<RecordingSession | null>(null)
+  // Mirror of the inline-playback object URL so the unmount cleanup can revoke it
+  // without re-subscribing the cleanup effect to every playback change.
+  const playingUrlRef = useRef<string | null>(null)
+
   // ---- calibration UI state ----
   const [calibSlot, setCalibSlot] = useState<SlotIdx>(0)
   const [method, setMethod] = useState<CalibMethod>('auto')
@@ -260,6 +424,36 @@ export function CameraPanel() {
   const [qrFound, setQrFound] = useState<number | null>(null)
   const [calibMsg, setCalibMsg] = useState<string | null>(null)
 
+  // ---- two-camera GRID calibration (printed marker sheet) ----
+  // Persisted inferred mount per slot (head-mounted / stationary), survives reload.
+  const [camRoles, setCamRoles] = usePersistentState<[CameraRole, CameraRole]>(
+    'karmyogi.camera.roles',
+    ['unknown', 'unknown'],
+  )
+  // Sheet-generation status / busy flag.
+  const [sheetBusy, setSheetBusy] = useState(false)
+  const [gridMsg, setGridMsg] = useState<string | null>(null)
+  // Per-slot grid auto-calibrate marker counts (null = not run this session).
+  const [gridFound, setGridFound] = useState<[number | null, number | null]>([null, null])
+  // Role-probe live state.
+  const [roleRunning, setRoleRunning] = useState(false)
+  const [roleProgress, setRoleProgress] = useState<RoleProbeProgress | null>(null)
+  // Abort handle for the in-flight role probe.
+  const roleAbortRef = useRef<AbortController | null>(null)
+
+  // ---- sheet → machine registration (ties the printed grid to the work frame) ----
+  // The printed sheet sits at an unknown offset+rotation on the bed, so a grid-
+  // solved homography lands in SHEET-mm, not machine-work-mm. The operator jogs
+  // the tool tip to two known markers and captures live work XY at each; from
+  // those we bake a rigid sheet→machine transform into the stored homography so
+  // it lands in machine-work-mm (consistent with the bed-corner / machine-motion
+  // methods and what CameraBedPlane expects). PERSISTED so it survives reload and
+  // can be re-applied / recomputed. null entry = not yet captured.
+  const [sheetReg, setSheetReg] = usePersistentState<{
+    originMachine: [number, number] | null
+    secondMachine: [number, number] | null
+  }>('karmyogi.camera.sheetReg', { originMachine: null, secondMachine: null })
+
   // Job manual inputs.
   const [jobW, setJobW] = useState('100')
   const [jobD, setJobD] = useState('100')
@@ -267,6 +461,33 @@ export function CameraPanel() {
 
   // Empty-bed reference captured flags (mirror refGrayRef for re-render).
   const [refCaptured, setRefCaptured] = useState<[boolean, boolean]>([false, false])
+
+  // ---- advanced live-camera image controls (per slot) ----
+  // Discovered, adjustable settings on each slot's active track (re-read on every
+  // (re)start). Empty = the device/browser exposes nothing adjustable.
+  const [advCaps, setAdvCaps] = useState<[AdvCap[], AdvCap[]]>([[], []])
+  // PERSISTED user overrides per slot — survive a stream restart + a reload, and
+  // are re-applied whenever the camera (re)starts (see applyAdvancedToSlot).
+  const [advOverrides, setAdvOverrides] = usePersistentState<[AdvOverrides, AdvOverrides]>(
+    'karmyogi.camera.advOverrides',
+    [{}, {}],
+  )
+  // Keep a ref mirror so the (re)start path can read the latest overrides without
+  // adding them to startStream's dependency list (which would rebuild the stream
+  // callbacks — and could restart streams — on every slider drag).
+  const advOverridesRef = useRef(advOverrides)
+  useEffect(() => {
+    advOverridesRef.current = advOverrides
+  }, [advOverrides])
+
+  // ---- collapsible-section open/closed (persisted) ----
+  // The panel is grouped into a few house-style sections. The everyday ones
+  // ("Live view") start open; the advanced/occasional ones start collapsed so a
+  // first-time user sees a calm panel. Each flag survives a reload.
+  const [secLiveOpen, setSecLiveOpen] = usePersistentState<boolean>('karmyogi.camera.sec.live', true)
+  const [secCaptureOpen, setSecCaptureOpen] = usePersistentState<boolean>('karmyogi.camera.sec.capture', false)
+  const [secSavedOpen, setSecSavedOpen] = usePersistentState<boolean>('karmyogi.camera.sec.saved', false)
+  const [secCalibOpen, setSecCalibOpen] = usePersistentState<boolean>('karmyogi.camera.sec.calib', false)
 
   const qrSupported = barcodeDetectorAvailable()
   // MediaRecorder is needed for both Record and Timelapse (which assemble webm).
@@ -315,8 +536,122 @@ export function CameraPanel() {
       if (v) v.srcObject = null
       // Tell the 3D viewer this slot's feed is gone.
       setVideoEl(s, null)
+      // Drop the discovered advanced settings — there's no live track now.
+      // (Persisted overrides stay; they re-apply on the next start.)
+      setAdvCaps((prev) => {
+        if (prev[s].length === 0) return prev
+        const next: [AdvCap[], AdvCap[]] = [prev[0], prev[1]]
+        next[s] = []
+        return next
+      })
     },
     [setVideoEl],
+  )
+
+  // ---- advanced image controls: discover + (re)apply for a slot ----
+  // Read the live track's capabilities/settings and publish the adjustable ones
+  // for this slot. getCapabilities/getSettings are non-standard for the image
+  // controls, so the records are read defensively. No-op if unsupported.
+  const discoverAdvCaps = useCallback((s: SlotIdx) => {
+    const track = streamRefs.current[s]?.getVideoTracks()[0]
+    if (!trackSupportsAdvanced(track)) {
+      setAdvCaps((prev) => {
+        const next: [AdvCap[], AdvCap[]] = [prev[0], prev[1]]
+        next[s] = []
+        return next
+      })
+      return
+    }
+    let caps: Record<string, unknown> = {}
+    let settings: Record<string, unknown> = {}
+    try {
+      caps = track!.getCapabilities() as unknown as Record<string, unknown>
+    } catch {
+      caps = {}
+    }
+    try {
+      settings = track!.getSettings() as unknown as Record<string, unknown>
+    } catch {
+      settings = {}
+    }
+    const found: AdvCap[] = []
+    for (const def of ADV_CAP_DEFS) {
+      const range = asRange(caps[def.name])
+      if (!range) continue
+      const cur = settings[def.name]
+      found.push({
+        ...def,
+        ...range,
+        current: typeof cur === 'number' ? cur : null,
+      })
+    }
+    setAdvCaps((prev) => {
+      const next: [AdvCap[], AdvCap[]] = [prev[0], prev[1]]
+      next[s] = found
+      return next
+    })
+  }, [])
+
+  // Re-apply this slot's PERSISTED overrides to its live track. Called on every
+  // (re)start so settings survive a stream restart / reload. Each override is
+  // applied independently so one unsupported value can't break the rest.
+  const applyAdvancedToSlot = useCallback(async (s: SlotIdx) => {
+    const track = streamRefs.current[s]?.getVideoTracks()[0]
+    if (!trackSupportsAdvanced(track)) return
+    const overrides = advOverridesRef.current[s]
+    for (const [name, value] of Object.entries(overrides)) {
+      if (!Number.isFinite(value)) continue
+      try {
+        await track!.applyConstraints({ advanced: [{ [name]: value } as MediaTrackConstraintSet] })
+      } catch {
+        /* device rejected this value — skip it, keep the others */
+      }
+    }
+  }, [])
+
+  // Live-edit one setting: persist it + apply it immediately to the active track.
+  const setAdvValue = useCallback(
+    (s: SlotIdx, name: string, value: number) => {
+      setAdvOverrides((prev) => {
+        const next: [AdvOverrides, AdvOverrides] = [{ ...prev[0] }, { ...prev[1] }]
+        next[s] = { ...next[s], [name]: value }
+        return next
+      })
+      const track = streamRefs.current[s]?.getVideoTracks()[0]
+      if (trackSupportsAdvanced(track)) {
+        track!
+          .applyConstraints({ advanced: [{ [name]: value } as MediaTrackConstraintSet] })
+          .catch(() => {})
+      }
+    },
+    [setAdvOverrides],
+  )
+
+  // Reset a slot: clear its persisted overrides and re-apply the device defaults
+  // (the capability ranges' implied defaults), then re-read current settings.
+  const resetAdvForSlot = useCallback(
+    async (s: SlotIdx) => {
+      setAdvOverrides((prev) => {
+        const next: [AdvOverrides, AdvOverrides] = [{ ...prev[0] }, { ...prev[1] }]
+        next[s] = {}
+        return next
+      })
+      const track = streamRefs.current[s]?.getVideoTracks()[0]
+      if (trackSupportsAdvanced(track)) {
+        // Re-apply each adjustable setting at its capability default (midpoint is
+        // a safe neutral when the device doesn't expose a default), then re-read.
+        for (const cap of advCaps[s]) {
+          const def = cap.current ?? (cap.min + cap.max) / 2
+          try {
+            await track!.applyConstraints({ advanced: [{ [cap.name]: def } as MediaTrackConstraintSet] })
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      discoverAdvCaps(s)
+    },
+    [advCaps, setAdvOverrides, discoverAdvCaps],
   )
 
   // ---- start / restart a slot's stream ----
@@ -353,6 +688,12 @@ export function CameraPanel() {
             return next
           })
         }
+        // Re-apply the user's saved advanced image settings to the fresh track
+        // (so they survive a stream restart / reload), then publish the discovered
+        // adjustable settings for the UI. Order: apply first, then re-read so the
+        // sliders reflect what actually took effect.
+        await applyAdvancedToSlot(s)
+        discoverAdvCaps(s)
       } catch (err) {
         const e = err as DOMException
         if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
@@ -367,7 +708,7 @@ export function CameraPanel() {
         }
       }
     },
-    [supported, stopStream, enumerate, setVideoEl, setSlotStatus, t],
+    [supported, stopStream, enumerate, setVideoEl, setSlotStatus, applyAdvancedToSlot, discoverAdvCaps, t],
   )
 
   // ---- SYNTHETIC test-pattern source (no camera / no permission needed) ----
@@ -617,6 +958,134 @@ export function CameraPanel() {
     }, Math.round(1000 / fps))
   }, [tlInterval, tlFps, t])
 
+  // ---- AUTO-record: load saved clips on mount + react to streaming ----
+  // Load the persisted clip list once on mount (newest first).
+  const refreshClips = useCallback(async () => {
+    try {
+      const metas = await listClips()
+      setSavedClips(metas)
+    } catch {
+      /* IndexedDB unavailable — leave the list empty */
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshClips().catch(() => {})
+  }, [refreshClips])
+
+  // Start / stop the auto-record session in lock-step with the program stream.
+  // Only the PRIMARY slot (0) is recorded — that's the calibrated, top-down view
+  // the rest of the panel already records / snapshots / timelapses.
+  useEffect(() => {
+    // Begin recording only when auto-record is ARMED and a stream is running.
+    if (autoRecord && streaming) {
+      // Stream STARTED — begin recording the active primary stream (once).
+      if (autoSessionRef.current) return
+      const stream = streamRefs.current[0]
+      if (!stream) {
+        setAutoRecMsg(
+          t('cam.auto.noCam', 'Auto-record is ON but Camera 1 is not live — start it to capture the run.'),
+        )
+        return
+      }
+      try {
+        autoSessionRef.current = startRecordingSession(stream)
+        setAutoRecActive(true)
+        setAutoRecMsg(null)
+      } catch {
+        autoSessionRef.current = null
+        setAutoRecMsg(
+          t('cam.auto.recFailed', 'Could not start auto-recording — the camera format may be unsupported.'),
+        )
+      }
+      return
+    }
+    // Otherwise (stream ended, OR auto-record disarmed mid-run) — if a session is
+    // in flight, stop it and persist what was captured so far.
+    const session = autoSessionRef.current
+    if (!session) return
+    autoSessionRef.current = null
+    session
+      .stop()
+      .then(async (res) => {
+        setAutoRecActive(false)
+        if (res.blob.size === 0) return
+        const when = Date.now()
+        const name = `${timestampClipName(when)}.${extForMime(res.mimeType)}`
+        try {
+          await saveClip({
+            name,
+            blob: res.blob,
+            durationMs: res.durationMs,
+            mimeType: res.mimeType,
+            createdAt: when,
+          })
+          await refreshClips()
+        } catch {
+          setAutoRecMsg(
+            t('cam.auto.saveFailed', 'Could not save the recorded clip — the browser cache may be full.'),
+          )
+        }
+      })
+      .catch(() => {
+        setAutoRecActive(false)
+      })
+  }, [autoRecord, streaming, t, refreshClips])
+
+  // ---- saved-clip actions: play (inline) / download / delete ----
+  const playClip = useCallback(
+    async (id: number) => {
+      // Toggle: clicking the playing clip closes it (and revokes its URL).
+      setPlayingClip((prev) => {
+        if (prev && prev.id === id) {
+          URL.revokeObjectURL(prev.url)
+          return null
+        }
+        return prev
+      })
+      const already = playingClip?.id === id
+      if (already) return
+      const blob = await getClipBlob(id)
+      if (!blob) {
+        await refreshClips()
+        return
+      }
+      const url = URL.createObjectURL(blob)
+      setPlayingClip((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url)
+        return { id, url }
+      })
+    },
+    [playingClip, refreshClips],
+  )
+
+  const downloadClip = useCallback(async (meta: ClipMeta) => {
+    const blob = await getClipBlob(meta.id)
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    downloadUrl(url, meta.name)
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+  }, [])
+
+  const removeSavedClip = useCallback(
+    async (id: number) => {
+      setPlayingClip((prev) => {
+        if (prev && prev.id === id) {
+          URL.revokeObjectURL(prev.url)
+          return null
+        }
+        return prev
+      })
+      try {
+        await deleteClip(id)
+      } catch {
+        /* ignore — refresh reflects the real state */
+      }
+      await refreshClips()
+    },
+    [refreshClips],
+  )
+
   // ---- power toggle per slot ----
   const toggleLive = useCallback(
     (s: SlotIdx) => {
@@ -708,13 +1177,19 @@ export function CameraPanel() {
     clipsRef.current = clips
   }, [clips])
 
+  // Mirror the inline-playback URL so the unmount cleanup can revoke it.
+  useEffect(() => {
+    playingUrlRef.current = playingClip?.url ?? null
+  }, [playingClip])
+
   // Full cleanup on unmount.
   useEffect(() => {
     const videoEls = videoRefs.current
     const streamEls = streamRefs.current
     return () => {
-      // Abort any in-flight auto-calibration so no jog is left running.
+      // Abort any in-flight auto-calibration / role probe so no jog is left running.
       autoAbortRef.current?.abort()
+      roleAbortRef.current?.abort()
       if (recTimerRef.current !== null) window.clearInterval(recTimerRef.current)
       if (tlCaptureTimerRef.current !== null) window.clearInterval(tlCaptureTimerRef.current)
       if (tlDrawTimerRef.current !== null) window.clearInterval(tlDrawTimerRef.current)
@@ -733,6 +1208,14 @@ export function CameraPanel() {
         } catch {
           /* noop */
         }
+      }
+      // Stop any in-flight auto-record session (its blob is discarded on unmount).
+      autoSessionRef.current?.stop().catch(() => {})
+      autoSessionRef.current = null
+      // Revoke the inline-playback object URL if one is open.
+      if (playingUrlRef.current) {
+        URL.revokeObjectURL(playingUrlRef.current)
+        playingUrlRef.current = null
       }
       for (const bmp of tlFramesRef.current) bmp.close?.()
       for (let i = 0; i < 2; i++) {
@@ -1078,6 +1561,271 @@ export function CameraPanel() {
     commitHomography(calibSlot, imgPts, worldPts, frame.width, frame.height)
   }, [calibSlot, commitHomography, t])
 
+  // ---- (b1) sheet → machine registration ----
+  // The printed grid uses cols:4, rows:5 (see generateSheet), so the two
+  // registration anchors are grid (0,0) → sheet (0,0) and grid (3,0) → sheet
+  // (114,0). Derive them from the same layout the sheet is built with so the
+  // on-screen guidance always matches the printed marker labels.
+  const regMarkers = useMemo(() => registrationMarkers({ cols: 4, rows: 5 }), [])
+
+  // Build the SheetRegistration the grid solver bakes in, or null until BOTH
+  // anchors have been captured by jogging the tool to the marker.
+  const sheetRegistration: SheetRegistration | null = useMemo(() => {
+    const { originMachine, secondMachine } = sheetReg
+    if (!originMachine || !secondMachine) return null
+    return {
+      originSheet: [regMarkers.originMm.x, regMarkers.originMm.y],
+      originMachine,
+      secondSheet: [regMarkers.secondMm.x, regMarkers.secondMm.y],
+      secondMachine,
+    }
+  }, [sheetReg, regMarkers])
+
+  // A live sanity check of the captured registration (rotation + scale), shown so
+  // the operator can spot a fat-fingered capture (scale should be ~1.0).
+  const regTransform = useMemo(
+    () => (sheetRegistration ? solveSheetTransform(sheetRegistration) : null),
+    [sheetRegistration],
+  )
+
+  // Capture the CURRENT live machine work XY as one of the two anchors. Mirrors
+  // how machine-motion calibration reads useMachine wpos at the press.
+  const captureRegAnchor = useCallback(
+    (which: 'origin' | 'second') => {
+      if (machineConn !== 'connected') {
+        setGridMsg(t('cam.reg.notConnected', 'Machine not connected — connect it in the Controller tab first.'))
+        return
+      }
+      const p = useMachine.getState().wpos
+      const xy: [number, number] = [p.x, p.y]
+      setSheetReg((prev) => ({
+        originMachine: which === 'origin' ? xy : prev.originMachine,
+        secondMachine: which === 'second' ? xy : prev.secondMachine,
+      }))
+      setGridMsg(
+        which === 'origin'
+          ? t('cam.reg.gotOrigin', 'Captured origin marker at work X{x} Y{y}. Now jog to the second marker and capture it.', {
+              x: xy[0].toFixed(1),
+              y: xy[1].toFixed(1),
+            })
+          : t('cam.reg.gotSecond', 'Captured second marker at work X{x} Y{y}. Re-run “Auto-calibrate” so the sheet ties to the machine.', {
+              x: xy[0].toFixed(1),
+              y: xy[1].toFixed(1),
+            }),
+      )
+    },
+    [machineConn, setSheetReg, t],
+  )
+
+  const clearRegistration = useCallback(() => {
+    setSheetReg({ originMachine: null, secondMachine: null })
+    setGridMsg(t('cam.reg.cleared', 'Registration cleared — re-capture both markers to tie the sheet to the machine.'))
+  }, [setSheetReg, t])
+
+  // ---- (b2) two-camera GRID calibration (printed marker sheet) ----
+  // Generate + download the printable A4 marker grid (each QR encodes its own
+  // bed-mm coordinate). REQUIRES the user to print at 100% and lay it flat.
+  const generateSheet = useCallback(async () => {
+    setSheetBusy(true)
+    setGridMsg(t('cam.grid.generating', 'Generating the A4 marker sheet…'))
+    try {
+      const sheet = await generateCalibrationSheet({ cols: 4, rows: 5 })
+      const url = URL.createObjectURL(sheet.blob)
+      downloadUrl(url, 'karmyogi-grid-calibration-A4.pdf')
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+      setGridMsg(
+        t(
+          'cam.grid.generated',
+          'Sheet ready ({n} markers). PRINT AT 100% (no fit-to-page), lay it flat on the bed, then auto-calibrate.',
+          { n: sheet.markers.length },
+        ),
+      )
+    } catch (err) {
+      setGridMsg(
+        err instanceof Error
+          ? err.message
+          : t('cam.grid.genFailed', 'Could not generate the calibration sheet.'),
+      )
+    } finally {
+      setSheetBusy(false)
+    }
+  }, [t])
+
+  // Auto-calibrate ONE slot from the printed grid (reads the QR mm coordinates
+  // and solves its image→bed homography). Persists via useCameraCalib.
+  const autoCalibSlotFromGrid = useCallback(
+    async (s: SlotIdx) => {
+      if (!qrSupported) {
+        setGridMsg(
+          t('cam.grid.noDetector', 'BarcodeDetector is unavailable in this browser — use Auto or Manual calibration instead.'),
+        )
+        return
+      }
+      const v = videoRefs.current[s]
+      if (!v || !v.videoWidth) {
+        setGridMsg(t('cam.bt.err.noFrame', 'No live frame — start this camera first.'))
+        return
+      }
+      const detected = await detectGridMarkers(v)
+      setGridFound((prev) => {
+        const next: [number | null, number | null] = [prev[0], prev[1]]
+        next[s] = detected.markers.length
+        return next
+      })
+      const res = calibrateCameraFromGrid(detected, sheetRegistration)
+      if (!res.ok) {
+        setGridMsg(
+          res.reason === 'tooFew'
+            ? t('cam.grid.tooFew', 'Cam {n}: found {f} grid markers — need at least 4 visible and spread out.', {
+                n: s + 1,
+                f: detected.markers.length,
+              })
+            : res.reason === 'badRegistration'
+              ? t('cam.grid.badReg', 'Cam {n}: the two registration captures coincide — jog to two DIFFERENT markers and re-capture.', {
+                  n: s + 1,
+                })
+              : t('cam.grid.degenerate', 'Cam {n}: markers are collinear — angle the sheet so a 2D spread is visible.', {
+                  n: s + 1,
+                }),
+        )
+        return
+      }
+      calib.setCamera(s, {
+        H: res.result.H,
+        rmsMm: res.result.rmsMm,
+        frameW: res.result.frameW,
+        frameH: res.result.frameH,
+      })
+      setGridMsg(
+        res.result.registered
+          ? t('cam.grid.calibrated', 'Cam {n} calibrated from {u} grid markers (registered to machine work XY) — RMS {rms} mm.', {
+              n: s + 1,
+              u: res.result.used,
+              rms: res.result.rmsMm.toFixed(2),
+            })
+          : t('cam.grid.calibratedNoReg', 'Cam {n} solved from {u} grid markers — RMS {rms} mm. NOT yet tied to the machine: do step 2 (register the sheet) and re-calibrate, or the overlay will be offset.', {
+              n: s + 1,
+              u: res.result.used,
+              rms: res.result.rmsMm.toFixed(2),
+            }),
+      )
+    },
+    [qrSupported, calib, sheetRegistration, t],
+  )
+
+  // Auto-calibrate BOTH live cameras from the grid in one click.
+  const autoCalibBothFromGrid = useCallback(async () => {
+    await autoCalibSlotFromGrid(0)
+    if (secondaryEnabled && live(1)) await autoCalibSlotFromGrid(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCalibSlotFromGrid, secondaryEnabled, status])
+
+  // GUIDED head-vs-stationary probe: jog a known distance, see which feed the
+  // markers/world shift in. The HEAD camera's whole view translates; the
+  // STATIONARY one barely moves. Persists the inferred role per slot.
+  const runRoleProbe = useCallback(async () => {
+    if (machineConn !== 'connected') {
+      setGridMsg(
+        t('cam.role.notConnected', 'Machine not connected — connect it in the Controller tab first.'),
+      )
+      return
+    }
+    if (!live(0) && !live(1)) {
+      setGridMsg(t('cam.role.needCam', 'Start at least one camera first.'))
+      return
+    }
+    const jog = 8
+    const ok =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(
+            t(
+              'cam.role.confirm',
+              'The machine will jog +{j} mm on X and back to detect which camera is head-mounted. Make sure the tool is clear. Continue?',
+              { j: jog },
+            ),
+          )
+    if (!ok) return
+
+    const ctrl = new AbortController()
+    roleAbortRef.current = ctrl
+    setRoleRunning(true)
+    setRoleProgress(null)
+    setGridMsg(null)
+    try {
+      const res = await detectCameraRoles({
+        videos: [videoRefs.current[0], videoRefs.current[1]],
+        jogMm: jog,
+        feed: 1000,
+        settleMs: 350,
+        signal: ctrl.signal,
+        onProgress: (p) => setRoleProgress(p),
+      })
+      setCamRoles([res.slots[0].role, res.slots[1].role])
+      const label = (r: CameraRole) =>
+        r === 'head'
+          ? t('cam.role.head', 'head-mounted')
+          : r === 'stationary'
+            ? t('cam.role.stationary', 'stationary')
+            : t('cam.role.unknown', 'unknown')
+      if (res.headSlot == null && res.stationarySlot == null) {
+        setGridMsg(
+          t(
+            'cam.role.inconclusive',
+            'Inconclusive — neither feed showed a clear world-shift. Ensure the head camera sees the bed and retry with more light.',
+          ),
+        )
+      } else {
+        setGridMsg(
+          t('cam.role.done', 'Detected — Cam 1: {a}, Cam 2: {b}.', {
+            a: label(res.slots[0].role),
+            b: label(res.slots[1].role),
+          }),
+        )
+      }
+    } catch (err) {
+      const isAbort = err instanceof DOMException && err.name === 'AbortError'
+      setGridMsg(
+        isAbort
+          ? t('cam.role.aborted', 'Probe aborted — machine returned to start.')
+          : err instanceof Error
+            ? err.message
+            : t('cam.role.failed', 'Role detection failed.'),
+      )
+    } finally {
+      setRoleRunning(false)
+      setRoleProgress(null)
+      roleAbortRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machineConn, status, setCamRoles, t])
+
+  const abortRoleProbe = useCallback(() => {
+    roleAbortRef.current?.abort()
+    grbl.jogCancel().catch(() => {})
+  }, [])
+
+  // Localize a role-probe progress code (panel owns the copy; qrCalib stays i18n-free).
+  const roleProgressLabel = useCallback(
+    (p: RoleProbeProgress): string => {
+      switch (p.code) {
+        case 'capturing':
+          return t('cam.role.p.capturing', 'Capturing reference frames…')
+        case 'jogging':
+          return t('cam.role.p.jogging', 'Jogging +{delta} mm on X…', p.params ?? {})
+        case 'capturingAfter':
+          return t('cam.role.p.after', 'Capturing shifted frames…')
+        case 'returning':
+          return t('cam.role.p.returning', 'Returning to start…')
+        case 'analyzing':
+          return t('cam.role.p.analyzing', 'Comparing the feeds…')
+        default:
+          return ''
+      }
+    },
+    [t],
+  )
+
   // ---- (c) manual bed-corner calibration ----
   const solveManual = useCallback(() => {
     if (cornerClicks.length < 4) {
@@ -1315,6 +2063,32 @@ export function CameraPanel() {
     calib.cameras[1].H.length === 9
   const spreadTooSmall = mmPairs.length >= 2 && minPairwiseDist(mmPairs.map((p) => p.px)) < 20
 
+  // ---- top status strip: condense the camera / calibration / recording state
+  // the panel already computes into three compact pills. Pure derivation. ----
+  const liveCount = (live(0) ? 1 : 0) + (live(1) ? 1 : 0)
+  const anyDenied = status[0].kind === 'denied' || status[1].kind === 'denied'
+  const camState: { tone: 'on' | 'warn' | 'off'; label: string } = !supported
+    ? { tone: 'warn', label: t('cam.strip.unsupported', 'no getUserMedia') }
+    : anyDenied
+      ? { tone: 'warn', label: t('cam.strip.denied', 'permission denied') }
+      : liveCount > 0
+        ? {
+            tone: 'on',
+            label:
+              liveCount === 2
+                ? t('cam.strip.live2', '2 cameras live')
+                : t('cam.strip.live1', '1 camera live'),
+          }
+        : { tone: 'off', label: t('cam.strip.noCam', 'no camera') }
+  const isCalibrated = calib.isCalibrated()
+  const recState: { tone: 'on' | 'off'; label: string } | null = recording
+    ? { tone: 'on', label: t('cam.strip.recording', 'recording') }
+    : autoRecActive
+      ? { tone: 'on', label: t('cam.strip.autoRec', 'auto-recording') }
+      : tlActive
+        ? { tone: 'on', label: t('cam.strip.timelapse', 'timelapse') }
+        : null
+
   // ---- VISIBLE "why is this disabled?" reasons (not just tooltips) ----
   // Each returns a localized one-liner when the action can't run, else null.
   const autoReason: string | null =
@@ -1455,7 +2229,90 @@ export function CameraPanel() {
               : t('cam.bt.ref.set', 'Capture empty-bed reference')}
           </button>
         </div>
+        {/* Advanced live-camera image controls (collapsed by default). */}
+        {renderAdvanced(s)}
       </section>
+    )
+  }
+
+  // ---- advanced image-controls disclosure (per slot) ----
+  const renderAdvanced = (s: SlotIdx) => {
+    const isLive = status[s].kind === 'live'
+    const caps = advCaps[s]
+    const overrides = advOverrides[s]
+    const hasOverrides = Object.keys(overrides).length > 0
+    return (
+      <details className="cam-guide cam-adv" data-has={hasOverrides}>
+        <summary>
+          {t('cam.adv.title', 'Advanced image settings')}
+          {hasOverrides && <span className="cam-adv-badge">{t('cam.adv.custom', 'custom')}</span>}
+        </summary>
+        <div className="cam-adv-body">
+          {!isLive ? (
+            <p className="cam-hint">
+              {t('cam.adv.needLive', 'Start this camera to adjust the live image.')}
+            </p>
+          ) : caps.length === 0 ? (
+            <p className="cam-hint">
+              {t(
+                'cam.adv.unsupported',
+                'This camera / browser does not expose adjustable image settings (no getCapabilities support, or the device reports none).',
+              )}
+            </p>
+          ) : (
+            <>
+              <p className="cam-hint">
+                {t(
+                  'cam.adv.hint',
+                  'Adjust the live feed. Only settings your camera reports are shown; values are saved and re-applied when the camera restarts.',
+                )}
+              </p>
+              <div className="cam-fields cam-fields-3d">
+                {caps.map((cap) => {
+                  const value =
+                    cap.name in overrides
+                      ? overrides[cap.name]
+                      : cap.current ?? (cap.min + cap.max) / 2
+                  const id = `cam-adv-${s}-${cap.name}`
+                  const digits = cap.step < 1 ? 2 : 0
+                  return (
+                    <label key={cap.name} htmlFor={id}>
+                      <span className="cam-flabel">
+                        {t(cap.key, cap.label)} · {value.toFixed(digits)}
+                      </span>
+                      <input
+                        id={id}
+                        className="cam-range"
+                        type="range"
+                        min={cap.min}
+                        max={cap.max}
+                        step={cap.step}
+                        value={value}
+                        onChange={(e) => setAdvValue(s, cap.name, parseFloat(e.target.value))}
+                        aria-label={t(cap.key, cap.label)}
+                      />
+                    </label>
+                  )
+                })}
+              </div>
+              <div className="cam-row">
+                <button
+                  type="button"
+                  className="cam-btn cam-grow"
+                  disabled={!hasOverrides}
+                  onClick={() => {
+                    resetAdvForSlot(s).catch(() => {})
+                  }}
+                  title={t('cam.adv.resetTip', 'Clear your saved adjustments and restore the camera defaults')}
+                >
+                  <Icon name="close" size={14} />
+                  {t('cam.adv.reset', 'Reset to defaults')}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </details>
     )
   }
 
@@ -1468,6 +2325,40 @@ export function CameraPanel() {
         )}
       </p>
 
+      {/* ---- top status strip: camera · calibration · recording ---- */}
+      <div className="cam-strip" role="status" aria-label={t('cam.strip.aria', 'Camera status')}>
+        <span className="cam-strip-pill" data-tone={camState.tone}>
+          <span className="cam-strip-dot" aria-hidden="true" />
+          {camState.label}
+        </span>
+        <span className="cam-strip-sep" aria-hidden="true">·</span>
+        <span className="cam-strip-pill" data-tone={isCalibrated ? 'on' : 'off'}>
+          {isCalibrated
+            ? t('cam.strip.calibrated', 'calibrated')
+            : t('cam.strip.notCalibrated', 'not calibrated')}
+        </span>
+        {recState && (
+          <>
+            <span className="cam-strip-sep" aria-hidden="true">·</span>
+            <span className="cam-strip-pill cam-strip-rec" data-tone={recState.tone}>
+              <span className="cam-rec-dot" aria-hidden="true" />
+              {recState.label}
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* ============================ LIVE VIEW ============================ */}
+      <CamSection
+        title={t('cam.sec.live', 'Live view')}
+        open={secLiveOpen}
+        onToggle={() => setSecLiveOpen((v) => !v)}
+        badge={
+          <span className="cam-raw" data-on={liveCount > 0}>
+            {camState.label}
+          </span>
+        }
+      >
       <div className="cam-cards">
         {/* ---- calibration sheet (printable QR fiducials) ---- */}
         <section className="cam-card">
@@ -1530,10 +2421,74 @@ export function CameraPanel() {
         </section>
         {secondaryEnabled && renderSlot(1)}
 
+        {/* ---- auto-record while streaming (slot 0 / Camera 1 only) ---- */}
+        <section className="cam-card">
+          <header className="cam-card-head">
+            <h4>{t('cam.auto.title', 'Auto-record runs')}</h4>
+            {autoRecActive ? (
+              <span className="cam-rec" title={t('cam.auto.recTip', 'Recording the current run')}>
+                <span className="cam-rec-dot" aria-hidden="true" />
+                {t('cam.auto.recording', 'recording')}
+              </span>
+            ) : (
+              <span className="cam-raw" data-on={autoRecord}>
+                {autoRecord ? t('cam.auto.on', 'armed') : t('cam.auto.off', 'off')}
+              </span>
+            )}
+          </header>
+          <p className="cam-hint">
+            {t(
+              'cam.auto.hint',
+              'Automatically record Camera 1 whenever the machine streams a program — the clip is saved to this browser when the run finishes.',
+            )}
+          </p>
+          {!recorderSupported && (
+            <p className="cam-warn">
+              {t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).')}
+            </p>
+          )}
+          <div className="cam-row">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoRecord}
+              className={`cam-rec-pill${autoRecord ? ' on' : ''}`}
+              disabled={!recorderSupported}
+              onClick={() => setAutoRecord((v) => !v)}
+              title={
+                autoRecord
+                  ? t('cam.auto.toggleOnTip', 'Auto-record is ON — click to disable')
+                  : t('cam.auto.toggleOffTip', 'Auto-record is OFF — click to record every run automatically')
+              }
+            >
+              <span className="cam-rec-pill-dot" data-live={autoRecActive} aria-hidden="true" />
+              <span className="cam-rec-pill-label">
+                {autoRecord ? t('cam.auto.labelOn', 'Auto-record ON') : t('cam.auto.labelOff', 'Auto-record OFF')}
+              </span>
+            </button>
+          </div>
+          {autoRecord && !canCapture && recorderSupported && (
+            <p className="cam-hint">
+              {t('cam.auto.needCam1', 'Start Camera 1 above so a run can be captured.')}
+            </p>
+          )}
+          {autoRecMsg && <p className="cam-warn">{autoRecMsg}</p>}
+        </section>
+      </div>
+      </CamSection>
+
+      {/* ============================= CAPTURE ============================= */}
+      <CamSection
+        title={t('cam.sec.capture', 'Capture')}
+        open={secCaptureOpen}
+        onToggle={() => setSecCaptureOpen((v) => !v)}
+        badge={<span className="cam-raw">{t('cam.capture.cam1only', 'Camera 1 only')}</span>}
+      >
+      <div className="cam-cards">
         {/* ---- capture controls (slot 0 / Camera 1 only) ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
-            <h4>{t('cam.capture.title', 'Capture')}</h4>
+            <h4>{t('cam.capture.title', 'Snapshot & record')}</h4>
             <span className="cam-raw">{t('cam.capture.cam1only', 'Camera 1 only')}</span>
           </header>
           {!recorderSupported && (
@@ -1662,8 +2617,23 @@ export function CameraPanel() {
           </div>
           {recError && <p className="cam-warn">{recError}</p>}
         </section>
+      </div>
+      </CamSection>
 
-        {/* ================= BED TRACKING (3D) ================= */}
+      {/* ================= BED TRACKING & CALIBRATION ================= */}
+      <CamSection
+        title={t('cam.sec.calib', 'Bed tracking & calibration')}
+        open={secCalibOpen}
+        onToggle={() => setSecCalibOpen((v) => !v)}
+        badge={
+          <span className="cam-raw" data-on={isCalibrated}>
+            {isCalibrated
+              ? t('cam.bt.calibBadge', 'calibrated')
+              : t('cam.bt.uncalibBadge', 'not calibrated')}
+          </span>
+        }
+      >
+      <div className="cam-cards">
         <section className="cam-card cam-span">
           <header className="cam-card-head">
             <h4>{t('cam.bt.title', 'Bed tracking (3D)')}</h4>
@@ -2136,6 +3106,304 @@ export function CameraPanel() {
 
           {calibMsg && <p className="cam-calib-msg">{calibMsg}</p>}
 
+          {/* --- two-camera printed-grid calibration --- */}
+          <div className="cam-subhead">
+            {t('cam.grid.title', 'Two-camera grid (print & auto-calibrate)')}
+          </div>
+          <p className="cam-hint">
+            {t(
+              'cam.grid.hint',
+              'For a head-mounted + a stationary external camera. Print the marker grid, lay it flat on the bed, then let karmyogi read each marker’s printed mm coordinate and solve both cameras at once — and tell which camera is on the head.',
+            )}
+          </p>
+          <div className="cam-grid-cal">
+            {/* (1) generate the printable sheet */}
+            <div className="cam-grid-step">
+              <span className="cam-grid-step-n" aria-hidden="true">1</span>
+              <div className="cam-grid-step-body">
+                <span className="cam-grid-step-title">
+                  {t('cam.grid.step1', 'Print the marker sheet')}
+                </span>
+                <p className="cam-hint">
+                  {t(
+                    'cam.grid.step1Note',
+                    'Each QR encodes its own bed position in mm. PRINT AT 100% (no “fit to page”), measure the 50 mm ruler to confirm scale, and tape it flat on the bed.',
+                  )}
+                </p>
+                <div className="cam-row">
+                  <button
+                    type="button"
+                    className="cam-btn cam-primary cam-grow"
+                    disabled={sheetBusy}
+                    onClick={() => {
+                      generateSheet().catch(() => {})
+                    }}
+                    title={t('cam.grid.genTip', 'Generate and download a printable A4 PDF of unique QR markers')}
+                  >
+                    <Icon name="download" size={14} />
+                    {sheetBusy
+                      ? t('cam.grid.genBusy', 'Generating…')
+                      : t('cam.grid.gen', 'Generate marker sheet (A4 PDF)')}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* (2) register the sheet to the machine work frame */}
+            <div className="cam-grid-step">
+              <span className="cam-grid-step-n" aria-hidden="true">2</span>
+              <div className="cam-grid-step-body">
+                <span className="cam-grid-step-title">
+                  {t('cam.reg.title', 'Register the sheet to the machine')}
+                </span>
+                <p className="cam-hint">
+                  {t(
+                    'cam.reg.note',
+                    'The sheet sits at an unknown spot on the bed. Tie it to the machine: jog the tool TIP exactly onto two printed markers and capture the live work XY at each. karmyogi bakes that into the calibration so the overlay lands in true machine coordinates (without this it would be offset/rotated). Needs the machine connected.',
+                  )}
+                </p>
+                {machineConn !== 'connected' && (
+                  <p className="cam-warn cam-disabled-why">
+                    {t('cam.reg.notConnectedHint', 'Connect the machine in the Controller tab to capture work XY.')}
+                  </p>
+                )}
+                <div className="cam-row">
+                  <button
+                    type="button"
+                    className="cam-btn cam-grow"
+                    disabled={machineConn !== 'connected'}
+                    onClick={() => captureRegAnchor('origin')}
+                    title={t('cam.reg.captureOriginTip', 'Jog the tool tip onto the X{x} Y{y} marker, then capture the live work XY', {
+                      x: regMarkers.originMm.x,
+                      y: regMarkers.originMm.y,
+                    })}
+                  >
+                    <Icon name="probe" size={14} />
+                    {t('cam.reg.captureOrigin', 'Capture origin marker (X{x} Y{y})', {
+                      x: regMarkers.originMm.x,
+                      y: regMarkers.originMm.y,
+                    })}
+                    {sheetReg.originMachine && (
+                      <span className="cam-grid-count" data-on={true}>
+                        {t('cam.reg.at', 'X{x} Y{y}', {
+                          x: sheetReg.originMachine[0].toFixed(1),
+                          y: sheetReg.originMachine[1].toFixed(1),
+                        })}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="cam-btn cam-grow"
+                    disabled={machineConn !== 'connected'}
+                    onClick={() => captureRegAnchor('second')}
+                    title={t('cam.reg.captureSecondTip', 'Jog the tool tip onto the X{x} Y{y} marker, then capture the live work XY', {
+                      x: regMarkers.secondMm.x,
+                      y: regMarkers.secondMm.y,
+                    })}
+                  >
+                    <Icon name="probe" size={14} />
+                    {t('cam.reg.captureSecond', 'Capture second marker (X{x} Y{y})', {
+                      x: regMarkers.secondMm.x,
+                      y: regMarkers.secondMm.y,
+                    })}
+                    {sheetReg.secondMachine && (
+                      <span className="cam-grid-count" data-on={true}>
+                        {t('cam.reg.at', 'X{x} Y{y}', {
+                          x: sheetReg.secondMachine[0].toFixed(1),
+                          y: sheetReg.secondMachine[1].toFixed(1),
+                        })}
+                      </span>
+                    )}
+                  </button>
+                  {(sheetReg.originMachine || sheetReg.secondMachine) && (
+                    <IconButton
+                      className="cam-icon-btn"
+                      iconName="close"
+                      label={t('cam.reg.clear', 'Clear the sheet registration')}
+                      onClick={clearRegistration}
+                    />
+                  )}
+                </div>
+                {sheetRegistration ? (
+                  regTransform ? (
+                    <p
+                      className={`cam-hint${Math.abs(regTransform.scale - 1) > 0.05 ? ' cam-warn' : ''}`}
+                      role="status"
+                    >
+                      {t('cam.reg.ok', 'Registered: sheet rotated {deg}° on the bed, scale {scale}× (should be ~1.0).', {
+                        deg: regTransform.rotationDeg.toFixed(1),
+                        scale: regTransform.scale.toFixed(3),
+                      })}
+                    </p>
+                  ) : (
+                    <p className="cam-warn" role="status">
+                      {t('cam.reg.degenerate', 'The two captures are at the same spot — jog to two DIFFERENT markers.')}
+                    </p>
+                  )
+                ) : (
+                  <p className="cam-hint" role="status">
+                    {t('cam.reg.pending', 'Capture BOTH markers to register. Until then a grid calibration stays in the sheet’s frame (overlay will be offset).')}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* (3) auto-calibrate both cameras from the grid */}
+            <div className="cam-grid-step">
+              <span className="cam-grid-step-n" aria-hidden="true">3</span>
+              <div className="cam-grid-step-body">
+                <span className="cam-grid-step-title">
+                  {t('cam.grid.step2', 'Auto-calibrate from the grid')}
+                </span>
+                <p className="cam-hint">
+                  {t(
+                    'cam.grid.step2Note',
+                    'Aim each camera at the sheet so several markers are visible, then scan. ≥4 markers per camera are needed. Do step 2 (register) first so the result lands in machine coordinates.',
+                  )}
+                </p>
+                {!qrSupported && (
+                  <p className="cam-warn cam-disabled-why">
+                    {t('cam.grid.noDetector', 'BarcodeDetector is unavailable in this browser — use Auto or Manual calibration instead.')}
+                  </p>
+                )}
+                {qrSupported && !sheetRegistration && (
+                  <p className="cam-warn cam-disabled-why">
+                    {t('cam.grid.regFirst', 'Not registered yet — calibrating now lands in the sheet’s frame (overlay offset). Do step 2 first, or re-calibrate after.')}
+                  </p>
+                )}
+                <div className="cam-row">
+                  <button
+                    type="button"
+                    className="cam-btn cam-grow"
+                    disabled={!qrSupported || !live(0)}
+                    onClick={() => {
+                      autoCalibSlotFromGrid(0).catch(() => {})
+                    }}
+                    title={t('cam.grid.scan1Tip', 'Read the grid in Camera 1 and solve its calibration')}
+                  >
+                    <Icon name="frame" size={14} />
+                    {t('cam.grid.scan1', 'Calibrate Cam 1')}
+                    {gridFound[0] != null && (
+                      <span className="cam-grid-count" data-on={gridFound[0] >= 4}>
+                        {t('cam.grid.count', '{n} found', { n: gridFound[0] })}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="cam-btn cam-grow"
+                    disabled={!qrSupported || !secondaryEnabled || !live(1)}
+                    onClick={() => {
+                      autoCalibSlotFromGrid(1).catch(() => {})
+                    }}
+                    title={
+                      secondaryEnabled
+                        ? t('cam.grid.scan2Tip', 'Read the grid in Camera 2 and solve its calibration')
+                        : t('cam.bt.cam2Disabled', 'Enable the second camera first')
+                    }
+                  >
+                    <Icon name="frame" size={14} />
+                    {t('cam.grid.scan2', 'Calibrate Cam 2')}
+                    {gridFound[1] != null && (
+                      <span className="cam-grid-count" data-on={gridFound[1] >= 4}>
+                        {t('cam.grid.count', '{n} found', { n: gridFound[1] })}
+                      </span>
+                    )}
+                  </button>
+                </div>
+                {secondaryEnabled && (
+                  <div className="cam-row">
+                    <button
+                      type="button"
+                      className="cam-btn cam-primary cam-grow"
+                      disabled={!qrSupported || !live(0)}
+                      onClick={() => {
+                        autoCalibBothFromGrid().catch(() => {})
+                      }}
+                      title={t('cam.grid.scanBothTip', 'Read the grid in both live cameras and solve both at once')}
+                    >
+                      <Icon name="frame" size={14} />
+                      {t('cam.grid.scanBoth', 'Auto-calibrate both cameras')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* (4) detect which camera is head-mounted vs stationary */}
+            <div className="cam-grid-step">
+              <span className="cam-grid-step-n" aria-hidden="true">4</span>
+              <div className="cam-grid-step-body">
+                <span className="cam-grid-step-title">
+                  {t('cam.role.title', 'Detect head vs stationary camera')}
+                </span>
+                <p className="cam-hint">
+                  {t(
+                    'cam.role.note',
+                    'Jogs the machine a small known distance and watches which feed the world shifts in — the head-mounted camera moves with the spindle; the external one barely changes. Needs the machine connected; it will ask before jogging.',
+                  )}
+                </p>
+                {machineConn !== 'connected' && (
+                  <p className="cam-warn cam-disabled-why">
+                    {t('cam.role.notConnectedHint', 'Connect the machine in the Controller tab to run the probe.')}
+                  </p>
+                )}
+                <div className="cam-role-chips" role="status">
+                  {([0, 1] as SlotIdx[]).map((s) => {
+                    const r = camRoles[s]
+                    return (
+                      <span key={s} className={`cam-role-chip cam-role-${r}`}>
+                        <span className="cam-role-chip-cam">
+                          {s === 0 ? t('cam.bt.cam1', 'Cam 1') : t('cam.bt.cam2', 'Cam 2')}
+                        </span>
+                        <span className="cam-role-chip-val">
+                          {r === 'head'
+                            ? t('cam.role.head', 'head-mounted')
+                            : r === 'stationary'
+                              ? t('cam.role.stationary', 'stationary')
+                              : t('cam.role.unknown', 'unknown')}
+                        </span>
+                      </span>
+                    )
+                  })}
+                </div>
+                <div className="cam-row">
+                  {!roleRunning ? (
+                    <button
+                      type="button"
+                      className="cam-btn cam-grow"
+                      disabled={machineConn !== 'connected' || (!live(0) && !live(1))}
+                      onClick={() => {
+                        runRoleProbe().catch(() => {})
+                      }}
+                      title={t('cam.role.runTip', 'Jog a known distance and infer which camera is on the head')}
+                    >
+                      <Icon name="jog" size={14} />
+                      {t('cam.role.run', 'Detect camera mounts')}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="cam-btn danger cam-grow"
+                      onClick={abortRoleProbe}
+                      title={t('cam.role.abortTip', 'Stop the probe and cancel the jog')}
+                    >
+                      <Icon name="stop" size={13} />
+                      {t('cam.role.abort', 'Abort')}
+                    </button>
+                  )}
+                </div>
+                {roleRunning && roleProgress && (
+                  <p className="cam-hint cam-pending" role="status">
+                    {roleProgressLabel(roleProgress)}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+          {gridMsg && <p className="cam-calib-msg">{gridMsg}</p>}
+
           {/* --- job footprint + height --- */}
           <div className="cam-subhead">{t('cam.bt.jobTitle', 'Job (stock) on the bed')}</div>
           <p className="cam-hint">
@@ -2229,7 +3497,17 @@ export function CameraPanel() {
             </p>
           )}
         </section>
+      </div>
+      </CamSection>
 
+      {/* ========================= SAVED RECORDINGS ========================= */}
+      <CamSection
+        title={t('cam.sec.saved', 'Saved recordings')}
+        open={secSavedOpen}
+        onToggle={() => setSecSavedOpen((v) => !v)}
+        badge={<span className="cam-raw">{clips.length + savedClips.length}</span>}
+      >
+      <div className="cam-cards">
         {/* ---- recorded clips ---- */}
         <section className="cam-card cam-span">
           <header className="cam-card-head">
@@ -2269,7 +3547,87 @@ export function CameraPanel() {
             </ul>
           )}
         </section>
+
+        {/* ---- auto-recorded clips (saved in this browser via IndexedDB) ---- */}
+        <section className="cam-card cam-span">
+          <header className="cam-card-head">
+            <h4>{t('cam.saved.title', 'Saved run recordings')}</h4>
+            <span className="cam-raw">{savedClips.length}</span>
+          </header>
+          {savedClips.length === 0 ? (
+            <p className="cam-hint">
+              {t(
+                'cam.saved.empty',
+                'Clips auto-recorded while the machine streams a program are saved in this browser and listed here.',
+              )}
+            </p>
+          ) : (
+            <ul className="cam-clips">
+              {savedClips.map((c) => (
+                <li key={c.id} className="cam-saved-clip">
+                  <div className="cam-clip">
+                    <span className="cam-clip-tag rec">{t('cam.saved.tag', 'AUTO')}</span>
+                    <span className="cam-clip-name" title={c.name}>
+                      {c.name}
+                    </span>
+                    <span className="cam-clip-size">
+                      {fmtDuration(c.durationMs)} · {fmtBytes(c.bytes)}
+                    </span>
+                    <button
+                      type="button"
+                      className="cam-btn cam-mini"
+                      onClick={() => {
+                        playClip(c.id).catch(() => {})
+                      }}
+                      title={
+                        playingClip?.id === c.id
+                          ? t('cam.saved.close', 'Close the player')
+                          : t('cam.saved.play', 'Play {name}', { name: c.name })
+                      }
+                      aria-label={
+                        playingClip?.id === c.id
+                          ? t('cam.saved.close', 'Close the player')
+                          : t('cam.saved.play', 'Play {name}', { name: c.name })
+                      }
+                    >
+                      <Icon name={playingClip?.id === c.id ? 'stop' : 'play'} size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="cam-btn cam-mini cam-clip-dl"
+                      onClick={() => {
+                        downloadClip(c).catch(() => {})
+                      }}
+                      title={t('cam.clips.download', 'Download {name}', { name: c.name })}
+                      aria-label={t('cam.clips.download', 'Download {name}', { name: c.name })}
+                    >
+                      <Icon name="download" size={14} />
+                    </button>
+                    <IconButton
+                      className="cam-icon-btn cam-mini"
+                      iconName="trash"
+                      label={t('cam.saved.delete', 'Delete {name} from this browser', { name: c.name })}
+                      onClick={() => {
+                        removeSavedClip(c.id).catch(() => {})
+                      }}
+                    />
+                  </div>
+                  {playingClip?.id === c.id && (
+                    <video
+                      className="cam-saved-video"
+                      src={playingClip.url}
+                      controls
+                      autoPlay
+                      playsInline
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
+      </CamSection>
     </div>
   )
 }

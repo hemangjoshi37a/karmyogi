@@ -4,7 +4,7 @@ import { authRequired } from './firebase'
 import { useT } from '../i18n'
 import { AuthBackground } from './AuthBackground'
 import { POLICIES, PoliciesModal, type Policy } from '../components/policies'
-import { getFirstSeenAt, graceActive, graceDaysLeft } from './graceGate'
+import { getFirstSeenAt, graceActive } from './graceGate'
 import '../styles/auth.css'
 
 /**
@@ -30,40 +30,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // Optional mode (configured but VITE_AUTH_REQUIRED=false): keep the app open
   // even when signed out / still loading — sign-in is offered in the top bar.
   if (!authRequired()) return <>{children}</>
-  // Free-explore grace period: a first-time visitor uses the WHOLE app (no
-  // login) for the first few days, with a slim banner offering sign-in.
-  if (graceActive()) {
-    return (
-      <div className="auth-grace-wrap">
-        <GraceBanner />
-        <div className="auth-grace-body">{children}</div>
-      </div>
-    )
-  }
+  // Free-explore grace window: a first-time visitor uses the WHOLE app (no
+  // login) for the first few days. No banner — sign-in is offered as a small
+  // icon button in the top bar (see UserChip).
+  if (graceActive()) return <>{children}</>
   if (status === 'loading') return <AuthSplash />
   return <SignInScreen graceExpired />
-}
-
-/** Thin top bar shown only during the gated free-explore window. */
-function GraceBanner() {
-  const t = useT()
-  const signIn = useAuth((s) => s.signInWithGoogle)
-  return (
-    <div className="auth-grace-banner" role="status">
-      <span className="auth-grace-banner-text">
-        {t('grace.banner', 'Exploring karmyogi — {n} day(s) left. Sign in anytime to keep your work.', {
-          n: graceDaysLeft(),
-        })}
-      </span>
-      <button
-        type="button"
-        className="auth-grace-banner-btn"
-        onClick={() => void signIn()}
-      >
-        {t('auth.google', 'Sign in with Google')}
-      </button>
-    </div>
-  )
 }
 
 function AuthSplash() {

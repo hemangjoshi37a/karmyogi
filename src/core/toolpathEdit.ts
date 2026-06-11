@@ -56,6 +56,17 @@ export function inferEmitOptions(gcode: string): Omit<SafeReemitOptions, 'progra
   }
 }
 
+/**
+ * Map a SELECTION of segment indices to the segments that should be KEPT (the
+ * complement, in program order). Both the lasso and the individual "pick"
+ * selection feed their result through this so the selection→delete→re-emit
+ * model is identical: whatever is selected is removed, and `reemitSafe` rebuilds
+ * a safe program from the remainder.
+ */
+export function keptFromSelection<T>(segments: T[], selected: Set<number>): T[] {
+  return segments.filter((_, i) => !selected.has(i))
+}
+
 const EPS = 1e-4
 
 /**

@@ -10,6 +10,7 @@ import { initDevLogs, setDevLogsContext } from '../integrations/devlogs'
 import { AdminPage } from '../admin/AdminPage'
 import { useLiveSync } from '../machine/liveSync'
 import { useT } from '../i18n'
+import { UndoRedoHotkeys } from '../components/UndoRedoHotkeys'
 
 /** True when the current path is the admin console (`/admin` or `/admin/...`). */
 function isAdminPath(pathname: string): boolean {
@@ -145,6 +146,7 @@ export function App() {
   // 'disabled' → it renders the app fully open, exactly as today.
   return (
     <AuthGate>
+      <UndoRedoHotkeys />
       <Shell />
     </AuthGate>
   )

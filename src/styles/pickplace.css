@@ -1,4 +1,9 @@
-/* Pick & Place panel. Co-located styles; uses theme CSS variables only. */
+/* Pick & Place panel. Co-located styles; uses theme CSS variables only.
+   House layout (matches Soldering / CAD-CAM):
+   - a slim header (title + ⓘ + compact icon toolbar) and a live status strip,
+   - bordered card sections that TILE into a responsive grid,
+   - a compact fixed-layout ops table that reflows to stacked label/value rows
+     when the PANEL is narrow, and grows controls to ≥36px touch targets. */
 
 .pp-panel {
   display: flex;
@@ -26,14 +31,173 @@
   container-name: ppscroll;
 }
 
-.pp-intro {
-  margin: 0;
-  font-size: var(--fs-body);
-  line-height: 1.4;
-  color: var(--fg-muted);
+/* When wrapped in the shared preset host (.cc-presets-host adds a floating left
+   rail + footer save-bar), fill the band between the top and the save-bar, and
+   reserve a left gutter on the scroll region so the rail never overlaps the
+   cards. Mirrors the host rule for .sp-panel / .wr-panel in presets.css. */
+.cc-presets-host > .pp-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
 }
-.pp-intro b {
+.cc-presets-host > .pp-panel .pp-scroll {
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .pp-panel .pp-scroll {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
+
+/* ───────────────────────── header ───────────────────────── */
+.pp-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  min-height: var(--ctl-h-lg);
+}
+.pp-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.pp-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* icon toolbar pinned to the right of the header */
+.pp-tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.pp-tools-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--sp-1) 2px;
+  background: var(--border);
+}
+
+/* square icon buttons — compact on desktop, grown for touch in the queries below */
+.pp-ico {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
   color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.pp-ico > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pp-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.pp-ico:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pp-ico-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-size: 17px;
+  font-weight: 600;
+}
+.pp-ico-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 85%, #fff);
+  color: var(--accent-fg);
+}
+.pp-ico-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+/* icon + short word buttons (Set pick / Set place) — same chrome, auto width */
+.pp-ico-text {
+  width: auto;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-ctl);
+}
+.pp-ico-label {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ───────────────────────── status strip ───────────────────────── */
+.pp-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+.pp-status-pill b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.pp-status-sep {
+  color: var(--border);
+}
+.pp-status-warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+.pp-status-sync {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ───────────────────────── boxed warnings ───────────────────────── */
+/* House alert chrome (mirrors .sp-warn): tinted background + warn border so a
+   warning reads as an alert, not body text. */
+.pp-warnbox {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+.pp-warnbox svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 /* --- card grid: control/param cards tile into 2–3 columns at wide container
@@ -92,64 +256,28 @@
 .pp-row button {
   min-height: var(--ctl-h);
 }
-.pp-spacer {
-  flex: 1 1 auto;
-}
 .pp-meta {
   color: var(--fg-muted);
   font-size: var(--fs-body);
   font-variant-numeric: tabular-nums;
 }
-.pp-meta b {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
 
 /* --- head-type selector --- */
-.pp-head {
+.pp-headsel {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   font-size: var(--fs-label);
   color: var(--fg-muted);
 }
-.pp-head select {
+.pp-headsel select {
   height: var(--ctl-h);
   min-height: 0;
 }
 
-/* --- op tools row: compact buttons; the two "set from machine" buttons pack
-   to the right and may wrap, never stretching full width. --- */
-.pp-op-tools {
-  margin-top: 2px;
-}
-.pp-add,
-.pp-clear {
-  min-height: var(--ctl-h);
-}
-.pp-set {
-  min-height: var(--ctl-h);
-  font-size: var(--fs-ctl);
-}
-.pp-set:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-/* Buttons that pair a leading icon with a text label keep them on one line and
-   vertically centered. */
-.pp-add,
-.pp-clear,
-.pp-set,
-.pp-play {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  justify-content: center;
-}
-
 /* --- compact field grid: fields pack left tightly and wrap naturally, never
    stretching one-per-huge-column across the card. --- */
-.pp-grid {
+.pp-fields {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
   gap: var(--sp-2) var(--sp-3);
@@ -159,17 +287,49 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
   min-width: 0;
 }
-.pp-field input,
-.pp-field select {
-  height: var(--ctl-h);
-  min-height: 0;
+.pp-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* slim input with the unit as a muted inline suffix (Soldering house pattern) */
+.pp-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pp-input input {
   width: 100%;
   min-width: 0;
+  height: var(--ctl-h);
+  min-height: 0;
   box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
+}
+.pp-input.has-unit input {
+  /* leave room for the unit suffix so digits never overlap it */
+  padding-right: 44px;
+}
+.pp-input i {
+  position: absolute;
+  right: 7px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+/* field flagged by a validation warning (e.g. unsafe Travel Z) */
+.pp-field-warn .pp-input input {
+  border-color: var(--warn);
+}
+.pp-field-warn .pp-field-label {
+  color: var(--warn);
 }
 
 /* --- checkbox row --- */
@@ -233,11 +393,27 @@
   min-height: 0;
   box-sizing: border-box;
 }
+/* a specific coordinate input that lies outside the bed */
+.pp-table input.pp-num-warn {
+  border-color: var(--warn);
+}
 .pp-empty {
   padding: var(--sp-4) var(--sp-3);
   text-align: center;
   color: var(--fg-muted);
   font-size: var(--fs-body);
+  line-height: 1.5;
+}
+.pp-empty p {
+  margin: 0 0 var(--sp-2);
+}
+/* actionable empty state: a real Add button so a phone user can start here */
+.pp-empty-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  min-height: var(--ctl-h);
 }
 
 .pp-actions-col {
@@ -277,25 +453,6 @@
   transform: scaleY(-1);
 }
 
-/* --- out-of-range / unsafe warnings --- */
-.pp-warnings {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  margin-top: var(--sp-1);
-}
-.pp-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-1);
-  font-size: var(--fs-body);
-  line-height: 1.35;
-  color: var(--warn, #d97706);
-}
-.pp-warning svg {
-  flex: 0 0 auto;
-  margin-top: 1px;
-}
 /* Flag rows / preview ops whose pick or place point falls outside the bed. */
 .pp-row-oob td {
   box-shadow: inset 2px 0 0 var(--warn, #d97706);
@@ -311,9 +468,6 @@
 /* --- 2D bed preview --- */
 .pp-preview2d-body {
   padding: var(--sp-2);
-}
-.pp-preview-size {
-  align-self: flex-start;
 }
 .pp-preview2d {
   width: 100%;
@@ -369,6 +523,34 @@
   stroke: var(--fg);
 }
 
+/* legend row under the preview: swatch + name pairs, wraps on narrow widths */
+.pp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.pp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+.pp-legend-item svg {
+  flex: 0 0 auto;
+}
+.pp-legend-oob {
+  fill: none;
+  stroke: var(--warn, #d97706);
+  stroke-width: 1.4;
+}
+.pp-legend-size {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- advanced collapsible --- */
 .pp-collapsible > h3 {
   padding: 0;
@@ -403,9 +585,6 @@
   text-transform: none;
   letter-spacing: 0;
 }
-.pp-rot-table {
-  max-width: 220px;
-}
 
 /* --- hint --- */
 .pp-hint {
@@ -414,15 +593,16 @@
   line-height: 1.45;
   color: var(--fg-muted);
 }
-.pp-hint b {
-  color: var(--fg);
-}
 
 /* --- generate / send --- */
 .pp-generate {
   gap: var(--sp-3);
 }
 .pp-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
   flex: 1 1 auto;
   min-height: var(--ctl-h-lg);
   font-weight: 600;
@@ -449,9 +629,13 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.pp-raw-toggle:hover {
+.pp-raw-toggle:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--fg);
+}
+.pp-raw-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .pp-preview {
   margin: 0;
@@ -523,6 +707,12 @@
     text-transform: uppercase;
     letter-spacing: 0.3px;
   }
+  /* keep the empty state stacked (message above its Add button) */
+  .pp-table td.pp-empty {
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--sp-1);
+  }
   .pp-idx {
     width: 100%;
     text-align: left;
@@ -535,33 +725,38 @@
     justify-content: flex-start;
     padding-top: var(--sp-1);
   }
-  .pp-rot-table {
-    max-width: none;
-  }
 }
 
 /* --- very narrow column (≤360px) and mobile: grow controls to ≥36px touch
    targets and let fields/inputs breathe (compact on desktop, comfortable on
    touch). --- */
 @container ppscroll (max-width: 360px) {
-  .pp-head select,
-  .pp-add,
-  .pp-clear,
-  .pp-set,
-  .pp-field input,
-  .pp-field select,
+  .pp-headsel select,
+  .pp-input input,
   .pp-table input,
+  .pp-empty-add,
   .pp-raw-toggle,
   .pp-toggle {
     min-height: var(--ctl-h-touch);
     height: auto;
   }
+  .pp-ico {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+  .pp-ico-text {
+    width: auto;
+    min-height: var(--ctl-h-touch);
+  }
+  .pp-head .km-io-btn {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
   .pp-row-btn.icon-btn {
     min-width: var(--ctl-h-touch);
     min-height: var(--ctl-h-touch);
   }
-  .pp-row-btn,
-  .pp-set {
+  .pp-row-btn {
     flex: 1 1 auto;
   }
   .pp-play {
@@ -579,17 +774,22 @@
     }
   }
   @media (max-width: 768px) {
-    .pp-head select,
-    .pp-add,
-    .pp-clear,
-    .pp-set,
-    .pp-field input,
-    .pp-field select,
+    .pp-headsel select,
+    .pp-input input,
     .pp-table input,
+    .pp-empty-add,
     .pp-raw-toggle,
     .pp-toggle {
       min-height: var(--ctl-h-touch);
       height: auto;
+    }
+    .pp-ico {
+      width: var(--ctl-h-touch);
+      height: var(--ctl-h-touch);
+    }
+    .pp-ico-text {
+      width: auto;
+      min-height: var(--ctl-h-touch);
     }
     .pp-row-btn.icon-btn {
       min-width: var(--ctl-h-touch);

@@ -1,6 +1,6 @@
 import { useT } from '../i18n'
 import { useAuth } from './authStore'
-import { authRequired, firebaseConfigured } from './firebase'
+import { firebaseConfigured } from './firebase'
 import '../styles/auth.css'
 
 /**
@@ -15,13 +15,35 @@ export function UserChip() {
   const signOut = useAuth((s) => s.signOut)
   const signIn = useAuth((s) => s.signInWithGoogle)
 
-  // Optional mode (configured but sign-in not required): offer a compact
-  // "Sign in" button in the bar when signed out, so tracking can be enabled.
-  if (status === 'signedOut' && firebaseConfigured() && !authRequired()) {
+  // Signed out (grace window OR optional mode): show a small circular login
+  // icon button in the profile slot — sign-in is one tap away, no banner needed.
+  if (status === 'signedOut' && firebaseConfigured()) {
     return (
-      <button className="km-userchip-out km-userchip-signin" onClick={() => void signIn()}>
-        {t('auth.signIn', 'Sign in')}
-      </button>
+      <span className="km-userchip">
+        <button
+          type="button"
+          className="km-userchip-avatarbtn km-userchip-login"
+          onClick={() => void signIn()}
+          title={t('auth.google', 'Sign in with Google')}
+          aria-label={t('auth.google', 'Sign in with Google')}
+        >
+          <svg
+            width={18}
+            height={18}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+            <path d="M10 17l5-5-5-5" />
+            <path d="M15 12H3" />
+          </svg>
+        </button>
+      </span>
     )
   }
 

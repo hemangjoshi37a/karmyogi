@@ -3,7 +3,11 @@ import { useT } from '../i18n'
 import { useProgram, usePersistentState, useNotifications } from '../store'
 import { IconButton } from '../components/IconButton'
 import { Icon } from '../components/Icons'
+import { InfoTip } from '../components/InfoTip'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import {
   defaultGlueParams,
   generateGlue,
@@ -303,6 +307,17 @@ function shapeOrigin(shape: GlueShape): Pt {
 type GlueDocParams = Partial<Omit<GlueParams, 'programName' | 'metric'>>
 
 /**
+ * The fully-resolved Glue dispenser/motion SETTINGS (every field present) — this
+ * is what a colour PRESET snapshots and restores. It is the parametric config
+ * only, NOT the drawn shapes (those are the operator's actual work).
+ */
+type GlueSettings = Omit<GlueParams, 'programName' | 'metric'>
+
+/** Coerce an (untrusted) value to a finite number, else the fallback. */
+const numOr = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback
+
+/**
  * The serializable Glue document saved to / loaded from a `.kglue` file (plain
  * JSON): the drawn shapes plus the dispenser/motion params.
  */
@@ -420,6 +435,32 @@ export function GluePanel() {
       decimals: storedParams.decimals ?? d.decimals,
     }
   }, [storedParams])
+
+  // ---- colour-coded setting PRESETS (dispenser/motion params, NOT shapes) ----
+  // Snapshot the current resolved settings into a serializable preset.
+  const captureSettings = (): GlueSettings => ({ ...params })
+  // Restore a settings snapshot, coercing each field from the (untrusted)
+  // persisted value so a corrupt slot can never feed a NaN to the emitter.
+  // Decimals is additionally clamped to the 0–5 range the field accepts.
+  const applySettings = (s: GlueSettings) => {
+    const v = (s ?? {}) as Record<string, unknown>
+    setParams((prev) => ({
+      ...prev,
+      travelZ: numOr(v.travelZ, prev.travelZ ?? params.travelZ),
+      dispenseZ: numOr(v.dispenseZ, prev.dispenseZ ?? params.dispenseZ),
+      feed: Math.max(0, numOr(v.feed, prev.feed ?? params.feed)),
+      plungeFeed: Math.max(0, numOr(v.plungeFeed, prev.plungeFeed ?? params.plungeFeed)),
+      dispenseRate: Math.max(0, numOr(v.dispenseRate, prev.dispenseRate ?? params.dispenseRate)),
+      settleMs: Math.max(0, numOr(v.settleMs, prev.settleMs ?? params.settleMs)),
+      postDwellMs: Math.max(0, numOr(v.postDwellMs, prev.postDwellMs ?? params.postDwellMs)),
+      decimals: Math.max(0, Math.min(5, Math.round(numOr(v.decimals, prev.decimals ?? params.decimals)))),
+    }))
+  }
+  const presets = usePresets<GlueSettings>({
+    storageKey: 'karmyogi.glue.presets',
+    capture: captureSettings,
+    onApply: applySettings,
+  })
 
   const [tool, setTool] = useState<Tool>('rect')
   const [selected, setSelected] = useState<string | null>(null)
@@ -542,6 +583,10 @@ export function GluePanel() {
     [shapes, params],
   )
   const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
+  // What the store actually receives: an empty bed pushes '' (clear-on-empty),
+  // so the visible counters must say 0 — not the preamble-only lines the
+  // emitter still produces for zero shapes.
+  const liveLines = shapes.length === 0 ? 0 : lineCount
 
   // Degenerate dispense: with Dispense-Z at or above Travel-Z the head never
   // descends below travel height, so no real bead is laid down.
@@ -658,12 +703,75 @@ export function GluePanel() {
           : t('glue.hint.box', 'Drag a bounding box on the bed')
 
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('glue.presets.aria', 'Glue dispenser setting presets')}
+      />
     <div className="gp-panel">
-      {/* One-line intro / flow */}
-      <p className="gp-intro">
-        {t('glue.intro.pre', 'Pick a shape and draw it on the bed.')}{' '}
-        {t('glue.intro.post', 'The G-code updates live in the Program tab — run it from there.')}
-      </p>
+      {/* Slim header: title + InfoTip, with undo/clear + drawing save/load on
+          the right so the drawing toolbar holds only the shape tools. */}
+      <header className="gp-head">
+        <div className="gp-head-title">
+          <span className="gp-head-name">{t('glue.title', 'Glue dispense')}</span>
+          <InfoTip
+            topic="glueMode"
+            title={t('glue.title', 'Glue dispense')}
+            body={`${t('glue.intro.pre', 'Pick a shape and draw it on the bed.')} ${t(
+              'glue.intro.post',
+              'The G-code updates live in the Program tab — run it from there.',
+            )} ${t('glue.intro.viz', 'The 3D Visualizer previews the trajectories as you draw.')}`}
+          />
+        </div>
+        <div className="gp-head-tools">
+          <IconButton
+            className="gp-undo"
+            icon={<UndoGlyph />}
+            label={`${t('glue.undo', 'Undo')} — ${t('glue.undo.body', 'restores the shapes removed by the last Clear or Load')}`}
+            onClick={undoLast}
+            disabled={!undoShapes}
+          />
+          <IconButton
+            className="gp-clear"
+            iconName="trash"
+            label={`${t('glue.clear', 'Clear')} — ${t('glue.clear.title', 'Remove all shapes')}`}
+            onClick={clearAll}
+            disabled={shapes.length === 0}
+          />
+          <span className="gp-tools-sep" aria-hidden="true" />
+          <SaveLoadButtons
+            value={doc}
+            onLoad={loadDoc}
+            fileBase="karmyogi-glue"
+            ext="kglue"
+            saveDisabled={shapes.length === 0}
+            saveTitle={`${t('glue.save', 'Save drawing')} — ${t('glue.save.body', 'shapes + dispenser parameters')}`}
+            loadTitle={`${t('glue.load', 'Load drawing')} — ${t('glue.load.body', 'replaces the current shapes')}`}
+            onError={setLoadError}
+          />
+        </div>
+      </header>
+
+      {/* Live status strip: shape + line counts, auto-synced to the Program tab. */}
+      <div className="gp-status">
+        <span className="gp-status-pill">
+          <b>{shapes.length}</b>{' '}
+          {shapes.length === 1 ? t('glue.status.shape', 'shape') : t('glue.status.shapes', 'shapes')}
+        </span>
+        <span className="gp-status-sep" aria-hidden="true">·</span>
+        <span className="gp-status-pill">
+          <b>{liveLines}</b> {t('glue.status.lines', 'G-code lines')}
+        </span>
+        <span
+          className="gp-status-sync"
+          title={t('glue.live.title', 'Lines auto-synced to the Program tab')}
+        >
+          → {t('glue.status.program', 'Program')}
+        </span>
+      </div>
       {loadError && (
         <p className="gp-banner gp-banner-error" role="alert">
           <Icon name="warning" size={14} />
@@ -696,7 +804,7 @@ export function GluePanel() {
                   onClick={() => setTool(tl.id)}
                   aria-pressed={tool === tl.id}
                   aria-label={label}
-                  title={`${label} · ${hint}`}
+                  title={`${label} — ${hint}`}
                 >
                   <span className="gp-tool-glyph" aria-hidden="true">
                     <ToolGlyph tool={tl.id} />
@@ -704,31 +812,6 @@ export function GluePanel() {
                 </button>
               )
             })}
-            <span className="gp-spacer" />
-            <IconButton
-              className="gp-undo"
-              icon={<UndoGlyph />}
-              label={t('glue.undo.title', 'Undo the last Clear or Load')}
-              onClick={undoLast}
-              disabled={!undoShapes}
-            />
-            <IconButton
-              className="gp-clear"
-              iconName="trash"
-              label={`${t('glue.clear', 'Clear')} · ${t('glue.clear.title', 'Remove all shapes')}`}
-              onClick={clearAll}
-              disabled={shapes.length === 0}
-            />
-            <SaveLoadButtons
-              value={doc}
-              onLoad={loadDoc}
-              fileBase="karmyogi-glue"
-              ext="kglue"
-              saveDisabled={shapes.length === 0}
-              saveTitle={t('glue.save', 'Save glue drawing')}
-              loadTitle={t('glue.load', 'Load glue drawing')}
-              onError={setLoadError}
-            />
           </div>
 
           {/* Drawing canvas (the bed) */}
@@ -757,6 +840,19 @@ export function GluePanel() {
               ))}
               {/* Origin marker (bottom-left = machine [0,0]) */}
               <circle className="gp-origin" cx={0} cy={sy(0)} r={2.5} />
+
+              {/* In-place empty-state prompt; gone the moment a drag starts. */}
+              {shapes.length === 0 && !drag && (
+                <text
+                  className="gp-canvas-empty"
+                  x={BED.w / 2}
+                  y={sy(BED.h / 2)}
+                  textAnchor="middle"
+                  pointerEvents="none"
+                >
+                  {t('glue.canvas.empty', 'Pick a tool and drag here to draw')}
+                </text>
+              )}
 
               {/* Existing shapes. In select mode the path itself starts a
                   move-drag (and is a fat invisible hit-target for easy grabbing). */}
@@ -809,11 +905,6 @@ export function GluePanel() {
             </svg>
             <div className="gp-hint">
               <span>{hint}</span>
-              <span className="gp-meta">
-                {shapes.length === 1
-                  ? t('glue.count.one', '{n} shape', { n: shapes.length })
-                  : t('glue.count.many', '{n} shapes', { n: shapes.length })}
-              </span>
             </div>
           </div>
         </div>
@@ -898,43 +989,59 @@ export function GluePanel() {
             <div className="gp-fields">
               <label title={t('glue.field.dispenseZ.title', 'Z height (mm) at which the dispenser touches down to lay a bead')}>
                 {t('glue.field.dispenseZ', 'Dispense Z')}
-                <input
-                  type="number"
-                  step="0.1"
-                  value={params.dispenseZ}
-                  onChange={(e) => setParams({ ...params, dispenseZ: num(e.target.value, params.dispenseZ) })}
-                />
+                <span className="gp-input has-unit">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={params.dispenseZ}
+                    className={degenerateZ ? 'gp-input-bad' : undefined}
+                    aria-invalid={degenerateZ ? 'true' : undefined}
+                    onChange={(e) => setParams({ ...params, dispenseZ: num(e.target.value, params.dispenseZ) })}
+                  />
+                  <i>{t('unit.mm', 'mm')}</i>
+                </span>
               </label>
               <label title={t('glue.field.travelZ.title', 'Safe Z height (mm) for rapid travel between shapes')}>
                 {t('glue.field.travelZ', 'Travel Z')}
-                <input
-                  type="number"
-                  step="0.1"
-                  value={params.travelZ}
-                  onChange={(e) => setParams({ ...params, travelZ: num(e.target.value, params.travelZ) })}
-                />
+                <span className="gp-input has-unit">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={params.travelZ}
+                    className={degenerateZ ? 'gp-input-bad' : undefined}
+                    aria-invalid={degenerateZ ? 'true' : undefined}
+                    onChange={(e) => setParams({ ...params, travelZ: num(e.target.value, params.travelZ) })}
+                  />
+                  <i>{t('unit.mm', 'mm')}</i>
+                </span>
               </label>
               <label title={t('glue.field.feed.title', 'Trace feed rate (mm/min) while dispensing along an outline')}>
                 {t('glue.field.feed', 'Feed')}
-                <input
-                  type="number"
-                  step="10"
-                  min="0"
-                  value={params.feed}
-                  onChange={(e) => setParams({ ...params, feed: num(e.target.value, params.feed) })}
-                />
+                <span className="gp-input has-unit">
+                  <input
+                    type="number"
+                    step="10"
+                    min="0"
+                    value={params.feed}
+                    onChange={(e) => setParams({ ...params, feed: num(e.target.value, params.feed) })}
+                  />
+                  <i>{t('unit.mmPerMin', 'mm/min')}</i>
+                </span>
               </label>
               <label title={t('glue.field.dispenseRate.title', 'Dispenser output rate (drives the spindle/feeder S-word)')}>
                 {t('glue.field.dispenseRate', 'Dispense rate')}
-                <input
-                  type="number"
-                  step="100"
-                  min="0"
-                  value={params.dispenseRate}
-                  onChange={(e) =>
-                    setParams({ ...params, dispenseRate: num(e.target.value, params.dispenseRate) })
-                  }
-                />
+                <span className="gp-input has-unit">
+                  <input
+                    type="number"
+                    step="100"
+                    min="0"
+                    value={params.dispenseRate}
+                    onChange={(e) =>
+                      setParams({ ...params, dispenseRate: num(e.target.value, params.dispenseRate) })
+                    }
+                  />
+                  <i>{t('unit.sWord', 'S')}</i>
+                </span>
               </label>
             </div>
 
@@ -950,43 +1057,52 @@ export function GluePanel() {
             </button>
             {showAdvanced && (
               <div className="gp-fields gp-adv">
-                <label>
+                <label title={t('glue.field.plungeFeed.title', 'Feed rate (mm/min) for the descent from Travel Z to Dispense Z')}>
                   {t('glue.field.plungeFeed', 'Plunge feed')}
-                  <input
-                    type="number"
-                    step="10"
-                    min="0"
-                    value={params.plungeFeed}
-                    onChange={(e) =>
-                      setParams({ ...params, plungeFeed: num(e.target.value, params.plungeFeed) })
-                    }
-                  />
+                  <span className="gp-input has-unit">
+                    <input
+                      type="number"
+                      step="10"
+                      min="0"
+                      value={params.plungeFeed}
+                      onChange={(e) =>
+                        setParams({ ...params, plungeFeed: num(e.target.value, params.plungeFeed) })
+                      }
+                    />
+                    <i>{t('unit.mmPerMin', 'mm/min')}</i>
+                  </span>
                 </label>
-                <label>
-                  {t('glue.field.settle', 'Settle (ms)')}
-                  <input
-                    type="number"
-                    step="50"
-                    min="0"
-                    value={params.settleMs}
-                    onChange={(e) =>
-                      setParams({ ...params, settleMs: num(e.target.value, params.settleMs) })
-                    }
-                  />
+                <label title={t('glue.field.settle.title', 'Dwell (ms) after touch-down before moving, so the bead starts cleanly')}>
+                  {t('glue.field.settle', 'Settle')}
+                  <span className="gp-input has-unit">
+                    <input
+                      type="number"
+                      step="50"
+                      min="0"
+                      value={params.settleMs}
+                      onChange={(e) =>
+                        setParams({ ...params, settleMs: num(e.target.value, params.settleMs) })
+                      }
+                    />
+                    <i>{t('unit.ms', 'ms')}</i>
+                  </span>
                 </label>
-                <label>
-                  {t('glue.field.postDwell', 'Post dwell (ms)')}
-                  <input
-                    type="number"
-                    step="50"
-                    min="0"
-                    value={params.postDwellMs}
-                    onChange={(e) =>
-                      setParams({ ...params, postDwellMs: num(e.target.value, params.postDwellMs) })
-                    }
-                  />
+                <label title={t('glue.field.postDwell.title', 'Dwell (ms) after the dispenser stops, before retracting')}>
+                  {t('glue.field.postDwell', 'Post dwell')}
+                  <span className="gp-input has-unit">
+                    <input
+                      type="number"
+                      step="50"
+                      min="0"
+                      value={params.postDwellMs}
+                      onChange={(e) =>
+                        setParams({ ...params, postDwellMs: num(e.target.value, params.postDwellMs) })
+                      }
+                    />
+                    <i>{t('unit.ms', 'ms')}</i>
+                  </span>
                 </label>
-                <label>
+                <label title={t('glue.field.decimals.title', 'Coordinate decimal places in the emitted G-code (0–5)')}>
                   {t('glue.field.decimals', 'Decimals')}
                   <input
                     type="number"
@@ -1011,7 +1127,9 @@ export function GluePanel() {
               deleted in the Program tab); streaming itself happens there. */}
           <section className="gp-card gp-card-wide gp-send">
             <p className="gp-meta gp-send-note">
-              {t('glue.send.meta', 'Live preview · {n} lines → Visualizer', { n: lineCount })}
+              {shapes.length === 0
+                ? t('glue.send.empty', 'No program yet — draw a shape on the bed.')
+                : t('glue.send.live', 'Live · {n} lines → Program', { n: lineCount })}
             </p>
 
             <button
@@ -1029,21 +1147,49 @@ export function GluePanel() {
               {t('glue.send.btn', 'Send to Program tab')}
             </button>
 
-            {/* Raw G-code (collapsed by default) */}
+            {/* Raw G-code (collapsed by default; disabled until a shape exists,
+                matching the empty program the store actually receives) */}
             <button
               className="gp-raw-toggle"
               onClick={() => setShowRaw((v) => !v)}
-              aria-expanded={showRaw}
+              aria-expanded={showRaw && shapes.length > 0}
+              disabled={shapes.length === 0}
               title={t('glue.raw.title', 'Show the generated G-code text')}
             >
-              <Icon name={showRaw ? 'chevron-down' : 'chevron-right'} size={14} />
-              {t('glue.raw', 'Raw G-code ({n} lines)', { n: lineCount })}
+              <Icon name={showRaw && shapes.length > 0 ? 'chevron-down' : 'chevron-right'} size={14} />
+              {t('glue.raw', 'Raw G-code ({n} lines)', { n: liveLines })}
             </button>
-            {showRaw && <pre className="gp-preview">{gcode}</pre>}
+            {showRaw && shapes.length > 0 && <pre className="gp-preview">{gcode}</pre>}
           </section>
           </div>
         </div>
       </div>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={params}
+            onLoad={(data) => {
+              if (isObj(data)) applySettings(data as unknown as GlueSettings)
+              else
+                setLoadError(
+                  t('glue.settings.load.invalid', 'Could not load — file is not valid glue settings.'),
+                )
+            }}
+            fileBase="glue-settings"
+            ext="kgluecfg"
+            saveTitle={`${t('glue.settings.save', 'Save dispenser settings')} — ${t('glue.settings.save.body', 'parameters only, no shapes')}`}
+            loadTitle={`${t('glue.settings.load', 'Load dispenser settings')} — ${t('glue.settings.load.body', 'replaces the current parameters')}`}
+            onError={setLoadError}
+          />
+        }
+      />
     </div>
   )
 }

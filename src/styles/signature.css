@@ -15,6 +15,23 @@
   container-name: sigpanel;
 }
 
+/* When wrapped by the shared preset host (floating colour rail + footer
+   save-bar), the panel body fills the band between the rail/top and the bar and
+   reserves a left gutter so the rail never overlaps the content. The shared
+   presets.css only targets .sp-panel / .wr-panel, so mirror those rules here for
+   .sig-panel (the only file this tab may edit). */
+.cc-presets-host > .sig-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .sig-panel {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
+
 .sig-intro {
   margin: 0 0 var(--sp-2);
   padding: 0 var(--sp-1);

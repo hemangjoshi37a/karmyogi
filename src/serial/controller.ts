@@ -9,7 +9,8 @@
 
 import { GrblConnection, type PortLike } from './grblConnection'
 import { WsPort, normalizeWsUrl, mixedContentReason } from './wsPort'
-import { BlePort } from './blePort'
+import { BlePort, describeBleRequestError } from './blePort'
+import { UsbPort } from './usbPort'
 import { Streamer, type StreamMode } from './streamer'
 import { RealtimeByte } from './realtime'
 import { isStatusReport, isParserStateLine } from './status'
@@ -18,6 +19,7 @@ import {
   resolveDialect,
   statusQueryLine,
   g91JogLines,
+  isMarlinChatter,
   parseStatusForDialect,
   type ResolvedDialect,
 } from './dialect'
@@ -29,6 +31,7 @@ import { useGrblSettings } from '../store/grblSettings'
 import { useMachineProfile } from '../store/machineProfile'
 import { canLiveConnect, profileFor } from '../machine/controllers'
 import type { ControllerKind } from '../machine/types'
+import { reportSerialConnected } from '../track/adsConversion'
 
 /**
  * Optional descriptor passed when connecting, so the connection MANAGER (the
@@ -48,7 +51,10 @@ export interface ConnectMeta {
    * silently reconnected anyway (Web Bluetooth requires a fresh user gesture +
    * device chooser), so it isn't a persistently-reconnectable farm entry; its
    * appbar label still reads "Bluetooth …" (see defaultPortLabel + the BlePort
-   * detection in connect()).
+   * detection in connect()). WebUSB (USB-OTG) connections also register as
+   * `serial` — unlike BLE they DO auto-reconnect on load via
+   * navigator.usb.getDevices() (see autoConnectWebUsb), and their appbar label
+   * is the USB product name (see the UsbPort detection in defaultPortLabel).
    */
   kind?: 'serial' | 'mock' | 'websocket'
 }
@@ -113,6 +119,9 @@ function defaultPortLabel(kind: 'serial' | 'mock' | 'websocket', port: PortLike)
   // A BLE connection arrives as kind 'serial' (farm bookkeeping), so detect it by
   // the BlePort's `label` and prefer the device name.
   if (port instanceof BlePort) return port.label
+  // WebUSB (USB-OTG) also arrives as kind 'serial' — prefer its product name
+  // over the raw vendor:product fallback its getInfo() would otherwise produce.
+  if (port instanceof UsbPort) return port.label
   const p = port as unknown as { getInfo?: () => SerialPortInfo }
   if (typeof p.getInfo === 'function') {
     try {
@@ -158,6 +167,13 @@ class GrblController {
   // `ok` that immediately follows is consumed SILENTLY (not echoed to the console
   // and not counted by the jog gate) — otherwise the slow poll spams the console.
   private suppressNextOk = false
+  // Marlin only: the automatic `M114` status poll is a buffered LINE command that
+  // replies `X:.. Y:.. Z:..` then a bare `ok`. We poll it ~5 Hz, so that `ok` must
+  // be swallowed SILENTLY (no console echo, not counted by the jog gate) exactly
+  // like the `$G` poll's `ok` above — otherwise the console floods with `ok`s.
+  // Counted so a position reply that didn't arrive (busy/echo chatter in between)
+  // can't strand the flag and swallow an unrelated later `ok`.
+  private pendingStatusAcks = 0
   private settingsReading = false
   private connecting = false
   /**
@@ -221,7 +237,11 @@ class GrblController {
     // `port`) always works regardless of profile; only real hardware connections
     // are gated by whether we can actually speak the firmware's protocol.
     const profile = profileFor(useMachineProfile.getState().controllerKind)
-    const isMock = !!port
+    // A WebUSB (USB-OTG) port is REAL hardware: it must resolve the firmware's
+    // dialect (Marlin M114 polling etc.), respect the live-connect gate, and
+    // count as a real serial connection. Every other injected port keeps the
+    // legacy path (Mock today; BLE/WS connections behave exactly as before).
+    const isMock = !!port && !(port instanceof UsbPort)
     if (!isMock && !canLiveConnect(profile)) {
       const msg = `${profile.label} uses a proprietary binary protocol; live connection isn't supported yet — use GRBL/FluidNC, or Mock.`
       useConsole.getState().push('error', msg)
@@ -232,12 +252,16 @@ class GrblController {
     this.connecting = true
     // Resolve the firmware's protocol deviations once per connection. Mock always
     // speaks GRBL (the MockPort is a GRBL emulator), so pin it to the GRBL dialect.
-    this.dialect = isMock ? GRBL_DIALECT : resolveDialect(profile.dialect)
+    this.dialect = isMock ? GRBL_DIALECT : resolveDialect(profile.dialect, profile.kind)
+    // Baud the port is actually opened at: the user's override (if set) wins over
+    // the profile default. The mock/WebSocket transports ignore baud, so this only
+    // matters for real USB (Web Serial) — but it's harmless to pass through.
+    const baudRate = useMachineProfile.getState().effectiveBaud()
     machine.setConnection('connecting')
     machine.setError(null)
     try {
       const conn = new GrblConnection({
-        baudRate: profile.baud,
+        baudRate,
         // A bug parsing ONE response line must never tear down the whole
         // connection: the read loop reports any onLine throw as a disconnect, so
         // we swallow per-line handler errors here (logged to the console) and
@@ -295,7 +319,7 @@ class GrblController {
       machine.setConnection('connected')
       savePreferredPort(chosen as PortLike, {
         controllerKind: profile.kind,
-        baud: profile.baud,
+        baud: baudRate,
       })
       // Record what we're connected to so the farm store / appbar can label it.
       // Default kind/label inference covers the legacy Connect & Mock buttons,
@@ -305,6 +329,20 @@ class GrblController {
       const label = meta?.label ?? defaultPortLabel(kind, chosen as PortLike)
       this.setActive({ connected: true, machineId: meta?.machineId, kind, label })
       useConsole.getState().push('info', `Connected (${profile.label}).`)
+      // Fire the Google Ads "Serial Connected" activation conversion (best-effort,
+      // once per session, off-on-localhost). Only for a REAL serial port — not the
+      // in-browser mock or a WebSocket. BLE arrives as kind 'serial' (farm
+      // bookkeeping) and may also fire it; that's acceptable (still a real machine
+      // link, deduped once-per-session, and guarded off on dev/localhost). Must
+      // never throw or delay the connection, so it's a fire-and-forget call after
+      // the link is confirmed established.
+      if (kind === 'serial' && !isMock) {
+        try {
+          reportSerialConnected()
+        } catch {
+          /* tracking is best-effort and must never affect the connection */
+        }
+      }
       this.startStatusPolling()
     } catch (err) {
       machine.setConnection('disconnected')
@@ -377,6 +415,54 @@ class GrblController {
     // the BlePort.label after open() via defaultPortLabel (which detects BlePort),
     // so leave label unset. `kind: 'serial'` is the farm-understood fallback
     // (the farm has no 'ble' kind); BLE isn't a reconnectable farm entry anyway.
+    try {
+      await this.connect(port, {
+        streamMode: opts?.streamMode,
+        meta: { kind: 'serial', machineId: opts?.machineId },
+      })
+    } catch (err) {
+      // Always log the RAW error (name + message) for diagnosis — the friendly
+      // message below can otherwise mask what truly failed.
+      const rawName = (err as { name?: string } | null)?.name ?? 'Error'
+      const rawMsg = err instanceof Error ? err.message : String(err)
+      useConsole.getState().push('error', `BLE raw error — ${rawName}: ${rawMsg}`)
+      // Translate the (often cryptic) Web Bluetooth failure into an actionable
+      // message: dismissing the chooser stays quiet; adapter-off / permission /
+      // no-UART-service all get a clear hint. The message is surfaced here, so the
+      // caller's no-op .catch() never leaves the user with "nothing happened".
+      const f = await describeBleRequestError(err)
+      const machine = useMachine.getState()
+      if (f.cancelled) {
+        machine.setError(null)
+      } else {
+        useConsole.getState().push('error', f.message)
+        machine.setError(f.message)
+      }
+    }
+  }
+
+  /**
+   * Connect over WebUSB — the USB-OTG path for Android Chromium, where Web
+   * Serial does not exist but `navigator.usb` does. UsbPort speaks the bridge
+   * chip's native protocol (CDC-ACM / CH340 / CP210x / FTDI) in the browser, so
+   * the same byte stream the desktop gets from Web Serial arrives here and the
+   * whole streaming stack (incl. the effectiveBaud override / Marlin's 250000)
+   * is reused unchanged. Must be called from a user gesture (device chooser).
+   */
+  async connectUsbOtg(opts?: { machineId?: string; streamMode?: StreamMode }): Promise<void> {
+    if (!UsbPort.isSupported()) {
+      const msg =
+        'WebUSB is not available in this browser. On Android use Chrome/Edge over ' +
+        'HTTPS; on iPhone/iPad use the Network (WebSocket) bridge instead.'
+      useConsole.getState().push('error', msg)
+      useMachine.getState().setError(msg)
+      throw new Error(msg)
+    }
+    // Dismissing the chooser throws NotFoundError before any state changed —
+    // it propagates to the caller (the UI ignores it), with no error surfaced.
+    const port = await UsbPort.request()
+    // Surface an unplug immediately (the read pump also errors the readable).
+    port.setOnDisconnect(() => this.handleDisconnect())
     await this.connect(port, {
       streamMode: opts?.streamMode,
       meta: { kind: 'serial', machineId: opts?.machineId },
@@ -392,7 +478,10 @@ class GrblController {
    */
   async autoConnect(): Promise<boolean> {
     if (this.conn || this.connecting) return !!this.conn
-    if (typeof navigator === 'undefined' || !navigator.serial) return false
+    if (typeof navigator === 'undefined') return false
+    // No Web Serial (Android Chromium): fall back to WebUSB, whose permission
+    // grants Chrome also persists per origin — same silent-reconnect pattern.
+    if (!navigator.serial) return this.autoConnectWebUsb()
     let ports: SerialPort[] = []
     try {
       ports = await navigator.serial.getPorts()
@@ -422,9 +511,39 @@ class GrblController {
     }
   }
 
+  /**
+   * WebUSB flavour of autoConnect (Android, where navigator.serial is absent):
+   * `navigator.usb.getDevices()` returns devices this origin was already
+   * granted, so a previously-used OTG adapter reconnects with no gesture.
+   * UsbPort.getInfo() feeds the same vendor/product preference matching as the
+   * Web Serial path. Returns true if it connected.
+   */
+  private async autoConnectWebUsb(): Promise<boolean> {
+    if (!UsbPort.isSupported()) return false
+    const pref = readPreferredPort()
+    const port = await UsbPort.findAuthorized(pref ?? undefined)
+    if (!port) return false
+    // Restore the last-used controller so the selector + baud/capability set
+    // match what this device was driven with before.
+    if (pref?.controllerKind) {
+      useMachineProfile.getState().setControllerKind(pref.controllerKind)
+    }
+    port.setOnDisconnect(() => this.handleDisconnect())
+    try {
+      await this.connect(port, { meta: { kind: 'serial' } })
+      return true
+    } catch {
+      // claimInterface can fail when the OS/another app holds the device — the
+      // user can still connect manually from the menu (with the clear error).
+      return false
+    }
+  }
+
   async disconnect(): Promise<void> {
     this.stopStatusPolling()
     this.inflightJogs = 0
+    this.pendingStatusAcks = 0
+    this.suppressNextOk = false
     this.streamer?.reset()
     this.streamer = null
     await this.conn?.close()
@@ -456,12 +575,36 @@ class GrblController {
     } else if (this.dialect.status === 'marlin') {
       // Marlin/RepRap/Smoothie: position arrives as an `M114` reply line (not
       // `<...>`). Parse it into a StatusReport and apply it via the same store
-      // action GRBL uses. NB: the line may also still carry an `ok` (e.g.
-      // "X:.. Y:.. Z:.. ok") — we don't return so the ack accounting below runs.
+      // action GRBL uses.
       const report = parseStatusForDialect(this.dialect, line)
       if (report) {
         useMachine.getState().applyStatus(report)
-        // Don't `return`: fall through so a trailing `ok` still drives the streamer.
+        // Echo the position report to the console (it's a recv line), but do NOT
+        // fall through to the jog/stream ack accounting — a position line is not
+        // an `ok`. The bare `ok` that follows is handled below (and silently
+        // swallowed for an automatic poll via pendingStatusAcks).
+        useConsole.getState().push('recv', line)
+        return
+      }
+      // Marlin chatter (echo:/busy:/temperature/boot banner) is informational and
+      // is NEVER an ack — echo it to the console but keep it away from the settings
+      // capture, the jog gate, and the streamer's `ok` accounting below.
+      if (isMarlinChatter(this.dialect, line)) {
+        useConsole.getState().push('recv', line)
+        return
+      }
+      // The bare `ok` acknowledging an AUTOMATIC `M114` status poll: swallow it
+      // silently (no console echo, not a jog/stream ack) so the ~5 Hz poll never
+      // spams. Only consume it when NOT streaming — during a stream the poll is
+      // gated off (Marlin status is a buffered line command) so any `ok` belongs
+      // to the program and must reach the streamer.
+      if (
+        this.pendingStatusAcks > 0 &&
+        !this.streamer?.isRunning &&
+        line.trim().toLowerCase() === 'ok'
+      ) {
+        this.pendingStatusAcks--
+        return
       }
     }
     // Capture `$N=val` setting lines (from a `$$` dump) into the settings store.
@@ -550,11 +693,30 @@ class GrblController {
   requestStatus = async (): Promise<void> => {
     if (!this.conn) return
     if (this.dialect.status === 'grbl') {
+      // GRBL's `?` is a free realtime byte (no RX-buffer cost, no `ok`), so it is
+      // safe to poll continuously even mid-stream — behaviour is unchanged.
       await this.realtime(RealtimeByte.StatusReport)
       return
     }
     const q = statusQueryLine(this.dialect)
-    if (q) await this.conn.writeLine(q)
+    if (!q) return
+    // Marlin/RepRap: status is a buffered LINE command (`M114`) that occupies the
+    // RX buffer and replies with its own `ok`. Injecting it into an active
+    // char-counting stream would both consume buffer space the streamer doesn't
+    // account for AND have its `ok` miscounted as a program-line ack — desyncing
+    // the stream. So skip polling while a program is running (position simply
+    // freezes during the cut, which is safe; the poll resumes on idle). The poll
+    // timer also guards this, but guard here too in case requestStatus is called
+    // directly.
+    if (this.streamer?.isRunning) return
+    // Flag the matching `ok` for silent consumption (see handleLine) so the poll
+    // doesn't spam the console. Capped so a missed reply can't strand the flag.
+    if (this.pendingStatusAcks < 4) this.pendingStatusAcks++
+    try {
+      await this.conn.writeLine(q)
+    } catch {
+      this.pendingStatusAcks = Math.max(0, this.pendingStatusAcks - 1)
+    }
   }
 
   /**
@@ -718,7 +880,13 @@ class GrblController {
 
   private startStatusPolling(): void {
     this.stopStatusPolling()
-    this.statusTimer = setInterval(() => void this.requestStatus(), STATUS_POLL_MS)
+    this.statusTimer = setInterval(() => {
+      // For a line-command status (Marlin `M114`) skip the poll while streaming —
+      // it would compete for the RX buffer and its `ok` would desync the
+      // char-counting window. GRBL's `?` realtime byte is free, so it always polls.
+      if (this.dialect.statusIsLineCommand && this.streamer?.isRunning) return
+      void this.requestStatus()
+    }, STATUS_POLL_MS)
     // Prime the active-WCS badge immediately, then poll `$G` slowly. The poll
     // only fires when a program is NOT streaming, so it never competes with a
     // job for the RX buffer (the WCS won't change mid-cut anyway).

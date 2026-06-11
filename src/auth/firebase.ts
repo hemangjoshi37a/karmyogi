@@ -96,11 +96,41 @@ export function authRequired(): boolean {
   return String(import.meta.env.VITE_AUTH_REQUIRED ?? 'true').toLowerCase() !== 'false'
 }
 
+/**
+ * True only on the REAL deployed domain — false on localhost / loopback / file:
+ * and whenever Vite's DEV flag is set. Used to keep dev/preview/Playwright loads
+ * from initializing GA4 and inflating DAU. Inlined here (rather than imported
+ * from `../track/adsConversion`) to avoid a circular import — adsConversion
+ * imports the analytics helpers from this file.
+ */
+function analyticsAllowedHere(): boolean {
+  try {
+    if (import.meta.env.DEV) return false
+    if (typeof location === 'undefined') return false
+    if (location.protocol === 'file:') return false
+    const host = location.hostname.toLowerCase()
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0' ||
+      host === '::1' ||
+      host === '[::1]' ||
+      host.endsWith('.localhost')
+    ) {
+      return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 // Cached singletons — created at most once, only when configured.
 let appPromise: Promise<FirebaseApp> | null = null
 let authPromise: Promise<Auth> | null = null
 let dbPromise: Promise<Firestore> | null = null
 let analyticsStarted = false
+let analyticsInstance: Analytics | null = null
 
 async function getApp(): Promise<FirebaseApp> {
   if (!CONFIG) throw new Error('Firebase is not configured')
@@ -181,16 +211,63 @@ export async function getDb(): Promise<Firestore | null> {
   return dbPromise
 }
 
-/** Init Analytics once, only if a measurementId is configured + supported. */
+/**
+ * Init Analytics once, only if a measurementId is configured + supported AND we
+ * are on the real deployed domain (NOT localhost/dev/preview/Playwright — that
+ * would inflate DAU). Caches the instance so the safe `logAnalyticsEvent` /
+ * `setAnalyticsUser` helpers below can reuse it.
+ */
 export async function maybeStartAnalytics(): Promise<Analytics | null> {
-  if (!CONFIG || !CONFIG.measurementId || analyticsStarted) return null
+  if (!CONFIG || !CONFIG.measurementId || analyticsStarted) return analyticsInstance
+  if (!analyticsAllowedHere()) return null
   analyticsStarted = true
   try {
     const app = await getApp()
     const { getAnalytics, isSupported } = await import('firebase/analytics')
-    if (await isSupported()) return getAnalytics(app)
+    if (await isSupported()) {
+      analyticsInstance = getAnalytics(app)
+      return analyticsInstance
+    }
   } catch {
     /* analytics is best-effort; never let it break the app */
   }
   return null
+}
+
+/**
+ * Log a GA4 event on the (already-started) Firebase Analytics instance.
+ * No-ops gracefully if analytics isn't configured/supported/started or we're off
+ * the real domain. Best-effort — never throws.
+ */
+export function logAnalyticsEvent(name: string, params?: Record<string, unknown>): void {
+  if (!CONFIG || !CONFIG.measurementId || !analyticsAllowedHere()) return
+  void (async () => {
+    try {
+      const analytics = await maybeStartAnalytics()
+      if (!analytics) return
+      const { logEvent } = await import('firebase/analytics')
+      logEvent(analytics, name, params)
+    } catch {
+      /* best-effort */
+    }
+  })()
+}
+
+/**
+ * Set the GA4 user id on the (already-started) Firebase Analytics instance, so
+ * signed-in users become a segmentable (authenticated-DAU) audience. No-ops
+ * gracefully when analytics isn't available. Best-effort — never throws.
+ */
+export function setAnalyticsUser(uid: string): void {
+  if (!CONFIG || !CONFIG.measurementId || !analyticsAllowedHere()) return
+  void (async () => {
+    try {
+      const analytics = await maybeStartAnalytics()
+      if (!analytics) return
+      const { setUserId } = await import('firebase/analytics')
+      setUserId(analytics, uid)
+    } catch {
+      /* best-effort */
+    }
+  })()
 }

@@ -47,12 +47,22 @@ export const CONTROLLER_PROFILES: Record<ControllerKind, ControllerProfile> = {
     grblCompatible: true,
     supported: 'full',
     transport: 'webserial',
-    // FluidNC exposes GRBL `$`-settings over serial (plus a YAML config), so the
-    // classic `$`-editor works. Dialect is pure-GRBL (omit) — `?`/`!`/`~`/`0x18`,
-    // `$$` and `$J=` all behave exactly like GRBL over Web Serial.
+    // FluidNC's protocol CORE is pure GRBL (omit `dialect`): `?` realtime status,
+    // `!`/`~`/0x18/0x85 + override bytes, ok/error acks, `$H`/`$X`/`$J=` and the
+    // same modal G-code set, usually over USB serial at 115200 baud (the board
+    // also exposes WebSocket :81, telnet :23 and BLE). SETTINGS are the real
+    // divergence: `$$` lists NAMED `$path/name=value` settings (slash-separated
+    // names, not numbers) and the full machine config is a YAML file
+    // (`$Config/Dump` prints it; `$Bye` restarts). `resolveDialect` derives
+    // `settingsStyle: 'named'` from the kind, which routes the Motion panel to
+    // the named-settings editor. `settingsModel` stays 'grbl' because the shared
+    // `SettingsModel` union (src/machine/types.ts) has no FluidNC member — the
+    // dialect's `settingsStyle` is the named-vs-numeric switch.
     settingsModel: 'grbl',
     notes:
-      'ESP32 firmware. GRBL-compatible streaming/realtime/status over Web Serial; YAML config, extra axes, WiFi/WebSocket.',
+      'ESP32 GRBL successor. GRBL-compatible streaming/realtime/status over USB serial at 115200 ' +
+      '(boards also expose WebSocket :81, telnet and BLE). Homing $H, unlock $X, jog $J=. ' +
+      'Settings are NAMED ($name=value via $$); the full machine config is YAML — $Config/Dump prints it.',
   },
   grblhal: {
     kind: 'grblhal',
@@ -80,7 +90,9 @@ export const CONTROLLER_PROFILES: Record<ControllerKind, ControllerProfile> = {
     kind: 'marlin',
     label: 'Marlin',
     machineType: 'cnc3',
-    baud: 115200,
+    // Marlin's common default serial baud is 250000 (the firmware's BAUDRATE
+    // default), distinct from GRBL's 115200. Users can still override per-connect.
+    baud: 250000,
     capabilities: {
       axes: [...STANDARD_3AXIS],
       hasSpindle: true,

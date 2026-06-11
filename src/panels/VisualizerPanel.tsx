@@ -19,6 +19,7 @@ import {
 
 import { sectionColor } from '../viewer/sectionColors'
 import { useViewportShapes, type ShapeKind } from '../store/viewportShapes'
+import { Icon } from '../components/Icons'
 
 /**
  * Visualizer panel: hosts the 3D viewport and feeds it the loaded G-code program
@@ -120,19 +121,38 @@ export function VisualizerPanel() {
   const toggleGizmo = () => {
     const next = !gizmoOn
     setGizmoOn(next)
-    if (next && !selectedSectionId && sections.length > 0) selectSection(sections[0].id)
+    if (next) {
+      setLassoMode(false)
+      setPickMode(false)
+      if (!selectedSectionId && sections.length > 0) selectSection(sections[0].id)
+    }
   }
 
-  // Lasso-delete mode (mutually exclusive with the placement gizmo).
+  // Lasso-delete mode (mutually exclusive with the placement gizmo + pick mode).
   const [lassoMode, setLassoMode] = useState(false)
+  // Pick mode: click individual toolpath lines to select (mutually exclusive with
+  // lasso + gizmo). Shares the SAME selection→reemit deletion pipeline as lasso.
+  const [pickMode, setPickMode] = useState(false)
   const toggleLasso = () => {
     const next = !lassoMode
     setLassoMode(next)
-    if (next) setGizmoOn(false)
+    if (next) {
+      setGizmoOn(false)
+      setPickMode(false)
+    }
+  }
+  const togglePick = () => {
+    const next = !pickMode
+    setPickMode(next)
+    if (next) {
+      setGizmoOn(false)
+      setLassoMode(false)
+    }
   }
   // ESC always exits lasso mode (previously you were stuck until you deleted
   // something). Turning the mode off cascades into the Viewer, which clears any
-  // pending selection/polygon.
+  // pending selection/polygon. (Pick mode handles its own Escape inside the
+  // Viewer: clears the selection first, then calls onPickExit to leave the mode.)
   useEffect(() => {
     if (!lassoMode) return
     const onKey = (e: KeyboardEvent) => {
@@ -151,15 +171,71 @@ export function VisualizerPanel() {
     'karmyogi.viewer.showJobBoxes',
     true,
   )
-  // Apply a lasso deletion: rebuild a SAFE program from the kept segments and
-  // replace the program with it (collapsed into one edited section).
-  const onLassoDelete = (kept: Segment[]) => {
-    setLassoMode(false)
+
+  // --- Layers / legend overlay (upper-left) ---------------------------------
+  // Collapsed by default so it never clutters the viewport. Each toggle drives
+  // the corresponding three.js object's visibility via the props below, and all
+  // state is persisted (same usePersistentState pattern used across the app).
+  const [legendOpen, setLegendOpen] = usePersistentState(
+    'karmyogi.viewer.legendOpen',
+    false,
+  )
+  const [showAllToolpaths, setShowAllToolpaths] = usePersistentState(
+    'karmyogi.viewer.layers.toolpaths',
+    true,
+  )
+  const [showModel, setShowModel] = usePersistentState(
+    'karmyogi.viewer.layers.model',
+    true,
+  )
+  const [showBed, setShowBed] = usePersistentState(
+    'karmyogi.viewer.layers.bed',
+    true,
+  )
+  // Per-section visibility, keyed by section id. Absent / non-false = shown.
+  const [hiddenSections, setHiddenSections] = usePersistentState<
+    Record<string, boolean>
+  >('karmyogi.viewer.layers.hiddenSections', {})
+  const sectionVisibility = useMemo(() => {
+    const m: Record<string, boolean> = {}
+    for (const id of Object.keys(hiddenSections)) {
+      if (hiddenSections[id]) m[id] = false
+    }
+    return m
+  }, [hiddenSections])
+  const toggleSection = (id: string) =>
+    setHiddenSections((prev) => ({ ...prev, [id]: !prev[id] }))
+
+  // Legend rows: id + name + swatch colour for every program section (the
+  // per-section colour source is reused from `sectionData`, so swatches match
+  // the lines on screen).
+  const legendSections = useMemo(
+    () =>
+      sections.map((s, i) => ({
+        id: s.id,
+        name: s.name,
+        color: sectionData[i]?.color ?? sectionColor(i, theme === 'dark', s.color),
+      })),
+    [sections, sectionData, theme],
+  )
+  // Apply a deletion (from EITHER the lasso or the individual-pick selection):
+  // rebuild a SAFE program from the kept segments and replace the program with it
+  // (collapsed into one edited section). Both selection tools funnel through this
+  // single re-emit pipeline so safe-Z retracts + program structure stay correct.
+  const applyKeptSegments = (kept: Segment[]) => {
     const out = reemitSafe(
       kept.map((s) => ({ from: s.from, to: s.to, kind: s.kind })),
       { ...inferEmitOptions(gcode), programName: 'edited toolpath' },
     )
     useProgram.getState().setCombined('edited toolpath', out)
+  }
+  const onLassoDelete = (kept: Segment[]) => {
+    setLassoMode(false)
+    applyKeptSegments(kept)
+  }
+  const onPickDelete = (kept: Segment[]) => {
+    setPickMode(false)
+    applyKeptSegments(kept)
   }
 
   const gcode = useMemo(() => lines.join('\n'), [lines])
@@ -355,6 +431,19 @@ export function VisualizerPanel() {
           >
             ✂
           </button>
+          <button
+            className={pickMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+            onClick={togglePick}
+            disabled={!hasProgram}
+            title={t(
+              'vz.pick',
+              'Pick-delete: click a toolpath line to select it (Shift/Ctrl-click for more), then Delete (safe-Z kept)',
+            )}
+            aria-label={t('vz.pick', 'Pick delete')}
+            aria-pressed={pickMode}
+          >
+            ⇲
+          </button>
         </div>
         <Viewer
           ref={ref}
@@ -382,7 +471,29 @@ export function VisualizerPanel() {
           lasso={lassoMode && hasProgram}
           onLassoDelete={onLassoDelete}
           onLassoExit={() => setLassoMode(false)}
+          pick={pickMode && hasProgram}
+          onPickDelete={onPickDelete}
+          onPickExit={() => setPickMode(false)}
           showDimensions={showDimensions}
+          showToolpaths={showAllToolpaths}
+          sectionVisibility={sectionVisibility}
+          showShapes={showModel}
+          showBed={showBed}
+        />
+        <LegendPanel
+          t={t}
+          open={legendOpen}
+          setOpen={setLegendOpen}
+          showAllToolpaths={showAllToolpaths}
+          setShowAllToolpaths={setShowAllToolpaths}
+          sections={legendSections}
+          hiddenSections={hiddenSections}
+          onToggleSection={toggleSection}
+          showModel={showModel}
+          setShowModel={setShowModel}
+          showBed={showBed}
+          setShowBed={setShowBed}
+          shifted={gizmoOn && !!placement}
         />
         {gizmoOn && placement && (
           <PlacementReadout
@@ -621,6 +732,137 @@ function OverflowMenu({
         </div>,
           document.body,
         )}
+    </div>
+  )
+}
+
+interface LegendSection {
+  id: string
+  name: string
+  color: string
+}
+
+/**
+ * Collapsible LAYERS / legend overlay (upper-left). Collapsed by default it is
+ * just a small layers button, so it never clutters the viewport; expanding
+ * reveals a tree of eye/eye-off show-hide toggles for the toolpaths (an "All"
+ * master plus one row per program section, each with its colour swatch), the
+ * model / drawing preview, and the machine bed. Each toggle drives the matching
+ * three.js object's `.visible` through props passed to the Viewer.
+ *
+ * Sits opposite the toolbar (top-LEFT vs the toolbar's top-RIGHT) so it never
+ * overlaps the lasso/pick tools or the ⋯ menu; when the placement readout is
+ * showing (also top-left) it shifts down (`shifted`) so the two never collide.
+ */
+function LegendPanel({
+  t,
+  open,
+  setOpen,
+  showAllToolpaths,
+  setShowAllToolpaths,
+  sections,
+  hiddenSections,
+  onToggleSection,
+  showModel,
+  setShowModel,
+  showBed,
+  setShowBed,
+  shifted,
+}: {
+  t: TFn
+  open: boolean
+  setOpen: (updater: (v: boolean) => boolean) => void
+  showAllToolpaths: boolean
+  setShowAllToolpaths: Toggle
+  sections: LegendSection[]
+  hiddenSections: Record<string, boolean>
+  onToggleSection: (id: string) => void
+  showModel: boolean
+  setShowModel: Toggle
+  showBed: boolean
+  setShowBed: Toggle
+  shifted: boolean
+}) {
+  const eyeRow = (
+    visible: boolean,
+    label: React.ReactNode,
+    onToggle: () => void,
+    opts?: { indent?: boolean; swatch?: string; key?: string },
+  ) => (
+    <button
+      key={opts?.key}
+      type="button"
+      className={
+        'vz-layer-row' +
+        (opts?.indent ? ' vz-layer-row--child' : '') +
+        (visible ? '' : ' vz-layer-row--off')
+      }
+      onClick={onToggle}
+      aria-pressed={visible}
+    >
+      <span className="vz-layer-eye" aria-hidden="true">
+        <Icon name={visible ? 'eye' : 'eye-off'} size={15} />
+      </span>
+      {opts?.swatch !== undefined && (
+        <span
+          className="vz-layer-swatch"
+          style={{ background: opts.swatch }}
+          aria-hidden="true"
+        />
+      )}
+      <span className="vz-layer-label">{label}</span>
+    </button>
+  )
+
+  return (
+    <div
+      className={'vz-layers' + (shifted ? ' vz-layers--shifted' : '')}
+      role="group"
+      aria-label={t('vz.layers.aria', 'Layers')}
+    >
+      <button
+        type="button"
+        className={
+          open ? 'vz-toolbar-btn vz-layers-btn vz-toolbar-btn--on' : 'vz-toolbar-btn vz-layers-btn'
+        }
+        onClick={() => setOpen((o) => !o)}
+        title={t('vz.layers.title', 'Layers — show / hide toolpaths, model, bed')}
+        aria-label={t('vz.layers.title', 'Layers')}
+        aria-expanded={open}
+      >
+        <span className="vz-layers-glyph" aria-hidden="true">
+          {open ? '▾' : '＋'}
+        </span>
+        <span className="vz-layers-btn-label">{t('vz.layers.label', 'Layers')}</span>
+      </button>
+      {open && (
+        <div className="vz-layers-tree">
+          <div className="vz-layer-group">{t('vz.layers.toolpaths', 'Toolpaths')}</div>
+          {eyeRow(
+            showAllToolpaths,
+            t('vz.layers.allToolpaths', 'All toolpaths'),
+            () => setShowAllToolpaths((v) => !v),
+          )}
+          {sections.length === 0 && (
+            <div className="vz-layer-empty">{t('vz.layers.none', 'No toolpaths loaded')}</div>
+          )}
+          {sections.map((s) =>
+            eyeRow(
+              showAllToolpaths && hiddenSections[s.id] !== true,
+              s.name,
+              () => onToggleSection(s.id),
+              { indent: true, swatch: s.color, key: s.id },
+            ),
+          )}
+          <div className="vz-layer-group">{t('vz.layers.scene', 'Scene')}</div>
+          {eyeRow(showModel, t('vz.layers.model', 'Model / drawing'), () =>
+            setShowModel((v) => !v),
+          )}
+          {eyeRow(showBed, t('vz.layers.bed', 'Machine bed'), () =>
+            setShowBed((v) => !v),
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -1267,6 +1509,102 @@ const OVERLAY_CSS = `
   line-height: 1;
 }
 .vz-menu-label { flex: 1 1 auto; min-width: 0; }
+/* --- layers / legend overlay (top-left, collapsible) --- */
+.vz-layers {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  /* Cap so the tree wraps/scrolls instead of covering the scene on a phone. */
+  max-width: min(70%, 230px);
+  pointer-events: auto;
+}
+/* When the placement readout occupies the top-left, drop below it. */
+.vz-layers--shifted { top: 44px; }
+.vz-layers-btn {
+  width: auto;
+  min-width: 28px;
+  gap: 5px;
+  padding: 0 9px;
+}
+.vz-layers-glyph { font-size: 13px; line-height: 1; }
+.vz-layers-btn-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.vz-layers-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: max-content;
+  max-width: 100%;
+  max-height: min(60vh, 360px);
+  overflow-y: auto;
+  padding: 5px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+.vz-layer-group {
+  padding: 5px 6px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.vz-layer-empty {
+  padding: 3px 8px 5px 28px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.vz-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.vz-layer-row:hover { background: color-mix(in srgb, var(--accent, var(--fg)) 14%, transparent); }
+.vz-layer-row--child { padding-left: 20px; }
+.vz-layer-row--off { color: var(--fg-muted); opacity: 0.7; }
+.vz-layer-eye {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+}
+.vz-layer-swatch {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--fg) 30%, transparent);
+}
+.vz-layer-row--off .vz-layer-swatch { opacity: 0.45; }
+.vz-layer-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* --- tool-cone legend (bottom-right) --- */
 .vz-legend {
   position: absolute;
@@ -1334,6 +1672,11 @@ const OVERLAY_CSS = `
 @media (pointer: coarse), (max-width: 768px) {
   .vz-toolbar { gap: 6px; }
   .vz-toolbar-btn { width: 36px; height: 36px; font-size: 18px; }
+  .vz-layers-btn { width: auto; }
+  .vz-layers--shifted { top: 52px; }
+  .vz-layer-row { min-height: 40px; font-size: 13px; }
+  .vz-layer-group { font-size: 11px; }
+  .vz-layer-empty { font-size: 12px; }
   .vz-menu-item { min-height: 40px; font-size: 13px; }
   .vz-menu-glyph { font-size: 16px; }
   .vz-legend { font-size: 11px; padding: 7px 11px; }

@@ -15,6 +15,24 @@
   container-name: pcbpanel;
 }
 
+/* When the panel is wrapped by the shared preset host (floating left rail +
+   footer save-bar), the panel fills the band between the top and the save-bar,
+   and its SCROLL region gains a left gutter so the rail never overlaps content
+   (mirrors the .sp-panel / .wr-panel rules in presets.css for this tab's root). */
+.cc-presets-host > .pcb-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+.cc-presets-host > .pcb-panel > .pcb-scroll {
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .pcb-panel > .pcb-scroll {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
+
 /* Vertical-only scroll. Sections tile into a responsive card-grid so they fill
    the panel width at wide sizes (killing bottom whitespace) and collapse to a
    single column when the panel is narrow. */

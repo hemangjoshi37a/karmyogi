@@ -5,6 +5,7 @@ import {
   isIdentityJob,
   type JobPlacement,
 } from '../core/transform'
+import { recordHistory, registerHistorySource } from './history'
 
 // NOTE: Phase-0 stub. Workstream W5 (program panel + streaming) owns and expands
 // this slice: load .nc, streaming progress, feed-from-line, pause/abort.
@@ -96,6 +97,27 @@ interface ProgramStore {
   setCursor: (i: number) => void
   setStreaming: (s: boolean) => void
   clear: () => void
+  /**
+   * Capture an opaque snapshot of the undoable program state (sections + the
+   * module-scope dismissed/last-gcode tracking). Consumed by the platform
+   * history engine; the value shape is private to this store.
+   */
+  historySnapshot: () => ProgramHistorySnapshot
+  /** Restore a snapshot produced by `historySnapshot()`. */
+  historyRestore: (snap: ProgramHistorySnapshot) => void
+}
+
+/**
+ * Opaque undo/redo snapshot of the program. Captures the section list plus the
+ * module-scope dismissed-section / last-gcode tracking so undo restores a fully
+ * coherent moment (otherwise a deleted section could re-appear, or a content
+ * re-push could be wrongly ignored, right after an undo).
+ */
+export interface ProgramHistorySnapshot {
+  sections: ProgramSection[]
+  selectedSectionId: string | null
+  dismissed: string[]
+  lastGcode: [string, string][]
 }
 
 /** Bake a placement into raw lines, returning the placed `lines` array. */
@@ -161,6 +183,17 @@ function nextSectionId(): string {
 const dismissedNames = new Set<string>()
 const lastGcodeByName = new Map<string, string>()
 
+/** Deep-clone a section so a captured snapshot can't be mutated by later edits. */
+function cloneSection(s: ProgramSection): ProgramSection {
+  return {
+    id: s.id,
+    name: s.name,
+    rawLines: s.rawLines.slice(),
+    placement: { ...s.placement },
+    color: s.color,
+  }
+}
+
 /** Recompute the derived combined fields from a section list (per-section placement). */
 function deriveFrom(sections: ProgramSection[]) {
   return {
@@ -189,8 +222,12 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     // disappears instead of lingering as a stale, empty card. This is a true
     // no-op when the section already doesn't exist.
     if (gcode.trim() === '') {
+      if (idx < 0) {
+        lastGcodeByName.delete(name)
+        return
+      }
+      recordHistory()
       lastGcodeByName.delete(name)
-      if (idx < 0) return
       const removedId = sections[idx].id
       const next = sections.filter((s) => s.name !== name)
       set({
@@ -212,6 +249,8 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     //     (avoids needless re-renders / stream resets during streaming).
     if (unchanged && (dismissedNames.has(name) || idx >= 0)) return
 
+    // Genuine load/edit → snapshot BEFORE mutating any tracking or sections.
+    recordHistory()
     // Genuine push (new name, or gcode changed): record it + un-dismiss so a
     // real edit in a previously-deleted tab brings the section back.
     lastGcodeByName.set(name, gcode)
@@ -235,6 +274,7 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     })
   },
   setCombined: (name, gcode) => {
+    recordHistory()
     const rawLines = gcode.split(/\r?\n/)
     const next: ProgramSection[] = [
       { id: nextSectionId(), name, rawLines, placement: { ...IDENTITY_JOB_PLACEMENT } },
@@ -257,6 +297,7 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     if (!removed) return
     const next = sections.filter((s) => s.id !== removed.id)
     if (next.length === sections.length) return
+    recordHistory()
     // Mark the section's name as user-dismissed so the owning tab's next
     // (identical) re-push can't resurrect it. `lastGcodeByName` is retained so
     // the dismiss check has the content to compare against; a genuinely
@@ -282,6 +323,7 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     const { sections } = get()
     const idx = sections.findIndex((s) => s.id === id)
     if (idx < 0) return
+    recordHistory()
     const next = sections.slice()
     next[idx] = { ...next[idx], placement: { ...next[idx].placement, ...p } }
     set(deriveFrom(next))
@@ -290,6 +332,7 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     const { sections } = get()
     const idx = sections.findIndex((s) => s.id === id)
     if (idx < 0) return
+    recordHistory()
     const next = sections.slice()
     // Colour is display-only metadata — it doesn't affect rawLines/lines, so we
     // update the section array without re-baking the combined program.
@@ -300,6 +343,7 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     const { sections } = get()
     const idx = sections.findIndex((s) => s.id === id)
     if (idx < 0) return
+    recordHistory()
     const next = sections.slice()
     next[idx] = { ...next[idx], placement: { ...IDENTITY_JOB_PLACEMENT } }
     set(deriveFrom(next))
@@ -307,6 +351,8 @@ export const useProgram = create<ProgramStore>((set, get) => ({
   setCursor: (cursor) => set({ cursor }),
   setStreaming: (streaming) => set({ streaming }),
   clear: () => {
+    // Snapshot the program BEFORE wiping anything so clear is undoable.
+    if (get().sections.length > 0) recordHistory()
     // Reset the dismissed-section + last-gcode tracking alongside the store so
     // a fresh program starts with a clean slate (no stale dismissals).
     dismissedNames.clear()
@@ -321,4 +367,39 @@ export const useProgram = create<ProgramStore>((set, get) => ({
       streaming: false,
     })
   },
+  historySnapshot: () => {
+    const { sections, selectedSectionId } = get()
+    return {
+      sections: sections.map(cloneSection),
+      selectedSectionId,
+      dismissed: [...dismissedNames],
+      lastGcode: [...lastGcodeByName.entries()],
+    }
+  },
+  historyRestore: (snap) => {
+    const sections = snap.sections.map(cloneSection)
+    // Restore the module-scope tracking alongside the store so a deleted section
+    // stays deleted (and an undone delete is un-dismissed) consistently with the
+    // restored section list.
+    dismissedNames.clear()
+    for (const n of snap.dismissed) dismissedNames.add(n)
+    lastGcodeByName.clear()
+    for (const [n, g] of snap.lastGcode) lastGcodeByName.set(n, g)
+    set({
+      ...deriveFrom(sections),
+      selectedSectionId: snap.selectedSectionId,
+      // Don't carry a stale cursor/stream across an undo of program content.
+      cursor: -1,
+      streaming: false,
+    })
+  },
 }))
+
+// Register the program store as the first platform-undo source. This module is
+// imported eagerly (the store is created on import), so the source is available
+// before any user edit. The returned unregister is intentionally unused — the
+// program store lives for the whole app session.
+registerHistorySource('program', {
+  snapshot: () => useProgram.getState().historySnapshot(),
+  restore: (value) => useProgram.getState().historyRestore(value as ProgramHistorySnapshot),
+})

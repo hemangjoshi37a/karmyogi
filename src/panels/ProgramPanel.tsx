@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { useProgram, useMachine, useSettings } from '../store'
 import { sectionColor } from '../viewer/sectionColors'
+import { applyJobPlacement, isIdentityJob } from '../core/transform'
 import { grbl } from '../serial/controller'
 import { ProgramProgressBar } from '../components/ProgramProgressBar'
 import { FrameButton } from '../components/FrameButton'
@@ -35,7 +36,6 @@ const ACCEPT = '.nc,.gcode,.tap,.txt,.cnc,.ngc'
  */
 export function ProgramPanel() {
   const t = useT()
-  const name = useProgram((s) => s.name)
   const lines = useProgram((s) => s.lines)
   const sections = useProgram((s) => s.sections)
   const cursor = useProgram((s) => s.cursor)
@@ -43,7 +43,6 @@ export function ProgramPanel() {
   const setProgram = useProgram((s) => s.setProgram)
   const removeSection = useProgram((s) => s.removeSection)
   const setSectionColor = useProgram((s) => s.setSectionColor)
-  const clear = useProgram((s) => s.clear)
   const theme = useSettings((s) => s.theme)
 
   const connected = useMachine((s) => s.connection === 'connected')
@@ -65,6 +64,72 @@ export function ProgramPanel() {
   const toggleSection = useCallback((id: string) => {
     setOpenSections((m) => ({ ...m, [id]: !m[id] }))
   }, [])
+
+  // Map the FULL-program `cursor` to (which section, line-within-section) by
+  // replicating combineBaked()'s layout from src/store/program.ts WITHOUT
+  // editing the store: walk sections in order; each contributes ONE separator
+  // comment line then its baked lines (rawLines when placement is identity,
+  // else the placement applied + split). `start` is the index of that section's
+  // separator comment; baked content is start+1 .. start+1+bakedLen.
+  const sectionRanges = useMemo(() => {
+    const ranges = new Map<
+      string,
+      { start: number; end: number; bakedLen: number }
+    >()
+    let offset = 0
+    for (const s of sections) {
+      const bakedLen = isIdentityJob(s.placement)
+        ? s.rawLines.length
+        : applyJobPlacement(s.rawLines.join('\n'), s.placement).split(/\r?\n/)
+            .length
+      // +1 for the separator comment combineBaked() pushes before each section.
+      const start = offset
+      const end = offset + 1 + bakedLen
+      ranges.set(s.id, { start, end, bakedLen })
+      offset = end
+    }
+    return ranges
+  }, [sections])
+
+  // The id of the section the cursor currently sits inside while streaming
+  // (null when idle / out of range), plus the 1-based line within that section's
+  // baked content (0 while still on the separator line, before the first line).
+  const streamPos = useMemo(() => {
+    if (!streaming || cursor < 0) return null
+    for (const s of sections) {
+      const r = sectionRanges.get(s.id)
+      if (!r) continue
+      if (cursor >= r.start && cursor < r.end) {
+        // cursor === r.start is the separator comment line → line 0 (not started).
+        const line = Math.max(0, cursor - r.start)
+        return { id: s.id, line, total: r.bakedLen }
+      }
+    }
+    return null
+  }, [streaming, cursor, sections, sectionRanges])
+
+  // Auto-expand the section currently being streamed so its active line is
+  // visible; remember whether WE opened it so we don't fight the user's toggles.
+  const autoOpenedRef = useRef<string | null>(null)
+  useEffect(() => {
+    const id = streamPos?.id ?? null
+    if (id === autoOpenedRef.current) return
+    setOpenSections((m) => {
+      const next = { ...m }
+      // Re-collapse a previously auto-opened section if it's no longer active.
+      const prev = autoOpenedRef.current
+      if (prev && prev !== id) delete next[prev]
+      if (id) next[id] = true
+      return next
+    })
+    autoOpenedRef.current = id
+  }, [streamPos?.id])
+
+  // Scroll the active line into view within the streaming section's body.
+  const activeLineRef = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    activeLineRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [streamPos?.id, streamPos?.line])
 
   // While streaming, the start-line field becomes a live current-line readout
   // (1-based, full-program). The store's `cursor` is already a FULL-program
@@ -153,21 +218,6 @@ export function ProgramPanel() {
     else grbl.feedHold()
   }
 
-  // Destructive Clear asks for confirmation so a loaded program isn't lost on a
-  // stray click.
-  function onClear() {
-    if (
-      window.confirm(
-        t(
-          'prog.clearConfirm',
-          'Clear the loaded program? This cannot be undone.',
-        ),
-      )
-    ) {
-      clear()
-    }
-  }
-
   // Confirm before removing a section (it discards that source's generated code).
   function onRemoveSection(sectionName: string) {
     if (
@@ -201,6 +251,22 @@ export function ProgramPanel() {
     document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(url), 0)
   }
+
+  // Per-section BAKED lines (placement applied) for the per-section Frame button,
+  // so framing traces each section where it actually sits on the bed. Identity
+  // placements pass through untouched (no bake cost).
+  const sectionFrameLines = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const s of sections) {
+      m.set(
+        s.id,
+        isIdentityJob(s.placement)
+          ? s.rawLines
+          : applyJobPlacement(s.rawLines.join('\n'), s.placement).split(/\r?\n/),
+      )
+    }
+    return m
+  }, [sections])
 
   const canStream = connected && hasProgram && !streaming
 
@@ -353,8 +419,7 @@ export function ProgramPanel() {
       {/* --- Sections: one expandable/deletable card per source/tab. Each tab
               that generates G-code keeps its OWN section here; regenerating from
               a tab updates its section in place rather than clobbering others. --- */}
-      {sections.length > 0 && (
-        <section className="pp-card pp-sections-card">
+      <section className="pp-card pp-sections-card">
           <div className="pp-sections-header">
             <span className="pp-section-title">
               {t('prog.sections', 'Sections')}
@@ -368,14 +433,35 @@ export function ProgramPanel() {
                     count: sections.length,
                   })}
             </span>
+            {/* Upload a G-code file → adds a NEW section (same copy/download/
+                delete controls as tab-generated sections). */}
+            <div className="pp-sections-actions">
+              <button
+                type="button"
+                className="pp-icon-btn"
+                onClick={() => fileRef.current?.click()}
+                disabled={streaming}
+                title={t('prog.uploadSection', 'Upload a G-code file as a new section (or drag & drop)')}
+                aria-label={t('prog.uploadSection', 'Upload a G-code file as a new section')}
+              >
+                ⬆
+              </button>
+            </div>
           </div>
+          {sections.length > 0 ? (
           <ul className="pp-section-list">
             {sections.map((sec, i) => {
               const open = !!openSections[sec.id]
               const count = sec.rawLines.length
               const color = sectionColor(i, theme === 'dark', sec.color)
+              // Is THIS section the one currently being streamed? If so, expose
+              // the live "line X / Y" position and a subtle shimmer highlight.
+              const active = streamPos && streamPos.id === sec.id ? streamPos : null
               return (
-                <li key={sec.id} className="pp-section">
+                <li
+                  key={sec.id}
+                  className={'pp-section' + (active ? ' is-streaming' : '')}
+                >
                   <div className="pp-section-row">
                     <label
                       className="pp-section-color"
@@ -413,7 +499,27 @@ export function ProgramPanel() {
                           ? t('prog.lineCountOne', '{count} line', { count })
                           : t('prog.lineCount', '{count} lines', { count })}
                       </span>
+                      {active && (
+                        <span
+                          className="pp-section-live"
+                          title={t(
+                            'prog.sectionLiveHint',
+                            'Current streamed line within this section',
+                          )}
+                        >
+                          {t('prog.sectionLive', '{line} / {total}', {
+                            line: active.line,
+                            total: active.total,
+                          })}
+                        </span>
+                      )}
                     </button>
+                    <FrameButton
+                      className="pp-frame pp-section-frame"
+                      lines={sectionFrameLines.get(sec.id)}
+                      showOptions={false}
+                      label={t('prog.frame', 'Frame this section')}
+                    />
                     <button
                       type="button"
                       className="pp-icon-btn pp-section-io"
@@ -446,74 +552,55 @@ export function ProgramPanel() {
                       🗑
                     </button>
                   </div>
-                  {open && (
-                    <pre className="pp-section-body">
-                      {sec.rawLines.join('\n')}
-                    </pre>
-                  )}
+                  {open &&
+                    (active ? (
+                      // While this section is streaming, render line-by-line so
+                      // the active line can be highlighted + scrolled into view.
+                      // (Line numbers track the raw body; for identity placement
+                      // baked === raw so the active index lines up exactly.)
+                      <pre className="pp-section-body pp-section-body--live">
+                        {sec.rawLines.map((ln, li) => {
+                          const isActive = li === active.line - 1
+                          return (
+                            <span
+                              key={li}
+                              ref={isActive ? activeLineRef : undefined}
+                              className={
+                                'pp-section-line' +
+                                (isActive ? ' is-active' : '')
+                              }
+                            >
+                              {ln === '' ? '​' : ln}
+                              {'\n'}
+                            </span>
+                          )
+                        })}
+                      </pre>
+                    ) : (
+                      <pre className="pp-section-body">
+                        {sec.rawLines.join('\n')}
+                      </pre>
+                    ))}
                 </li>
               )
             })}
           </ul>
-        </section>
-      )}
-
-      {/* --- Program file: name + Load / Clear. The line-by-line read view and
-              the text editor were removed — the Sections list above is the single
-              representation of the program (view its lines by expanding a section,
-              copy/download/delete per section). --- */}
-      <section className="pp-card pp-text-card">
-        <div className="pp-text-header">
-          <span className="pp-section-title">
-            {t('prog.programFile', 'Program')}
-            <span className="pp-meta pp-text-count">
-              {' '}
-              (
-              {lines.length === 1
-                ? t('prog.lineCountOne', '{count} line', { count: lines.length })
-                : t('prog.lineCount', '{count} lines', { count: lines.length })}
-              )
-            </span>
-          </span>
-          {name && (
-            <span className="pp-name" title={name}>
-              {name}
-            </span>
-          )}
-          <div className="pp-file-actions">
-            <button
-              className="pp-icon-btn"
-              onClick={() => fileRef.current?.click()}
-              disabled={streaming}
-              title={t(
-                'prog.loadHint',
-                'Load a .nc / .gcode / .tap / .ngc file (or drag & drop)',
+          ) : (
+            <p className="pp-hint pp-sections-empty">
+              {t(
+                'prog.noSections',
+                'No program yet — generate one from a tab (Carving, Writing, PCB…) or ⬆ upload a G-code file.',
               )}
-              aria-label={t('prog.loadFile', 'Load file')}
-            >
-              ⬆
-            </button>
-            {hasProgram && (
-              <button
-                className="pp-icon-btn pp-btn-clear"
-                onClick={onClear}
-                disabled={streaming}
-                title={t('prog.clear', 'Clear / unload program')}
-                aria-label={t('prog.clearAria', 'Clear program')}
-              >
-                🗑
-              </button>
-            )}
-          </div>
-        </div>
-        <input
-          ref={fileRef}
-          className="pp-load-input"
-          type="file"
-          accept={ACCEPT}
-          onChange={onFileChange}
-        />
-      </section>
+            </p>
+          )}
+          <input
+            ref={fileRef}
+            className="pp-load-input"
+            type="file"
+            accept={ACCEPT}
+            onChange={onFileChange}
+          />
+        </section>
     </div>
   )
 }

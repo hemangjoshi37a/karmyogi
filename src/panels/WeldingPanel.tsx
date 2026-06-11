@@ -4,6 +4,9 @@ import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { Icon } from '../components/Icons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import {
   WeavePattern,
   defaultWeldLine,
@@ -479,7 +482,32 @@ export function WeldingPanel() {
     setLoadError('')
   }
 
+  // ---- color-coded setting PRESETS (global welding params only) ------------
+  // Snapshot the current global params (arc/gas + travel/motion) — NOT the
+  // object list, which is the operator's actual work. Scoped to its own
+  // persistence key, independent of the carving/soldering/writing presets.
+  const capturePreset = (): PersistParams => ({ ...params })
+  // Restore a captured preset, coercing each field defensively (via the same
+  // parse helper Load uses) so a corrupt persisted slot can never feed a NaN /
+  // out-of-range value to the emitter.
+  const applyPreset = (p: PersistParams) => {
+    setParams((prev) => parseWeldParams(p, prev))
+  }
+  const presets = usePresets<PersistParams>({
+    storageKey: 'karmyogi.welding.presets',
+    capture: capturePreset,
+    onApply: applyPreset,
+  })
+
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('weld.presets.aria', 'Welding setting presets')}
+      />
     <div className="wp-panel">
       {/* Slim header: title + icon toolbar. */}
       <header className="wp-head">
@@ -783,6 +811,26 @@ export function WeldingPanel() {
           ))}
         </div>
       </div>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={params}
+            onLoad={(data) => setParams((p) => parseWeldParams(data, p))}
+            onError={setLoadError}
+            fileBase="welding-settings"
+            ext="kweldset"
+            saveTitle={t('weld.presets.saveSettings', 'Save welding settings to file')}
+            loadTitle={t('weld.presets.loadSettings', 'Load welding settings from file')}
+          />
+        }
+      />
     </div>
   )
 }

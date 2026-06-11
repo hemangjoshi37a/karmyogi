@@ -22,6 +22,9 @@ import { useT } from '../i18n'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { IconButton } from '../components/IconButton'
 import { Icon } from '../components/Icons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import type { StatusNote } from '../core/fontLibrary'
 import '../styles/writing.css'
 
@@ -537,7 +540,25 @@ export function WritingPanel() {
       setGenMode, setFontId],
   )
 
+  // ---- color-coded setting PRESETS (text / font / layout) -------------------
+  // Snapshot the full writing document; apply via the same validated loadDoc so
+  // a corrupt persisted slot is coerced field-by-field (and uploaded/local font
+  // ids fall back to the built-in font, just like a loaded .kwrite file).
+  const presets = usePresets<WritingDoc>({
+    storageKey: 'karmyogi.writing.presets',
+    capture: () => doc,
+    onApply: loadDoc,
+  })
+
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('writing.presets.aria', 'Writing setting presets')}
+      />
     <div className="wr-panel">
       <div className="wr-scroll">
         <p className="wr-intro">
@@ -849,6 +870,29 @@ export function WritingPanel() {
 
         </div>
       </div>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={doc}
+            onLoad={loadDoc}
+            fileBase="writing-settings"
+            ext="kwrite"
+            saveTitle={t('writing.settings.save', 'Save writing settings')}
+            loadTitle={t('writing.settings.load', 'Load writing settings')}
+            onError={setInfo}
+            parseErrorMessage={(name) =>
+              t('writing.info.parseError', 'Could not read {name} — expected a .kwrite (JSON) writing document.', { name })
+            }
+          />
+        }
+      />
     </div>
   )
 }

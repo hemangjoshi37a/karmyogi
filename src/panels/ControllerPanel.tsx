@@ -5,7 +5,7 @@ import { useMachine, useSettings, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
 import { DroReadout } from '../components/DroReadout'
 import { JogPad, jogKeyToDelta, jogParamsFromDelta, HOLD_DELAY_MS, type JogDelta } from '../components/JogPad'
-import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, SpindleCcwIcon, AxisZeroIcon, PlusIcon, MinusIcon, OvResetIcon } from '../components/MachineIcons'
+import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, SpindleCcwIcon, AxisZeroIcon, GoToZeroIcon, PlusIcon, MinusIcon, OvResetIcon } from '../components/MachineIcons'
 import { InfoTip } from '../components/InfoTip'
 import { useT } from '../i18n'
 import '../styles/controller.css'
@@ -15,6 +15,22 @@ const STEP_SIZES = [0.1, 1, 10, 100]
 const CONTINUOUS_JOG_MAX_MM = 2000
 /** Machine states in which destructive commands (Zero) must be confirmed / refused. */
 const BUSY_STATES = new Set(['Run', 'Hold', 'Jog', 'Home', 'Alarm', 'Door'])
+/** Default safe-Z retract height (mm, work coords) used before any XY return. */
+const DEFAULT_SAFE_Z = 5
+
+/**
+ * Work coordinate systems. `code` is the GRBL command sent on select; `label`
+ * is the compact chip text (so all six fit in a narrow row); `tk`/`title`
+ * resolve the full hover description (name + gcode).
+ */
+const WCS = [
+  { code: 'G54', label: 'W1', tk: 'coord.wcs.g54', title: 'G54 — Work coordinate system 1 (default datum). The active work zero used for positioning.' },
+  { code: 'G55', label: 'W2', tk: 'coord.wcs.g55', title: 'G55 — Work coordinate system 2.' },
+  { code: 'G56', label: 'W3', tk: 'coord.wcs.g56', title: 'G56 — Work coordinate system 3.' },
+  { code: 'G57', label: 'W4', tk: 'coord.wcs.g57', title: 'G57 — Work coordinate system 4.' },
+  { code: 'G58', label: 'W5', tk: 'coord.wcs.g58', title: 'G58 — Work coordinate system 5.' },
+  { code: 'G59', label: 'W6', tk: 'coord.wcs.g59', title: 'G59 — Work coordinate system 6.' },
+] as const
 
 /** Tiny, barely-visible corner badge showing a button's keyboard shortcut. */
 function Kbd({ k }: { k: string }) {
@@ -26,9 +42,61 @@ function Kbd({ k }: { k: string }) {
 }
 
 /**
+ * Compact Adobe-style numeric control: a slider you can DRAG plus a small number
+ * input you can TYPE into — both synced and clamped to [min, max]. The whole row
+ * carries one explanatory `title` tooltip (replacing the per-field ⓘ icon).
+ */
+function SliderField(props: {
+  label: string
+  rowTitle: string
+  inputId: string
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+  step: number
+  unit: string
+  ariaLabel: string
+}) {
+  const { label, rowTitle, inputId, value, onChange, min, max, step, unit, ariaLabel } = props
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  return (
+    <div className="mc-field mc-sliderfield" title={rowTitle}>
+      <label className="mc-label" htmlFor={inputId}>
+        {label}
+      </label>
+      <input
+        type="range"
+        className="mc-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={ariaLabel}
+        tabIndex={-1}
+      />
+      <input
+        id={inputId}
+        type="number"
+        className="mc-input mc-slider-num"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(clamp(Number(e.target.value) || 0))}
+        aria-label={ariaLabel}
+      />
+      <span className="mc-unit">{unit}</span>
+    </div>
+  )
+}
+
+/**
  * Controller panel: connection, DRO, jog pad, home/unlock/reset, and
- * feed/rapid/spindle overrides. Touch-friendly and fully keyboard-operable when
- * the panel is focused (see the key map in onKeyDown / the panel hint).
+ * feed/rapid/spindle overrides. Touch-friendly and fully keyboard-operable
+ * whenever the panel is VISIBLE and you're not typing in a field — no focus on
+ * the panel needed (see the key map in onKeyDown / the panel hint).
  */
 export function ControllerPanel() {
   const t = useT()
@@ -40,6 +108,9 @@ export function ControllerPanel() {
   const overrides = useMachine((s) => s.overrides)
   const machineState = useMachine((s) => s.state)
   const machineError = useMachine((s) => s.error)
+  // Machine-reported active WCS (from a `$G` parser-state poll). Authoritative
+  // when known; falls back to the persisted local guess only when unknown.
+  const machineWcs = useMachine((s) => s.activeWcs)
   const units = useSettings((s) => s.units)
   const bedW = useBed((s) => s.width)
   const bedD = useBed((s) => s.depth)
@@ -63,6 +134,14 @@ export function ControllerPanel() {
   // Continuous-jog distance is user-configurable (persisted) and capped to the
   // machine's travel so a held jog can't ask GRBL to fly far past the envelope.
   const [contJogMm, setContJogMm] = usePersistentState('karmyogi.jog.continuousMm', 1000)
+  // Persisted local guess of the active WCS — only updated by an explicit user
+  // selection (and only while connected); the machine's `$G` report wins for the
+  // chip highlight so it reflects the REAL active coordinate system.
+  const [localWcs, setLocalWcs] = usePersistentState('karmyogi.wcs', 'G54')
+  const activeWcs = (machineWcs ?? localWcs) as string
+  // Safe-Z retract height (work Z, mm) prepended before any XY return so the tool
+  // lifts clear of the work/clamps instead of dragging across them.
+  const [safeZ] = usePersistentState('karmyogi.coord.safeZ', DEFAULT_SAFE_Z)
   const rootRef = useRef<HTMLDivElement>(null)
 
   // Optimistic spindle-running flag: flip instantly on click for responsive UI,
@@ -188,6 +267,58 @@ export function ControllerPanel() {
     void grbl.send('G10 L20 P0 X0 Y0 Z0')
   }, [busy, machineState, t])
 
+  // Select the active work coordinate system (G54–G59). Persist the local guess
+  // only while connected; the `$G` poll confirms it from the machine shortly and
+  // takes over the chip highlight.
+  const selectWcs = useCallback((w: string) => {
+    if (!grbl.isConnected) return
+    setLocalWcs(w)
+    grbl
+      .send(w)
+      .then(() => grbl.requestParserState().catch(() => {}))
+      .catch(() => {})
+  }, [setLocalWcs])
+
+  // Zero a single work axis at the current position (G10 L20 P0 <axis>0).
+  // Destructive — re-defining the work datum mid-Run/Alarm is dangerous, so
+  // confirm when the machine isn't safely Idle.
+  const zeroAxis = useCallback(
+    (axis: 'X' | 'Y' | 'Z') => {
+      if (!grbl.isConnected) return
+      if (busy) {
+        const ok = window.confirm(
+          t('coord.zero.confirmBusy', 'Machine is {state}. Set {axes} work zero anyway?', {
+            state: machineState,
+            axes: axis,
+          }),
+        )
+        if (!ok) return
+      }
+      void grbl.send(`G10 L20 P0 ${axis}0`)
+    },
+    [busy, machineState, t],
+  )
+
+  // SAFETY: return to work XY zero, retracting Z to a safe height FIRST so the
+  // tool never drags through the workpiece or clamps. Sends the retract and the
+  // XY rapid as two lines: `G90 G0 Z<safe>` then `G90 G0 X0 Y0`.
+  const goToZero = useCallback(() => {
+    if (!grbl.isConnected) return
+    const z = Number.isFinite(safeZ) ? safeZ : DEFAULT_SAFE_Z
+    if (busy) {
+      const ok = window.confirm(
+        t('coord.goto.confirmBusy', 'Machine is {state}. Retract Z and rapid to X0 Y0 anyway?', {
+          state: machineState,
+        }),
+      )
+      if (!ok) return
+    }
+    Promise.resolve()
+      .then(() => grbl.send(`G90 G0 Z${z}`))
+      .then(() => grbl.send('G90 G0 X0 Y0'))
+      .catch(() => {})
+  }, [busy, machineState, safeZ, t])
+
   // SAFETY: stop any continuous jog if the window loses focus or is hidden
   // (e.g. holding an arrow key then alt-tabbing) — keyup never fires for the
   // other window, so without this a held jog would run away. Wired at the
@@ -210,12 +341,20 @@ export function ControllerPanel() {
     if (!connected) resetKeyJog()
   }, [connected, resetKeyJog])
 
+  // Prime the machine's active WCS on connect so the W1–W6 chip resolves promptly
+  // (the controller also polls `$G`). While disconnected we never touch the local
+  // guess — it's only an offline fallback for the highlight.
+  useEffect(() => {
+    if (connected) grbl.requestParserState().catch(() => {})
+  }, [connected])
+
   const onKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: KeyboardEvent) => {
       if (!grbl.isConnected) return
-      // Don't hijack typing in inputs/selects.
-      const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      // Don't hijack typing in inputs/selects/editable fields.
+      const el = e.target as HTMLElement | null
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || el?.isContentEditable) return
       // Don't fight browser/OS shortcuts (Ctrl/Meta/Alt combos).
       if (e.ctrlKey || e.metaKey || e.altKey) return
 
@@ -330,7 +469,7 @@ export function ControllerPanel() {
   // comes up do we stop motion (0x85) — so multi-arrow diagonal jogs don't get
   // cut short, and no continuous jog can survive all keys being released.
   const onKeyUp = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: KeyboardEvent) => {
       if (!heldKeys.current.has(e.key)) return
       e.preventDefault()
       heldKeys.current.delete(e.key)
@@ -344,16 +483,28 @@ export function ControllerPanel() {
     [clearKeyJogTimer, cancelJog],
   )
 
-  // Stop motion if focus actually LEAVES the panel (tab/click away) while a key
-  // jog is active — complements the window-level blur handler above. Ignore
-  // internal focus moves (button → button) so they don't cancel a held jog.
-  const onBlur = useCallback(
-    (e: React.FocusEvent<HTMLDivElement>) => {
-      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
-      resetKeyJog()
-    },
-    [resetKeyJog],
-  )
+  // Keyboard machine control works whenever the Controller panel is VISIBLE on
+  // screen and the user is NOT typing in a field — NO focus on the panel needed.
+  // Listeners live on the window; keydown is gated by panel visibility (so a
+  // hidden/background tab can't start a jog), while keyup is ALWAYS processed so
+  // a held jog can never survive the key being released. Visibility uses
+  // offsetParent (null when dockview display:none-hides an inactive tab).
+  useEffect(() => {
+    const visible = () => {
+      const el = rootRef.current
+      return !!el && el.offsetParent !== null
+    }
+    const kd = (e: KeyboardEvent) => {
+      if (visible()) onKeyDown(e)
+    }
+    const ku = (e: KeyboardEvent) => onKeyUp(e)
+    window.addEventListener('keydown', kd)
+    window.addEventListener('keyup', ku)
+    return () => {
+      window.removeEventListener('keydown', kd)
+      window.removeEventListener('keyup', ku)
+    }
+  }, [onKeyDown, onKeyUp])
 
   const ov = (byte: number) => () => void grbl.realtime(byte)
 
@@ -361,10 +512,6 @@ export function ControllerPanel() {
     <div
       className="mc-panel"
       ref={rootRef}
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      onKeyUp={onKeyUp}
-      onBlur={onBlur}
       aria-label={t('ctrl.panel.aria', 'Machine controller')}
     >
       <div className="mc-cols">
@@ -470,14 +617,7 @@ export function ControllerPanel() {
       <section className="mc-section">
         <h4>{t('ctrl.jog', 'Jog')}</h4>
         <div className="mc-field">
-          <span className="mc-label">{t('ctrl.step', 'Step')}<InfoTip
-            topic="jogStep"
-            title={t('ctrl.explain.jogStep.title', 'Jog step')}
-            body={t(
-              'ctrl.explain.jogStep.body',
-              'How far the machine moves each time you tap a jog (arrow) button — for example 0.1, 1, or 10 mm. Big steps move quickly across the table; small steps let you nudge precisely. Use small steps near the workpiece.',
-            )}
-          /></span>
+          <span className="mc-label">{t('ctrl.step', 'Step')}</span>
           <span className="mc-seg mc-grow" role="group" aria-label={t('ctrl.step.aria', 'Jog step (mm)')}>
             {STEP_SIZES.map((s, i) => (
               <button
@@ -495,57 +635,100 @@ export function ControllerPanel() {
           </span>
           <span className="mc-unit">{unitMm}</span>
         </div>
-        <div className="mc-field">
-          <label className="mc-label" htmlFor="jog-feed">{t('ctrl.feed', 'Feed')}</label>
-          <InfoTip
-            topic="feedRate"
-            title={t('ctrl.explain.feedRate.title', 'Feed rate')}
-            body={t(
-              'ctrl.explain.feedRate.body',
-              'The speed the tool moves through the material while cutting, in mm per minute. Higher is faster but harder on the bit; lower is slower and cleaner. Start conservative and increase only if the cut stays smooth.',
-            )}
-          />
-          <input
-            id="jog-feed"
-            className="mc-input mc-input-grow"
-            type="number"
-            min={1}
-            step={50}
-            value={jogFeed}
-            onChange={(e) => setJogFeed(Math.max(1, Number(e.target.value) || 0))}
-            aria-label={t('ctrl.jogfeed.aria', 'Jog feed rate (mm/min)')}
-            title={t('ctrl.jogfeed.title', 'Jog feed rate (mm/min) — speed of jog moves')}
-          />
-          <span className="mc-unit">{unitMmMin}</span>
+        <SliderField
+          label={t('ctrl.feed', 'Feed')}
+          rowTitle={t(
+            'ctrl.jogfeed.row',
+            'Jog feed rate ({unit}) — how fast jog moves run. Drag the slider or type a value.',
+            { unit: unitMmMin },
+          )}
+          inputId="jog-feed"
+          value={jogFeed}
+          onChange={setJogFeed}
+          min={1}
+          max={10000}
+          step={10}
+          unit={unitMmMin}
+          ariaLabel={t('ctrl.jogfeed.aria', 'Jog feed rate (mm/min)')}
+        />
+        <SliderField
+          label={t('ctrl.jog.continuous', 'Hold dist')}
+          rowTitle={t(
+            'ctrl.jog.continuous.row',
+            'How far a press-and-hold jog travels before repeating — capped to machine travel ({cap} {unit}). Drag the slider or type a value.',
+            { cap: Math.round(continuousJogMm), unit: unitMm },
+          )}
+          inputId="jog-cont"
+          value={contJogMm}
+          onChange={setContJogMm}
+          min={1}
+          max={CONTINUOUS_JOG_MAX_MM}
+          step={10}
+          unit={unitMm}
+          ariaLabel={t('ctrl.jog.continuous.aria', 'Continuous (hold) jog distance (mm)')}
+        />
+        {/* Work coordinate system (G54–G59 → W1–W6): a compact row above the
+            jog arrows. The active system is highlighted (machine `$G` report
+            wins; falls back to the persisted local guess). */}
+        <div className="mc-wcs-row" role="group" aria-label={t('coord.wcs.aria.group', 'Work coordinate system')}>
+          {WCS.map((w) => (
+            <button
+              key={w.code}
+              type="button"
+              className={`mc-btn coord-wcs-chip${activeWcs === w.code ? ' primary' : ''}`}
+              disabled={!connected}
+              aria-pressed={activeWcs === w.code}
+              aria-label={t('coord.wcs.aria', '{code} work coordinate system', { code: w.code })}
+              title={t(w.tk, w.title)}
+              onClick={() => selectWcs(w.code)}
+            >
+              <span className="coord-wcs-label">{w.label}</span>
+              <span className="coord-wcs-code" aria-hidden="true">{w.code}</span>
+            </button>
+          ))}
         </div>
-        <div className="mc-field">
-          <label className="mc-label" htmlFor="jog-cont">{t('ctrl.jog.continuous', 'Hold dist')}</label>
-          <InfoTip
-            topic="jogContinuous"
-            title={t('ctrl.explain.jogCont.title', 'Continuous jog distance')}
-            body={t(
-              'ctrl.explain.jogCont.body',
-              'How far a press-and-hold jog travels before it must be repeated. The machine keeps moving only while held and stops the instant you let go; this value is capped to the configured machine travel so a hold can never fly far past the bed.',
-            )}
+        {/* Jog arrows (XY pad + Z column with Go-to-zero in its center) and, to
+            the right, a stacked column of work-offset Zero X/Y/Z buttons. */}
+        <div className="mc-jog-row">
+          <JogPad
+            disabled={!connected}
+            step={step}
+            onJog={doJog}
+            onJogHold={doJogHold}
+            onCancel={cancelJog}
+            zCenter={
+              <button
+                type="button"
+                className="mc-btn mc-btn-icon mc-goto-zero"
+                disabled={!connected}
+                onClick={goToZero}
+                aria-label={t('coord.quick.goto', 'Go to zero')}
+                title={t('coord.quick.gotoTitle', 'Retract Z to the safe height, then rapid to work zero (X0 Y0)')}
+              >
+                <GoToZeroIcon size={18} />
+              </button>
+            }
           />
-          <input
-            id="jog-cont"
-            className="mc-input mc-input-grow"
-            type="number"
-            min={1}
-            step={50}
-            value={contJogMm}
-            onChange={(e) => setContJogMm(Math.max(1, Number(e.target.value) || 0))}
-            aria-label={t('ctrl.jog.continuous.aria', 'Continuous (hold) jog distance (mm)')}
-            title={t('ctrl.jog.continuous.title', 'Distance a held jog travels — capped to machine travel ({cap} {unit})', { cap: Math.round(continuousJogMm), unit: unitMm })}
-          />
-          <span className="mc-unit">{unitMm}</span>
+          <div className="mc-zero-col" role="group" aria-label={t('coord.wco.heading', 'Work Offset (WCO)')}>
+            {(['X', 'Y', 'Z'] as const).map((ax) => (
+              <button
+                key={ax}
+                type="button"
+                className="mc-btn mc-btn-lead mc-zero-btn"
+                disabled={!connected}
+                onClick={() => zeroAxis(ax)}
+                title={t('coord.wco.zeroAxis.title', 'Set the current position as work zero for {axis} (G10 L20 P0)', { axis: ax })}
+              >
+                <AxisZeroIcon size={15} />
+                <span>{t('coord.wco.zeroAxis', 'Zero {axis}', { axis: ax })}</span>
+              </button>
+            ))}
+          </div>
         </div>
-        <JogPad disabled={!connected} step={step} onJog={doJog} onJogHold={doJogHold} onCancel={cancelJog} />
         <span className="mc-hint">
           {t(
             'ctrl.kbd.hint',
-            'Fully keyboard-operable when focused: arrows jog XY · PgUp/PgDn jog Z · Esc cancels · 1–4 step size · h Home · u Unlock · r Reset · ! Hold · ~ Resume · s Spindle · z Zero · [ ] feed ∓ · \\ feed 100%',
+            'Keyboard control whenever this panel is visible (and you are not typing): arrows jog XY · PgUp/PgDn jog Z · Esc cancels · 1–4 step size · h Home · u Unlock · r Reset · ! Hold · ~ Resume · s Spindle · z Zero · [ ] feed ∓ · \\ feed 100%',
           )}
         </span>
       </section>

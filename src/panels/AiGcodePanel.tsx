@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AiError,
   buildSystemPrompt,
@@ -23,6 +23,7 @@ import { useBed } from '../store/bed'
 import { useProgram } from '../store'
 import { useT } from '../i18n'
 import { IconButton } from '../components/IconButton'
+import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
 import '../styles/ai.css'
 
@@ -37,7 +38,7 @@ import '../styles/ai.css'
  *    control. We CANNOT read that cookie ourselves (cross-origin HttpOnly), and
  *    a browser fetch can't set `Cookie` nor read a CORS-blocked response — so
  *    the cookie is sent as `X-Session-Cookie` to your proxy, which re-attaches
- *    it server-side. The in-panel guide explains the export steps.
+ *    it server-side. A "How?" disclosure explains the export steps on demand.
  *
  * Everything is stored ONLY in this browser (localStorage) and sent ONLY to the
  * official endpoint (key mode) or your proxy (session mode). Output is run
@@ -45,6 +46,13 @@ import '../styles/ai.css'
  * G21/G90/G94 preamble and flags out-of-bed coordinates, absurd feeds, and
  * missing safe-Z retracts. The G-code can be loaded into the Program tab so it
  * appears in the Visualizer for review BEFORE it is ever streamed.
+ *
+ * Layout follows the house (Soldering / Glue) pattern: a slim header (title +
+ * InfoTip + icon toolbar), a live status strip (provider · model · readiness ·
+ * last lint), a self-contained collapsible "Connect AI" section (collapses to a
+ * one-line summary once configured) with the long cookie guide behind a "How?"
+ * disclosure, and the CHAT — the primary task — as the dominant region with the
+ * composer pinned at the bottom.
  */
 
 const PROVIDER_INFO: Record<
@@ -82,6 +90,56 @@ type T = (key: string, english: string, vars?: Record<string, string | number>) 
  *  works through a relay (CORS + HttpOnly cookies make the in-browser path
  *  impossible), so the whole mode is hidden unless one is present. */
 const RELAY_CONFIGURED = DEFAULT_RELAY_URL.trim().length > 0
+
+/** Inline check glyph for the transient "copied" button state (the shared icon
+ *  set has no 'check'; Icons.tsx must not be edited, so it lives locally). */
+const CHECK_GLYPH = (
+  <svg
+    viewBox="0 0 24 24"
+    width="16"
+    height="16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </svg>
+)
+
+/**
+ * A slim square icon button for the header toolbar (same pattern as the
+ * Soldering panel). `title`/`body` are combined into a native hover tooltip
+ * explainer that never intercepts the action click, keeping the toolbar
+ * compact while every button stays self-documenting.
+ */
+function ToolButton(props: {
+  glyph: ReactNode
+  title: string
+  body: string
+  onClick: () => void
+  className?: string
+  disabled?: boolean
+  ariaExpanded?: boolean
+}) {
+  const { glyph, title, body, onClick, className = '', disabled, ariaExpanded } = props
+  return (
+    <button
+      type="button"
+      className={`ai-ico${className ? ' ' + className : ''}`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={title}
+      aria-expanded={ariaExpanded}
+      title={`${title} — ${body}`}
+    >
+      <span aria-hidden="true">{glyph}</span>
+    </button>
+  )
+}
 
 /**
  * Translate an AI-core error (an {@link AiError} carries a stable `code` +
@@ -157,6 +215,14 @@ function translateWarning(t: T, w: LintWarning): string {
   }
 }
 
+/** Worst severity in a warning list, for the status strip + message summary. */
+function worstLevel(warnings: LintWarning[] | undefined): 'error' | 'warn' | 'info' | null {
+  if (!warnings || warnings.length === 0) return null
+  if (warnings.some((w) => w.level === 'error')) return 'error'
+  if (warnings.some((w) => w.level === 'warn')) return 'warn'
+  return 'info'
+}
+
 export function AiGcodePanel() {
   const t = useT()
 
@@ -185,25 +251,9 @@ export function AiGcodePanel() {
   const clearChat = useAiGcode((s) => s.clearChat)
   const clearCredentials = useAiGcode((s) => s.clearCredentials)
 
-  const [prompt, setPrompt] = useState(storedPrompt)
-  const [tool, setTool] = useState('')
-  const [material, setMaterial] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [showKey, setShowKey] = useState(false)
-  const [showConfig, setShowConfig] = useState(chat.length === 0)
-  const [loadedId, setLoadedId] = useState<string | null>(null)
-  const [cookieImportNote, setCookieImportNote] = useState<string | null>(null)
-  const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-  const cookieFileRef = useRef<HTMLInputElement | null>(null)
-  const threadRef = useRef<HTMLDivElement | null>(null)
-  // Monotonic counter so each "Load into Program" gets its OWN program section
-  // (the store upserts by name) and multiple loads don't overwrite each other.
-  const loadSeqRef = useRef(0)
-
   // Session/cookie auth can ONLY work through a configured relay; if none is set
   // for this deployment, the mode is hidden and we hard-pin to key mode.
+  // (Derived BEFORE the state hooks so the initial Connect collapse keys off it.)
   const effectiveAuthMode: AuthMode = RELAY_CONFIGURED ? authMode : 'key'
 
   const info = PROVIDER_INFO[provider]
@@ -217,6 +267,33 @@ export function AiGcodePanel() {
   const ready = effectiveAuthMode === 'key' ? hasKey : hasSession
   /** The model dropdown is on "Custom…" (free-text id not in the preset list). */
   const isCustomModel = !MODEL_OPTIONS[provider].includes(model)
+  /** Expected key prefix ('sk-' / 'sk-ant-') — the keyHint minus the trailing dots. */
+  const expectedPrefix = info.keyHint.replace(/\.+$/, '')
+  /** Soft, purely-presentational format check (never blocks sending). */
+  const keyLooksWrong = hasKey && !apiKey.trim().startsWith(expectedPrefix)
+
+  const [prompt, setPrompt] = useState(storedPrompt)
+  const [tool, setTool] = useState('')
+  const [material, setMaterial] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [showKey, setShowKey] = useState(false)
+  // The "Connect AI" section (provider + credentials): open until credentials
+  // exist, collapsed to a one-line summary once configured so the CHAT is first.
+  const [showConnect, setShowConnect] = useState(!ready)
+  // The optional "Model & context" advanced disclosure (collapsed by default).
+  const [showContext, setShowContext] = useState(false)
+  // The long cookie-export step-by-step guide — hidden behind a "How?" expander.
+  const [showCookieHelp, setShowCookieHelp] = useState(false)
+  const [loadedId, setLoadedId] = useState<string | null>(null)
+  const [cookieImportNote, setCookieImportNote] = useState<string | null>(null)
+  const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const cookieFileRef = useRef<HTMLInputElement | null>(null)
+  const threadRef = useRef<HTMLDivElement | null>(null)
+  // Monotonic counter so each "Load into Program" gets its OWN program section
+  // (the store upserts by name) and multiple loads don't overwrite each other.
+  const loadSeqRef = useRef(0)
 
   const bed = useMemo(
     () => ({ width: bedW, depth: bedD, height: bedH }),
@@ -231,6 +308,16 @@ export function AiGcodePanel() {
   /** Unique-ish id for a chat turn (no crypto dependency needed). */
   const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 
+  /** The most recent assistant turn's lint summary, for the status strip. */
+  const lastAssistant = useMemo(() => {
+    for (let i = chat.length - 1; i >= 0; i--) {
+      if (chat[i].role === 'assistant') return chat[i]
+    }
+    return undefined
+  }, [chat])
+  const lastLevel = worstLevel(lastAssistant?.warnings)
+  const lastWarnCount = lastAssistant?.warnings?.length ?? 0
+
   const run = async (overridePrompt?: string) => {
     // Hard re-entrancy guard: a double-click (or Enter + click) must not fire
     // two concurrent requests.
@@ -239,6 +326,8 @@ export function AiGcodePanel() {
     setError(null)
     setLoadedId(null)
     if (!ready) {
+      // Open the Connect section so the missing field is right there.
+      setShowConnect(true)
       setError(
         effectiveAuthMode === 'key'
           ? t(
@@ -384,8 +473,110 @@ export function AiGcodePanel() {
     return () => window.clearTimeout(id)
   }, [copyState])
 
+  // Tappable example prompts for the empty state — they only FILL the composer
+  // (never auto-send) so the user can edit before generating.
+  const exampleCircle = t('ai.example.circle', 'Cut a 40mm circle, 3mm deep, 1mm per pass')
+  const exampleGrid = t('ai.example.grid', 'Drill a 5×5 grid of holes, 10mm spacing')
+  const exampleChips: { label: string; fill: string }[] = [
+    { label: t('ai.example.engrave', 'Engrave “HELLO” centered on the bed'), fill: t('ai.examplePrompt', EXAMPLE_PROMPT) },
+    { label: exampleCircle, fill: exampleCircle },
+    { label: exampleGrid, fill: exampleGrid },
+  ]
+
   return (
     <div className="ai-panel" aria-label={t('ai.aria.panel', 'AI G-code generator')}>
+      {/* Slim house-style header: title + InfoTip + icon toolbar. */}
+      <header className="ai-head">
+        <div className="ai-head-title">
+          <span className="ai-head-name">{t('ai.title', 'AI G-code')}</span>
+          <InfoTip
+            topic="aiGcode"
+            title={t('ai.title', 'AI G-code')}
+            body={t(
+              'ai.intro',
+              'Describe a job in plain words and the model writes GRBL G-code for it. This runs entirely in your browser using your own API key (or a pasted login session) — there is no server.',
+            )}
+          />
+        </div>
+        <div className="ai-tools">
+          <ToolButton
+            className="ai-ico-danger"
+            glyph={<Icon name="trash" />}
+            disabled={chat.length === 0 || busy}
+            onClick={() => {
+              clearChat()
+              setError(null)
+              setLoadedId(null)
+            }}
+            title={t('ai.chat.clear', 'Clear chat')}
+            body={t('ai.chat.clearTip', 'Clear this conversation (cannot be undone)')}
+          />
+          <span className="ai-tools-sep" aria-hidden="true" />
+          <ToolButton
+            className={showConnect ? 'is-active' : ''}
+            glyph={<Icon name="settings" />}
+            onClick={() => setShowConnect((v) => !v)}
+            ariaExpanded={showConnect}
+            title={t('ai.toolbar.connect', 'Connect AI')}
+            body={t(
+              'ai.toolbar.connect.body',
+              'Provider and your API key or login session — needed before generating.',
+            )}
+          />
+        </div>
+      </header>
+
+      {/* At-a-glance readiness strip: provider · model, credentials, bed, last lint. */}
+      <div className="ai-status" role="status">
+        <span className="ai-status-pill" title={t('ai.status.providerTip', 'Active provider and model')}>
+          <b>{info.label}</b>
+          <span className="ai-status-model">{model || t('ai.model.custom', 'Custom…')}</span>
+        </span>
+        <button
+          type="button"
+          className="ai-status-cred"
+          data-ok={ready ? 'true' : 'false'}
+          onClick={() => setShowConnect(true)}
+          title={
+            ready
+              ? t('ai.status.credTipOk', 'Credentials are stored in this browser — click to open Connect AI')
+              : t('ai.status.credTip', 'No credentials yet — click to open Connect AI and add them')
+          }
+        >
+          <span className="ai-status-dot" aria-hidden="true" />
+          {ready
+            ? t('ai.status.readyAll', 'Ready')
+            : t('ai.status.needsSetup', 'Needs setup')}
+        </button>
+        <span
+          className="ai-status-pill"
+          title={t('ai.status.bedTip', 'Machine bed (work area): {w} × {d} × {h} mm', {
+            w: bedW,
+            d: bedD,
+            h: bedH,
+          })}
+        >
+          {t('ai.ctx.bed', 'Bed')}{' '}
+          <b>
+            {bedW}×{bedD}
+          </b>
+        </span>
+        {lastLevel && (
+          <span
+            className={`ai-status-lint ${lastLevel}`}
+            title={t(
+              'ai.status.lintTip',
+              'Safety lint on the latest result — review the flagged lines before cutting.',
+            )}
+          >
+            <Icon name={lastLevel === 'info' ? 'info' : 'warning'} size={12} />
+            {lastLevel === 'info'
+              ? t('ai.status.lintInfo', 'Lint note')
+              : t('ai.status.lintCount', '{n} lint', { n: lastWarnCount })}
+          </span>
+        )}
+      </div>
+
       {/* PROMINENT safety banner — AI output can be wrong/unsafe. */}
       <div className="ai-safety" role="note">
         <Icon name="warning" className="ai-safety-icon" size={16} />
@@ -397,460 +588,591 @@ export function AiGcodePanel() {
         </span>
       </div>
 
-      {/* BYOK explainer. */}
-      <p className="ai-intro">
-        {t(
-          'ai.intro',
-          'Describe a job in plain words and the model writes GRBL G-code for it. This runs entirely in your browser using your own API key (or a pasted login session) — there is no server.',
-        )}
-      </p>
-
-      {/* Setup + chat tile into a responsive grid so they fill the panel width
-          and collapse to one column when docked narrow / on mobile. */}
-      <div className="ai-cards">
-      {/* Connection: provider + auth-mode toggles grouped in one compact card. */}
-      <section className="ai-card">
-        <div className="ai-field-block">
-          <span className="ai-label">{t('ai.providerAria', 'AI provider')}</span>
-          <div className="ai-seg" role="tablist" aria-label={t('ai.providerAria', 'AI provider')}>
-            {(['openai', 'anthropic'] as Provider[]).map((p) => (
-              <button
-                key={p}
-                type="button"
-                role="tab"
-                aria-selected={provider === p}
-                className="ai-seg-btn"
-                data-on={provider === p ? 'true' : 'false'}
-                onClick={() => switchProvider(p)}
-                title={t('ai.provider.tip', 'Use {name}', { name: PROVIDER_INFO[p].label })}
-              >
-                {PROVIDER_INFO[p].label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Auth-mode toggle: API key (recommended) vs session cookie (advanced).
-            Session/cookie mode only works through a configured relay (CORS +
-            HttpOnly cookies make the in-browser path impossible), so the toggle
-            is shown ONLY when a relay is configured for this deployment. */}
-        {RELAY_CONFIGURED && (
-          <div className="ai-field-block">
-            <label className="ai-label ai-auth-label">
-              {t('ai.auth.methodLabel', 'Authentication Method')}
-            </label>
-            <div className="ai-seg ai-seg-sub" role="tablist" aria-label={t('ai.authAria', 'Authentication method')}>
-              {(['key', 'session'] as AuthMode[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  role="tab"
-                  aria-selected={authMode === m}
-                  className="ai-seg-btn"
-                  data-on={authMode === m ? 'true' : 'false'}
-                  onClick={() => {
-                    setAuthMode(m)
-                    setError(null)
-                  }}
-                  title={
-                    m === 'key'
-                      ? t('ai.auth.keyTip', 'Use your own API key (recommended)')
-                      : t('ai.auth.sessionTip', 'Paste a logged-in session cookie via your own relay (advanced)')
-                  }
-                >
-                  {m === 'key'
+      {/* ---- Connect AI: collapsible, self-contained provider + credentials ---- */}
+      <section className="ai-connect" aria-label={t('ai.connect.aria', 'Connect AI')}>
+        <button
+          type="button"
+          className="ai-connect-bar"
+          aria-expanded={showConnect}
+          onClick={() => setShowConnect((v) => !v)}
+          title={t('ai.connect.toggleTip', 'Show or hide the AI connection settings')}
+        >
+          <Icon name={showConnect ? 'chevron-down' : 'chevron-right'} size={14} />
+          <span className="ai-connect-title">{t('ai.connect.title', 'Connect AI')}</span>
+          {/* Compact connected/needs-setup summary chip. */}
+          {ready ? (
+            <span className="ai-connect-chip ok" title={t('ai.connect.connectedTip', 'AI is configured and ready')}>
+              <span className="ai-status-dot" aria-hidden="true" />
+              {t('ai.connect.connected', 'Connected · {provider} · {mode}', {
+                provider: info.label,
+                mode:
+                  effectiveAuthMode === 'key'
                     ? t('ai.auth.key', 'API key')
-                    : t('ai.auth.session', 'Login session')}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
-
-      {effectiveAuthMode === 'key' ? (
-        /* API key — masked. */
-        <section className="ai-card">
-          <label className="ai-label" htmlFor="ai-key">
-            {t('ai.key.label', '{provider} API key', { provider: info.label })}
-          </label>
-          <div className="ai-key-row">
-            <input
-              id="ai-key"
-              className="ai-input ai-mono"
-              type={showKey ? 'text' : 'password'}
-              value={apiKey}
-              placeholder={info.keyHint}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(e) => setApiKey(provider, e.target.value)}
-              aria-label={t('ai.key.aria', '{provider} API key', { provider: info.label })}
-            />
-            <IconButton
-              type="button"
-              className="ai-icon-btn"
-              iconName={showKey ? 'eye-off' : 'eye'}
-              onClick={() => setShowKey((v) => !v)}
-              label={showKey ? t('ai.key.hide', 'Hide key') : t('ai.key.show', 'Show key')}
-            />
-            {hasKey && (
-              <IconButton
-                type="button"
-                className="ai-icon-btn ai-icon-danger"
-                iconName="close"
-                onClick={() => clearCredentials(provider)}
-                label={t('ai.creds.clearTip', 'Remove the stored {provider} key from this browser', {
-                  provider: info.label,
-                })}
-              />
-            )}
-          </div>
-          <p className="ai-note">
-            {t(
-              'ai.key.note',
-              'Your key stays in this browser (localStorage) and is sent only to {provider}.',
-              { provider: info.label },
-            )}{' '}
-            <a href={info.keyUrl} target="_blank" rel="noreferrer noopener">
-              {t('ai.key.get', 'Get a key')}
-            </a>
-          </p>
-        </section>
-      ) : (
-        /* Login session — just paste (or import) your copied cookie. */
-        <section className="ai-card">
-          <label className="ai-label">
-            {t('ai.session.label', '{site} login session', { site: info.site })}
-          </label>
-
-          <p className="ai-note">
-            {t(
-              'ai.session.simple',
-              'Already logged in to {site}? Copy your cookie with a cookie extension (e.g. Cookie-Editor) and paste it below — no API key needed.',
-              { site: info.site },
-            )}
-          </p>
-
-          {/* The one easy action: paste, or import a saved cookie file. */}
-          <div className="ai-row">
-            <a
-              className="ai-btn ai-grow"
-              href={`https://${info.site}/`}
-              target="_blank"
-              rel="noreferrer noopener"
-              title={t('ai.session.openTip', 'Open {site} in a new tab and log in', { site: info.site })}
-            >
-              <Icon name="upload" size={14} />
-              {t('ai.session.openLogin', 'Open {site}', { site: info.site })}
-            </a>
-            <button
-              type="button"
-              className="ai-btn ai-grow"
-              onClick={() => cookieFileRef.current?.click()}
-              title={t(
-                'ai.session.importTip',
-                'Import a cookie file you saved from a cookie extension (.txt or .json)',
-              )}
-            >
-              <Icon name="download" size={14} />
-              {t('ai.session.import', 'Import cookie file')}
-            </button>
-            <input
-              ref={cookieFileRef}
-              type="file"
-              accept=".txt,.json,text/plain,application/json"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                importCookieFile(e.target.files?.[0])
-                e.target.value = ''
-              }}
-              aria-hidden="true"
-            />
-          </div>
-          {cookieImportNote && (
-            <p className="ai-note ai-ok" role="status" aria-live="polite">
-              {cookieImportNote}
-            </p>
+                    : t('ai.auth.session', 'Login session'),
+              })}
+            </span>
+          ) : (
+            <span className="ai-connect-chip warn">
+              {t('ai.connect.needsSetup', 'Not connected — add credentials')}
+            </span>
           )}
+        </button>
 
-          <label className="ai-label ai-sublabel" htmlFor="ai-cookie">
-            {t('ai.session.cookieLabel', 'Paste your cookie here')}
-          </label>
-          <textarea
-            id="ai-cookie"
-            className="ai-textarea ai-mono"
-            rows={3}
-            value={sessionCookie}
-            placeholder={t('ai.session.cookiePlaceholder', 'paste the cookie you copied (header string or JSON both work)')}
-            spellCheck={false}
-            onChange={(e) => {
-              const val = e.target.value
-              // Automatically parse if pasted text is JSON or Netscape format
-              const parsed = parseCookieFile(val)
-              setSessionCookie(provider, parsed || val)
-            }}
-            aria-label={t('ai.session.cookieAria', 'Pasted session cookie')}
-          />
+        {showConnect && (
+          <div className="ai-connect-body">
+            {/* Provider segmented toggle. */}
+            <div className="ai-field-block">
+              <span className="ai-label ai-label-row">
+                {t('ai.providerAria', 'AI provider')}
+                <InfoTip
+                  topic="aiProvider"
+                  title={t('ai.providerAria', 'AI provider')}
+                  body={t(
+                    'ai.provider.info',
+                    'Which AI service writes the G-code. Each provider keeps its own key, model choice and session in this browser.',
+                  )}
+                />
+              </span>
+              <div className="ai-seg" role="tablist" aria-label={t('ai.providerAria', 'AI provider')}>
+                {(['openai', 'anthropic'] as Provider[]).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    role="tab"
+                    aria-selected={provider === p}
+                    className="ai-seg-btn"
+                    data-on={provider === p ? 'true' : 'false'}
+                    onClick={() => switchProvider(p)}
+                    title={t('ai.provider.tip', 'Use {name}', { name: PROVIDER_INFO[p].label })}
+                  >
+                    {PROVIDER_INFO[p].label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          <p className="ai-note">
-            {t(
-              'ai.session.stored',
-              'Your cookie stays in this browser (localStorage). If the session expires, paste a fresh one.',
+            {/* Auth-mode toggle: API key (recommended) vs session cookie (advanced).
+                Session/cookie mode only works through a configured relay (CORS +
+                HttpOnly cookies make the in-browser path impossible), so the toggle
+                is shown ONLY when a relay is configured for this deployment. */}
+            {RELAY_CONFIGURED && (
+              <div className="ai-field-block">
+                <span className="ai-label">{t('ai.auth.methodLabel', 'Authentication method')}</span>
+                <div className="ai-seg ai-seg-sub" role="tablist" aria-label={t('ai.authAria', 'Authentication method')}>
+                  {(['key', 'session'] as AuthMode[]).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      role="tab"
+                      aria-selected={authMode === m}
+                      className="ai-seg-btn"
+                      data-on={authMode === m ? 'true' : 'false'}
+                      onClick={() => {
+                        setAuthMode(m)
+                        setError(null)
+                      }}
+                      title={
+                        m === 'key'
+                          ? t('ai.auth.keyTip', 'Use your own API key (recommended)')
+                          : t('ai.auth.sessionTip', 'Paste a logged-in session cookie via your own relay (advanced)')
+                      }
+                    >
+                      {m === 'key'
+                        ? t('ai.auth.keyRec', 'API key (recommended)')
+                        : t('ai.auth.sessionAdv', 'Session cookie (advanced)')}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-          </p>
 
-          {/* Relay/proxy URL — required for session mode (the cookie is forwarded
-              to it as X-Session-Cookie; a direct browser call is CORS-blocked).
-              Defaults to the build-time VITE_AI_RELAY_URL; override for self-host. */}
-          <label className="ai-label ai-sublabel" htmlFor="ai-proxy">
-            {t('ai.session.proxyLabel', 'Relay / proxy URL')}
-          </label>
-          <input
-            id="ai-proxy"
-            className="ai-input ai-mono"
-            type="url"
-            value={proxyUrl}
-            placeholder={DEFAULT_RELAY_URL || 'https://your-relay.example.com'}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(e) => setProxyUrl(provider, e.target.value)}
-            aria-label={t('ai.session.proxyAria', 'Relay / proxy URL')}
-          />
-          <p className="ai-note">
-            {t(
-              'ai.session.proxyNote',
-              'The pasted cookie is sent to this relay as X-Session-Cookie; it re-attaches it server-side. Leave blank to use the deployment default.',
+            {effectiveAuthMode === 'key' ? (
+              /* API key — masked, with soft format validation + stored confirmation. */
+              <div className="ai-field-block">
+                <span className="ai-label ai-label-row" id="ai-key-label">
+                  {t('ai.key.label', '{provider} API key', { provider: info.label })}
+                  <InfoTip
+                    topic="aiApiKey"
+                    title={t('ai.key.label', '{provider} API key', { provider: info.label })}
+                    body={t(
+                      'ai.key.info',
+                      'Paste your own {provider} API key. It is stored only in this browser (localStorage) and sent only to {provider} with each request.',
+                      { provider: info.label },
+                    )}
+                  />
+                </span>
+                <div className="ai-key-row">
+                  <input
+                    id="ai-key"
+                    className="ai-input ai-mono"
+                    type={showKey ? 'text' : 'password'}
+                    value={apiKey}
+                    placeholder={info.keyHint}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => setApiKey(provider, e.target.value)}
+                    aria-labelledby="ai-key-label"
+                  />
+                  <IconButton
+                    type="button"
+                    className="ai-icon-btn"
+                    iconName={showKey ? 'eye-off' : 'eye'}
+                    onClick={() => setShowKey((v) => !v)}
+                    label={showKey ? t('ai.key.hide', 'Hide key') : t('ai.key.show', 'Show key')}
+                  />
+                  {hasKey && (
+                    <IconButton
+                      type="button"
+                      className="ai-icon-btn ai-icon-danger"
+                      iconName="close"
+                      onClick={() => clearCredentials(provider)}
+                      label={t('ai.creds.clearTip', 'Remove the stored {provider} key from this browser', {
+                        provider: info.label,
+                      })}
+                    />
+                  )}
+                </div>
+                {!hasKey ? (
+                  <p className="ai-note">
+                    {t(
+                      'ai.key.note',
+                      'Your key stays in this browser (localStorage) and is sent only to {provider}.',
+                      { provider: info.label },
+                    )}{' '}
+                    <a href={info.keyUrl} target="_blank" rel="noreferrer noopener">
+                      {t('ai.key.get', 'Get a key')}
+                    </a>
+                  </p>
+                ) : keyLooksWrong ? (
+                  /* Soft inline format check — presentational only, never blocks sending. */
+                  <p className="ai-note ai-error" role="status" aria-live="polite">
+                    {t(
+                      'ai.key.formatWarn',
+                      'This does not look like an {provider} key (expected {hint}…) — double-check you copied the right one.',
+                      { provider: info.label, hint: expectedPrefix },
+                    )}
+                  </p>
+                ) : (
+                  /* Positive confirmation that the key is stored. */
+                  <p className="ai-note ai-ok" role="status" aria-live="polite">
+                    ✓{' '}
+                    {t(
+                      'ai.key.note',
+                      'Your key stays in this browser (localStorage) and is sent only to {provider}.',
+                      { provider: info.label },
+                    )}
+                  </p>
+                )}
+              </div>
+            ) : (
+              /* Login session — paste (or import) your copied cookie; the long
+                 export walkthrough lives behind a "How?" disclosure below. */
+              <div className="ai-field-block">
+                <span className="ai-label ai-label-row" id="ai-cookie-label">
+                  {t('ai.session.label', '{site} login session', { site: info.site })}
+                  <InfoTip
+                    topic="aiSession"
+                    title={t('ai.session.label', '{site} login session', { site: info.site })}
+                    body={t(
+                      'ai.session.info',
+                      'Advanced: reuses your logged-in {site} session instead of an API key. The pasted cookie is stored only in this browser (localStorage) and forwarded only to the relay you configure below.',
+                      { site: info.site },
+                    )}
+                  />
+                </span>
+
+                <p className="ai-note">
+                  {t(
+                    'ai.session.simple',
+                    'Already logged in to {site}? Copy your cookie with a cookie extension (e.g. Cookie-Editor) and paste it below — no API key needed.',
+                    { site: info.site },
+                  )}{' '}
+                  <button
+                    type="button"
+                    className="ai-link-btn"
+                    aria-expanded={showCookieHelp}
+                    onClick={() => setShowCookieHelp((v) => !v)}
+                    title={t('ai.session.howTip', 'Show the step-by-step cookie export guide')}
+                  >
+                    {showCookieHelp ? t('ai.session.howHide', 'Hide guide') : t('ai.session.how', 'How?')}
+                  </button>
+                </p>
+
+                {/* The long step-by-step export walkthrough, hidden by default. */}
+                {showCookieHelp && (
+                  <ol className="ai-guide" aria-label={t('ai.session.guideAria', 'Cookie export steps')}>
+                    <li>
+                      {t(
+                        'ai.session.step1',
+                        'Install a cookie-export extension such as “Cookie-Editor” or “EditThisCookie” in this browser.',
+                      )}
+                    </li>
+                    <li>
+                      {t('ai.session.step2', 'Open {site} in a new tab and make sure you are logged in.', {
+                        site: info.site,
+                      })}
+                    </li>
+                    <li>
+                      {t(
+                        'ai.session.step3',
+                        'Click the extension on the {site} tab, then Export (as “Header String” or JSON / Netscape).',
+                        { site: info.site },
+                      )}
+                    </li>
+                    <li>
+                      {t(
+                        'ai.session.step4',
+                        'Paste it in the box below, or save it as a .txt/.json file and use “Import cookie file”.',
+                      )}
+                    </li>
+                    <li className="ai-warn-note">
+                      {t(
+                        'ai.session.step5',
+                        'The cookie grants access to your {site} account — keep it private. It is stored only in this browser and sent only to your relay. Sessions expire, so re-export if it stops working.',
+                        { site: info.site },
+                      )}
+                    </li>
+                  </ol>
+                )}
+
+                {/* The one easy action: open the site, or import a saved cookie file. */}
+                <div className="ai-row">
+                  <a
+                    className="ai-btn ai-grow"
+                    href={`https://${info.site}/`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title={t('ai.session.openTip', 'Open {site} in a new tab and log in', { site: info.site })}
+                  >
+                    <Icon name="upload" size={14} />
+                    {t('ai.session.openLogin', 'Open {site}', { site: info.site })}
+                  </a>
+                  <button
+                    type="button"
+                    className="ai-btn ai-grow"
+                    onClick={() => cookieFileRef.current?.click()}
+                    title={t(
+                      'ai.session.importTip',
+                      'Import a cookie file you saved from a cookie extension (.txt or .json)',
+                    )}
+                  >
+                    <Icon name="download" size={14} />
+                    {t('ai.session.import', 'Import cookie file')}
+                  </button>
+                  <input
+                    ref={cookieFileRef}
+                    type="file"
+                    accept=".txt,.json,text/plain,application/json"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      importCookieFile(e.target.files?.[0])
+                      e.target.value = ''
+                    }}
+                    aria-hidden="true"
+                  />
+                </div>
+                {cookieImportNote && (
+                  <p className="ai-note ai-ok" role="status" aria-live="polite">
+                    {cookieImportNote}
+                  </p>
+                )}
+
+                <textarea
+                  id="ai-cookie"
+                  className="ai-textarea ai-mono"
+                  rows={3}
+                  value={sessionCookie}
+                  placeholder={t('ai.session.cookiePlaceholder', 'paste the cookie you copied (header string or JSON both work)')}
+                  spellCheck={false}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    // Automatically parse if pasted text is JSON or Netscape format.
+                    const parsed = parseCookieFile(val)
+                    setSessionCookie(provider, parsed || val)
+                  }}
+                  aria-labelledby="ai-cookie-label"
+                />
+                {hasSession && (
+                  /* Positive confirmation that the cookie is stored. */
+                  <p className="ai-note ai-ok" role="status" aria-live="polite">
+                    ✓{' '}
+                    {t(
+                      'ai.session.stored',
+                      'Your cookie stays in this browser (localStorage). If the session expires, paste a fresh one.',
+                    )}
+                  </p>
+                )}
+
+                {/* Relay/proxy URL — required for session mode (the cookie is forwarded
+                    to it as X-Session-Cookie; a direct browser call is CORS-blocked).
+                    Defaults to the build-time VITE_AI_RELAY_URL; override for self-host. */}
+                <span className="ai-label ai-sublabel ai-label-row" id="ai-proxy-label">
+                  {t('ai.session.proxyLabel', 'Relay / proxy URL')}
+                  <InfoTip
+                    topic="aiRelay"
+                    title={t('ai.session.proxyLabel', 'Relay / proxy URL')}
+                    body={t(
+                      'ai.session.proxyNote',
+                      'The pasted cookie is sent to this relay as X-Session-Cookie; it re-attaches it server-side. Leave blank to use the deployment default.',
+                    )}
+                  />
+                </span>
+                <input
+                  id="ai-proxy"
+                  className="ai-input ai-mono"
+                  type="url"
+                  value={proxyUrl}
+                  placeholder={DEFAULT_RELAY_URL || 'https://your-relay.example.com'}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => setProxyUrl(provider, e.target.value)}
+                  aria-labelledby="ai-proxy-label"
+                />
+
+                {sessionCookie.trim() && (
+                  <div className="ai-row">
+                    <button
+                      type="button"
+                      className="ai-btn ai-mini"
+                      onClick={() => clearCredentials(provider)}
+                      title={t(
+                        'ai.creds.clearSessionTip',
+                        'Remove the stored {site} cookie from this browser',
+                        { site: info.site },
+                      )}
+                    >
+                      <Icon name="close" size={13} />
+                      {t('ai.creds.clearSession', 'Clear stored cookie')}
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
-          </p>
 
-          {sessionCookie.trim() && (
-            <div className="ai-row">
+            {/* Model & machine context — advanced, collapsed disclosure. */}
+            <div className="ai-field-block">
               <button
                 type="button"
-                className="ai-btn ai-mini"
-                onClick={() => clearCredentials(provider)}
-                title={t(
-                  'ai.creds.clearSessionTip',
-                  'Remove the stored {site} cookie from this browser',
-                  { site: info.site },
-                )}
+                className="ai-link-btn ai-context-toggle"
+                aria-expanded={showContext}
+                onClick={() => setShowContext((v) => !v)}
+                title={t('ai.context.toggleTip', 'Choose the model and add optional tool / material context')}
               >
-                <Icon name="close" size={13} />
-                {t('ai.creds.clearSession', 'Clear stored cookie')}
+                <Icon name={showContext ? 'chevron-down' : 'chevron-right'} size={13} />
+                {t('ai.setup.short', 'Model & context')}
+                <span className="ai-context-summary">
+                  {model || t('ai.model.custom', 'Custom…')}
+                </span>
               </button>
+              {showContext && (
+                <div className="ai-fields">
+                  <label className="ai-fields-wide" htmlFor="ai-model">
+                    {t('ai.model.label', 'Model')}
+                    <select
+                      id="ai-model"
+                      className="ai-input"
+                      value={isCustomModel ? '__custom__' : model}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v !== '__custom__') setModel(provider, v)
+                        else setModel(provider, '')
+                      }}
+                      aria-label={t('ai.model.aria', 'Model')}
+                    >
+                      {MODEL_OPTIONS[provider].map((m) => (
+                        <option key={m} value={m}>
+                          {m === DEFAULT_MODELS[provider] ? t('ai.model.default', '{m} (default)', { m }) : m}
+                        </option>
+                      ))}
+                      <option value="__custom__">{t('ai.model.custom', 'Custom…')}</option>
+                    </select>
+                  </label>
+                  {/* The free-text model id only appears when "Custom…" is selected. */}
+                  {isCustomModel && (
+                    <label className="ai-fields-wide">
+                      {t('ai.model.custom', 'Custom…')}
+                      <input
+                        className="ai-input ai-mono"
+                        type="text"
+                        value={model}
+                        placeholder={t('ai.model.customPlaceholder', 'custom model id')}
+                        spellCheck={false}
+                        onChange={(e) => setModel(provider, e.target.value)}
+                        aria-label={t('ai.model.customAria', 'Custom model id')}
+                      />
+                    </label>
+                  )}
+                  <label>
+                    {t('ai.ctx.toolAria', 'Tool (optional)')}
+                    <input
+                      className="ai-input"
+                      type="text"
+                      value={tool}
+                      placeholder={t('ai.ctx.toolPlaceholder', 'e.g. 3mm flat endmill')}
+                      onChange={(e) => setTool(e.target.value)}
+                      aria-label={t('ai.ctx.toolAria', 'Tool (optional)')}
+                    />
+                  </label>
+                  <label>
+                    {t('ai.ctx.matAria', 'Material (optional)')}
+                    <input
+                      className="ai-input"
+                      type="text"
+                      value={material}
+                      placeholder={t('ai.ctx.matPlaceholder', 'e.g. MDF, plywood')}
+                      onChange={(e) => setMaterial(e.target.value)}
+                      aria-label={t('ai.ctx.matAria', 'Material (optional)')}
+                    />
+                  </label>
+                </div>
+              )}
             </div>
-          )}
-        </section>
-      )}
-
-      {/* Model + machine context — collapsible (the credential UI stays visible). */}
-      <section className="ai-card ai-card-wide">
-      <button
-        type="button"
-        className="ai-disclosure ai-setup-toggle"
-        aria-expanded={showConfig}
-        onClick={() => setShowConfig((v) => !v)}
-        title={t('ai.setup.tip', 'Model and machine-context settings')}
-      >
-        <Icon name={showConfig ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
-        {t('ai.setup.title', 'Model & context — {model} · bed {w}×{d} mm', {
-          model,
-          w: bedW,
-          d: bedD,
-        })}
-      </button>
-
-      {showConfig && (
-      <div className="ai-fields">
-        <label htmlFor="ai-model">
-          {t('ai.model.label', 'Model')}
-          <select
-            id="ai-model"
-            className="ai-input"
-            value={isCustomModel ? '__custom__' : model}
-            onChange={(e) => {
-              const v = e.target.value
-              if (v !== '__custom__') setModel(provider, v)
-              else setModel(provider, '')
-            }}
-            aria-label={t('ai.model.aria', 'Model')}
-          >
-            {MODEL_OPTIONS[provider].map((m) => (
-              <option key={m} value={m}>
-                {m === DEFAULT_MODELS[provider] ? t('ai.model.default', '{m} (default)', { m }) : m}
-              </option>
-            ))}
-            <option value="__custom__">{t('ai.model.custom', 'Custom…')}</option>
-          </select>
-        </label>
-        {/* The free-text model id only appears when "Custom…" is selected. */}
-        {isCustomModel && (
-          <label>
-            {t('ai.model.custom', 'Custom…')}
-            <input
-              className="ai-input ai-mono"
-              type="text"
-              value={model}
-              placeholder={t('ai.model.customPlaceholder', 'custom model id')}
-              spellCheck={false}
-              onChange={(e) => setModel(provider, e.target.value)}
-              aria-label={t('ai.model.customAria', 'Custom model id')}
-            />
-          </label>
+          </div>
         )}
-
-        {/* Read-only machine context summary. */}
-        <div className="ai-context ai-fields-wide" role="group" aria-label={t('ai.ctx.aria', 'Machine context')}>
-          <span className="ai-ctx-item">
-            {t('ai.ctx.bed', 'Bed')}:{' '}
-            <b>
-              {bedW} × {bedD} × {bedH} mm
-            </b>
-          </span>
-        </div>
-        <label>
-          {t('ai.ctx.toolAria', 'Tool (optional)')}
-          <input
-            className="ai-input"
-            type="text"
-            value={tool}
-            placeholder={t('ai.ctx.toolPlaceholder', 'Tool (optional) — e.g. 3mm flat endmill')}
-            onChange={(e) => setTool(e.target.value)}
-            aria-label={t('ai.ctx.toolAria', 'Tool (optional)')}
-          />
-        </label>
-        <label>
-          {t('ai.ctx.matAria', 'Material (optional)')}
-          <input
-            className="ai-input"
-            type="text"
-            value={material}
-            placeholder={t('ai.ctx.matPlaceholder', 'Material (optional) — e.g. MDF, plywood')}
-            onChange={(e) => setMaterial(e.target.value)}
-            aria-label={t('ai.ctx.matAria', 'Material (optional)')}
-          />
-        </label>
-      </div>
-      )}
       </section>
 
-      {/* ---- Chat conversation ---- */}
-      <section className="ai-card ai-chat-card ai-card-wide">
-        <header className="ai-out-head">
-          <span className="ai-label">{t('ai.chat.label', 'Chat')}</span>
-          <span className="ai-out-stats">
-            <span className="ai-chat-count">
-              {t('ai.chat.count', '{n} messages', { n: chat.length })}
-            </span>
-            <IconButton
-              type="button"
-              className="ai-icon-btn ai-icon-danger"
-              iconName="trash"
-              disabled={chat.length === 0 || busy}
-              onClick={() => {
-                clearChat()
-                setError(null)
-                setLoadedId(null)
-              }}
-              label={t('ai.chat.clearTip', 'Clear this conversation (cannot be undone)')}
-            />
-          </span>
-        </header>
-
+      {/* ---- Chat conversation (the primary task — dominant region) ---- */}
+      <section className="ai-chat" aria-label={t('ai.chat.label', 'Chat')}>
         {/* Thread (browser-cached; iterate by chatting). */}
         <div className="ai-thread" ref={threadRef} aria-label={t('ai.chat.threadAria', 'Conversation')}>
           {chat.length === 0 && !busy && (
-            <p className="ai-thread-empty">
-              {t(
-                'ai.chat.empty',
-                'Describe what you want to make. Then keep chatting to refine it — e.g. “make it 2mm deeper”, “add a 5mm border”, “use feed 300”. The whole conversation is sent as context and cached in this browser.',
-              )}
-            </p>
+            <div className="ai-thread-empty">
+              <Icon name="info" size={22} className="ai-empty-icon" />
+              <p className="ai-empty-lead">
+                {t(
+                  'ai.chat.emptyShort',
+                  'Describe what you want to make, then keep chatting to refine it.',
+                )}
+              </p>
+              <p className="ai-empty-sub">
+                {t('ai.chat.emptyTry', 'Try one of these:')}
+              </p>
+              <div className="ai-chips" role="group" aria-label={t('ai.examples.aria', 'Example prompts')}>
+                {exampleChips.map((c) => (
+                  <button
+                    key={c.label}
+                    type="button"
+                    className="ai-chip"
+                    onClick={() => setPrompt(c.fill)}
+                    title={c.fill}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {chat.map((m) =>
             m.role === 'user' ? (
-              <div key={m.id} className="ai-msg user">
-                <div className="ai-msg-role">{t('ai.chat.you', 'You')}</div>
-                <div className="ai-msg-text">{m.content}</div>
+              <div key={m.id} className="ai-msg-row user">
+                <div className="ai-msg user">
+                  <div className="ai-msg-role">{t('ai.chat.you', 'You')}</div>
+                  <div className="ai-msg-text">{m.content}</div>
+                </div>
               </div>
             ) : (
-              <div key={m.id} className="ai-msg assistant">
-                <div className="ai-msg-role">{info.label}</div>
-                {m.warnings && m.warnings.length > 0 && (
-                  <ul className="ai-warnings" aria-label={t('ai.out.warnAria', 'Safety lint warnings')}>
-                    {m.warnings.map((w, i) => (
-                      <li key={i} className={`ai-warn-item ${w.level}`}>
-                        <Icon name={w.level === 'info' ? 'info' : 'warning'} size={13} className="ai-warn-icon" />{' '}
-                        {translateWarning(t, w)}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {m.gcode ? (
-                  <>
-                    <pre className="ai-code" aria-label={t('ai.out.codeAria', 'Generated G-code')}>
-                      {m.gcode}
-                    </pre>
-                    <div className="ai-row">
-                      <button
-                        type="button"
-                        className="ai-btn primary ai-grow"
-                        onClick={() => loadIntoProgram(m)}
-                        title={t(
-                          'ai.loadTip',
-                          'Load this G-code into the Program tab so it shows in the Visualizer for review',
+              <div key={m.id} className="ai-msg-row assistant">
+                <div className="ai-msg assistant">
+                  <div className="ai-msg-role">
+                    <Icon name="spindle" size={12} className="ai-msg-role-icon" />
+                    {info.label}
+                  </div>
+                  {m.gcode ? (
+                    <>
+                      <pre className="ai-code" aria-label={t('ai.out.codeAria', 'Generated G-code')}>
+                        {m.gcode}
+                      </pre>
+                      {m.warnings && m.warnings.length > 0 && (
+                        <ul className="ai-warnings" aria-label={t('ai.out.warnAria', 'Safety lint warnings')}>
+                          {m.warnings.map((w, i) => (
+                            <li key={i} className={`ai-warn-item ${w.level}`}>
+                              <Icon name={w.level === 'info' ? 'info' : 'warning'} size={13} className="ai-warn-icon" />{' '}
+                              {translateWarning(t, w)}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="ai-row ai-msg-actions">
+                        <button
+                          type="button"
+                          className="ai-btn primary ai-grow"
+                          onClick={() => loadIntoProgram(m)}
+                          title={t(
+                            'ai.loadTip',
+                            'Load this G-code into the Program tab so it shows in the Visualizer for review',
+                          )}
+                        >
+                          <Icon name="upload" size={14} />
+                          {t('ai.load', 'Send to Program')}
+                        </button>
+                        {/* Copy confirmation is transient IN-BUTTON feedback (check /
+                            warning swap) so the thread never shifts; an offscreen
+                            live region below announces it for screen readers. */}
+                        {copyState?.id === m.id ? (
+                          <IconButton
+                            type="button"
+                            className={`ai-icon-btn ${copyState.ok ? 'ai-icon-ok' : 'ai-icon-danger'}`}
+                            icon={copyState.ok ? CHECK_GLYPH : <Icon name="warning" size={16} />}
+                            onClick={() => copyGcode(m)}
+                            label={
+                              copyState.ok
+                                ? t('ai.copied', 'Copied to clipboard.')
+                                : t('ai.copyFail', 'Could not copy — select the code and copy it manually.')
+                            }
+                          />
+                        ) : (
+                          <IconButton
+                            type="button"
+                            className="ai-icon-btn"
+                            iconName="copy"
+                            onClick={() => copyGcode(m)}
+                            label={t('ai.copyTip', 'Copy the G-code to the clipboard')}
+                          />
                         )}
-                      >
-                        <Icon name="upload" size={14} />
-                        {t('ai.load', 'Load into Program')}
-                      </button>
-                      <IconButton
-                        type="button"
-                        className="ai-icon-btn"
-                        iconName="copy"
-                        onClick={() => copyGcode(m)}
-                        label={t('ai.copyTip', 'Copy the G-code to the clipboard')}
-                      />
-                    </div>
-                    {loadedId === m.id && (
-                      <p className="ai-note ai-ok" role="status" aria-live="polite">
-                        {t(
-                          'ai.loadedNote',
-                          'Loaded into Program — open the Visualizer to review the toolpath before cutting.',
-                        )}
-                      </p>
-                    )}
-                    {copyState?.id === m.id && (
-                      <p
-                        className={`ai-note ${copyState.ok ? 'ai-ok' : 'ai-error'}`}
-                        role="status"
-                        aria-live="polite"
-                      >
-                        {copyState.ok
-                          ? t('ai.copied', 'Copied to clipboard.')
-                          : t('ai.copyFail', 'Could not copy — select the code and copy it manually.')}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <div className="ai-msg-text">{m.content}</div>
-                )}
+                      </div>
+                      {loadedId === m.id && (
+                        <p className="ai-note ai-ok" role="status" aria-live="polite">
+                          {t(
+                            'ai.loadedNote',
+                            'Loaded into Program — open the Visualizer to review the toolpath before cutting.',
+                          )}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div className="ai-msg-text">{m.content}</div>
+                  )}
+                </div>
               </div>
             ),
           )}
           {busy && (
-            <div className="ai-msg assistant">
-              <div className="ai-msg-role">{info.label}</div>
-              <p className="ai-note ai-busy" role="status" aria-live="polite">
-                <span className="ai-spinner" aria-hidden="true" />
-                {t('ai.busy', 'Asking {provider}…', { provider: info.label })}
-              </p>
+            <div className="ai-msg-row assistant">
+              <div className="ai-msg assistant">
+                <div className="ai-msg-role">
+                  <Icon name="spindle" size={12} className="ai-msg-role-icon" />
+                  {info.label}
+                </div>
+                <p className="ai-note ai-busy" role="status" aria-live="polite">
+                  <span className="ai-spinner" aria-hidden="true" />
+                  {t('ai.busy', 'Asking {provider}…', { provider: info.label })}
+                </p>
+              </div>
             </div>
           )}
         </div>
 
+        {/* Offscreen live region: announces copy results without moving the thread. */}
+        <span className="ai-sr-only" role="status" aria-live="polite">
+          {copyState
+            ? copyState.ok
+              ? t('ai.copied', 'Copied to clipboard.')
+              : t('ai.copyFail', 'Could not copy — select the code and copy it manually.')
+            : ''}
+        </span>
+
         {error && (
-          <p className="ai-note ai-error" role="alert">
+          <p className="ai-note ai-error ai-compose-error" role="alert">
             {error}
             {effectiveAuthMode === 'key' && !hasKey && (
               <>
@@ -863,49 +1185,58 @@ export function AiGcodePanel() {
           </p>
         )}
 
-        {/* Composer. Enter sends; Shift+Enter for a newline. */}
-        <textarea
-          id="ai-prompt"
-          className="ai-textarea ai-composer"
-          rows={3}
-          value={prompt}
-          placeholder={chat.length === 0 ? t('ai.examplePrompt', EXAMPLE_PROMPT) : t('ai.chat.followupPlaceholder', 'Refine the code above…')}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              if (!busy) run()
+        {/* Composer pinned at the bottom. Enter sends; Shift+Enter for a newline. */}
+        <div className="ai-composer">
+          <textarea
+            id="ai-prompt"
+            className="ai-textarea ai-composer-input"
+            rows={2}
+            value={prompt}
+            placeholder={
+              chat.length === 0
+                ? t('ai.prompt.placeholder', 'Describe what to make…')
+                : t('ai.chat.followupPlaceholder', 'Refine the code above…')
             }
-          }}
-          aria-label={t('ai.prompt.aria', 'Message')}
-        />
-        <div className="ai-row">
-          {busy ? (
-            <button
-              type="button"
-              className="ai-btn ai-grow"
-              onClick={cancel}
-              title={t('ai.cancelTip', 'Cancel the in-flight request')}
-            >
-              <Icon name="stop" size={13} />
-              {t('ai.cancel', 'Cancel')}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="ai-btn primary ai-grow"
-              onClick={() => run()}
-              title={t('ai.sendTip', 'Send to {provider} (Enter)', { provider: info.label })}
-            >
-              <Icon name={chat.length === 0 ? 'play' : 'chevron-right'} size={14} />
-              {chat.length === 0
-                ? t('ai.generate', 'Generate G-code')
-                : t('ai.send', 'Send')}
-            </button>
-          )}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (!busy && prompt.trim()) run()
+              }
+            }}
+            aria-label={t('ai.prompt.aria', 'Message')}
+          />
+          <div className="ai-composer-row">
+            <span className="ai-composer-hint">
+              {t('ai.composer.hint', 'Enter to send · Shift+Enter for a new line')}
+            </span>
+            {busy ? (
+              <button
+                type="button"
+                className="ai-btn ai-send"
+                onClick={cancel}
+                title={t('ai.cancelTip', 'Cancel the in-flight request')}
+              >
+                <Icon name="stop" size={13} />
+                {t('ai.cancel', 'Cancel')}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="ai-btn primary ai-send"
+                onClick={() => run()}
+                disabled={!prompt.trim()}
+                title={t('ai.sendTip', 'Send to {provider} (Enter)', { provider: info.label })}
+              >
+                <Icon name={chat.length === 0 ? 'play' : 'chevron-right'} size={14} />
+                {chat.length === 0
+                  ? t('ai.generate', 'Generate')
+                  : t('ai.send', 'Send')}
+              </button>
+            )}
+          </div>
         </div>
       </section>
-      </div>
     </div>
   )
 }

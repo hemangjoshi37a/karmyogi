@@ -1047,6 +1047,28 @@
 }
 .cc-cutout.on .cc-cutout-title { color: var(--fg); }
 
+/* ---- Advanced · two-sided machining card ----
+   Reuses .cc-advanced / .cc-adv-toggle / .cc-grid / .cc-field / .cc-rowlabel /
+   .cc-subops / .cc-hint; only the enabled-accent edge + the little "ON" badge and
+   the wrapping corner grid are bespoke. */
+.cc-advanced.cc-span.on {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.cc-ts-on-badge {
+  margin-left: var(--sp-2);
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+.cc-ts-enable { margin-bottom: var(--sp-2); }
+/* The flip / re-zero corner selector wraps to two-up on narrow panels. */
+.cc-ts-corners { flex-wrap: wrap; }
+.cc-ts-corners .cc-subop-btn { flex: 1 1 40%; min-width: 0; }
+
 /* The up-front SHAPE choice: two large, clearly-readable segmented buttons with
    an icon over a label — "Part outline" vs "Rectangle". */
 .cc-cutshape {
@@ -1143,350 +1165,14 @@
 
 /* ============================================================================
    Color-coded SETTING PRESETS — floating left rail + footer save-bar
+   ----------------------------------------------------------------------------
+   The reusable rail + save-bar styles now live in styles/presets.css (shared
+   with the Soldering / Writing tabs). Only the carving-specific scroll gutter
+   that keeps the always-on mobile pencils clear of the settings stays here.
    ============================================================================ */
-
-/* --- floating translucent rail on the left edge --- */
-.cc-presets-rail {
-  position: absolute;
-  left: 8px;
-  /* Centre vertically within the band ABOVE the footer save-bar (top..bottom +
-     margin:auto), so the rail never overlaps the "Save here" bar at the bottom. */
-  top: 8px;
-  bottom: 64px;
-  margin: auto 0;
-  height: fit-content;
-  max-height: calc(100% - 78px);
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 6px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-elev) 68%, transparent);
-  backdrop-filter: blur(10px) saturate(1.1);
-  -webkit-backdrop-filter: blur(10px) saturate(1.1);
-  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-.cc-presets-cap {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font-size: 7px;
-  letter-spacing: 2px;
-  font-weight: 800;
-  color: var(--fg-muted);
-  opacity: 0.55;
-  margin-bottom: 2px;
-  user-select: none;
-}
-.cc-preset-slotwrap {
-  position: relative;
-  display: flex;
-}
-.cc-preset-slot {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border-radius: 7px;
-  border: 1.5px solid color-mix(in srgb, #000 22%, var(--slot));
-  background: var(--slot);
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.25);
-  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
-}
-.cc-preset-slot:hover {
-  transform: scale(1.14);
-}
-.cc-preset-slot:focus-visible {
-  outline: 2px solid var(--slot);
-  outline-offset: 2px;
-}
-.cc-preset-slot.is-empty {
-  background: transparent;
-  border-style: dashed;
-  border-color: color-mix(in srgb, var(--slot) 55%, transparent);
-  box-shadow: none;
-  opacity: 0.55;
-}
-.cc-preset-slot.is-empty:hover {
-  opacity: 0.9;
-}
-.cc-preset-plus {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  color: color-mix(in srgb, var(--slot) 70%, var(--fg));
-}
-.cc-preset-slot.is-sel {
-  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--slot), 0 2px 7px rgba(0, 0, 0, 0.3);
-}
-/* hover/touch flyout — a floating pill to the right of a swatch showing the
-   preset NAME (+ an edit button for filled slots). */
-.cc-preset-flyout {
-  position: absolute;
-  left: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%) translateX(-4px);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 4px 3px 9px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.34);
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  z-index: 25;
-  transition: opacity 0.12s ease, transform 0.12s ease;
-}
-.cc-preset-slotwrap:hover .cc-preset-flyout,
-.cc-preset-slotwrap:focus-within .cc-preset-flyout {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(-50%) translateX(0);
-}
-.cc-preset-flyout-name {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--fg);
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cc-preset-edit {
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
-}
-.cc-preset-edit:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-/* --- footer save-bar --- */
-.cc-presets-bar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  /* Compact single row: [name field] [colour dropdown] [save] [delete].
-     Still wraps as a fallback on the very narrowest columns. */
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  z-index: 15;
-}
-.cc-presets-extra {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-}
-.cc-presets-sep {
-  flex: 0 0 auto;
-  width: 1px;
-  align-self: stretch;
-  margin: 3px 1px;
-  background: var(--border);
-}
-.cc-presets-name {
-  flex: 1 1 40px;
-  min-width: 34px;
-  height: 30px;
-  padding: 2px 9px;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 12px;
-}
-.cc-presets-name:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.cc-presets-dd {
-  position: relative;
-  flex: 0 0 auto;
-}
-.cc-presets-dd-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 30px;
-  padding: 0 6px;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  cursor: pointer;
-}
-.cc-presets-dd-btn:hover {
-  border-color: var(--accent);
-}
-.cc-presets-dot {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  border: 1.5px solid rgba(0, 0, 0, 0.3);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-.cc-presets-caret {
-  color: var(--fg-muted);
-  font-size: 10px;
-}
-/* pre-made colour GRID selector (the save-bar dropdown popover) */
-.cc-presets-grid {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  right: 0;
-  z-index: 30;
-  display: grid;
-  grid-template-columns: repeat(5, 26px);
-  gap: 7px;
-  padding: 9px;
-  border-radius: 11px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-elev) 97%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
-}
-.cc-presets-cell {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border-radius: 7px;
-  border: 1.5px solid color-mix(in srgb, #000 22%, var(--slot));
-  background: var(--slot);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  transition: transform 0.1s ease;
-}
-.cc-presets-cell:hover {
-  transform: scale(1.12);
-}
-.cc-presets-cell.is-empty {
-  background: transparent;
-  border-style: dashed;
-  border-color: color-mix(in srgb, var(--slot) 55%, transparent);
-  box-shadow: none;
-  opacity: 0.62;
-}
-.cc-presets-cell.is-sel {
-  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--slot);
-}
-.cc-presets-cell-check {
-  color: #fff;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
-}
-/* compact square icon buttons (save / delete) */
-.cc-presets-iconbtn {
-  flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
-}
-.cc-presets-save {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-.cc-presets-save:hover {
-  filter: brightness(1.08);
-}
-.cc-presets-save.is-ok {
-  background: var(--ok, #16a34a);
-  border-color: var(--ok, #16a34a);
-  color: #fff;
-}
-.cc-presets-ok {
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1;
-}
-.cc-presets-clearbtn {
-  color: var(--fg-muted);
-}
-.cc-presets-clearbtn:hover {
-  border-color: var(--danger, #e5484d);
-  color: var(--danger, #e5484d);
-}
-
-/* touch / mobile: no hover, so the edit pencils are always visible; bigger taps
-   and a wider left gutter so the always-on pencils don't cover the settings. */
 @media (pointer: coarse), (max-width: 768px) {
   .cc-scroll {
     padding-left: calc(var(--sp-3) + 60px);
-  }
-  /* compact one-row footer on mobile — keep the rail clear of it */
-  .cc-presets-rail {
-    bottom: 100px;
-    max-height: calc(100% - 112px);
-  }
-  .cc-preset-slot {
-    width: 28px;
-    height: 28px;
-  }
-  /* No hover on touch — tapping a swatch focuses it, and :focus-within reveals
-     the flyout (name + edit) for that one slot. */
-  .cc-preset-edit {
-    width: 28px;
-    height: 28px;
-  }
-  .cc-presets-bar {
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 8px;
-  }
-  .cc-presets-name,
-  .cc-presets-dd-btn {
-    height: 38px;
-  }
-  .cc-presets-iconbtn {
-    width: 38px;
-    height: 38px;
-  }
-  .cc-presets-cell {
-    width: 34px;
-    height: 34px;
-  }
-  .cc-presets-grid {
-    grid-template-columns: repeat(5, 34px);
   }
 }
 .cc-camstock-apply:hover { filter: brightness(1.06); }

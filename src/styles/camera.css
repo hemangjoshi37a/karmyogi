@@ -26,6 +26,95 @@
   color: var(--fg-muted);
 }
 
+/* ---- top status strip (camera · calibration · recording) ---- */
+.cam-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+.cam-strip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+.cam-strip-pill[data-tone='on'] {
+  color: var(--accent);
+}
+.cam-strip-pill[data-tone='warn'] {
+  color: var(--warn);
+}
+.cam-strip-rec[data-tone='on'] {
+  color: var(--danger);
+}
+.cam-strip-sep {
+  color: var(--border);
+}
+.cam-strip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+}
+.cam-strip-pill[data-tone='on'] .cam-strip-dot {
+  opacity: 1;
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* ---- collapsible section cards (house-style disclosure) ---- */
+.cam-sec {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fg) 2%, var(--bg-panel));
+  overflow: hidden;
+}
+.cam-sec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--ctl-h-lg);
+  padding: var(--sp-2) var(--sp-3);
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.cam-sec-head:hover {
+  color: var(--fg);
+}
+.cam-sec-head > svg {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.cam-sec[data-open='true'] > .cam-sec-head {
+  border-bottom: 1px solid var(--border);
+}
+.cam-sec-title {
+  flex: 1 1 auto;
+  font-size: var(--fs-section);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.cam-sec-badge {
+  flex: 0 0 auto;
+}
+.cam-sec-body {
+  padding: var(--sp-3);
+}
+
 /* ---- card grid: tile to fill width, collapse to 1 col when narrow ---- */
 .cam-cards {
   display: grid;
@@ -601,6 +690,100 @@
   background: color-mix(in srgb, var(--accent) 10%, var(--bg));
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
 }
+
+/* ---- two-camera printed-grid calibration ---- */
+.cam-grid-cal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+/* One numbered step (print → auto-calibrate → detect mounts). */
+.cam-grid-step {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 3%, var(--bg-panel));
+  min-width: 0;
+}
+.cam-grid-step-n {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: var(--fs-label);
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--accent);
+}
+.cam-grid-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.cam-grid-step-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--fg);
+}
+/* Inline "{n} found" badge inside a calibrate button. */
+.cam-grid-count {
+  margin-left: var(--sp-1);
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.cam-grid-count[data-on='true'] {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+/* Per-slot inferred mount chips (head / stationary / unknown). */
+.cam-role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.cam-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font-size: var(--fs-label);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.cam-role-chip-cam {
+  font-weight: 700;
+  color: var(--fg);
+}
+.cam-role-chip-val {
+  font-family: ui-monospace, monospace;
+  color: var(--fg-muted);
+}
+.cam-role-chip.cam-role-head {
+  border-color: var(--accent);
+}
+.cam-role-chip.cam-role-head .cam-role-chip-val {
+  color: var(--accent);
+}
+.cam-role-chip.cam-role-stationary {
+  border-color: var(--ok);
+}
+.cam-role-chip.cam-role-stationary .cam-role-chip-val {
+  color: var(--ok);
+}
 .cam-job-readout {
   font-family: ui-monospace, monospace;
   color: var(--fg);
@@ -654,6 +837,31 @@
   color: var(--fg);
 }
 .cam-guide > .cam-hint {
+  padding: 0 var(--sp-2) var(--sp-2);
+}
+
+/* ---- Advanced live-camera image-settings disclosure ---- */
+.cam-adv {
+  margin-top: var(--sp-2);
+}
+/* Small "custom" pill on the summary when overrides are active. */
+.cam-adv > summary {
+  justify-content: flex-start;
+}
+.cam-adv-badge {
+  margin-left: auto;
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-label);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.cam-adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
   padding: 0 var(--sp-2) var(--sp-2);
 }
 
@@ -780,6 +988,81 @@
   white-space: nowrap;
 }
 
+/* ---- auto-record ON/OFF pill (styled after the Controller spindle toggle:
+   a rounded accent pill with a sliding dot; here the dot is a red record light
+   that pulses while a run is actively recording). ---- */
+.cam-rec-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input, var(--bg));
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.cam-rec-pill:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.cam-rec-pill.on {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border-color: var(--danger);
+  color: var(--fg);
+}
+.cam-rec-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.cam-rec-pill-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+.cam-rec-pill.on .cam-rec-pill-dot {
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger);
+}
+/* Actively recording → pulse the red light. */
+.cam-rec-pill-dot[data-live='true'] {
+  background: var(--danger);
+  box-shadow: 0 0 8px var(--danger);
+  animation: cam-blink 1s steps(2, start) infinite;
+}
+.cam-rec-pill-label {
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cam-rec-pill-dot[data-live='true'] {
+    animation: none;
+  }
+}
+
+/* ---- saved (IndexedDB) run-recording rows with inline playback ---- */
+.cam-saved-clip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.cam-saved-clip .cam-clip {
+  flex-wrap: wrap;
+}
+.cam-saved-video {
+  width: 100%;
+  max-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #000;
+}
+
 /* ---- narrow column (≤340px): stack fields, full-width inputs, ≥38px taps.
    Driven by the PANEL's own width. ---- */
 @container campanel (max-width: 360px) {
@@ -807,6 +1090,7 @@
   .cam-input,
   .cam-select,
   .cam-seg-btn,
+  .cam-sec-head,
   .cam-icon-btn.icon-btn {
     min-height: var(--ctl-h-touch);
   }

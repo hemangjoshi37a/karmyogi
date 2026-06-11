@@ -26,6 +26,9 @@ import {
 import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import '../styles/pcb.css'
 
 /** Single canonical program section for ALL PCB output (preview / play / generate).
@@ -884,7 +887,29 @@ export function PcbPanel() {
     )
   }
 
+  // ---- colour-coded setting PRESETS (CAM params only — NOT the layer files /
+  // role assignments, which are the operator's actual board). Scoped to its own
+  // persistence key, independent of the carving / soldering / writing presets.
+  // capture() snapshots the current Params; onApply() restores them, reusing the
+  // same defensive parsePcbParams() so a corrupt persisted slot can never feed a
+  // NaN into the emitter. The settings-only Save/Load pair lives in the bar's
+  // `extra` slot; the toolbar SaveLoadButtons (params + roles) stays as-is.
+  const applyPcbParams = (p: unknown) => setParams((prev) => parsePcbParams(p, prev))
+  const presets = usePresets<Params>({
+    storageKey: 'karmyogi.pcb.presets',
+    capture: () => ({ ...params }),
+    onApply: applyPcbParams,
+  })
+
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('pcb.presets.aria', 'PCB setting presets')}
+      />
     <div className="pcb-panel">
       <div className="pcb-scroll">
         {/* ---- 1. Upload package (primary action) ---- */}
@@ -1462,6 +1487,26 @@ export function PcbPanel() {
           </section>
         )}
       </div>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={params}
+            onLoad={applyPcbParams}
+            onError={fail}
+            fileBase="pcb-settings"
+            ext="kpcbs"
+            saveTitle={t('pcb.presets.saveSettings', 'Save PCB CAM settings to file')}
+            loadTitle={t('pcb.presets.loadSettings', 'Load PCB CAM settings from file')}
+          />
+        }
+      />
     </div>
   )
 }

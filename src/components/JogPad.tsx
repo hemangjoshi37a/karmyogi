@@ -1,6 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import type { Vec3 } from '../store'
-import { InfoTip } from './InfoTip'
 import { useT } from '../i18n'
 
 /**
@@ -49,6 +48,12 @@ interface JogPadProps {
   onJogHold?: (delta: JogDelta) => void
   /** Cancel an in-progress jog (must send jogCancel / 0x85 to stop immediately). */
   onCancel?: () => void
+  /**
+   * Optional content injected into the EMPTY CENTER cell of the Z column (between
+   * Z+ and Z−). Used by the Controller to host a "Go to zero" button. When
+   * absent the cell stays empty and the pad behaves exactly as before.
+   */
+  zCenter?: ReactNode
 }
 
 interface JogCell {
@@ -68,7 +73,7 @@ interface JogCell {
  * queued motion. Presentational (W4-owned); keyboard handling lives in the panel
  * via jogKeyToDelta so the panel can scope it to focus.
  */
-export function JogPad({ disabled, step, onJog, onJogHold, onCancel }: JogPadProps) {
+export function JogPad({ disabled, step, onJog, onJogHold, onCancel, zCenter }: JogPadProps) {
   const t = useT()
   // Single one-shot timer: when it fires, the press has become a hold.
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -143,9 +148,6 @@ export function JogPad({ disabled, step, onJog, onJogHold, onCancel }: JogPadPro
 
   return (
     <div className="jogpad">
-      <span className="jog-info" aria-hidden="false">
-        <InfoTip topic="jogStep" />
-      </span>
       <div className="jog-grid" role="group" aria-label={t('ctrl.jog.xy', 'XY jog')}>
         {xy.map((c) => (
           <button
@@ -177,6 +179,8 @@ export function JogPad({ disabled, step, onJog, onJogHold, onCancel }: JogPadPro
             {c.label}
           </button>
         ))}
+        {/* Empty center cell (row 2) — optionally hosts a "Go to zero" button. */}
+        {zCenter ? <div className="jog-z-center" style={{ gridRow: '2' }}>{zCenter}</div> : null}
       </div>
     </div>
   )

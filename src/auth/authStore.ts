@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { firebaseConfigured, getFirebaseAuth, maybeStartAnalytics } from './firebase'
+import { initAdsTag, reportLogin } from '../track/adsConversion'
 
 /**
  * Auth state for the (optional) Google sign-in gate.
@@ -32,6 +33,9 @@ interface AuthState {
 }
 
 let initialized = false
+// The uid we last reported a `login` for, so onAuthStateChanged re-firing on
+// reload/refresh doesn't log a duplicate login per page load.
+let reportedLoginUid: string | null = null
 
 export const useAuth = create<AuthState>((set) => ({
   status: firebaseConfigured() ? 'loading' : 'disabled',
@@ -41,6 +45,10 @@ export const useAuth = create<AuthState>((set) => ({
   init: () => {
     if (initialized) return
     initialized = true
+    // Load the Google Ads gtag on every real-domain page load (gated by
+    // analyticsAllowed() inside) so the ad click's gclid is captured for
+    // attribution — independent of whether Firebase auth is configured.
+    initAdsTag()
     if (!firebaseConfigured()) {
       set({ status: 'disabled' })
       return
@@ -76,6 +84,12 @@ export const useAuth = create<AuthState>((set) => ({
             },
             error: null,
           })
+          // Tag the signed-in user in GA4 (setUserId + `login` event) once per
+          // uid, so authenticated users form a segmentable audience. Best-effort.
+          if (reportedLoginUid !== fbUser.uid) {
+            reportedLoginUid = fbUser.uid
+            reportLogin(fbUser.uid)
+          }
         } else {
           set({ status: 'signedOut', user: null })
         }

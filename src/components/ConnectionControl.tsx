@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { grbl } from '../serial/controller'
 import { MockPort } from '../serial'
 import { BlePort } from '../serial/blePort'
+import { UsbPort } from '../serial/usbPort'
 import { mixedContentReason, normalizeWsUrl } from '../serial/wsPort'
 import { useMachine, useMachineProfile, usePersistentState, useMachines } from '../store'
 import { CONTROLLER_LIST, profileFor, canLiveConnect } from '../machine/controllers'
@@ -78,6 +79,8 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
   const error = useMachine((s) => s.error)
   const controllerKind = useMachineProfile((s) => s.controllerKind)
   const setControllerKind = useMachineProfile((s) => s.setControllerKind)
+  const baudOverride = useMachineProfile((s) => s.baudOverride)
+  const setBaudOverride = useMachineProfile((s) => s.setBaudOverride)
   const connected = connection === 'connected'
   const connecting = connection === 'connecting'
   // Server bridge toggle — same persisted flag the App shell reads to mount the
@@ -94,6 +97,10 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
   const activeEntry = machines.find((m) => m.id === activeId) ?? null
 
   const profile = profileFor(controllerKind)
+  // Baud the next connection will open at: the user's override (if any) wins over
+  // the selected firmware's default. Shown next to the status so the operator can
+  // confirm the rate it connected at.
+  const effectiveBaud = baudOverride ?? profile.baud
   const experimental = profile.supported === 'experimental'
   // Can we attempt a REAL (non-mock) USB connection to this firmware? Proprietary
   // controllers (Ruida / EzCAD / FSCUT / Masso) can't stream live in a browser, so
@@ -136,6 +143,13 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
         ))}
       </select>
       <FirmwareDrivers kind={controllerKind} />
+      <BaudSelector
+        baud={effectiveBaud}
+        isOverride={baudOverride != null}
+        profileBaud={profile.baud}
+        disabled={selectDisabled}
+        onChange={setBaudOverride}
+      />
       <span className="km-conn-dot" data-conn={connection} />
       <span className="km-conn-state">
         {/* Connection status only (Connected / Connecting / Disconnected) — the
@@ -225,6 +239,104 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
   )
 }
 
+/** Standard USB serial baud rates offered in the picker (GRBL 115200, Marlin 250000, …). */
+const STANDARD_BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 250000, 500000, 1000000] as const
+const CUSTOM_BAUD = '__custom__'
+
+interface BaudSelectorProps {
+  /** The baud the next connection will use (override if set, else profile default). */
+  baud: number
+  /** True when the current baud is a user override (vs. the firmware default). */
+  isOverride: boolean
+  /** The selected firmware's default baud, used to label the default option. */
+  profileBaud: number
+  /** Locked while connected/connecting — baud only applies at the next open. */
+  disabled: boolean
+  /** Set (`number`) or clear (`null`, = use firmware default) the baud override. */
+  onChange: (baud: number | null) => void
+}
+
+/**
+ * Baud-rate picker for the USB (Web Serial) connection. Defaults to the selected
+ * firmware profile's baud and lets the user override it (including a free-form
+ * "Custom…" rate, since Web Serial's `port.open` accepts any positive integer —
+ * e.g. Marlin's 250000). The override is persisted in the machineProfile store
+ * and plumbed to `port.open` in the controller. It is disabled while connected
+ * because baud can only change on the next open/connect.
+ */
+function BaudSelector({ baud, isOverride, profileBaud, disabled, onChange }: BaudSelectorProps) {
+  const t = useT()
+  // Whether the current baud is one of the standard presets. If not (a custom
+  // override), the dropdown shows "Custom…" selected and reveals a number input.
+  const isStandard = (STANDARD_BAUDS as readonly number[]).includes(baud)
+  // Latch "Custom…" once chosen so the number input stays visible even before a
+  // valid value is typed (a custom baud that isn't a preset also forces it on).
+  const [customChosen, setCustomChosen] = useState(false)
+  const showCustom = customChosen || (isOverride && !isStandard)
+  const [customText, setCustomText] = useState(showCustom ? String(baud) : '')
+
+  const onSelect = (value: string) => {
+    if (value === CUSTOM_BAUD) {
+      // Reveal the custom field, seeded with the current baud to edit from. The
+      // override only changes once a valid number is typed (commitCustom).
+      setCustomChosen(true)
+      setCustomText(String(baud))
+      return
+    }
+    setCustomChosen(false)
+    const n = Number(value)
+    // Picking the firmware default clears the override (so a later firmware change
+    // tracks the new default); any other preset sets it explicitly.
+    onChange(n === profileBaud ? null : n)
+  }
+
+  const commitCustom = (text: string) => {
+    setCustomText(text)
+    const n = Number(text.trim())
+    if (text.trim() !== '' && Number.isFinite(n) && n > 0) onChange(Math.floor(n))
+  }
+
+  return (
+    <span className="km-baud">
+      <select
+        className="km-conn-select km-baud-select"
+        value={showCustom ? CUSTOM_BAUD : String(baud)}
+        disabled={disabled}
+        onChange={(e) => onSelect(e.target.value)}
+        aria-label={t('conn.baud.label', 'USB baud rate')}
+        title={
+          disabled
+            ? t('conn.baud.locked', 'Baud rate — applies on the next connect (locked while connected)')
+            : t('conn.baud.title', 'USB baud rate (applies when you connect)')
+        }
+      >
+        {STANDARD_BAUDS.map((b) => (
+          <option key={b} value={b}>
+            {b}
+            {b === profileBaud ? ` — ${t('conn.baud.default', 'default')}` : ''}
+          </option>
+        ))}
+        <option value={CUSTOM_BAUD}>{t('conn.baud.custom', 'Custom…')}</option>
+      </select>
+      {showCustom && (
+        <input
+          className="km-baud-custom"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          step={1}
+          disabled={disabled}
+          value={customText}
+          placeholder={t('conn.baud.customPh', 'e.g. 250000')}
+          onChange={(e) => commitCustom(e.target.value)}
+          aria-label={t('conn.baud.customLabel', 'Custom USB baud rate')}
+          title={t('conn.baud.customTitle', 'Enter a custom baud rate (positive integer)')}
+        />
+      )}
+    </span>
+  )
+}
+
 interface ConnectMenuProps {
   connecting: boolean
   liveConnect: boolean
@@ -248,6 +360,10 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
 
   const bleSupported = typeof navigator !== 'undefined' && BlePort.isSupported()
   const serialSupported = typeof navigator !== 'undefined' && !!navigator.serial
+  // Android Chromium has no Web Serial but DOES have WebUSB — the same "USB
+  // cable" row then connects via UsbPort (USB-OTG). Desktop keeps Web Serial.
+  const usbOtgSupported = !serialSupported && UsbPort.isSupported()
+  const usbSupported = serialSupported || usbOtgSupported
   const pageSecure = typeof location !== 'undefined' && location.protocol === 'https:'
 
   useEffect(() => {
@@ -274,7 +390,11 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
 
   const connectUsb = () => {
     setOpen(false)
-    grbl.connect().catch(() => {})
+    // Web Serial (desktop Chromium) is preferred when present; otherwise fall
+    // back to WebUSB (Android Chromium over a USB-OTG cable). A dismissed
+    // chooser rejects without surfacing an error — same as the serial picker.
+    if (serialSupported) grbl.connect().catch(() => {})
+    else grbl.connectUsbOtg().catch(() => {})
   }
 
   const connectWifi = () => {
@@ -296,6 +416,12 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
     setOpen(false)
     grbl.connectBluetooth().catch(() => {})
   }
+  // Fallback chooser listing ALL nearby BLE devices — for modules that advertise
+  // a non-standard name/service and so don't appear in the filtered chooser.
+  const connectBleAll = () => {
+    setOpen(false)
+    grbl.connectBluetooth({ acceptAllDevices: true }).catch(() => {})
+  }
 
   return (
     <span className="km-cx" ref={ref}>
@@ -315,22 +441,32 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
         <div className="km-cx-pop" role="menu">
           <div className="km-cx-head">{t('conn.connect.how', 'Connect to machine')}</div>
 
-          {/* USB / Web Serial */}
+          {/* USB cable — Web Serial on desktop Chromium; WebUSB (USB-OTG) on
+              Android Chromium, where navigator.serial doesn't exist. Same row,
+              same glyph, same mental model on both. */}
           <button
             className="km-cx-row"
             role="menuitem"
-            disabled={connecting || !liveConnect || !serialSupported}
+            disabled={connecting || !liveConnect || !usbSupported}
             onClick={connectUsb}
             title={
-              !serialSupported
-                ? t('conn.usb.unsupported', 'Web Serial needs Chrome/Edge over HTTPS or localhost.')
-                : liveConnect
-                  ? t('conn.connect.title', 'Connect to the controller over USB (Web Serial)')
-                  : t(
+              !usbSupported
+                ? t(
+                    'conn.usb.unsupportedAll',
+                    'No USB API in this browser — on iPhone/iPad use the Wi-Fi (WebSocket) bridge; on Android use Chrome/Edge.',
+                  )
+                : !liveConnect
+                  ? t(
                       'conn.connect.unsupported',
                       '{name} can’t be driven live from a browser ({notes}). Use Mock to explore the UI, or generate G-code here and run it on the device.',
                       { name: profileLabel, notes: profileNotes },
                     )
+                  : serialSupported
+                    ? t('conn.connect.title', 'Connect to the controller over USB (Web Serial)')
+                    : t(
+                        'conn.usb.titleOtg',
+                        'Connect over USB-OTG (WebUSB) — works with CDC, CH340, CP210x and FTDI adapters',
+                      )
             }
           >
             <span className="km-cx-row-ico"><TransportGlyph kind="usb" /></span>
@@ -339,7 +475,15 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
               <span className="km-cx-row-sub">
                 {serialSupported
                   ? t('conn.usb.sub', 'Web Serial — the standard wired connection.')
-                  : t('conn.usb.subUnsupported', 'Not available in this browser.')}
+                  : usbOtgSupported
+                    ? t(
+                        'conn.usb.subOtg',
+                        'WebUSB (USB-OTG) — plug the machine into your phone with an OTG cable/adapter.',
+                      )
+                    : t(
+                        'conn.usb.subNone',
+                        'Not available in this browser — on iPhone/iPad use the Network bridge; on Android use Chrome/Edge.',
+                      )}
               </span>
             </span>
           </button>
@@ -364,11 +508,32 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
               <span className="km-cx-row-title">{t('conn.ble', 'Bluetooth')}</span>
               <span className="km-cx-row-sub">
                 {bleSupported
-                  ? t('conn.ble.sub', 'BLE serial bridge (Nordic UART / HM-10).')
-                  : t('conn.ble.subUnsupported', 'Not available in this browser.')}
+                  ? t('conn.ble.sub', 'BLE serial (Nordic UART / HM-10 / FluidNC). Classic HC-05/06 not supported.')
+                  : t('conn.ble.subUnsupported', 'Not in this browser — on iPhone/iPad use the Wi-Fi bridge below.')}
               </span>
             </span>
           </button>
+
+          {bleSupported && (
+            <button
+              className="km-cx-row km-cx-row--sub"
+              role="menuitem"
+              disabled={connecting}
+              onClick={connectBleAll}
+              title={t(
+                'conn.ble.all.title',
+                'Show ALL nearby Bluetooth LE devices — use if your machine isn’t in the list above (its module advertises a non-standard name or service).',
+              )}
+            >
+              <span className="km-cx-row-ico" aria-hidden="true" />
+              <span className="km-cx-row-txt">
+                <span className="km-cx-row-title">{t('conn.ble.all', 'Show all devices…')}</span>
+                <span className="km-cx-row-sub">
+                  {t('conn.ble.all.sub', 'List every nearby BLE device (classic HC-05/06 still won’t appear).')}
+                </span>
+              </span>
+            </button>
+          )}
 
           <div className="km-cx-sep" aria-hidden="true" />
 

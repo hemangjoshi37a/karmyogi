@@ -9,6 +9,10 @@ import { useT } from '../i18n'
  * switch between them. Same content + controls as desktop → minimal learning
  * curve between the two form factors (see CLAUDE.md "Responsive UI").
  *
+ * The tab list is derived from `availablePanels` in the registry, so every
+ * registered panel (Controller, Console, …, Screw Fitting, PCB, …) appears here
+ * automatically — there is no hand-maintained mobile-only list to keep in sync.
+ *
  * Tab labels are translated with the SAME contract as the desktop dock tabs:
  * `t('tab.' + p.id, p.title)`, so the mobile strip is localized exactly like
  * the desktop one (previously it rendered the raw English `p.title`).
@@ -23,6 +27,7 @@ export function MobileShell() {
   const active = availablePanels.find((p) => p.id === activeId) ?? availablePanels[0]
   const Component = active ? panelComponents[active.component] : undefined
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const tabsRef = useRef<HTMLElement | null>(null)
 
   // Minimal props shim so panel components render outside dockview. Panels read
   // `props.params` and optionally `props.api?.title`.
@@ -70,6 +75,7 @@ export function MobileShell() {
   return (
     <div className="mobile-shell">
       <nav
+        ref={tabsRef}
         className="mobile-tabs"
         role="tablist"
         aria-label={t('mobile.panels', 'Panels')}

@@ -53,9 +53,6 @@ const lazyPanels: Record<string, LazyExoticComponent<ComponentType<IDockviewPane
   console: lazy(() =>
     import('../panels/ConsolePanel').then((m) => ({ default: pick(m, 'ConsolePanel') })),
   ),
-  coords: lazy(() =>
-    import('../panels/CoordSystemPanel').then((m) => ({ default: pick(m, 'CoordSystemPanel') })),
-  ),
   program: lazy(() =>
     import('../panels/ProgramPanel').then((m) => ({ default: pick(m, 'ProgramPanel') })),
   ),
@@ -67,6 +64,16 @@ const lazyPanels: Record<string, LazyExoticComponent<ComponentType<IDockviewPane
   ),
   soldering: lazy(() =>
     import('../panels/SolderingPanel').then((m) => ({ default: pick(m, 'SolderingPanel') })),
+  ),
+  screwfitting: lazy(() =>
+    import('../panels/ScrewFittingPanel').then((m) => ({
+      default: pick(m, 'ScrewFittingPanel'),
+    })),
+  ),
+  drilling: lazy(() =>
+    import('../panels/DrillingPanel').then((m) => ({
+      default: pick(m, 'DrillingPanel'),
+    })),
   ),
   pcb: lazy(() => import('../panels/PcbPanel').then((m) => ({ default: pick(m, 'PcbPanel') }))),
   probe: lazy(() =>
@@ -124,11 +131,12 @@ const PANEL_SCOPE: Record<string, string> = {
   visualizer: 'Visualizer',
   controller: 'Controller',
   console: 'Console',
-  coords: 'Coordinates',
   program: 'Program',
   cadcam: '2D/3D Carving',
   writing: 'Writing',
   soldering: 'Soldering',
+  screwfitting: 'Screw Fitting',
+  drilling: 'Bore / Drill / Hole',
   pcb: 'PCB',
   probe: 'Probe',
   glue: 'Glue Dispense',
@@ -180,10 +188,11 @@ export const availablePanels: PanelSpec[] = [
   { id: 'console', component: 'console', title: 'Console' },
   { id: 'program', component: 'program', title: 'Program' },
   { id: 'visualizer', component: 'visualizer', title: 'Visualizer' },
-  { id: 'coords', component: 'coords', title: 'Coordinates' },
   { id: 'cadcam', component: 'cadcam', title: '2D/3D Carving' },
   { id: 'writing', component: 'writing', title: 'Writing' },
   { id: 'soldering', component: 'soldering', title: 'Soldering' },
+  { id: 'screwfitting', component: 'screwfitting', title: 'Screw Fitting' },
+  { id: 'drilling', component: 'drilling', title: 'Bore / Drill / Hole' },
   { id: 'pcb', component: 'pcb', title: 'PCB' },
   { id: 'glue', component: 'glue', title: 'Glue Dispense' },
   { id: 'pnp', component: 'pnp', title: 'Pick & Place' },

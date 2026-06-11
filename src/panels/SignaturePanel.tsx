@@ -22,6 +22,9 @@ import { grbl } from '../serial/controller'
 import { IconButton } from '../components/IconButton'
 import { Icon } from '../components/Icons'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import '../styles/signature.css'
 
 /** Named program section this panel owns in the combined program. */
@@ -103,6 +106,34 @@ interface SignatureDoc {
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/** Coerce an (untrusted) value to a finite number, else the fallback. */
+const numOr = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback
+
+/**
+ * A reusable SIGNATURE setting preset: the size, image-trace and pen/placement
+ * PARAMS that drive generation — NOT the freehand strokes or the loaded image
+ * (those are the operator's actual work, saved separately to a .ksig). Scoped to
+ * its own persistence key, independent of the carving / soldering / writing
+ * presets.
+ */
+interface SignatureSettings {
+  mode: Mode
+  drawW: number
+  drawH: number
+  threshold: number
+  invert: boolean
+  targetW: number
+  targetH: number
+  lockAspect: boolean
+  tolerance: number
+  originX: number
+  originY: number
+  penUpZ: number
+  penDownZ: number
+  feed: number
+}
 
 /**
  * Narrow an arbitrary value to a ScreenStroke ({ points: {x,y}[] }). Points are
@@ -537,7 +568,61 @@ export function SignaturePanel() {
   // Nothing to save when there are no committed freehand strokes.
   const saveDisabled = strokes.length === 0
 
+  // ---- color-coded setting PRESETS (size / trace / pen params, NOT strokes) ----
+  // Snapshot the current generation PARAMS (no strokes, no image).
+  const captureSettings = (): SignatureSettings => ({
+    mode, drawW, drawH,
+    threshold, invert, targetW, targetH, lockAspect, tolerance,
+    originX, originY, penUpZ, penDownZ, feed,
+  })
+  // Restore a captured/loaded settings snapshot, coercing each field from the
+  // (untrusted) source so a corrupt slot or hand-edited file can never feed a
+  // NaN into the emitter. The strokes / loaded image are left untouched.
+  const applySettings = (s: SignatureSettings) => {
+    const o = (s ?? {}) as unknown as Record<string, unknown>
+    if (o.mode === 'draw' || o.mode === 'image') setMode(o.mode)
+    setDrawW((prev) => numOr(o.drawW, prev))
+    setDrawH((prev) => numOr(o.drawH, prev))
+    setThreshold((prev) => numOr(o.threshold, prev))
+    if (typeof o.invert === 'boolean') setInvert(o.invert)
+    setTargetW((prev) => numOr(o.targetW, prev))
+    setTargetH((prev) => numOr(o.targetH, prev))
+    if (typeof o.lockAspect === 'boolean') setLockAspect(o.lockAspect)
+    setTolerance((prev) => numOr(o.tolerance, prev))
+    setOriginX((prev) => numOr(o.originX, prev))
+    setOriginY((prev) => numOr(o.originY, prev))
+    setPenUpZ((prev) => numOr(o.penUpZ, prev))
+    setPenDownZ((prev) => numOr(o.penDownZ, prev))
+    setFeed((prev) => numOr(o.feed, prev))
+  }
+  const presets = usePresets<SignatureSettings>({
+    storageKey: 'karmyogi.signature.presets',
+    capture: captureSettings,
+    onApply: applySettings,
+  })
+  // The same settings object the presets capture, also offered as a portable
+  // settings-only file in the preset bar (distinct from the strokes+params
+  // .ksig save in the draw toolbar above).
+  const settings = captureSettings()
+  // Validate a loaded settings file before applying (must be a JSON object).
+  const loadSettings = (data: unknown) => {
+    if (!isObj(data)) {
+      setInfo(t('sig.info.settingsInvalid', 'Could not load — file is not valid signature settings.'))
+      return
+    }
+    applySettings(data as unknown as SignatureSettings)
+    setInfo(t('sig.info.settingsLoaded', 'Loaded signature settings — preview updated.'))
+  }
+
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('sig.presets.aria', 'Signature setting presets')}
+      />
     <div className="sig-panel">
       <p className="sig-intro">
         {mode === 'draw' ? (
@@ -915,6 +1000,29 @@ export function SignaturePanel() {
           )}
         </section>
       </div>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={settings}
+            onLoad={loadSettings}
+            fileBase="signature-settings"
+            ext="ksigset"
+            saveTitle={t('sig.settings.save', 'Save signature settings')}
+            loadTitle={t('sig.settings.load', 'Load signature settings')}
+            onError={setInfo}
+            parseErrorMessage={(name) =>
+              t('sig.info.settingsParseError', 'Could not read {name} — expected .ksigset (JSON) settings.', { name })
+            }
+          />
+        }
+      />
     </div>
   )
 }

@@ -100,6 +100,16 @@
   line-height: 1.2;
   white-space: normal;
 }
+/* Secondary "Show all devices…" fallback row, indented under its primary row. */
+.km-cx-row--sub {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-left: 22px;
+}
+.km-cx-row--sub .km-cx-row-title {
+  font-size: 12px;
+  font-weight: 500;
+}
 
 .km-cx-sep {
   height: 1px;
@@ -179,6 +189,50 @@
   }
   .km-cx-row {
     min-height: 44px;
+  }
+}
+
+/* ---- USB baud-rate selector (next to the firmware selector) ----
+ * Lives in the `.km-baud-*` namespace (owned here) so it never fights the
+ * `.km-conn-*` topbar/globals rules. Reuses the `.km-conn-select` look for the
+ * dropdown so it matches the firmware picker visually. */
+.km-baud {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.km-baud-select {
+  /* Keep it compact so the appbar cluster doesn't overflow; the longest preset
+   * label ("1000000 — default") still fits. */
+  max-width: 9.5em;
+}
+.km-baud-custom {
+  width: 7em;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 7px;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.km-baud-custom:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.km-baud-custom:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* On narrow / touch screens keep the baud controls touch-usable and let them
+ * wrap with the rest of the connection cluster. */
+@media (max-width: 640px) {
+  .km-baud-select {
+    min-height: 36px;
+  }
+  .km-baud-custom {
+    min-height: 36px;
   }
 }
 

@@ -1,0 +1,584 @@
+/* Screw-fitting panel (#74). Co-located styles; uses theme CSS variables only.
+   Mirrors the Auto-soldering panel layout (a slim header + icon toolbar, a live
+   status strip, collapsible Settings cards that tile into a responsive grid, and
+   a compact points table that reflows to stacked cards when the PANEL is narrow).
+   Density uses the shared tokens in theme.css; the panel is the only scroll
+   container (vertical only, never sideways), reflowing on its OWN width via a
+   container query so it works in a narrow docked column on a wide window. */
+
+.scf-panel {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  container-type: inline-size;
+  container-name: screwpanel;
+}
+
+/* ───────────────────────── header ───────────────────────── */
+.scf-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--ctl-h-lg);
+}
+.scf-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.scf-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scf-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.scf-tools-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--sp-1) 2px;
+  background: var(--border);
+}
+
+/* square icon buttons */
+.scf-ico {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.scf-ico > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.scf-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.scf-ico:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.scf-ico.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
+}
+.scf-ico-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-size: 17px;
+  font-weight: 600;
+}
+.scf-ico-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 85%, #fff);
+  color: var(--accent-fg);
+}
+.scf-ico-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ───────────────────────── status strip ───────────────────────── */
+.scf-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+.scf-status-pill b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.scf-status-sep {
+  color: var(--border);
+}
+.scf-status-sync {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.scf-warn {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+/* ───────────────────────── cards ───────────────────────── */
+.scf-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+.scf-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.scf-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.scf-card-head h4 {
+  margin: 0;
+  font-size: var(--fs-section);
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.scf-card-count {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 1px 6px;
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--fg-muted);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+/* ───────────────────────── field grids ───────────────────────── */
+.scf-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3);
+  align-items: end;
+}
+.scf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.scf-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.scf-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.scf-input input {
+  width: 100%;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 7px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+.scf-input.has-unit input {
+  padding-right: 38px;
+}
+.scf-input input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.scf-input i {
+  position: absolute;
+  right: 7px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+.scf-field select {
+  width: 100%;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 6px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.scf-field select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* a full-width checkbox-style toggle row inside a field grid */
+.scf-check {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-label);
+  color: var(--fg);
+  cursor: pointer;
+  min-height: var(--ctl-h);
+}
+.scf-check input {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+/* a small read-only chip summarising the resolved preset diameters */
+.scf-preset-note {
+  grid-column: 1 / -1;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+.scf-preset-note b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ───────────────────────── point table ───────────────────────── */
+.scf-points {
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+.scf-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.scf-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.scf-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: var(--fs-section);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  text-align: left;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scf-table td {
+  padding: 3px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.scf-table tbody tr {
+  cursor: pointer;
+}
+.scf-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.scf-table tr.scf-row-selected td {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.scf-idx {
+  width: 26px;
+  text-align: right;
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
+}
+.scf-table td input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 4px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.scf-table td input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.scf-empty {
+  padding: 22px 12px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+.scf-actions-col {
+  width: 92px;
+}
+.scf-actions {
+  display: flex;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+.scf-row-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.scf-row-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.scf-row-ico:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.scf-row-ico.scf-del:not(:disabled):hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-input));
+}
+
+/* ───────────────────── narrow point cards ───────────────────── */
+.scf-cards {
+  display: none; /* shown only by the narrow container query */
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+}
+.scf-pcard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+.scf-pcard.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.scf-pcard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.scf-pcard-idx {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--fg);
+}
+.scf-pcard-actions {
+  display: inline-flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.scf-pcard-actions .scf-row-ico {
+  flex: 0 0 auto;
+  width: var(--ctl-h-touch);
+  height: var(--ctl-h-touch);
+}
+.scf-pcard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: var(--sp-2);
+}
+.scf-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.scf-mini > span {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scf-mini input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h-touch);
+  padding: 0 5px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.scf-mini input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ───────── narrow PANEL: swap the table for the card list ───────── */
+@container screwpanel (max-width: 430px) {
+  .scf-settings {
+    grid-template-columns: 1fr;
+  }
+  .scf-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+  .scf-input input,
+  .scf-field select {
+    height: var(--ctl-h-touch);
+  }
+  .scf-ico {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+  .scf-table-wrap {
+    display: none;
+  }
+  .scf-cards {
+    display: flex;
+  }
+}
+
+/* Fallback for engines without container-query support. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 768px) {
+    .scf-settings {
+      grid-template-columns: 1fr;
+    }
+    .scf-fields {
+      grid-template-columns: 1fr 1fr;
+    }
+    .scf-input input,
+    .scf-field select {
+      height: var(--ctl-h-touch);
+    }
+    .scf-ico {
+      width: var(--ctl-h-touch);
+      height: var(--ctl-h-touch);
+    }
+    .scf-table {
+      table-layout: auto;
+    }
+    .scf-table,
+    .scf-table thead,
+    .scf-table tbody,
+    .scf-table tr,
+    .scf-table td {
+      display: block;
+      width: 100%;
+    }
+    .scf-table thead {
+      display: none;
+    }
+    .scf-table tbody tr {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin: var(--sp-3);
+      padding: var(--sp-2) var(--sp-3);
+      background: var(--bg-elev);
+    }
+    .scf-table td {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      border-bottom: none;
+      padding: 3px 0;
+    }
+    .scf-table td input {
+      height: var(--ctl-h-touch);
+    }
+    .scf-table td[data-label]::before {
+      content: attr(data-label);
+      flex: 0 0 70px;
+      font-size: var(--fs-label);
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .scf-idx::before {
+      content: 'Screw ';
+    }
+    .scf-row-ico {
+      height: var(--ctl-h-touch);
+    }
+  }
+}

@@ -8,6 +8,12 @@ interface BedProps {
   width?: number
   depth?: number
   height?: number
+  /**
+   * Render the editable X/Y/Z size labels. They are drei <Html> overlays, which
+   * IGNORE three.js group visibility — so the Layers "Machine bed" toggle has to
+   * gate them explicitly (hiding the bed must also hide its size numbers).
+   */
+  showLabels?: boolean
 }
 
 /**
@@ -17,7 +23,7 @@ interface BedProps {
  * spot). The grid is centred on the work origin, so the volume spans
  * [-W/2..W/2] × [-D/2..D/2] × [0..H].
  */
-export function Bed({ width = 300, depth = 200, height = 100 }: BedProps) {
+export function Bed({ width = 300, depth = 200, height = 100, showLabels = true }: BedProps) {
   const theme = useSettings((s) => s.theme)
   const minor = theme === 'dark' ? '#3a4250' : '#d4dae1'
   const major = theme === 'dark' ? '#515c6e' : '#aab4c0'
@@ -39,7 +45,9 @@ export function Bed({ width = 300, depth = 200, height = 100 }: BedProps) {
         fadeStrength={1}
       />
       <BedVolume width={width} depth={depth} height={height} dark={theme === 'dark'} />
-      <BedDimensions width={width} depth={depth} height={height} dark={theme === 'dark'} />
+      {showLabels && (
+        <BedDimensions width={width} depth={depth} height={height} dark={theme === 'dark'} />
+      )}
       <OriginGizmo />
     </group>
   )

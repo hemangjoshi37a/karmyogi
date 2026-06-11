@@ -107,8 +107,18 @@
 .pp-sections-card { margin-top: 0; }
 .pp-sections-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--sp-2, 6px);
+}
+/* Upload-section button pinned to the right of the Sections header. */
+.pp-sections-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1, 4px);
+}
+.pp-sections-empty {
+  margin: 4px 2px 2px;
 }
 .pp-section-title {
   font-size: var(--fs-section, 10.5px);
@@ -204,6 +214,63 @@
   white-space: pre;
   overflow: auto;
   max-height: 40vh;
+}
+
+/* --- streaming section: subtle shimmer + live current-line ---
+   The shimmer is an enterprise-subtle moving gradient layered over the row only
+   (very low opacity), not the whole card body. Honour reduced-motion. */
+@keyframes pp-shimmer {
+  0% { background-position: -150% 0; }
+  100% { background-position: 250% 0; }
+}
+.pp-section.is-streaming {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.pp-section.is-streaming .pp-section-row {
+  position: relative;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+/* Moving gradient sheen confined to the row; pointer-events:none so it never
+   blocks the disclosure/colour/IO controls underneath. */
+.pp-section.is-streaming .pp-section-row::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--accent) 22%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: pp-shimmer 2.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-section.is-streaming .pp-section-row::after { animation: none; }
+}
+/* Live "line X / Y" readout in the streaming section's header row. */
+.pp-section-live {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-fg, var(--fg));
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+  white-space: nowrap;
+}
+
+/* Line-by-line body while streaming, so the active line can be highlighted. */
+.pp-section-body--live { display: block; }
+.pp-section-line { display: block; }
+.pp-section-line.is-active {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--accent-fg, var(--fg));
+  font-weight: 600;
 }
 
 /* --- progress + ETA --- */

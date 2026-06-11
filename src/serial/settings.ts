@@ -8,6 +8,22 @@
 // echoed lines and builds the `$<n>=<val>` write commands; it also carries a
 // human-readable label/units table for the common GRBL v1.1 settings so the
 // Motion panel can render them.
+//
+// FluidNC (named style): FluidNC replaced the numbered table with a YAML config
+// + NAMED settings. Its `$$` dump lists `$path/name=value` lines instead, e.g.:
+//   $axes/x/steps_per_mm=80.000
+//   $Firmware/Build=...
+// A write is `$<name>=<value>` and a single read is `$<name>`. This module ALSO
+// parses those named lines and captures them into `useNamedSettings` (a small
+// persisted snapshot store, mirroring src/store/grblSettings.ts for the numeric
+// map) — the capture rides on `parseSettingLine`, which the controller already
+// calls on every received line, so no controller change is needed. The numeric
+// GRBL path is byte-for-byte unchanged.
+
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+// No runtime cycle: grblSettings.ts only imports a TYPE from this module.
+import { useGrblSettings } from '../store/grblSettings'
 
 export interface GrblSetting {
   /** Setting number, e.g. 120 for X acceleration. */
@@ -80,8 +96,8 @@ export const GRBL_SETTING_META: Record<number, GrblSettingMeta> = {
 
 const SETTING_RE = /^\$(\d+)\s*=\s*(.+?)\s*$/
 
-/** Parse a single `$<n>=<val>` line; returns undefined if it isn't one. */
-export function parseSettingLine(line: string): GrblSetting | undefined {
+/** Pure numeric `$<n>=<val>` matcher (no side effects — used by block parsing). */
+function matchNumericSetting(line: string): GrblSetting | undefined {
   const m = SETTING_RE.exec(line.trim())
   if (!m) return undefined
   const number = parseInt(m[1], 10)
@@ -90,8 +106,27 @@ export function parseSettingLine(line: string): GrblSetting | undefined {
 }
 
 /**
+ * Parse a single `$<n>=<val>` line; returns undefined if it isn't one.
+ *
+ * This is the controller's per-received-line settings hook (src/serial/
+ * controller.ts feeds every line here), so it doubles as the CAPTURE point for
+ * FluidNC NAMED `$path/name=value` lines: those are recorded into
+ * `useNamedSettings` as a side channel and still return undefined, which keeps
+ * the controller's numeric store, console echo and ack accounting exactly as
+ * before (a named line is treated like any other informational line).
+ */
+export function parseSettingLine(line: string): GrblSetting | undefined {
+  const numeric = matchNumericSetting(line)
+  if (numeric) return numeric
+  const named = parseNamedSettingLine(line)
+  if (named) recordNamedSetting(named)
+  return undefined
+}
+
+/**
  * Parse a block of `$$` output into a map keyed by setting number. Non-setting
- * lines (`ok`, status reports, blanks) are ignored.
+ * lines (`ok`, status reports, blanks, FluidNC named lines) are ignored.
+ * Side-effect-free (safe for the Motion panel's import/paste dialog).
  */
 export function parseSettingsBlock(
   text: string | string[],
@@ -99,7 +134,7 @@ export function parseSettingsBlock(
   const lines = Array.isArray(text) ? text : text.split(/\r?\n/)
   const out = new Map<number, GrblSetting>()
   for (const line of lines) {
-    const s = parseSettingLine(line)
+    const s = matchNumericSetting(line)
     if (s) out.set(s.number, s)
   }
   return out
@@ -121,4 +156,101 @@ export function writeSettingCommand(
 /** Get a human label for a setting number. */
 export function settingLabel(number: number): string {
   return GRBL_SETTING_META[number]?.label ?? `Setting $${number}`
+}
+
+// --- FluidNC NAMED `$`-settings ---------------------------------------------
+//
+// FluidNC's `$$` dumps `$path/name=value` lines (slash-separated names, not
+// numbers). The numeric parsing/writing above is untouched; everything below is
+// the named-style channel.
+
+/** One FluidNC named setting as reported by `$$` / `$<name>`. */
+export interface NamedSetting {
+  /** Full setting path WITHOUT the leading `$`, e.g. 'axes/x/steps_per_mm'. */
+  name: string
+  /** Raw value text as reported (string preserves precision/format; may be empty). */
+  value: string
+}
+
+// A named-setting line: `$axes/x/steps_per_mm=80.000`, `$Firmware/Build=…`,
+// `$Hostname=fluidnc`. The name is letter-led path segments ([A-Za-z0-9_.-],
+// '/'-separated). A minimum name length of 2 is enforced in code so a stray
+// single-letter `$X=` / `$J=`-shaped token can never be mistaken for a setting;
+// numeric `$N=` ids never reach this matcher (they are tried first).
+const NAMED_SETTING_RE = /^\$([A-Za-z][A-Za-z0-9_.\-]*(?:\/[A-Za-z0-9_.\-]+)*)\s*=\s*(.*)$/
+
+/** Parse a single FluidNC `$name=value` line; undefined if it isn't one. Pure. */
+export function parseNamedSettingLine(line: string): NamedSetting | undefined {
+  const m = NAMED_SETTING_RE.exec(line.trim())
+  if (!m || m[1].length < 2) return undefined
+  return { name: m[1], value: m[2].trim() }
+}
+
+/** Build a FluidNC `$<name>=<value>` write command. */
+export function writeNamedSettingCommand(name: string, value: string | number): string {
+  return `$${name}=${value}`
+}
+
+/** Build a FluidNC `$<name>` single-setting read command (replies `$name=value`). */
+export function readNamedSettingCommand(name: string): string {
+  return `$${name}`
+}
+
+// --- Named-settings snapshot store -------------------------------------------
+//
+// Mirror of src/store/grblSettings.ts for the NAMED style. It lives here (not in
+// src/store/) because the capture hook is `parseSettingLine` above — the one
+// settings entry point the controller already calls — and this workstream owns
+// this file. The `$$` read lifecycle (loading flag, lastReadAt) is SHARED with
+// `useGrblSettings`: the controller arms `loading` when it sends `$$` and calls
+// `markRead()` on the terminating `ok` regardless of which line style came back,
+// so the Motion panel reads loading/lastReadAt from there for both styles.
+
+interface NamedSettingsStore {
+  /** Setting name → raw value, as last reported. */
+  values: Record<string, string>
+  /** Replace/insert one captured setting. */
+  setOne: (s: NamedSetting) => void
+  clear: () => void
+}
+
+export const useNamedSettings = create<NamedSettingsStore>()(
+  persist(
+    (set) => ({
+      values: {},
+      setOne: (s) => set((st) => ({ values: { ...st.values, [s.name]: s.value } })),
+      clear: () => set({ values: {} }),
+    }),
+    {
+      name: 'karmyogi.namedSettings',
+      // Persist the last-known snapshot so the table shows it after a refresh
+      // (before a reconnect/sync), same as the numeric store.
+      partialize: (s) => ({ values: s.values }),
+    },
+  ),
+)
+
+// Replace-on-dump semantics: when a `$$` read starts (useGrblSettings.loading
+// goes false→true — armed by the controller for BOTH styles), the FIRST named
+// line captured afterwards replaces the whole snapshot instead of upserting.
+// That way a fresh dump drops settings that no longer exist (firmware update,
+// different board) instead of accreting stale rows forever.
+let freshDump = false
+let prevLoading = useGrblSettings.getState().loading
+useGrblSettings.subscribe((st) => {
+  if (st.loading !== prevLoading) {
+    prevLoading = st.loading
+    if (st.loading) freshDump = true
+  }
+})
+
+function recordNamedSetting(s: NamedSetting): void {
+  if (freshDump) {
+    freshDump = false
+    useNamedSettings.setState({ values: { [s.name]: s.value } })
+    return
+  }
+  const st = useNamedSettings.getState()
+  if (st.values[s.name] === s.value) return // unchanged — avoid render churn
+  st.setOne(s)
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { importDxfString } from '../core/dxf'
 import { Drawing } from '../core/entity'
 import { engrave, profileContours, pocket, ProfileSide, type CamParams } from '../core/cam'
@@ -21,6 +21,14 @@ import {
   type CarveWorkerOutbound,
 } from '../core/carve3d'
 import { defaultCutoutParams, type CutoutParams } from '../core/cutout'
+import {
+  buildTwoSidedProgram,
+  defaultTwoSidedParams,
+  flipCornerLabel,
+  type TwoSidedParams,
+  type FlipAxis,
+  type FlipCorner,
+} from '../core/twoSided'
 import { useProgram, usePersistentState } from '../store'
 import {
   useCarveJobs,
@@ -47,6 +55,9 @@ import { Modal } from '../components/Modal'
 import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import { useT } from '../i18n'
 import '../styles/cadcam.css'
 
@@ -58,18 +69,15 @@ type Op = 'Engrave' | 'Profile' | 'Pocket'
 // ============================================================================
 // Color-coded SETTING PRESETS for the carving tab
 // ----------------------------------------------------------------------------
-// Ten fixed, well-spaced hues — each is one preset SLOT. The floating rail on the
-// left edge loads a slot's settings; the footer save-bar writes the CURRENT
-// settings into the slot whose colour is selected. A preset is a full snapshot of
-// the tunable carving parameters (NOT the loaded geometry/jobs): 2D op + vector
-// params + cutout, the chosen bit, the material, and the 3D carve global + job
-// defaults.
+// The floating rail on the left edge loads a slot's settings; the footer
+// save-bar writes the CURRENT settings into the slot whose colour is selected.
+// The generic slot machinery (10 colour slots, persistence, capture/apply
+// wiring) lives in components/presets/usePresets; here we only define the
+// carving snapshot shape and the capture/apply callbacks. A preset is a full
+// snapshot of the tunable carving parameters (NOT the loaded geometry/jobs): 2D
+// op + vector params + cutout, the chosen bit, the material, and the 3D carve
+// global + job defaults.
 // ============================================================================
-const PRESET_COLORS = [
-  '#ef4444', '#f97316', '#f59e0b', '#22c55e', '#10b981',
-  '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#ec4899',
-] as const
-
 interface CarvePreset {
   op: Op
   side: ProfileSide
@@ -80,38 +88,6 @@ interface CarvePreset {
   materialId: string
   carveGlobal: GlobalCarveSettings
   carveDefaults: JobDefaults
-}
-
-interface PresetSlot {
-  /** Fixed by position (PRESET_COLORS[i]); persisted for forward-compat. */
-  color: string
-  /** Optional human label shown in tooltips + the save-bar. */
-  name: string
-  /** The captured settings, or null for an empty slot. */
-  preset: CarvePreset | null
-}
-
-const DEFAULT_PRESET_SLOTS: PresetSlot[] = PRESET_COLORS.map((color) => ({
-  color,
-  name: '',
-  preset: null,
-}))
-
-/**
- * Coerce a persisted (possibly older / shorter / colour-drifted) slot array into
- * exactly 10 slots with the canonical colours, preserving any saved name/preset
- * by position. Guards the UI from schema drift in localStorage.
- */
-function normalizeSlots(raw: unknown): PresetSlot[] {
-  const arr = Array.isArray(raw) ? raw : []
-  return PRESET_COLORS.map((color, i) => {
-    const s = arr[i] as Partial<PresetSlot> | undefined
-    return {
-      color,
-      name: typeof s?.name === 'string' ? s.name : '',
-      preset: s && typeof s.preset === 'object' && s.preset !== null ? (s.preset as CarvePreset) : null,
-    }
-  })
 }
 
 /** Per-axis colours mirror the Visualizer's axis gizmo (X red, Y green, Z blue). */
@@ -538,21 +514,23 @@ export function CadCamPanel() {
   // `rect` fields — normalise through the defaults so nested reads never crash.
   const cutout = useMemo(() => defaultCutoutParams(cutoutRaw), [cutoutRaw])
 
+  // ADVANCED · double-sided (front + back) machining. OFF by default — emits the
+  // front side as today, then a flipped+Z-inverted back side as a second program
+  // section with an operator FLIP instruction block between them. Persisted so
+  // the operator's preference survives reloads. Normalised through the defaults so
+  // an older/short saved shape can't read undefined.
+  const [twoSidedRaw, setTwoSided] = usePersistentState<TwoSidedParams>(
+    'karmyogi.carve.twoSided',
+    defaultTwoSidedParams(),
+  )
+  const twoSided = useMemo(() => defaultTwoSidedParams(twoSidedRaw), [twoSidedRaw])
+
   // Tool/bit selection — persisted so the operator's bit survives reloads.
   const [bitId, setBitId] = usePersistentState<string>('karmyogi.carve.bit', DEFAULT_BIT_ID)
   // Bit cutting LENGTH (flute/usable length, mm) — a primary, beginner-visible
   // choice. It doesn't change the toolpath, but it's the safe limit on how deep
   // the bit can reach, so we surface it and use it as a sanity hint for depth.
   const [bitLength, setBitLength] = usePersistentState<number>('karmyogi.carve.bitLen', 16)
-
-  // ---- color-coded setting PRESETS (10 slots, persisted) ------------------
-  const [presetSlotsRaw, setPresetSlotsRaw] = usePersistentState<PresetSlot[]>(
-    'karmyogi.carve.presets',
-    DEFAULT_PRESET_SLOTS,
-  )
-  const presetSlots = useMemo(() => normalizeSlots(presetSlotsRaw), [presetSlotsRaw])
-  // The slot the save-bar targets + the rail highlights (kept in sync between them).
-  const [selectedSlot, setSelectedSlot] = useState(0)
 
   // ---- mount reconcile: keep the restored `mode` consistent with live data ---
   // On a tab-switch remount the persisted `mode` is restored, but the heavy 2D
@@ -724,20 +702,12 @@ export function CadCamPanel() {
     }
   }
 
-  const loadSlot = (i: number) => {
-    setSelectedSlot(i)
-    const s = presetSlots[i]
-    if (s?.preset) applyPreset(s.preset)
-  }
-  const saveToSlot = (i: number) => {
-    const snap = captureSettings()
-    setPresetSlotsRaw(presetSlots.map((s, idx) => (idx === i ? { ...s, preset: snap } : s)))
-    setSelectedSlot(i)
-  }
-  const clearSlot = (i: number) =>
-    setPresetSlotsRaw(presetSlots.map((s, idx) => (idx === i ? { ...s, preset: null, name: '' } : s)))
-  const renameSlot = (i: number, name: string) =>
-    setPresetSlotsRaw(presetSlots.map((s, idx) => (idx === i ? { ...s, name } : s)))
+  // Named, colour-coded slots (persisted) wired to the carving capture/apply.
+  const presets = usePresets<CarvePreset>({
+    storageKey: 'karmyogi.carve.presets',
+    capture: captureSettings,
+    onApply: applyPreset,
+  })
 
   // ---- file import --------------------------------------------------------
   /**
@@ -1093,17 +1063,27 @@ export function CadCamPanel() {
           clearCarveProgram()
           return
         }
-        const name =
+        const baseName =
           active.length === 1
             ? t('cc.progName3dOne', '{name} — 3D Carving', { name: active[0].name })
             : t('cc.progName3dMany', '{n} jobs — 3D Carving', { n: active.length })
-        // If the program name changed (job count crossed 1↔many, or a renamed
-        // single job), remove the previous section so it doesn't linger.
+        // ADVANCED · double-sided: post-process the front program into a combined
+        // front+back program (pure core transform). Disabled → returns it as-is.
+        const twoSidedRes = buildTwoSidedProgram(msg.gcode, twoSided)
+        const finalGcode = twoSidedRes.gcode
+        if (twoSidedRes.warnings.length) setWarnings((w) => [...w, ...twoSidedRes.warnings])
+        const name = twoSided.enabled ? `${baseName} (two-sided)` : baseName
+        // If the program name changed (job count crossed 1↔many, a renamed single
+        // job, or the two-sided toggle), remove the previous section so it doesn't
+        // linger.
         if (lastCarveNameRef.current && lastCarveNameRef.current !== name) clearCarveProgram()
         lastCarveNameRef.current = name
-        setProgram(name, msg.gcode)
-        setGcode(msg.gcode)
-        setLineCount(msg.lineCount)
+        const lineCount = twoSided.enabled
+          ? finalGcode.split('\n').filter((l) => l.length > 0).length
+          : msg.lineCount
+        setProgram(name, finalGcode)
+        setGcode(finalGcode)
+        setLineCount(lineCount)
         return
       }
       // error
@@ -1171,7 +1151,11 @@ export function CadCamPanel() {
       const c = cutout.enabled
         ? `1|${cutout.shape}|${cutout.clearAround ? 1 : 0}|${cutout.cutStepdownMm}|${cutout.breakThroughMm}|${cutout.finishAllowanceMm}|${cutout.tabs.count}|${cutout.tabs.lengthMm}|${cutout.tabs.heightMm}|${cutout.rect.mode}|${cutout.rect.marginMm}|${cutout.rect.x}|${cutout.rect.y}|${cutout.rect.width}|${cutout.rect.height}`
         : '0'
-      return `3d|${carveRev}|${c}`
+      // Two-sided post-process inputs change the emitted program too.
+      const ts = twoSided.enabled
+        ? `1|${twoSided.stockThicknessMm}|${twoSided.flipAxis}|${twoSided.flipCorner}`
+        : '0'
+      return `3d|${carveRev}|${c}|${ts}`
     }
     if (mode === '2d') {
       return `2d|${op}|${side}|${JSON.stringify(p2d)}`
@@ -1179,7 +1163,7 @@ export function CadCamPanel() {
     return mode
     // polylines/drawing/epsPolys identity is folded in via the separate dep below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, carveRev, cutout, op, side, p2d])
+  }, [mode, carveRev, cutout, twoSided, op, side, p2d])
 
   // ---- clobber guard: only own the Visualizer when this panel is VISIBLE --
   // Several CAM panels write the shared program store via live-generate effects;
@@ -1531,11 +1515,11 @@ export function CadCamPanel() {
       onDragLeave={onDragLeave}
     >
       <PresetRail
-        slots={presetSlots}
-        selected={selectedSlot}
-        onLoad={loadSlot}
-        onSelect={setSelectedSlot}
-        t={t}
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('cc.presets.aria', 'Carving setting presets')}
       />
       <div className="cc-scroll">
         {/* The panel heading + its explainer InfoTip were removed; the same
@@ -1833,6 +1817,11 @@ export function CadCamPanel() {
             <CutoutCard t={t} cutout={cutout} setCutout={setCutout} />
           )}
 
+          {/* ====== 6 · ADVANCED · two-sided (front + back) machining ====== */}
+          {mode === '3d' && jobs.length > 0 && (
+            <TwoSidedCard t={t} twoSided={twoSided} setTwoSided={setTwoSided} />
+          )}
+
           {/* Material + recommended-passes now live in the primary section and
               the Advanced (auto) panel above; speeds/depths apply themselves. */}
 
@@ -2100,12 +2089,12 @@ export function CadCamPanel() {
         </div>
       </div>
       <PresetSaveBar
-        slots={presetSlots}
-        selected={selectedSlot}
-        onSelect={setSelectedSlot}
-        onSave={saveToSlot}
-        onClear={clearSlot}
-        onRename={renameSlot}
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
         extra={
           <SaveLoadButtons
             value={carveDoc}
@@ -2117,7 +2106,6 @@ export function CadCamPanel() {
             loadTitle={t('cc.load', 'Load carve settings')}
           />
         }
-        t={t}
       />
       <MaterialInfoModal material={infoMaterial} onClose={() => setInfoMaterial(null)} t={t} />
     </div>
@@ -2416,46 +2404,6 @@ function MaterialCard({
   )
 }
 
-// ============================================================================
-// Color-coded preset rail (left edge) + save bar (footer)
-// ============================================================================
-
-/** Thin pencil glyph for the per-slot edit affordance. */
-function PencilIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
-      />
-    </svg>
-  )
-}
-
-/** Floppy-disk glyph for the preset Save button. */
-function SaveIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"
-      />
-    </svg>
-  )
-}
-
-/** Recycle-bin glyph for the preset Delete button. */
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM8.5 9.5h1.5v8H8.5v-8zm5.5 0h1.5v8H14v-8zM15.5 4l-1-1h-5l-1 1H5v2h14V4h-3.5z"
-      />
-    </svg>
-  )
-}
-
 /** Uppercase file-extension badge (e.g. "STL") derived from a filename. */
 function fileExt(name: string): string {
   const m = name.match(/\.([a-z0-9]+)$/i)
@@ -2533,232 +2481,6 @@ function ModelFilesList({
         </li>
       )}
     </ul>
-  )
-}
-
-/**
- * Floating, translucent color-swatch rail stuck to the LEFT edge of the carving
- * tab. Each swatch is one preset slot: clicking a FILLED swatch loads its
- * settings; hovering reveals an edit (pencil) button that also loads it (the
- * explicit "tweak this one" affordance). Empty slots show a faint "+"; clicking
- * one just selects it as the save target (use the footer to store settings into
- * it). The selected slot is ringed and stays in sync with the footer dropdown.
- */
-function PresetRail({
-  slots,
-  selected,
-  onLoad,
-  onSelect,
-  t,
-}: {
-  slots: PresetSlot[]
-  selected: number
-  onLoad: (i: number) => void
-  onSelect: (i: number) => void
-  t: ReturnType<typeof useT>
-}) {
-  return (
-    <div className="cc-presets-rail" role="toolbar" aria-label={t('cc.presets.aria', 'Carving setting presets')}>
-      <span className="cc-presets-cap" aria-hidden="true">
-        {t('cc.presets.tag', 'PRESETS')}
-      </span>
-      {slots.map((s, i) => {
-        const filled = !!s.preset
-        const label = s.name || t('cc.presets.slotN', 'Preset {n}', { n: i + 1 })
-        return (
-          <div className="cc-preset-slotwrap" key={i}>
-            <button
-              type="button"
-              className={
-                'cc-preset-slot' +
-                (filled ? ' is-filled' : ' is-empty') +
-                (i === selected ? ' is-sel' : '')
-              }
-              style={{ ['--slot' as string]: s.color } as CSSProperties}
-              aria-pressed={i === selected}
-              aria-label={
-                filled
-                  ? t('cc.presets.loadAria', 'Load preset {n}: {name}', { n: i + 1, name: label })
-                  : t('cc.presets.emptyAria', 'Empty preset slot {n}', { n: i + 1 })
-              }
-              onClick={() => (filled ? onLoad(i) : onSelect(i))}
-            >
-              {!filled && (
-                <span className="cc-preset-plus" aria-hidden="true">
-                  +
-                </span>
-              )}
-            </button>
-            {/* Hover (or always, on touch) flyout: shows the preset NAME, plus an
-                edit button for filled slots that loads it for tweaking. */}
-            <div className="cc-preset-flyout" role="presentation">
-              <span className="cc-preset-flyout-name">
-                {filled ? label : t('cc.presets.emptyName', 'Empty · {name}', { name: label })}
-              </span>
-              {filled && (
-                <button
-                  type="button"
-                  className="cc-preset-edit"
-                  title={t('cc.presets.editTip', 'Edit “{name}” — load to tweak, then Save', { name: label })}
-                  aria-label={t('cc.presets.editAria', 'Edit preset {n}', { n: i + 1 })}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onLoad(i)
-                  }}
-                >
-                  <PencilIcon />
-                </button>
-              )}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-/**
- * Sticky footer save-bar: an optional name field, a color dropdown that picks
- * the target slot (in sync with the rail), and a Save button that writes the
- * CURRENT settings into the selected color. A Clear button removes a stored
- * preset. Kept compact + glassy for an enterprise feel.
- */
-function PresetSaveBar({
-  slots,
-  selected,
-  onSelect,
-  onSave,
-  onClear,
-  onRename,
-  extra,
-  t,
-}: {
-  slots: PresetSlot[]
-  selected: number
-  onSelect: (i: number) => void
-  onSave: (i: number) => void
-  onClear: (i: number) => void
-  onRename: (i: number, name: string) => void
-  /** Extra controls rendered at the start of the bar (e.g. carve Save/Load). */
-  extra?: ReactNode
-  t: ReturnType<typeof useT>
-}) {
-  const [open, setOpen] = useState(false)
-  const [flash, setFlash] = useState(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
-  const cur = slots[selected] ?? slots[0]
-
-  // Dismiss the color popover on outside-click / Escape.
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: PointerEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('pointerdown', onDown, true)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('pointerdown', onDown, true)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  const slotLabel = (i: number) => slots[i].name || t('cc.presets.slotN', 'Preset {n}', { n: i + 1 })
-
-  const doSave = () => {
-    onSave(selected)
-    setFlash(true)
-    window.setTimeout(() => setFlash(false), 1300)
-  }
-
-  return (
-    <div className="cc-presets-bar">
-      {extra && (
-        <>
-          <span className="cc-presets-extra">{extra}</span>
-          <span className="cc-presets-sep" aria-hidden="true" />
-        </>
-      )}
-      <input
-        className="cc-presets-name"
-        value={cur.name}
-        placeholder={t('cc.presets.namePh', 'Preset name')}
-        onChange={(e) => onRename(selected, e.target.value)}
-        aria-label={t('cc.presets.nameAria', 'Preset name')}
-      />
-      <div className="cc-presets-dd" ref={wrapRef}>
-        <button
-          type="button"
-          className="cc-presets-dd-btn"
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
-          title={t('cc.presets.pickColor', 'Choose which colour slot to save into')}
-        >
-          <span className="cc-presets-dot" style={{ background: cur.color }} />
-          <span className="cc-presets-caret" aria-hidden="true">
-            ▾
-          </span>
-        </button>
-        {open && (
-          <div className="cc-presets-grid" role="listbox" aria-label={t('cc.presets.pickColor', 'Choose colour slot')}>
-            {slots.map((s, i) => (
-              <button
-                key={i}
-                type="button"
-                role="option"
-                aria-selected={i === selected}
-                title={s.preset ? slotLabel(i) : t('cc.presets.slotEmpty', 'Slot {n} (empty)', { n: i + 1 })}
-                className={
-                  'cc-presets-cell' +
-                  (i === selected ? ' is-sel' : '') +
-                  (s.preset ? ' is-filled' : ' is-empty')
-                }
-                style={{ ['--slot' as string]: s.color } as CSSProperties}
-                onClick={() => {
-                  onSelect(i)
-                  setOpen(false)
-                }}
-              >
-                {i === selected && (
-                  <span className="cc-presets-cell-check" aria-hidden="true">
-                    ✓
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <button
-        type="button"
-        className={'cc-presets-iconbtn cc-presets-save' + (flash ? ' is-ok' : '')}
-        onClick={doSave}
-        title={t('cc.presets.saveTip', 'Save the current settings into this colour')}
-        aria-label={t('cc.presets.saveBtn', 'Save preset')}
-      >
-        {flash ? (
-          <span className="cc-presets-ok" aria-hidden="true">
-            ✓
-          </span>
-        ) : (
-          <SaveIcon />
-        )}
-      </button>
-      {cur.preset && (
-        <button
-          type="button"
-          className="cc-presets-iconbtn cc-presets-clearbtn"
-          title={t('cc.presets.clearTip', 'Delete this preset slot')}
-          aria-label={t('cc.presets.clearAria', 'Delete preset {n}', { n: selected + 1 })}
-          onClick={() => onClear(selected)}
-        >
-          <TrashIcon />
-        </button>
-      )}
-    </div>
   )
 }
 
@@ -3100,6 +2822,147 @@ function CutoutCard({
                   'Cuts through each job’s own stock thickness, riding outside the part edge. Set 0 tabs only if the part is held some other way.',
                 )}
           </span>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * ADVANCED · double-sided (front + back) machining card. Collapsed by default and
+ * clearly labelled so beginners aren't confused. When enabled it makes the carve
+ * emit two clearly-separated program sections — the front exactly as today, then a
+ * mirrored + Z-inverted back side — with an operator FLIP instruction block between
+ * them. The transform math lives in the pure core (core/twoSided.ts); this card
+ * only wires the inputs.
+ */
+function TwoSidedCard({
+  t,
+  twoSided,
+  setTwoSided,
+}: {
+  t: ReturnType<typeof useT>
+  twoSided: TwoSidedParams
+  setTwoSided: (updater: TwoSidedParams | ((prev: TwoSidedParams) => TwoSidedParams)) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const patch = (p: Partial<TwoSidedParams>) =>
+    setTwoSided((c) => ({ ...defaultTwoSidedParams(c), ...p }))
+  const num = (v: string, fallback: number) => (Number.isFinite(+v) ? +v : fallback)
+  const fNum = (n: number) => String(Math.round(n * 1000) / 1000)
+
+  const CORNERS: { id: FlipCorner; label: string }[] = [
+    { id: 'back-left', label: t('cc.ts.cornerBL', 'Back-left') },
+    { id: 'back-right', label: t('cc.ts.cornerBR', 'Back-right') },
+    { id: 'front-left', label: t('cc.ts.cornerFL', 'Front-left') },
+    { id: 'front-right', label: t('cc.ts.cornerFR', 'Front-right') },
+  ]
+
+  return (
+    <section className={'cc-section cc-advanced cc-span' + (twoSided.enabled ? ' on' : '')}>
+      <button
+        className="cc-adv-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title={t(
+          'cc.ts.tip',
+          'Carve the FRONT, then flip the stock and carve the BACK in one program. Advanced — leave off for normal single-side carving.',
+        )}
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} />{' '}
+        {t('cc.ts.title', 'Advanced · Two-sided machining')}
+        {twoSided.enabled && <span className="cc-ts-on-badge"> {t('cc.ts.onBadge', 'ON')}</span>}
+      </button>
+      {open && (
+        <div className="cc-section-body">
+          <label className="cc-check cc-ts-enable">
+            <input
+              type="checkbox"
+              checked={twoSided.enabled}
+              onChange={(e) => patch({ enabled: e.target.checked })}
+            />
+            {t('cc.ts.enable', 'Enable two-sided (front + back) carving')}
+            <Tip
+              id="twoSided"
+              title={t('cc.ts.title', 'Advanced · Two-sided machining')}
+              body={t(
+                'cc.ts.enableTip',
+                'Emits the front side as usual, then a second section that mirrors the toolpath across the flip axis and references depths to the new top face after you turn the stock over. A pause + on-screen instruction tells you when to flip and re-zero.',
+              )}
+            />
+          </label>
+
+          {twoSided.enabled && (
+            <>
+              <div className="cc-grid">
+                <div className="cc-field">
+                  <label>{t('cc.ts.thickness', 'Stock thickness (mm)')}</label>
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.5}
+                    value={fNum(twoSided.stockThicknessMm)}
+                    title={t(
+                      'cc.ts.thicknessTip',
+                      'Total block thickness — the back-side cut depths are referenced from the new (flipped) top face using this.',
+                    )}
+                    onChange={(e) =>
+                      patch({ stockThicknessMm: num(e.target.value, twoSided.stockThicknessMm) })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="cc-rowlabel">{t('cc.ts.flipAxis', 'Flip axis')}</div>
+              <div className="cc-subops" role="group" aria-label={t('cc.ts.flipAxis', 'Flip axis')}>
+                {(['x', 'y'] as FlipAxis[]).map((ax) => (
+                  <button
+                    key={ax}
+                    type="button"
+                    className={'cc-subop-btn' + (twoSided.flipAxis === ax ? ' active' : '')}
+                    onClick={() => patch({ flipAxis: ax })}
+                    aria-pressed={twoSided.flipAxis === ax}
+                    title={
+                      ax === 'x'
+                        ? t('cc.ts.flipXTip', 'Turn the stock over about the X axis (Y mirrors)')
+                        : t('cc.ts.flipYTip', 'Turn the stock over about the Y axis (X mirrors)')
+                    }
+                  >
+                    {ax === 'x'
+                      ? t('cc.ts.flipX', 'About X')
+                      : t('cc.ts.flipY', 'About Y')}
+                  </button>
+                ))}
+              </div>
+
+              <div className="cc-rowlabel">{t('cc.ts.corner', 'Flip / re-zero corner')}</div>
+              <div className="cc-subops cc-ts-corners" role="group" aria-label={t('cc.ts.corner', 'Flip / re-zero corner')}>
+                {CORNERS.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={'cc-subop-btn' + (twoSided.flipCorner === c.id ? ' active' : '')}
+                    onClick={() => patch({ flipCorner: c.id })}
+                    aria-pressed={twoSided.flipCorner === c.id}
+                    title={t('cc.ts.cornerTip', 'Re-zero the tool against this corner after flipping')}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+
+              <span className="cc-hint">
+                {t(
+                  'cc.ts.hint',
+                  'The program runs the front, lifts to safe-Z, stops the spindle and PAUSES (M0). Flip the stock about {axis}, re-zero the tool at the {corner} corner, then resume to cut the back.',
+                  {
+                    axis: twoSided.flipAxis === 'x' ? 'X' : 'Y',
+                    corner: flipCornerLabel(twoSided.flipCorner),
+                  },
+                )}
+              </span>
+            </>
+          )}
         </div>
       )}
     </section>

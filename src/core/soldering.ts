@@ -22,6 +22,29 @@ export enum SolderFeedType {
   TouchDown = 'TouchDown',
 }
 
+/**
+ * How the tip makes its FINAL descent onto a point's touch location.
+ * - 'plunge'      : straight vertical drop from Free-Z down to Touch-Z at the
+ *                   point's exact XY (the original, default behaviour).
+ * - 'angle-front' : 45° approach IN from the −Y side (start offset in −Y).
+ * - 'angle-back'  : 45° approach IN from the +Y side (start offset in +Y).
+ * - 'angle-right' : 45° approach IN from the +X side (start offset in +X).
+ * - 'angle-left'  : 45° approach IN from the −X side (start offset in −X).
+ *
+ * For every directional 45° variant the descent START sits at Free-Z, offset
+ * from the pad along the chosen axis by the horizontal run (= |FreeZ−TouchZ|, so
+ * the diagonal is a true 45°). The tip then moves diagonally INTO the pad —
+ * driving the offset axis to the pad coord WHILE descending Z to Touch-Z; the
+ * other axis stays at the pad coord throughout. The retract mirrors the descent
+ * (back out along the same 45° line).
+ */
+export type SolderApproach =
+  | 'plunge'
+  | 'angle-front'
+  | 'angle-right'
+  | 'angle-left'
+  | 'angle-back';
+
 /** One soldering action at an absolute machine location. */
 export interface SolderPoint {
   x: number;
@@ -34,6 +57,8 @@ export interface SolderPoint {
   type: SolderFeedType;
   /** Feeder ON time (seconds). */
   feedSeconds: number;
+  /** Final-descent geometry: straight plunge or 45° angle of attack. */
+  approach: SolderApproach;
 }
 
 /** Defaults for a fresh soldering point. */
@@ -45,6 +70,7 @@ export function defaultSolderPoint(overrides: Partial<SolderPoint> = {}): Solder
     touchZ: -1.0,
     type: SolderFeedType.TouchDown,
     feedSeconds: 0.5,
+    approach: 'plunge',
     ...overrides,
   };
 }
@@ -65,7 +91,7 @@ export function defaultSolderingParams(overrides: Partial<SolderingParams> = {})
     metric: true,
     safeZ: 5.0,
     feederRPM: 1000.0,
-    plungeFeed: 100.0,
+    plungeFeed: 1000.0,
     settleSeconds: 0.0,
     decimals: 3,
     programName: 'hjLabs Auto-Soldering',
@@ -144,35 +170,89 @@ export function generateSoldering(points: SolderPoint[], params: Partial<Solderi
     // so a per-point freeZ set BELOW safeZ never drags the tip across the board
     // under the guaranteed-clear height. freeZ stays the post-solder retract.
     const travelZ = Math.max(pt.freeZ, p.safeZ);
-    const xy = `G0 X${fmt(pt.x, d)} Y${fmt(pt.y, d)}`;
     const feedOn = `M3 S${fmt(p.feederRPM, d)}`;
     const feed = `G4 P${fmt(pt.feedSeconds, d)}`;
-    // Plunge feed floored to >= 1 mm/min: an F0 (plungeFeed 0) errors/stalls GRBL.
-    const touch = `G1 Z${fmt(pt.touchZ, d)} F${fmt(Math.max(1, p.plungeFeed), d)}`;
+    const feedF = fmt(Math.max(1, p.plungeFeed), d); // F0 stalls GRBL
     const preRaise = `G0 Z${fmt(travelZ, d)}`;
     const raise = `G0 Z${fmt(pt.freeZ, d)}`;
 
+    // Where the tip arrives before the final descent, the moves that make it
+    // touch down, and the symmetric retract back out — all approach-aware.
+    //
+    // For a straight plunge the tip sits directly above the pad, drops
+    // vertically to Touch-Z, and (after touching/feeding) lifts straight back to
+    // Free-Z via `raise`.
+    //
+    // For a directional 45° approach the tip starts at Free-Z offset from the
+    // pad along ONE axis by the horizontal run (= |FreeZ−TouchZ|, so the
+    // diagonal is a true 45°), with the other axis at the pad coord. It then
+    // moves diagonally INTO the pad (offset axis → pad coord WHILE Z → Touch-Z),
+    // and on retract reverses the SAME diagonal (offset axis back out WHILE Z →
+    // Free-Z) before the normal safe-Z handling. Direction = the side the tip
+    // comes IN from: front = −Y, back = +Y, right = +X, left = −X.
+    const approach: SolderApproach = pt.approach ?? 'plunge';
+    let xy: string; // rapid to the start-of-descent XY at Free-Z
+    const touch: string[] = []; // moves that bring the tip onto the pad
+    // Diagonal retract that mirrors the descent (empty for a straight plunge —
+    // the plain vertical `raise` is used instead).
+    const angleRetract: string[] = [];
+    if (approach === 'plunge') {
+      // Straight plunge: above the pad, then a vertical descent.
+      xy = `G0 X${fmt(pt.x, d)} Y${fmt(pt.y, d)}`;
+      touch.push(`G1 Z${fmt(pt.touchZ, d)} F${feedF}`);
+    } else {
+      const off = Math.abs(pt.freeZ - pt.touchZ); // horizontal run = vertical drop
+      // Per-direction signed offset of the descent START from the pad. The tip
+      // comes IN from this side, so it starts on that side and moves toward the
+      // pad. front = from −Y, back = from +Y, right = from +X, left = from −X.
+      let startX = pt.x;
+      let startY = pt.y;
+      switch (approach) {
+        case 'angle-front':
+          startY = pt.y - off; // start on the −Y side, move in +Y into the pad
+          break;
+        case 'angle-back':
+          startY = pt.y + off; // start on the +Y side, move in −Y into the pad
+          break;
+        case 'angle-right':
+          startX = pt.x + off; // start on the +X side, move in −X into the pad
+          break;
+        case 'angle-left':
+          startX = pt.x - off; // start on the −X side, move in +X into the pad
+          break;
+      }
+      // Start above the offset point at Free-Z, descend diagonally onto the pad,
+      // and (on retract) reverse the diagonal back out to the offset point.
+      xy = `G0 X${fmt(startX, d)} Y${fmt(startY, d)}`;
+      touch.push(`G1 X${fmt(pt.x, d)} Y${fmt(pt.y, d)} Z${fmt(pt.touchZ, d)} F${feedF}`);
+      angleRetract.push(`G1 X${fmt(startX, d)} Y${fmt(startY, d)} Z${fmt(pt.freeZ, d)} F${feedF}`);
+    }
+
     if (pt.type === SolderFeedType.PreSolder) {
-      o.push(`(Point ${n}: pre-solder, feed ${fmt(pt.feedSeconds, d)}s)`);
+      o.push(`(Point ${n}: pre-solder, ${approach}, feed ${fmt(pt.feedSeconds, d)}s)`);
       o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
-      o.push(xy); // move above pad at free Z
+      o.push(xy); // move above pad (or its 45° start) at free Z
       o.push(feedOn); // pre-feed wire onto tip
       o.push(feed);
       o.push('M5'); // stop feeder
-      o.push(touch); // touch pad to deposit
+      o.push(...touch); // touch pad to deposit (straight or 45°)
       if (p.settleSeconds > 0.0) o.push(`G4 P${fmt(p.settleSeconds, d)}`);
-      o.push(raise); // retract to free Z
+      // Retract: diagonal back out along the 45° approach, else straight up.
+      if (angleRetract.length > 0) o.push(...angleRetract);
+      else o.push(raise);
     } else {
       // TouchDown
-      o.push(`(Point ${n}: touch-down, feed ${fmt(pt.feedSeconds, d)}s)`);
+      o.push(`(Point ${n}: touch-down, ${approach}, feed ${fmt(pt.feedSeconds, d)}s)`);
       o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
-      o.push(xy); // move above pad at free Z
-      o.push(touch); // touch pad first
+      o.push(xy); // move above pad (or its 45° start) at free Z
+      o.push(...touch); // touch pad first (straight or 45°)
       o.push(feedOn); // feed wire while in contact
       o.push(feed);
       o.push('M5'); // stop feeder
       if (p.settleSeconds > 0.0) o.push(`G4 P${fmt(p.settleSeconds, d)}`);
-      o.push(raise); // retract to free Z
+      // Retract: diagonal back out along the 45° approach, else straight up.
+      if (angleRetract.length > 0) o.push(...angleRetract);
+      else o.push(raise);
     }
   }
 

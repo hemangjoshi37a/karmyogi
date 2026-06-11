@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useT } from '../i18n'
 import { useMachine, useProgram, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
 import { grbl } from '../serial/controller'
 import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
+import { InfoTip } from '../components/InfoTip'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
 import {
   defaultPnpOp,
   defaultPnpParams,
@@ -101,6 +105,37 @@ function headLabels(head: PnpHeadType, t: ReturnType<typeof useT>): { on: string
 }
 
 /**
+ * A slim square icon button for the header toolbar (the Soldering / CAD-CAM
+ * house pattern). `title`/`body` are combined into a native hover tooltip
+ * explainer (one that never intercepts the action click). An optional `text`
+ * label sits beside the glyph for the few actions that need a word.
+ */
+function ToolButton(props: {
+  glyph: ReactNode
+  title: string
+  body: string
+  onClick: () => void
+  text?: string
+  className?: string
+  disabled?: boolean
+}) {
+  const { glyph, title, body, onClick, text, className = '', disabled } = props
+  return (
+    <button
+      type="button"
+      className={`pp-ico${text ? ' pp-ico-text' : ''}${className ? ' ' + className : ''}`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={title}
+      title={`${title} — ${body}`}
+    >
+      <span aria-hidden="true">{glyph}</span>
+      {text && <span className="pp-ico-label">{text}</span>}
+    </button>
+  )
+}
+
+/**
  * A number input that keeps the user's RAW keystrokes in local string state
  * while focused, so transient values ("", "-", "1.", "-0.0") never get coerced
  * back to a number mid-edit (which fought the caret and reverted typing). The
@@ -117,6 +152,7 @@ function NumField(props: {
   title?: string
   className?: string
   'aria-label'?: string
+  'aria-invalid'?: boolean
 }) {
   const { value, commit, ...rest } = props
   const [draft, setDraft] = useState<string | null>(null)
@@ -140,6 +176,33 @@ function NumField(props: {
   )
 }
 
+/**
+ * A labelled parameter field: short label + optional ⓘ explainer (which works
+ * on touch, where hover titles never fire) and the unit rendered as a muted
+ * inline suffix inside the input — the Soldering NumField house pattern.
+ */
+function PField(props: {
+  label: string
+  unit?: string
+  info?: { title: string; body: string }
+  warn?: boolean
+  children: ReactNode
+}) {
+  const { label, unit, info, warn, children } = props
+  return (
+    <label className={`pp-field${warn ? ' pp-field-warn' : ''}`}>
+      <span className="pp-field-label">
+        {label}
+        {info && <InfoTip topic="pnpField" title={info.title} body={info.body} />}
+      </span>
+      <span className={`pp-input${unit ? ' has-unit' : ''}`}>
+        {children}
+        {unit && <i>{unit}</i>}
+      </span>
+    </label>
+  )
+}
+
 /** Whether a point lies inside the bed rectangle [0..w] x [0..h]. */
 const inBed = (x: number, y: number, w: number, h: number): boolean =>
   x >= 0 && x <= w && y >= 0 && y <= h
@@ -149,19 +212,21 @@ const inBed = (x: number, y: number, w: number, h: number): boolean =>
  * spindle output (M3 = grip/vacuum ON, M5 = release OFF). An editable table of
  * pick→place operations drives the pure `generatePickPlace` core, which emits a
  * safe program (travel at safe-Z, lower to pick, grip, lift, travel to place,
- * lower, release, lift). "Set pick/place from machine" captures the live work
- * position. Generation is live + debounced into the shared program store so the
+ * lower, release, lift). "Set pick/place" captures the live work position.
+ * Generation is live + debounced into the shared program store so the
  * Visualizer previews the travel/pick/place path; Send streams it to the machine.
  *
- * Layout: a vertical-only scroller whose CARD sections tile into a responsive
- * grid — head + operations table and the bed preview stay full width, while the
- * motion params and the collapsed Advanced section tile beside each other at
- * wide widths (collapsing to one column when the panel is narrow). The Send +
- * raw G-code card spans full width at the foot.
+ * Layout (house style): a slim header (title + ⓘ + icon toolbar), an
+ * always-visible status strip (op/line counts · connection · sync hint), then a
+ * vertical-only scroller whose CARD sections tile into a responsive grid — the
+ * ops table and bed preview stay full width, while the motion params and the
+ * collapsed Advanced section tile beside each other at wide widths (collapsing
+ * to one column when the panel is narrow). The Send + raw G-code card spans
+ * full width at the foot.
  */
 export function PickPlacePanel() {
   const t = useT()
-  // Live machine work-position + connection (for "Set from machine").
+  // Live machine work-position + connection (for "Set pick/place").
   const wpos = useMachine((s) => s.wpos)
   const connected = useMachine((s) => s.connection === 'connected')
   const setProgram = useProgram((s) => s.setProgram)
@@ -242,6 +307,24 @@ export function PickPlacePanel() {
   const setParam = <K extends keyof PanelParams>(key: K, value: PanelParams[K]) =>
     setParams((p) => ({ ...p, [key]: value }))
 
+  // ---- color-coded setting PRESETS (motion / head params only) -------------
+  // A preset snapshots the GENERATOR SETTINGS (head + Z heights + feeds + grip +
+  // dwell/rotation/decimals) — NOT the pick→place operation list, which is the
+  // operator's actual work. Scoped to its own persistence key, independent of
+  // the carving / soldering / writing presets.
+  const capturePreset = (): PanelParams => ({ ...params })
+  // Restore a preset, re-validating the (untrusted) snapshot per-field via the
+  // same parser the file-load path uses so a corrupt slot can't feed a NaN to
+  // the emitter; missing fields fall back to the current params.
+  const applyPreset = (p: PanelParams) => {
+    setParams((prev) => parsePnpParams(p, prev))
+  }
+  const presets = usePresets<PanelParams>({
+    storageKey: 'karmyogi.pnp.presets',
+    capture: capturePreset,
+    onApply: applyPreset,
+  })
+
   // Record the live machine work-position into the selected row's pick or place
   // X/Y. If no row is selected, append a fresh row first.
   function recordInto(which: 'pick' | 'place') {
@@ -262,6 +345,10 @@ export function PickPlacePanel() {
   // Live G-code preview, recomputed whenever ops/params change.
   const gcode = useMemo(() => generatePickPlace(ops, { ...params }), [ops, params])
   const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
+  // With NO ops the generator still emits a preamble/footer-only program, but
+  // the store sync below pushes '' (nothing for the Visualizer) — so every
+  // user-facing count reports 0 lines until there is at least one operation.
+  const effectiveLines = ops.length === 0 ? 0 : lineCount
 
   // Push the freshly-computed program into the store (debounced) so the
   // Visualizer updates without a manual Generate step. While a job is streaming
@@ -338,15 +425,149 @@ export function PickPlacePanel() {
   // would drag the part across the bed at or below pickup height.
   const travelZUnsafe = params.travelZ <= params.pickZ || params.travelZ <= params.placeZ
 
+  // The rotation column only appears when rotation is emitted as a real A-axis
+  // word; the empty-state cell spans whatever columns are visible.
+  const tableCols = params.rotaryAxis ? 7 : 6
+
+  // Tooltip body for the Set pick / Set place toolbar buttons: explains exactly
+  // what will happen given the connection + selection state.
+  const setBody = (which: 'pick' | 'place'): string => {
+    if (!connected) return t('pnp.set.title.off', 'Connect to set from machine')
+    if (hasSelection) {
+      return which === 'pick'
+        ? t('pnp.setPick.title.on', 'Fill the selected op pick X/Y from the live machine position')
+        : t('pnp.setPlace.title.on', 'Fill the selected op place X/Y from the live machine position')
+    }
+    return which === 'pick'
+      ? t('pnp.setPick.body.append', 'Add a new op and fill its pick X/Y from the live machine position.')
+      : t('pnp.setPlace.body.append', 'Add a new op and fill its place X/Y from the live machine position.')
+  }
+
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('pnp.presets.aria', 'Pick & Place setting presets')}
+      />
     <div className="pp-panel">
       <div className="pp-scroll">
-        <p className="pp-intro">
-          {t('pnp.intro.pre', 'Move parts from a')} <b>{t('pnp.intro.pick', 'pick')}</b>{' '}
-          {t('pnp.intro.mid', 'point to a')} <b>{t('pnp.intro.place', 'place')}</b>{' '}
-          {t('pnp.intro.head', 'point. The head grabs with the spindle output ({on} on, {off} off). Build the operations below, then', { on: labels.on, off: labels.off })}{' '}
-          <b>{t('pnp.intro.send', 'Send')}</b> {t('pnp.intro.tomachine', 'to the machine.')}
-        </p>
+        {/* Slim header: title + ⓘ explainer + compact icon toolbar. */}
+        <header className="pp-head">
+          <div className="pp-head-title">
+            <span className="pp-head-name">{t('pnp.title', 'Pick & Place')}</span>
+            <InfoTip
+              topic="pnpMode"
+              title={t('pnp.title', 'Pick & Place')}
+              body={t(
+                'pnp.intro',
+                'Move parts from a pick point to a place point. The head grabs with the spindle output ({on} on, {off} off). Build the operations below, then Send to the machine.',
+                { on: labels.on, off: labels.off },
+              )}
+            />
+          </div>
+          <div className="pp-tools">
+            <ToolButton
+              className="pp-ico-primary"
+              glyph={<Icon name="add" />}
+              onClick={addRow}
+              title={t('pnp.addOp', 'Add op')}
+              body={t('pnp.toolbar.add.body', 'Append a pick→place operation to the table.')}
+            />
+            <ToolButton
+              className="pp-ico-danger"
+              glyph={<Icon name="trash" />}
+              onClick={clearOps}
+              disabled={ops.length === 0}
+              title={t('pnp.clear', 'Clear')}
+              body={t('pnp.toolbar.clear.body', 'Remove every operation and start over.')}
+            />
+            <span className="pp-tools-sep" aria-hidden="true" />
+            {/* Ops FILE save/load (.kpnp = operations + params); distinct from the
+                settings-only (.kpnpset) pair in the preset save bar below. */}
+            <SaveLoadButtons
+              value={doc}
+              onLoad={loadDoc}
+              onError={setLoadError}
+              fileBase="karmyogi-pick-place"
+              ext="kpnp"
+              saveDisabled={ops.length === 0}
+              saveTitle={t('pnp.save', 'Save operations + params')}
+              loadTitle={t('pnp.load', 'Load operations + params')}
+            />
+            <span className="pp-tools-sep" aria-hidden="true" />
+            <ToolButton
+              glyph={<Icon name="zero" size={14} />}
+              onClick={() => recordInto('pick')}
+              disabled={!connected}
+              text={
+                hasSelection
+                  ? t('pnp.setPick.short.sel', 'Set pick #{n}', { n: selected + 1 })
+                  : t('pnp.setPick.short', 'Set pick')
+              }
+              title={t('pnp.setPick.short', 'Set pick')}
+              body={setBody('pick')}
+            />
+            <ToolButton
+              glyph={<Icon name="zero" size={14} />}
+              onClick={() => recordInto('place')}
+              disabled={!connected}
+              text={
+                hasSelection
+                  ? t('pnp.setPlace.short.sel', 'Set place #{n}', { n: selected + 1 })
+                  : t('pnp.setPlace.short', 'Set place')
+              }
+              title={t('pnp.setPlace.short', 'Set place')}
+              body={setBody('place')}
+            />
+          </div>
+        </header>
+
+        {/* Live status strip: op/line counts · connection · Visualizer sync. */}
+        <div className="pp-status">
+          <span className="pp-status-pill">
+            <b>{ops.length}</b>{' '}
+            {ops.length === 1 ? t('pnp.status.op', 'op') : t('pnp.status.ops', 'ops')}
+          </span>
+          <span className="pp-status-sep" aria-hidden="true">·</span>
+          <span className="pp-status-pill">
+            <b>{effectiveLines}</b> {t('pnp.status.lines', 'lines')}
+          </span>
+          <span className="pp-status-sep" aria-hidden="true">·</span>
+          {connected ? (
+            <span
+              className="pp-status-pill"
+              title={t('pnp.status.wpos.title', 'Live machine work position (X, Y)')}
+            >
+              {t('pnp.status.wpos', 'WPos')}{' '}
+              <b>
+                {wpos.x.toFixed(2)}, {wpos.y.toFixed(2)}
+              </b>
+            </span>
+          ) : (
+            <span
+              className="pp-status-pill pp-status-warn"
+              title={t('pnp.status.conn.title', 'Connect to a machine to set positions and send')}
+            >
+              {t('pnp.status.notConnected', 'Not connected')}
+            </span>
+          )}
+          <span
+            className="pp-status-sync"
+            title={t('pnp.live.title', 'The program auto-syncs to the Visualizer as you edit')}
+          >
+            → {t('pnp.status.visualizer', 'Visualizer')}
+          </span>
+        </div>
+
+        {loadError && (
+          <p className="pp-warnbox" role="alert">
+            <Icon name="warning" size={14} />
+            <span>{loadError}</span>
+          </p>
+        )}
 
         {/* Cards tile into a responsive grid: wide cards (ops table, bed
             preview, send bar) span all columns; the motion + advanced param
@@ -359,7 +580,7 @@ export function PickPlacePanel() {
           <h3>{t('pnp.ops.title', 'Operations')}</h3>
           <div className="pp-card-body">
             <div className="pp-row">
-              <label className="pp-head">
+              <label className="pp-headsel">
                 {t('pnp.head.label', 'Head')}
                 <select
                   value={params.headType}
@@ -370,12 +591,6 @@ export function PickPlacePanel() {
                   <option value="gripper">{t('pnp.head.opt.gripper', 'Gripper')}</option>
                 </select>
               </label>
-              <span className="pp-spacer" />
-              <span className="pp-meta">
-                {ops.length === 1
-                  ? t('pnp.ops.count.one', '{n} op', { n: ops.length })
-                  : t('pnp.ops.count.many', '{n} ops', { n: ops.length })}
-              </span>
             </div>
 
             <div className="pp-table-wrap">
@@ -387,19 +602,34 @@ export function PickPlacePanel() {
                     <th>{t('pnp.col.pickY', 'Pick Y')}</th>
                     <th>{t('pnp.col.placeX', 'Place X')}</th>
                     <th>{t('pnp.col.placeY', 'Place Y')}</th>
+                    {params.rotaryAxis && <th>{t('pnp.col.rot', 'Rot°')}</th>}
                     <th className="pp-actions-col" />
                   </tr>
                 </thead>
                 <tbody>
                   {ops.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="pp-empty">
-                        {t('pnp.ops.empty', 'No operations yet. Add one below, or set pick/place from the machine position.')}
+                      <td colSpan={tableCols} className="pp-empty">
+                        <p>
+                          {t(
+                            'pnp.ops.empty',
+                            'No operations yet. Press + to add one, or ⌖ to set pick/place from the machine position.',
+                          )}
+                        </p>
+                        <button className="primary pp-empty-add" onClick={addRow}>
+                          <Icon name="add" size={14} /> {t('pnp.addOp', 'Add op')}
+                        </button>
                       </td>
                     </tr>
                   )}
                   {ops.map((op, i) => {
-                    const oob = !inBed(op.pickX, op.pickY, bedW, bedH) || !inBed(op.placeX, op.placeY, bedW, bedH)
+                    // Per-coordinate range checks so the offending inputs (not
+                    // just the row) get the warning tint.
+                    const badPX = op.pickX < 0 || op.pickX > bedW
+                    const badPY = op.pickY < 0 || op.pickY > bedH
+                    const badQX = op.placeX < 0 || op.placeX > bedW
+                    const badQY = op.placeY < 0 || op.placeY > bedH
+                    const oob = badPX || badPY || badQX || badQY
                     return (
                     <tr
                       key={op.id ?? i}
@@ -417,6 +647,8 @@ export function PickPlacePanel() {
                         <NumField
                           step="0.1"
                           aria-label={t('pnp.col.pickX', 'Pick X')}
+                          aria-invalid={badPX || undefined}
+                          className={badPX ? 'pp-num-warn' : undefined}
                           value={op.pickX}
                           commit={(raw) => updateOp(i, { pickX: num(raw, op.pickX) })}
                         />
@@ -425,6 +657,8 @@ export function PickPlacePanel() {
                         <NumField
                           step="0.1"
                           aria-label={t('pnp.col.pickY', 'Pick Y')}
+                          aria-invalid={badPY || undefined}
+                          className={badPY ? 'pp-num-warn' : undefined}
                           value={op.pickY}
                           commit={(raw) => updateOp(i, { pickY: num(raw, op.pickY) })}
                         />
@@ -433,6 +667,8 @@ export function PickPlacePanel() {
                         <NumField
                           step="0.1"
                           aria-label={t('pnp.col.placeX', 'Place X')}
+                          aria-invalid={badQX || undefined}
+                          className={badQX ? 'pp-num-warn' : undefined}
                           value={op.placeX}
                           commit={(raw) => updateOp(i, { placeX: num(raw, op.placeX) })}
                         />
@@ -441,10 +677,22 @@ export function PickPlacePanel() {
                         <NumField
                           step="0.1"
                           aria-label={t('pnp.col.placeY', 'Place Y')}
+                          aria-invalid={badQY || undefined}
+                          className={badQY ? 'pp-num-warn' : undefined}
                           value={op.placeY}
                           commit={(raw) => updateOp(i, { placeY: num(raw, op.placeY) })}
                         />
                       </td>
+                      {params.rotaryAxis && (
+                        <td data-label={t('pnp.col.rot', 'Rot°')}>
+                          <NumField
+                            step="5"
+                            aria-label={t('pnp.col.rotation', 'Rotation°')}
+                            value={op.rotation ?? 0}
+                            commit={(raw) => updateOp(i, { rotation: num(raw, op.rotation ?? 0) })}
+                          />
+                        </td>
+                      )}
                       <td className="pp-actions">
                         <IconButton
                           className="pp-row-btn"
@@ -480,81 +728,21 @@ export function PickPlacePanel() {
               </table>
             </div>
 
-            <div className="pp-row pp-op-tools">
-              <button className="primary pp-add" onClick={addRow}>
-                <Icon name="add" size={14} /> {t('pnp.addOp', 'Add op')}
-              </button>
-              <button className="pp-clear" onClick={clearOps} disabled={ops.length === 0}>
-                <Icon name="trash" size={14} /> {t('pnp.clear', 'Clear')}
-              </button>
-              <SaveLoadButtons
-                value={doc}
-                onLoad={loadDoc}
-                onError={setLoadError}
-                fileBase="karmyogi-pick-place"
-                ext="kpnp"
-                saveDisabled={ops.length === 0}
-                saveTitle={t('pnp.save', 'Save operations + params')}
-                loadTitle={t('pnp.load', 'Load operations + params')}
-              />
-              <span className="pp-spacer" />
-              <button
-                className="pp-set"
-                onClick={() => recordInto('pick')}
-                disabled={!connected}
-                title={connected ? t('pnp.setPick.title.on', 'Fill the selected op pick X/Y from the live machine position') : t('pnp.set.title.off', 'Connect to set from machine')}
-              >
-                <Icon name="zero" size={14} />{' '}
-                {hasSelection
-                  ? t('pnp.setPick.sel', 'Set pick #{n} from machine', { n: selected + 1 })
-                  : t('pnp.setPick', 'Set pick from machine')}
-              </button>
-              <button
-                className="pp-set"
-                onClick={() => recordInto('place')}
-                disabled={!connected}
-                title={connected ? t('pnp.setPlace.title.on', 'Fill the selected op place X/Y from the live machine position') : t('pnp.set.title.off', 'Connect to set from machine')}
-              >
-                <Icon name="zero" size={14} />{' '}
-                {hasSelection
-                  ? t('pnp.setPlace.sel', 'Set place #{n} from machine', { n: selected + 1 })
-                  : t('pnp.setPlace', 'Set place from machine')}
-              </button>
-            </div>
-            <span className="pp-meta">
-              {connected
-                ? t('pnp.wpos', 'Live WPos  {x}, {y}', { x: wpos.x.toFixed(2), y: wpos.y.toFixed(2) })
-                : t('pnp.notConnected', 'Not connected — set buttons disabled')}
-            </span>
-            {loadError && <span className="pp-meta pp-load-error">{loadError}</span>}
-
-            {(outOfBoundsOps.length > 0 || travelZUnsafe) && (
-              <div className="pp-warnings" role="alert">
-                {outOfBoundsOps.length > 0 && (
-                  <span className="pp-warning">
-                    <Icon name="warning" size={14} />{' '}
-                    {t(
-                      'pnp.warn.outOfBounds',
-                      'Op {ops} outside the {w}×{h} mm bed — it will be clipped or hit a limit.',
-                      {
-                        ops: outOfBoundsOps.map((i) => i + 1).join(', '),
-                        w: bedW,
-                        h: bedH,
-                      },
-                    )}
-                  </span>
-                )}
-                {travelZUnsafe && (
-                  <span className="pp-warning">
-                    <Icon name="warning" size={14} />{' '}
-                    {t(
-                      'pnp.warn.travelZ',
-                      'Travel Z ({tz}) is not above the pick/place Z — the head may drag the part across the bed.',
-                      { tz: params.travelZ },
-                    )}
-                  </span>
-                )}
-              </div>
+            {outOfBoundsOps.length > 0 && (
+              <p className="pp-warnbox" role="alert">
+                <Icon name="warning" size={14} />
+                <span>
+                  {t(
+                    'pnp.warn.outOfBounds',
+                    'Op {ops} outside the {w}×{h} mm bed — it will be clipped or hit a limit.',
+                    {
+                      ops: outOfBoundsOps.map((i) => i + 1).join(', '),
+                      w: bedW,
+                      h: bedH,
+                    },
+                  )}
+                </span>
+              </p>
             )}
           </div>
         </section>
@@ -562,11 +750,8 @@ export function PickPlacePanel() {
         {/* --- 2D bed preview ------------------------------------------ */}
         {ops.length > 0 && (
           <section className="pp-card pp-card-wide">
-            <h3>{t('pnp.preview.title', 'Bed preview · pick ○ → place △')}</h3>
+            <h3>{t('pnp.preview.title', 'Bed preview')}</h3>
             <div className="pp-card-body pp-preview2d-body">
-              <span className="pp-meta pp-preview-size">
-                {t('pnp.preview.size', 'Bed {w} × {h} mm', { w: bedW, h: bedH })}
-              </span>
               <svg
                 className="pp-preview2d"
                 viewBox={`${-PAD} ${-PAD} ${bedW + PAD * 2} ${bedH + PAD * 2}`}
@@ -613,6 +798,37 @@ export function PickPlacePanel() {
                   )
                 })}
               </svg>
+              {/* Legend: swatches drawn with the same SVG classes the preview
+                  uses, so they always match the live styles. */}
+              <div className="pp-legend">
+                <span className="pp-legend-item">
+                  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                    <circle className="pp-pick" cx="7" cy="7" r="4" />
+                  </svg>
+                  {t('pnp.legend.pick', 'pick')}
+                </span>
+                <span className="pp-legend-item">
+                  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                    <polygon className="pp-place" points="7,2.5 2.5,11.5 11.5,11.5" />
+                  </svg>
+                  {t('pnp.legend.place', 'place')}
+                </span>
+                <span className="pp-legend-item">
+                  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                    <line className="pp-move" x1="1" y1="7" x2="13" y2="7" />
+                  </svg>
+                  {t('pnp.legend.travel', 'travel')}
+                </span>
+                <span className="pp-legend-item">
+                  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                    <circle className="pp-legend-oob" cx="7" cy="7" r="4" />
+                  </svg>
+                  {t('pnp.legend.oob', 'outside bed')}
+                </span>
+                <span className="pp-legend-size">
+                  {t('pnp.preview.size', 'Bed {w} × {h} mm', { w: bedW, h: bedH })}
+                </span>
+              </div>
             </div>
           </section>
         )}
@@ -621,65 +837,110 @@ export function PickPlacePanel() {
         <section className="pp-card">
           <h3>{t('pnp.motion.title', 'Motion & {action}', { action: labels.on.toLowerCase() })}</h3>
           <div className="pp-card-body">
-            <div className="pp-grid">
-              <label className="pp-field">
-                {t('pnp.field.travelZ', 'Travel Z (mm)')}
+            <div className="pp-fields">
+              <PField
+                label={t('pnp.f.travelZ', 'Travel Z')}
+                unit={t('unit.mm', 'mm')}
+                warn={travelZUnsafe}
+                info={{
+                  title: t('pnp.f.travelZ', 'Travel Z'),
+                  body: t('pnp.field.travelZ.title', 'Safe clearance height for all XY travel'),
+                }}
+              >
                 <NumField
                   step="0.1"
                   value={params.travelZ}
+                  aria-invalid={travelZUnsafe || undefined}
                   commit={(raw) => setParam('travelZ', num(raw, params.travelZ))}
-                  title={t('pnp.field.travelZ.title', 'Safe clearance height for all XY travel')}
                 />
-              </label>
-              <label className="pp-field">
-                {t('pnp.field.pickZ', 'Pick Z (mm)')}
+              </PField>
+              <PField
+                label={t('pnp.f.pickZ', 'Pick Z')}
+                unit={t('unit.mm', 'mm')}
+                info={{
+                  title: t('pnp.f.pickZ', 'Pick Z'),
+                  body: t('pnp.field.pickZ.title', 'Height the head lowers to when picking up the part'),
+                }}
+              >
                 <NumField
                   step="0.1"
                   value={params.pickZ}
                   commit={(raw) => setParam('pickZ', num(raw, params.pickZ))}
-                  title={t('pnp.field.pickZ.title', 'Height the head lowers to when picking up the part')}
                 />
-              </label>
-              <label className="pp-field">
-                {t('pnp.field.placeZ', 'Place Z (mm)')}
+              </PField>
+              <PField
+                label={t('pnp.f.placeZ', 'Place Z')}
+                unit={t('unit.mm', 'mm')}
+                info={{
+                  title: t('pnp.f.placeZ', 'Place Z'),
+                  body: t('pnp.field.placeZ.title', 'Height the head lowers to when placing the part down'),
+                }}
+              >
                 <NumField
                   step="0.1"
                   value={params.placeZ}
                   commit={(raw) => setParam('placeZ', num(raw, params.placeZ))}
-                  title={t('pnp.field.placeZ.title', 'Height the head lowers to when placing the part down')}
                 />
-              </label>
-              <label className="pp-field">
-                {t('pnp.field.feedXY', 'Feed XY (mm/min)')}
+              </PField>
+              <PField
+                label={t('pnp.f.feedXY', 'Feed XY')}
+                unit={t('unit.mmPerMin', 'mm/min')}
+                info={{
+                  title: t('pnp.f.feedXY', 'Feed XY'),
+                  body: t('pnp.field.feedXY.title', 'Travel speed for XY moves'),
+                }}
+              >
                 <NumField
                   step="100"
                   min="0"
                   value={params.feedXY}
                   commit={(raw) => setParam('feedXY', Math.max(0, num(raw, params.feedXY)))}
-                  title={t('pnp.field.feedXY.title', 'Travel speed for XY moves')}
                 />
-              </label>
-              <label className="pp-field">
-                {t('pnp.field.feedZ', 'Feed Z (mm/min)')}
+              </PField>
+              <PField
+                label={t('pnp.f.feedZ', 'Feed Z')}
+                unit={t('unit.mmPerMin', 'mm/min')}
+                info={{
+                  title: t('pnp.f.feedZ', 'Feed Z'),
+                  body: t('pnp.field.feedZ.title', 'Plunge speed when lowering to pick/place height'),
+                }}
+              >
                 <NumField
                   step="10"
                   min="0"
                   value={params.feedZ}
                   commit={(raw) => setParam('feedZ', Math.max(0, num(raw, params.feedZ)))}
-                  title={t('pnp.field.feedZ.title', 'Plunge speed when lowering to pick/place height')}
                 />
-              </label>
-              <label className="pp-field">
-                {t('pnp.field.strength', '{action} strength (S)', { action: labels.on })}
+              </PField>
+              <PField
+                label={t('pnp.f.strength', '{action} strength', { action: labels.on })}
+                unit={t('unit.sWord', 'S')}
+                info={{
+                  title: t('pnp.f.strength', '{action} strength', { action: labels.on }),
+                  body: t('pnp.field.strength.title', 'Spindle S value = vacuum / grip strength (M3 S…)'),
+                }}
+              >
                 <NumField
                   step="100"
                   min="0"
                   value={params.gripRpm}
                   commit={(raw) => setParam('gripRpm', Math.max(0, num(raw, params.gripRpm)))}
-                  title={t('pnp.field.strength.title', 'Spindle S value = vacuum / grip strength (M3 S…)')}
                 />
-              </label>
+              </PField>
             </div>
+
+            {travelZUnsafe && (
+              <p className="pp-warnbox" role="alert">
+                <Icon name="warning" size={14} />
+                <span>
+                  {t(
+                    'pnp.warn.travelZ',
+                    'Travel Z ({tz}) is not above the pick/place Z — the head may drag the part across the bed.',
+                    { tz: params.travelZ },
+                  )}
+                </span>
+              </p>
+            )}
           </div>
         </section>
 
@@ -698,29 +959,44 @@ export function PickPlacePanel() {
           </h3>
           {showAdvanced && (
             <div className="pp-card-body">
-              <div className="pp-grid">
-                <label className="pp-field">
-                  {t('pnp.field.pickDwell', 'Pick dwell (ms)')}
+              <div className="pp-fields">
+                <PField
+                  label={t('pnp.f.pickDwell', 'Pick dwell')}
+                  unit={t('unit.ms', 'ms')}
+                  info={{
+                    title: t('pnp.f.pickDwell', 'Pick dwell'),
+                    body: t('pnp.field.pickDwell.title', 'Pause after gripping so the grip is secure (0 = none)'),
+                  }}
+                >
                   <NumField
                     step="50"
                     min="0"
                     value={params.pickDwellMs}
                     commit={(raw) => setParam('pickDwellMs', Math.max(0, num(raw, params.pickDwellMs)))}
-                    title={t('pnp.field.pickDwell.title', 'Pause after gripping so the grip is secure (0 = none)')}
                   />
-                </label>
-                <label className="pp-field">
-                  {t('pnp.field.placeDwell', 'Place dwell (ms)')}
+                </PField>
+                <PField
+                  label={t('pnp.f.placeDwell', 'Place dwell')}
+                  unit={t('unit.ms', 'ms')}
+                  info={{
+                    title: t('pnp.f.placeDwell', 'Place dwell'),
+                    body: t('pnp.field.placeDwell.title', 'Pause after releasing so the part settles (0 = none)'),
+                  }}
+                >
                   <NumField
                     step="50"
                     min="0"
                     value={params.placeDwellMs}
                     commit={(raw) => setParam('placeDwellMs', Math.max(0, num(raw, params.placeDwellMs)))}
-                    title={t('pnp.field.placeDwell.title', 'Pause after releasing so the part settles (0 = none)')}
                   />
-                </label>
-                <label className="pp-field">
-                  {t('pnp.field.decimals', 'Decimals')}
+                </PField>
+                <PField
+                  label={t('pnp.f.decimals', 'Decimals')}
+                  info={{
+                    title: t('pnp.f.decimals', 'Decimals'),
+                    body: t('pnp.field.decimals.title', 'Decimal places used in emitted coordinates'),
+                  }}
+                >
                   <NumField
                     step="1"
                     min="0"
@@ -729,9 +1005,8 @@ export function PickPlacePanel() {
                     commit={(raw) =>
                       setParam('decimals', Math.max(0, Math.min(6, Math.round(num(raw, params.decimals)))))
                     }
-                    title={t('pnp.field.decimals.title', 'Decimal places used in emitted coordinates')}
                   />
-                </label>
+                </PField>
               </div>
 
               <label className="pp-check">
@@ -742,47 +1017,15 @@ export function PickPlacePanel() {
                 />
                 {t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)')}
               </label>
-
-              <div className="pp-table-wrap pp-rot-table">
-                <table className="pp-table">
-                  <thead>
-                    <tr>
-                      <th className="pp-idx">#</th>
-                      <th>{t('pnp.col.rotation', 'Rotation°')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ops.length === 0 && (
-                      <tr>
-                        <td colSpan={2} className="pp-empty">{t('pnp.rot.empty', 'No operations.')}</td>
-                      </tr>
-                    )}
-                    {ops.map((op, i) => (
-                      <tr
-                        key={op.id ?? i}
-                        className={i === selected ? 'pp-row-selected' : undefined}
-                        onClick={() => setSelected(i)}
-                      >
-                        <td className="pp-idx">
-                          <span className="pp-idx-label">{t('pnp.idx.label', 'Op')}</span> {i + 1}
-                        </td>
-                        <td data-label={t('pnp.col.rotation', 'Rotation°')}>
-                          <NumField
-                            step="5"
-                            aria-label={t('pnp.col.rotation', 'Rotation°')}
-                            value={op.rotation ?? 0}
-                            commit={(raw) => updateOp(i, { rotation: num(raw, op.rotation ?? 0) })}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <p className="pp-hint">
+                {t('pnp.rot.note', 'Rotation is edited per-op in the Operations table.')}
+              </p>
 
               <p className="pp-hint">
-                {t('pnp.hint.pre', 'Speed here is the')} <b>{t('pnp.hint.feed', 'feed rate')}</b>{' '}
-                {t('pnp.hint.post', 'only. Acceleration is a global machine setting ($120–$122, set in the Motion / Probe panels) and is not written here.')}
+                {t(
+                  'pnp.hint',
+                  'Speed here is the feed rate only. Acceleration is a global machine setting ($120–$122, set in the Motion / Probe panels) and is not written here.',
+                )}
               </p>
             </div>
           )}
@@ -811,23 +1054,47 @@ export function PickPlacePanel() {
                   <Icon name="play" size={15} /> {t('pnp.send.btn', 'Send to machine')}
                 </button>
               )}
-              <span className="pp-meta">
-                {t('pnp.send.meta', 'Live · {n} lines → Visualizer', { n: lineCount })}
-              </span>
+              {ops.length === 0 && (
+                <span className="pp-meta">
+                  {t('pnp.send.meta.empty', 'Add an operation to generate a program')}
+                </span>
+              )}
             </div>
-            {!connected && ops.length > 0 && !streaming && (
-              <span className="pp-meta">{t('pnp.send.notConnected', 'Not connected — preview is live; connect to send.')}</span>
-            )}
 
-            <button className="pp-raw-toggle" onClick={() => setShowRaw((v) => !v)} aria-expanded={showRaw}>
+            <button
+              className="pp-raw-toggle"
+              onClick={() => setShowRaw((v) => !v)}
+              aria-expanded={showRaw}
+              disabled={effectiveLines === 0}
+            >
               <Icon name={showRaw ? 'chevron-down' : 'chevron-right'} size={13} />{' '}
-              {t('pnp.raw', 'Raw G-code ({n} lines)', { n: lineCount })}
+              {t('pnp.raw', 'Raw G-code ({n} lines)', { n: effectiveLines })}
             </button>
-            {showRaw && <pre className="pp-preview">{gcode}</pre>}
+            {showRaw && ops.length > 0 && <pre className="pp-preview">{gcode}</pre>}
           </div>
         </section>
         </div>
       </div>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={params}
+            onLoad={(data) => setParams((prev) => parsePnpParams(data, prev))}
+            onError={setLoadError}
+            fileBase="pnp-settings"
+            ext="kpnpset"
+            saveTitle={t('pnp.preset.save', 'Save motion / head settings to file')}
+            loadTitle={t('pnp.preset.load', 'Load motion / head settings from file')}
+          />
+        }
+      />
     </div>
   )
 }

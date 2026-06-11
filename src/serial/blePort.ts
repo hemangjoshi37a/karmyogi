@@ -108,19 +108,149 @@ export const NUS_RX_WRITE = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'
 /** NUS TX: device → host (notify). */
 export const NUS_TX_NOTIFY = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
 
+/** Microchip RN4870/71 (ISSC) Transparent UART service. */
+export const RN4870_SERVICE = '49535343-fe7d-4ae5-8fa9-9fafd205e455'
+/** RN4870 TX: device → host (notify). */
+const RN4870_TX_NOTIFY = '49535343-1e4d-4bd9-ba61-23c647249616'
+/** RN4870 RX: host → device (write / write-without-response). */
+const RN4870_RX_WRITE = '49535343-8841-43f4-a8d4-ecbe34729bb3'
+
+/** HM-10 / HC-08 / AT-09 / JDY-08 vendor UART service (single FFE1 char). */
+const HM10_SERVICE = 0xffe0
+/** Common UART-bridge vendor service variant. */
+const FFF0_SERVICE = 0xfff0
+
 /**
- * Other BLE-UART services we offer as `optionalServices` so HM-10 / HC-08 /
- * AT-09-style modules (and FluidNC's NimBLE bridge, which also uses NUS) work.
- * For these we auto-discover a notify characteristic (RX from device) and a
- * writable one (TX to device).
+ * Every UART-ish service we may need to TALK to after connecting. Chrome only
+ * exposes services listed here (or in a matching filter), so this is the
+ * superset for both the filtered and the accept-all chooser.
  */
 const OPTIONAL_UART_SERVICES: BluetoothServiceUUID[] = [
   NUS_SERVICE,
-  0xffe0, // HM-10 / HC-08 / AT-09 vendor service
-  0xfff0, // common UART-bridge vendor service
+  HM10_SERVICE,
+  FFF0_SERVICE,
   '0000ffe0-0000-1000-8000-00805f9b34fb',
   '0000fff0-0000-1000-8000-00805f9b34fb',
+  RN4870_SERVICE,
 ]
+
+/**
+ * Chooser filters. LAYERED on purpose: most modules do NOT advertise their
+ * UART service UUID (FluidNC/ESP32 NUS bridges usually advertise only a name;
+ * HM-10s do advertise FFE0), so a services-only filter list hides most real
+ * machines. We therefore ALSO match on the well-known module/firmware name
+ * prefixes. `namePrefix` is case-sensitive, hence the case variants. Devices
+ * with truly odd advertisements are reachable via the accept-all path.
+ */
+const REQUEST_FILTERS: RequestDeviceFilter[] = [
+  { services: [NUS_SERVICE] },
+  { services: [HM10_SERVICE] },
+  { services: [FFF0_SERVICE] },
+  { services: [RN4870_SERVICE] },
+  { namePrefix: 'FluidNC' },
+  { namePrefix: 'GRBL' },
+  { namePrefix: 'Grbl' },
+  { namePrefix: 'grbl' },
+  { namePrefix: 'BT04' }, // BT04-A / AT-09 clones
+  { namePrefix: 'BT05' },
+  { namePrefix: 'HM' }, // HM-10 ("HMSoft"), HM-16/17
+  { namePrefix: 'HC' }, // HC-08 (BLE — classic HC-05/06 never appear to BLE scans)
+  { namePrefix: 'JDY' }, // JDY-08 / JDY-23
+  { namePrefix: 'MLT' }, // MLT-BT05
+]
+
+/** Shown when we GATT-connected but found nothing UART-shaped to talk to. */
+export const BLE_NO_UART_MESSAGE =
+  'Connected, but the device has no supported BLE serial service (NUS / FFE0 / RN4870). ' +
+  'Classic Bluetooth modules (HC-05/HC-06) are not reachable from browsers — use a ' +
+  'BLE-UART module (HM-10 / JDY-08 / FluidNC) or the Wi-Fi (WebSocket) bridge.'
+
+export interface BleRequestFailure {
+  /** Human-actionable message for the connect UI / console. */
+  message: string
+  /** True when the user simply dismissed the chooser (not a real fault). */
+  cancelled: boolean
+}
+
+/**
+ * Translate a requestDevice() / GATT failure into a human-actionable message.
+ * Consults getAvailability() AFTER the failure — never before the chooser (a
+ * pre-flight await would void the tap's transient user activation) — so an
+ * OFF adapter gets its own "turn on Bluetooth" hint.
+ */
+export async function describeBleRequestError(err: unknown): Promise<BleRequestFailure> {
+  const name = (err as { name?: string } | null)?.name ?? ''
+  const raw = err instanceof Error ? err.message : String(err ?? '')
+  // Chooser dismissed: Chrome rejects with NotFoundError "User cancelled the
+  // requestDevice() chooser." (some platforms use AbortError). A normal action.
+  if (name === 'AbortError' || (name === 'NotFoundError' && /cancel/i.test(raw))) {
+    return { cancelled: true, message: 'No Bluetooth device selected.' }
+  }
+  // chrome://flags / enterprise policy: NotFoundError "Web Bluetooth API globally disabled."
+  if (name === 'NotFoundError' && /globally disabled/i.test(raw)) {
+    return {
+      cancelled: false,
+      message:
+        'Web Bluetooth is disabled in this browser (flag or policy). Check chrome://flags ' +
+        '→ "Web Bluetooth" and the browser policy, then retry.',
+    }
+  }
+  if (name === 'SecurityError' || name === 'NotAllowedError') {
+    return {
+      cancelled: false,
+      message:
+        'Bluetooth permission denied — allow "Nearby devices" for this browser ' +
+        '(Android: Settings → Apps → Chrome → Permissions) and open karmyogi over a ' +
+        'trusted HTTPS connection.',
+    }
+  }
+  if (name === 'InvalidStateError') {
+    return {
+      cancelled: false,
+      message: 'The Bluetooth adapter is not ready — toggle Bluetooth off/on and retry.',
+    }
+  }
+  // Anything else. IMPORTANT: navigator.bluetooth.getAvailability() is UNRELIABLE
+  // on Android (it frequently returns false even when Bluetooth is ON), so we must
+  // NOT use it to flatly claim "Bluetooth is off" — doing that hides the real
+  // failure. Instead we ALWAYS surface the underlying error and only soften the
+  // adapter hint based on availability.
+  const avail = await BlePort.availability()
+  const base = raw ? `Bluetooth connect failed: ${raw}` : 'Bluetooth connect failed.'
+  const hint =
+    avail === false
+      ? ' If Bluetooth is OFF, turn it on (plus Location on Android 11 and older). If it IS on, the browser didn’t report a Bluetooth adapter — open karmyogi over HTTPS in Chrome/Edge.'
+      : ' Make sure the machine is powered, advertising over BLE, and in range; if it isn’t in the list, tap “Show all devices”. (Classic Bluetooth HC-05/HC-06 can’t be reached from a browser.)'
+  return { cancelled: false, message: `${base}${hint}` }
+}
+
+/**
+ * Scan one GATT service for a notify characteristic (RX, device → host) and a
+ * writable one (TX, host → device). HM-10-style modules expose ONE FFE1
+ * characteristic that is BOTH — it is then used for both directions.
+ */
+async function pickUartPair(
+  svc: BluetoothRemoteGATTService,
+): Promise<{ rx: BluetoothRemoteGATTCharacteristic; tx: BluetoothRemoteGATTCharacteristic } | null> {
+  let chars: BluetoothRemoteGATTCharacteristic[] = []
+  try {
+    chars = await svc.getCharacteristics()
+  } catch {
+    return null
+  }
+  let notify: BluetoothRemoteGATTCharacteristic | null = null
+  let write: BluetoothRemoteGATTCharacteristic | null = null
+  for (const c of chars) {
+    const p = c.properties
+    if (!notify && (p.notify || p.indicate)) notify = c
+    if (!write && (p.write || p.writeWithoutResponse)) write = c
+  }
+  // A single characteristic that is both notify and writable (HM-10 style).
+  if (!notify && write && (write.properties.notify || write.properties.indicate)) notify = write
+  if (!write && notify && (notify.properties.write || notify.properties.writeWithoutResponse))
+    write = notify
+  return notify && write ? { rx: notify, tx: write } : null
+}
 
 export interface BlePortOptions {
   /**
@@ -178,6 +308,22 @@ export class BlePort implements PortLike {
   }
 
   /**
+   * Best-effort adapter availability via navigator.bluetooth.getAvailability().
+   * Returns true/false when known, or null when the API/method is absent — so
+   * callers can tell "adapter OFF" apart from "unknown". Consulted AFTER a failed
+   * chooser (never before — a pre-flight await would void the tap's user gesture).
+   */
+  static async availability(): Promise<boolean | null> {
+    const bt = getBluetooth()
+    if (!bt?.getAvailability) return null
+    try {
+      return await bt.getAvailability()
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Request a device (must be a user gesture), GATT-connect, locate the UART
    * RX/TX characteristics, and start notifications. `baudRate` is accepted for
    * PortLike parity but ignored (BLE has no baud rate).
@@ -192,16 +338,12 @@ export class BlePort implements PortLike {
       )
     }
 
+    // Filtered chooser uses the LAYERED filter set (UART services + the common
+    // FluidNC/GRBL/HM/JDY name prefixes) so machines that advertise only a name
+    // still appear; the accept-all path lists everything for odd advertisers.
     const requestOpts: RequestDeviceOptions = this.opts.acceptAllDevices
       ? { acceptAllDevices: true, optionalServices: OPTIONAL_UART_SERVICES }
-      : {
-          filters: [
-            { services: [NUS_SERVICE] },
-            { services: [0xffe0] },
-            { services: [0xfff0] },
-          ],
-          optionalServices: OPTIONAL_UART_SERVICES,
-        }
+      : { filters: REQUEST_FILTERS, optionalServices: OPTIONAL_UART_SERVICES }
 
     const device = await bt.requestDevice(requestOpts)
     this.device = device
@@ -278,53 +420,40 @@ export class BlePort implements PortLike {
   private async discoverCharacteristics(
     server: BluetoothRemoteGATTServer,
   ): Promise<{ rx: BluetoothRemoteGATTCharacteristic; tx: BluetoothRemoteGATTCharacteristic }> {
-    // 1) Try the canonical NUS pair first.
+    // 1) Canonical Nordic UART (NUS) exact pair: device→host notify + host→device write.
     try {
       const svc = await server.getPrimaryService(NUS_SERVICE)
-      const rx = await svc.getCharacteristic(NUS_TX_NOTIFY) // device→host notify
-      const tx = await svc.getCharacteristic(NUS_RX_WRITE) // host→device write
+      const rx = await svc.getCharacteristic(NUS_TX_NOTIFY)
+      const tx = await svc.getCharacteristic(NUS_RX_WRITE)
       return { rx, tx }
     } catch {
-      /* not a NUS device — fall through to generic discovery */
+      /* not a NUS device — keep trying */
     }
 
-    // 2) Generic discovery across whatever primary services we can reach.
+    // 2) Microchip RN4870/71 transparent-UART exact pair.
+    try {
+      const svc = await server.getPrimaryService(RN4870_SERVICE)
+      const rx = await svc.getCharacteristic(RN4870_TX_NOTIFY)
+      const tx = await svc.getCharacteristic(RN4870_RX_WRITE)
+      return { rx, tx }
+    } catch {
+      /* not an RN4870 — fall through to generic discovery */
+    }
+
+    // 3) Generic discovery: scan each reachable primary service for a notify +
+    //    writable pair (HM-10 / FFE0 / FFF0 modules, incl. single-char HM-10s).
     let services: BluetoothRemoteGATTService[] = []
     try {
       services = await server.getPrimaryServices()
     } catch {
       services = []
     }
-
-    let notify: BluetoothRemoteGATTCharacteristic | null = null
-    let write: BluetoothRemoteGATTCharacteristic | null = null
     for (const svc of services) {
-      let chars: BluetoothRemoteGATTCharacteristic[] = []
-      try {
-        chars = await svc.getCharacteristics()
-      } catch {
-        continue
-      }
-      for (const c of chars) {
-        const p = c.properties
-        if (!notify && (p.notify || p.indicate)) notify = c
-        if (!write && (p.write || p.writeWithoutResponse)) write = c
-      }
-      if (notify && write) break
+      const pair = await pickUartPair(svc)
+      if (pair) return pair
     }
 
-    // A single characteristic that is both notify and writable (HM-10 style).
-    if (!notify && write && (write.properties.notify || write.properties.indicate)) notify = write
-    if (!write && notify && (notify.properties.write || notify.properties.writeWithoutResponse))
-      write = notify
-
-    if (!notify || !write) {
-      throw new Error(
-        'No BLE-UART characteristics found on this device (need a notify + a write ' +
-          'characteristic). Is this a GRBL Bluetooth-LE serial bridge (e.g. Nordic UART / HM-10)?',
-      )
-    }
-    return { rx: notify, tx: write }
+    throw new Error(BLE_NO_UART_MESSAGE)
   }
 
   /** Write a chunk, split to ~20-byte frames for the default BLE ATT MTU. */

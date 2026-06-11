@@ -71,6 +71,12 @@ const STATE_NAMES: Record<string, GrblState> = {
   Check: 'Check',
   Home: 'Home',
   Sleep: 'Sleep',
+  // FluidNC extension: `Critical` is a hard-fault alarm (hard limit hit, motor
+  // fault) that requires a reset to clear. Map it onto Alarm so every existing
+  // alarm-handling path (probe aborts, alarm banners, unlock affordances)
+  // reacts to it instead of showing an uninformative "Unknown". GRBL itself
+  // never emits this state, so the GRBL path is unchanged.
+  Critical: 'Alarm',
 }
 
 function toVec3(csv: string): Vec3 | undefined {

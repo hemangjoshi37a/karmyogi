@@ -36,6 +36,8 @@ const LEFT_TABS = [
   { id: 'cadcam', title: '2D/3D Carving' },
   { id: 'writing', title: 'Writing' },
   { id: 'soldering', title: 'Soldering' },
+  { id: 'screwfitting', title: 'Screw Fitting' },
+  { id: 'drilling', title: 'Bore / Drill / Hole' },
   { id: 'pcb', title: 'PCB' },
   { id: 'glue', title: 'Glue Dispense' },
   { id: 'pnp', title: 'Pick & Place' },
@@ -44,6 +46,7 @@ const LEFT_TABS = [
   { id: 'laser', title: 'Laser Cutting' },
   { id: 'welding', title: 'Welding' },
   { id: 'camera', title: 'Camera' },
+  { id: 'aigcode', title: 'AI G-code' },
 ]
 
 // Per-tab hover tooltips shown on the dock TAB name. The 2D/3D Carving tab
@@ -86,8 +89,8 @@ const DEFAULT_LAYOUT: SerializedDockview = {
         {
           type: 'leaf',
           data: {
-            views: ['coords', 'cadcam', 'writing', 'soldering', 'pcb', 'glue', 'pnp', 'signature', 'print', 'laser', 'welding', 'camera'],
-            activeView: 'coords',
+            views: ['cadcam', 'writing', 'soldering', 'screwfitting', 'drilling', 'pcb', 'glue', 'pnp', 'signature', 'print', 'laser', 'welding', 'camera'],
+            activeView: 'cadcam',
             id: '1',
           },
           size: 323,
@@ -132,14 +135,15 @@ function buildDefaultLayout(api: DockviewApi) {
     // to deserialize (e.g. a panel id was renamed/removed).
     api.clear()
   }
-  // Left group base: Coordinates.
-  const coords = api.addPanel({ id: 'coords', component: 'coords', title: 'Coordinates' })
+  // Left group base: the first CAM/utility tab (2D/3D Carving).
+  const [first, ...rest] = LEFT_TABS
+  const base = api.addPanel({ id: first.id, component: first.id, title: first.title })
   // Center: Visualizer (right of the left group).
   const visualizer = api.addPanel({
     id: 'visualizer',
     component: 'visualizer',
     title: 'Visualizer',
-    position: { referencePanel: coords.id, direction: 'right' },
+    position: { referencePanel: base.id, direction: 'right' },
   })
   // Right column: Controller (right of the Visualizer → far-right full-height column).
   api.addPanel({
@@ -161,20 +165,21 @@ function buildDefaultLayout(api: DockviewApi) {
     title: 'Console',
     position: { referencePanel: program.id, direction: 'right' },
   })
-  // CAM/utility tabs join the left (Coordinates) group as tabs.
-  for (const t of LEFT_TABS) {
+  // The remaining CAM/utility tabs join the left group as tabs.
+  for (const t of rest) {
     api.addPanel({
       id: t.id,
       component: t.id,
       title: t.title,
-      position: { referencePanel: coords.id, direction: 'within' },
+      position: { referencePanel: base.id, direction: 'within' },
     })
   }
-  coords.api.setActive()
+  base.api.setActive()
 }
 
 export function Shell() {
   const apiRef = useRef<DockviewApi | null>(null)
+  const dockHostRef = useRef<HTMLDivElement | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const t = useT()
   const isMobile = useIsMobile()
@@ -224,10 +229,11 @@ export function Shell() {
         for (const panel of [...event.api.panels]) {
           if (!validIds.has(panel.id)) event.api.removePanel(panel)
         }
-        // Anchor new tabs to the left group (Coordinates), like the default build.
-        const anchor =
-          event.api.getPanel('coords') ??
-          event.api.getPanel(LEFT_TABS.find((tt) => event.api.getPanel(tt.id))?.id ?? '')
+        // Anchor new tabs to the left CAM/utility group (the first LEFT_TAB still
+        // present), like the default build.
+        const anchor = event.api.getPanel(
+          LEFT_TABS.find((tt) => event.api.getPanel(tt.id))?.id ?? '',
+        )
         for (const tab of LEFT_TABS) {
           if (event.api.getPanel(tab.id)) continue
           event.api.addPanel({
@@ -382,7 +388,7 @@ export function Shell() {
       {isMobile ? (
         <MobileShell />
       ) : (
-        <div className="dock-host">
+        <div className="dock-host" ref={dockHostRef}>
           <DockviewReact
             className="dockview-theme-karmyogi"
             components={panelComponents}

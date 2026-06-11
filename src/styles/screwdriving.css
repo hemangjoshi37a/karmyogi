@@ -1,0 +1,536 @@
+/* Screw Fitting (screw-driving) panel. Co-located styles; uses theme CSS
+   variables only. Mirrors the Auto-soldering panel layout (a slim header + icon
+   toolbar, a live status strip, collapsible Settings cards that tile into a
+   responsive grid, and a compact points table that reflows to stacked cards when
+   the PANEL is narrow). The panel is the only scroll container (vertical only),
+   reflowing on its OWN width via a container query so it works in a narrow docked
+   column on a wide window. */
+
+.swd-panel {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  container-type: inline-size;
+  container-name: screwdrivepanel;
+}
+
+/* ───────────────────────── header ───────────────────────── */
+.swd-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--ctl-h-lg);
+}
+.swd-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.swd-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.swd-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.swd-tools-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--sp-1) 2px;
+  background: var(--border);
+}
+
+/* square icon buttons */
+.swd-ico {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.swd-ico > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.swd-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.swd-ico:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.swd-ico.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
+}
+.swd-ico-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-size: 17px;
+  font-weight: 600;
+}
+.swd-ico-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 85%, #fff);
+  color: var(--accent-fg);
+}
+.swd-ico-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ───────────────────────── status strip ───────────────────────── */
+.swd-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+.swd-status-pill b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.swd-status-sep {
+  color: var(--border);
+}
+.swd-status-sync {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.swd-warn {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+/* ───────────────────────── cards ───────────────────────── */
+.swd-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+.swd-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.swd-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.swd-card-head h4 {
+  margin: 0;
+  font-size: var(--fs-section);
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.swd-card-count {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 1px 6px;
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--fg-muted);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+/* ───────────────────────── field grids ───────────────────────── */
+.swd-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3);
+  align-items: end;
+}
+.swd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.swd-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.swd-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.swd-input input {
+  width: 100%;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 7px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+.swd-input.has-unit input {
+  padding-right: 38px;
+}
+.swd-input input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.swd-input i {
+  position: absolute;
+  right: 7px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+
+/* ───────────────────────── point table ───────────────────────── */
+.swd-points {
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+.swd-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.swd-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.swd-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: var(--fs-section);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  text-align: left;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.swd-table td {
+  padding: 3px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.swd-table tbody tr {
+  cursor: pointer;
+}
+.swd-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.swd-table tr.swd-row-selected td {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.swd-idx {
+  width: 26px;
+  text-align: right;
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
+}
+.swd-table td input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 4px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.swd-table td input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.swd-empty {
+  padding: 22px 12px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+.swd-actions-col {
+  width: 92px;
+}
+.swd-actions {
+  display: flex;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+.swd-row-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.swd-row-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.swd-row-ico:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.swd-row-ico.swd-del:not(:disabled):hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-input));
+}
+
+/* ───────────────────── narrow point cards ───────────────────── */
+.swd-cards {
+  display: none; /* shown only by the narrow container query */
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+}
+.swd-pcard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+.swd-pcard.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.swd-pcard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.swd-pcard-idx {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--fg);
+}
+.swd-pcard-actions {
+  display: inline-flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.swd-pcard-actions .swd-row-ico {
+  flex: 0 0 auto;
+  width: var(--ctl-h-touch);
+  height: var(--ctl-h-touch);
+}
+.swd-pcard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: var(--sp-2);
+}
+.swd-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.swd-mini > span {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.swd-mini input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h-touch);
+  padding: 0 5px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.swd-mini input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ───────── narrow PANEL: swap the table for the card list ───────── */
+@container screwdrivepanel (max-width: 430px) {
+  .swd-settings {
+    grid-template-columns: 1fr;
+  }
+  .swd-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+  .swd-input input {
+    height: var(--ctl-h-touch);
+  }
+  .swd-ico {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+  .swd-table-wrap {
+    display: none;
+  }
+  .swd-cards {
+    display: flex;
+  }
+}
+
+/* Fallback for engines without container-query support. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 768px) {
+    .swd-settings {
+      grid-template-columns: 1fr;
+    }
+    .swd-fields {
+      grid-template-columns: 1fr 1fr;
+    }
+    .swd-input input {
+      height: var(--ctl-h-touch);
+    }
+    .swd-ico {
+      width: var(--ctl-h-touch);
+      height: var(--ctl-h-touch);
+    }
+    .swd-table {
+      table-layout: auto;
+    }
+    .swd-table,
+    .swd-table thead,
+    .swd-table tbody,
+    .swd-table tr,
+    .swd-table td {
+      display: block;
+      width: 100%;
+    }
+    .swd-table thead {
+      display: none;
+    }
+    .swd-table tbody tr {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin: var(--sp-3);
+      padding: var(--sp-2) var(--sp-3);
+      background: var(--bg-elev);
+    }
+    .swd-table td {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      border-bottom: none;
+      padding: 3px 0;
+    }
+    .swd-table td input {
+      height: var(--ctl-h-touch);
+    }
+    .swd-table td[data-label]::before {
+      content: attr(data-label);
+      flex: 0 0 70px;
+      font-size: var(--fs-label);
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .swd-idx::before {
+      content: 'Screw ';
+    }
+    .swd-row-ico {
+      height: var(--ctl-h-touch);
+    }
+  }
+}

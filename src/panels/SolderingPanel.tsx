@@ -3,12 +3,17 @@ import { useMachine, useProgram, useNotifications, usePersistentState } from '..
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { usePresets } from '../components/presets/usePresets'
+import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import {
   SolderFeedType,
   defaultSolderPoint,
   defaultSolderingParams,
   estimateSolderingSeconds,
   generateSoldering,
+  type SolderApproach,
   type SolderPoint,
   type SolderingParams,
 } from '../core/soldering'
@@ -45,6 +50,20 @@ interface RowDefaults {
   touchZ: number
   feedSeconds: number
   type: SolderFeedType
+  approach: SolderApproach
+}
+
+/** Global generator params held in panel state (programName/metric are fixed). */
+type SolderParams = Omit<SolderingParams, 'programName' | 'metric'>
+
+/**
+ * A reusable SOLDERING preset: the feeder/motion params + the new-point defaults
+ * (NOT the point list, which is the operator's actual work). Scoped to its own
+ * persistence key, independent of the carving + writing presets.
+ */
+interface SolderingPreset {
+  params: SolderParams
+  defaults: RowDefaults
 }
 
 const num = (v: string, fallback: number): number => {
@@ -57,12 +76,16 @@ const intNum = (v: string, fallback: number): number => {
   return Number.isFinite(n) ? n : fallback
 }
 
-const CSV_HEADER = 'x,y,freeZ,touchZ,type,feedSeconds'
+/** Coerce an (untrusted) value to a finite number, else the fallback. */
+const numOr = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback
+
+const CSV_HEADER = 'x,y,freeZ,touchZ,type,feedSeconds,approach'
 
 /** Serialize the soldering points to a CSV string (header + one row each). */
 function pointsToCsv(points: SolderPoint[]): string {
   const rows = points.map((p) =>
-    [p.x, p.y, p.freeZ, p.touchZ, p.type, p.feedSeconds].join(','),
+    [p.x, p.y, p.freeZ, p.touchZ, p.type, p.feedSeconds, p.approach].join(','),
   )
   return [CSV_HEADER, ...rows].join('\n') + '\n'
 }
@@ -71,6 +94,38 @@ function pointsToCsv(points: SolderPoint[]): string {
 function parseFeedType(v: string): SolderFeedType {
   const s = v.trim().toLowerCase().replace(/[\s_-]/g, '')
   return s === 'presolder' ? SolderFeedType.PreSolder : SolderFeedType.TouchDown
+}
+
+/**
+ * Lenient approach parse: accepts the new directional values
+ * ('angle-front'/'angle-right'/'angle-left'/'angle-back') in any
+ * case/separator form, maps the LEGACY 'angle45'/'45'/'angle' to 'angle-front'
+ * for backward compatibility, and otherwise falls back to 'plunge'.
+ */
+function parseApproach(v: string): SolderApproach {
+  const s = v.trim().toLowerCase().replace(/[\s_-]/g, '')
+  if (s === 'anglefront') return 'angle-front'
+  if (s === 'angleright') return 'angle-right'
+  if (s === 'angleleft') return 'angle-left'
+  if (s === 'angleback') return 'angle-back'
+  // Legacy single-direction 45° value → front (the new default 45° direction).
+  if (s === 'angle45' || s === '45' || s === 'angle') return 'angle-front'
+  return 'plunge'
+}
+
+/**
+ * The five descent approaches in display order, with their UI labels. Reused by
+ * the new-point defaults select, the per-row table select, and the mobile card
+ * radios so the option set stays in one place.
+ */
+function approachOptions(t: ReturnType<typeof useT>): { value: SolderApproach; label: string }[] {
+  return [
+    { value: 'plunge', label: t('solder.approach.plunge', 'Plunge ↓') },
+    { value: 'angle-front', label: t('solder.approach.front', '45° front') },
+    { value: 'angle-right', label: t('solder.approach.right', '45° right') },
+    { value: 'angle-left', label: t('solder.approach.left', '45° left') },
+    { value: 'angle-back', label: t('solder.approach.back', '45° back') },
+  ]
 }
 
 /**
@@ -94,6 +149,7 @@ function csvToPoints(text: string): SolderPoint[] {
         touchZ: num(cols[3], -1),
         type: cols[4] ? parseFeedType(cols[4]) : SolderFeedType.TouchDown,
         feedSeconds: num(cols[5], 0.5),
+        approach: cols[6] ? parseApproach(cols[6]) : 'plunge',
       }),
     )
   }
@@ -175,6 +231,7 @@ function NumField(props: {
  */
 export function SolderingPanel() {
   const t = useT()
+  const approachOpts = useMemo(() => approachOptions(t), [t])
   // Live machine work-position + connection (for "Record position").
   const wpos = useMachine((s) => s.wpos)
   const connected = useMachine((s) => s.connection === 'connected')
@@ -187,6 +244,7 @@ export function SolderingPanel() {
     touchZ: -1.0,
     feedSeconds: 0.5,
     type: SolderFeedType.TouchDown,
+    approach: 'plunge',
   })
 
   const [points, setPoints] = useState<SolderPoint[]>([])
@@ -199,7 +257,7 @@ export function SolderingPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Global generator params (programName is fixed here; metric stays mm/G21).
-  const [params, setParams] = useState<Omit<SolderingParams, 'programName' | 'metric'>>(() => {
+  const [params, setParams] = useState<SolderParams>(() => {
     const d = defaultSolderingParams()
     return {
       safeZ: d.safeZ,
@@ -211,23 +269,66 @@ export function SolderingPanel() {
     }
   })
 
-  function newRow(x = 0, y = 0): SolderPoint {
+  // ---- color-coded setting PRESETS (feeder/motion + new-point defaults) -----
+  // Snapshot the current feeder/motion + new-point defaults (NOT the points).
+  const capturePreset = (): SolderingPreset => ({
+    params: { ...params },
+    defaults: { ...defaults },
+  })
+  // Restore a captured preset, coercing each field from the (untrusted)
+  // persisted snapshot so a corrupt slot can never feed a NaN to the emitter.
+  const applyPreset = (p: SolderingPreset) => {
+    const pp = (p?.params ?? {}) as Record<string, unknown>
+    setParams((prev) => ({
+      safeZ: numOr(pp.safeZ, prev.safeZ),
+      feederRPM: Math.max(0, numOr(pp.feederRPM, prev.feederRPM)),
+      plungeFeed: Math.max(0, numOr(pp.plungeFeed, prev.plungeFeed)),
+      settleSeconds: Math.max(0, numOr(pp.settleSeconds, prev.settleSeconds)),
+      decimals: clampDecimals(numOr(pp.decimals, prev.decimals)),
+    }))
+    const pd = (p?.defaults ?? {}) as unknown as Record<string, unknown>
+    setDefaults((prev) => ({
+      freeZ: numOr(pd.freeZ, prev.freeZ),
+      touchZ: numOr(pd.touchZ, prev.touchZ),
+      feedSeconds: Math.max(0, numOr(pd.feedSeconds, prev.feedSeconds)),
+      type: pd.type === SolderFeedType.PreSolder ? SolderFeedType.PreSolder : SolderFeedType.TouchDown,
+      approach: parseApproach(typeof pd.approach === 'string' ? pd.approach : String(prev.approach)),
+    }))
+  }
+  const presets = usePresets<SolderingPreset>({
+    storageKey: 'karmyogi.soldering.presets',
+    capture: capturePreset,
+    onApply: applyPreset,
+  })
+
+  // Build a fresh point from the new-point defaults. X/Y (and the touch-down Z)
+  // can be overridden — e.g. prefilled from the live machine position. When no
+  // touch-down Z is supplied the default Touch-Z is kept.
+  function newRow(x = 0, y = 0, touchZ = defaults.touchZ): SolderPoint {
     return defaultSolderPoint({
       x,
       y,
       freeZ: defaults.freeZ,
-      touchZ: defaults.touchZ,
+      touchZ,
       feedSeconds: defaults.feedSeconds,
       type: defaults.type,
+      approach: defaults.approach,
     })
   }
 
   function addRow() {
+    // Prefill X/Y/Z from the LIVE machine work-position when connected so the
+    // new point lands where the tip currently is (the operator jogs to the pad,
+    // then clicks Add). Z maps to the touch-down height. When disconnected (no
+    // live position) fall back to the plain defaults — never crash.
+    const x = connected ? wpos.x : 0
+    const y = connected ? wpos.y : 0
+    const touchZ = connected ? wpos.z : defaults.touchZ
     // Compute the new index from the functional updater so it never reads a
     // stale `points` from this closure (which would select the wrong row).
     setPoints((p) => {
       setSelected(p.length)
-      return [...p, newRow()]
+      return [...p, newRow(x, y, touchZ)]
     })
   }
 
@@ -309,11 +410,12 @@ export function SolderingPanel() {
     if (selected >= 0 && selected < points.length) {
       updatePoint(selected, { x: wpos.x, y: wpos.y })
     } else {
-      // Append at the live position and select it via the functional updater so
-      // the new index is computed from the current list, not a stale closure.
+      // Append at the live position (X/Y plus the touch-down Z) and select it
+      // via the functional updater so the new index is computed from the current
+      // list, not a stale closure.
       setPoints((p) => {
         setSelected(p.length)
-        return [...p, newRow(wpos.x, wpos.y)]
+        return [...p, newRow(wpos.x, wpos.y, wpos.z)]
       })
     }
   }
@@ -364,6 +466,14 @@ export function SolderingPanel() {
   }, [gcode, points.length, setProgram, removeSection])
 
   return (
+    <div className="cc-presets-host">
+      <PresetRail
+        slots={presets.slots}
+        selected={presets.selected}
+        onLoad={presets.load}
+        onSelect={presets.select}
+        ariaLabel={t('solder.presets.aria', 'Soldering setting presets')}
+      />
     <div className="sp-panel">
       {/* Slim header: title + live line-count badge + icon toolbar. */}
       <header className="sp-head">
@@ -542,6 +652,24 @@ export function SolderingPanel() {
                   <option value={SolderFeedType.TouchDown}>{t('solder.feedType.touchDown', 'touch-down')}</option>
                 </select>
               </label>
+              <label className="sp-field">
+                <span className="sp-field-label">
+                  {t('solder.field.approach', 'Approach')}
+                  <InfoTip
+                    topic="solderApproach"
+                    title={t('solder.field.approach', 'Approach')}
+                    body={t('solder.field.approach.body', 'Plunge descends straight down onto the pad; the four 45° options approach (and retract) along a 45° angle from the named side — front (−Y), right (+X), left (−X) or back (+Y).')}
+                  />
+                </span>
+                <select
+                  value={defaults.approach}
+                  onChange={(e) => setDefaults((d) => ({ ...d, approach: e.target.value as SolderApproach }))}
+                >
+                  {approachOpts.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </label>
             </div>
           </div>
 
@@ -634,6 +762,7 @@ export function SolderingPanel() {
                 <th>{t('solder.table.freeZ', 'Free-Z')}</th>
                 <th>{t('solder.table.touchZ', 'Touch-Z')}</th>
                 <th>{t('solder.table.feedType', 'Type')}</th>
+                <th>{t('solder.table.approach', 'Approach')}</th>
                 <th>{t('solder.table.feedS', 'Feed s')}</th>
                 <th className="sp-actions-col" aria-label={t('solder.table.actions', 'Actions')} />
               </tr>
@@ -641,7 +770,7 @@ export function SolderingPanel() {
             <tbody>
               {points.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="sp-empty">
+                  <td colSpan={9} className="sp-empty">
                     {t(
                       'solder.table.empty',
                       'No points yet. Press + to add one, or ⌖ to record the machine position.',
@@ -695,6 +824,17 @@ export function SolderingPanel() {
                     >
                       <option value={SolderFeedType.PreSolder}>{t('solder.feedType.preSolder', 'pre-solder')}</option>
                       <option value={SolderFeedType.TouchDown}>{t('solder.feedType.touchDown', 'touch-down')}</option>
+                    </select>
+                  </td>
+                  <td data-label={t('solder.table.approach', 'Approach')}>
+                    <select
+                      value={pt.approach}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => updatePoint(i, { approach: e.target.value as SolderApproach })}
+                    >
+                      {approachOpts.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
                     </select>
                   </td>
                   <td data-label={t('solder.table.feedS', 'Feed s')}>
@@ -888,10 +1028,45 @@ export function SolderingPanel() {
                   {t('solder.feedType.touchDown', 'touch-down')}
                 </label>
               </div>
+
+              <div className="sp-pcard-type" onClick={(e) => e.stopPropagation()}>
+                <span className="sp-pcard-type-label">{t('solder.table.approach', 'Approach')}</span>
+                {approachOpts.map((o) => (
+                  <label key={o.value} className={`sp-radio${pt.approach === o.value ? ' is-on' : ''}`}>
+                    <input
+                      type="radio"
+                      name={`sp-approach-${i}`}
+                      checked={pt.approach === o.value}
+                      onChange={() => updatePoint(i, { approach: o.value })}
+                    />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
             </div>
           ))}
         </div>
       </div>
+    </div>
+      <PresetSaveBar
+        slots={presets.slots}
+        selected={presets.selected}
+        onSelect={presets.select}
+        onSave={presets.save}
+        onClear={presets.clear}
+        onRename={presets.rename}
+        extra={
+          <SaveLoadButtons
+            value={capturePreset()}
+            onLoad={(data) => applyPreset(data as SolderingPreset)}
+            onError={(msg) => notify('warn', msg)}
+            fileBase="soldering-settings"
+            ext="ksolder"
+            saveTitle={t('solder.settings.save', 'Save soldering settings')}
+            loadTitle={t('solder.settings.load', 'Load soldering settings')}
+          />
+        }
+      />
     </div>
   )
 }

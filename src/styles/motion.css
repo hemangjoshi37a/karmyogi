@@ -266,6 +266,20 @@
 }
 .mo-import:focus { outline: none; border-color: var(--accent); }
 
+/* ---- FluidNC named-settings editor ---- */
+/* Slash-path setting names can be long (axes/x/motor0/…): allow breaking. */
+.mo-path {
+  font-size: 12px;
+  word-break: break-all;
+  line-height: 1.4;
+}
+/* Named values are free text (paths, SSIDs, numbers): wider, left-aligned. */
+.mo-input.named {
+  width: 170px;
+  max-width: 48vw;
+  text-align: left;
+}
+
 /* ---- mobile: stack label over value, full-width controls, ≥36px tap ---- */
 @media (max-width: 540px) {
   .mo-rowitem {
@@ -275,7 +289,9 @@
   }
   .mo-edit { flex-wrap: wrap; }
   .mo-btn, .mo-input { min-height: 38px; }
-  .mo-input {
+  /* .mo-input.named repeated so it wins over the desktop .mo-input.named rule */
+  .mo-input,
+  .mo-input.named {
     flex: 1 1 auto;
     width: auto;
     max-width: none;

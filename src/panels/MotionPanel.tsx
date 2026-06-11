@@ -3,9 +3,16 @@ import { grbl } from '../serial/controller'
 import { useGrblSettings, useMachine, useMachineProfile, usePersistentState } from '../store'
 import { notesKeyFor, profileFor } from '../machine/controllers'
 import type { Capabilities, ControllerProfile } from '../machine/types'
-import { GRBL_SETTING_META, writeSettingCommand } from '../serial'
+import { GRBL_SETTING_META, writeSettingCommand, resolveDialect } from '../serial'
 import type { GrblSetting } from '../serial'
 import { parseSettingsBlock } from '../serial'
+// Named (FluidNC) settings APIs live in the settings module and are imported
+// directly (the ../serial barrel is owned by another workstream).
+import {
+  useNamedSettings,
+  writeNamedSettingCommand,
+  readNamedSettingCommand,
+} from '../serial/settings'
 import {
   GRBL_GROUPS,
   GRBL_SETTING_RICH,
@@ -28,7 +35,11 @@ import '../styles/motion.css'
  * The app supports many controllers and each stores its settings differently, so
  * this panel branches on the active profile's `settingsModel` instead of assuming
  * GRBL `$`-settings for everyone:
- *  - `grbl` / `grblhal` → the full `$`-settings editor (`GrblSettingsEditor`).
+ *  - `grbl` / `grblhal` → the full numeric `$`-settings editor
+ *                          (`GrblSettingsEditor`) — EXCEPT FluidNC, whose dialect
+ *                          resolves `settingsStyle: 'named'` and gets the
+ *                          named-settings editor (`NamedSettingsEditor`:
+ *                          `$path/name=value` rows, YAML config note).
  *  - `marlin`           → an honest M-code view (settings live in EEPROM).
  *  - `smoothie`         → an honest config-file view (`config-get` / `config-set`).
  *  - `masso`            → an honest "managed on-device / offline-export" notice.
@@ -42,8 +53,11 @@ export function MotionPanel() {
   const profile = profileFor(controllerKind)
   switch (profile.settingsModel) {
     case 'grbl':
-    case 'grblhal':
+    case 'grblhal': {
+      const dialect = resolveDialect(profile.dialect, profile.kind)
+      if (dialect.supportsNamedSettings) return <NamedSettingsEditor profile={profile} />
       return <GrblSettingsEditor profile={profile} />
+    }
     case 'marlin':
       return <MarlinSettingsView profile={profile} />
     case 'smoothie':
@@ -704,6 +718,367 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
           </button>
         </div>
       </Modal>
+    </div>
+  )
+}
+
+/**
+ * FluidNC NAMED-settings editor (`settingsStyle: 'named'`).
+ *
+ * FluidNC replaced GRBL's numbered `$0=10` table with a YAML config + NAMED
+ * settings: `$$` dumps `$path/name=value` lines, one is written back with
+ * `$<name>=<value>` and read with `$<name>`. This editor:
+ *  - Sync issues `$$` (same controller path as GRBL; the named lines are
+ *    captured into `useNamedSettings` by the settings parser),
+ *  - groups rows by the first path segment (axes/, Firmware/, Sta/, …) with a
+ *    raw substring filter over names AND values,
+ *  - edits inline — Enter (or the per-row write button, for touch) sends
+ *    `$name=value` then reads the value back with `$name` so the row reflects
+ *    what the controller actually accepted; Esc reverts,
+ *  - is honest that the FULL machine config lives in the YAML file
+ *    (`$Config/Dump` prints it to the Console).
+ */
+function NamedSettingsEditor({ profile }: { profile: ControllerProfile }) {
+  const t = useT()
+  const connection = useMachine((s) => s.connection)
+  const connected = connection === 'connected'
+  const values = useNamedSettings((s) => s.values)
+  // The `$$` read lifecycle (loading flag + completion time) is shared with the
+  // numeric store — the controller arms/clears it for both line styles.
+  const loading = useGrblSettings((s) => s.loading)
+  const lastReadAt = useGrblSettings((s) => s.lastReadAt)
+
+  // Pending edits keyed by setting name; absent => showing the live value.
+  const [edits, setEdits] = useState<Record<string, string>>({})
+  // Name of the setting currently being written (disables its row).
+  const [writing, setWriting] = useState<string | null>(null)
+  const [filter, setFilter] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const onSync = () => {
+    grbl.readSettings().catch(() => {
+      /* surfaced via console/store */
+    })
+  }
+
+  // Auto-sync when the panel is shown while connected and we have nothing yet.
+  useEffect(() => {
+    if (connected && Object.keys(values).length === 0 && !loading) onSync()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected])
+
+  // Drop pending edits when the link drops or the controller kind changes —
+  // they were against a different/now-gone machine (mirrors the numeric editor).
+  const prevConn = useRef(connection)
+  useEffect(() => {
+    if (prevConn.current === 'connected' && connection === 'disconnected') setEdits({})
+    prevConn.current = connection
+  }, [connection])
+  useEffect(() => {
+    setEdits({})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.kind])
+
+  const revert = (name: string) =>
+    setEdits((e) => {
+      const next = { ...e }
+      delete next[name]
+      return next
+    })
+
+  /** Commit one edit: write `$name=value`, then read it back with `$name`. */
+  const commit = async (name: string) => {
+    const v = edits[name]
+    if (v === undefined || writing !== null) return
+    const value = v.trim()
+    if (value === (values[name] ?? '')) {
+      revert(name)
+      return
+    }
+    setWriting(name)
+    try {
+      await grbl.send(writeNamedSettingCommand(name, value))
+      // Read the setting back — the `$name=value` reply is captured into the
+      // store, so the row shows what the controller actually accepted.
+      await grbl.send(readNamedSettingCommand(name))
+      revert(name)
+    } catch {
+      /* kept as a pending edit; the failure is surfaced via the Console */
+    }
+    setWriting(null)
+  }
+
+  const total = Object.keys(values).length
+  const editCount = Object.keys(edits).length
+
+  // Group by the first path segment ('' = names without a slash → "General"),
+  // applying the raw filter to full names and values. Groups and rows sort
+  // alphabetically; General first.
+  const groups = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    const names = Object.keys(values).sort((a, b) => a.localeCompare(b))
+    const byGroup = new Map<string, string[]>()
+    for (const name of names) {
+      if (
+        q &&
+        !name.toLowerCase().includes(q) &&
+        !(values[name] ?? '').toLowerCase().includes(q)
+      ) {
+        continue
+      }
+      const slash = name.indexOf('/')
+      const seg = slash > 0 ? name.slice(0, slash) : ''
+      const arr = byGroup.get(seg) ?? []
+      arr.push(name)
+      byGroup.set(seg, arr)
+    }
+    return Array.from(byGroup.entries()).sort(([a], [b]) =>
+      a === '' ? -1 : b === '' ? 1 : a.localeCompare(b),
+    )
+  }, [values, filter])
+
+  /** Serialize the snapshot as `$name=value` lines for export/backup. */
+  const exportText = useMemo(
+    () =>
+      Object.keys(values)
+        .sort((a, b) => a.localeCompare(b))
+        .map((n) => writeNamedSettingCommand(n, values[n]))
+        .join('\n'),
+    [values],
+  )
+
+  const onCopy = () => {
+    const done = () => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(exportText).then(done).catch(() => done())
+    } else {
+      done()
+    }
+  }
+
+  const send = (line: string) => {
+    grbl.send(line).catch(() => {
+      /* surfaced via console */
+    })
+  }
+
+  return (
+    <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and controller settings')}>
+      <section className="mo-section">
+        <h4>
+          {t('motion.heading.settingsFor', '{label} settings ($$)', {
+            label: profile.label,
+          })}
+        </h4>
+        <div className="mo-row">
+          <button
+            type="button"
+            className="mo-btn primary mo-iconbtn"
+            disabled={!connected || loading}
+            onClick={onSync}
+            title={
+              connected
+                ? t('motion.sync.title', 'Sync — fetch all parameters from the machine ($$)')
+                : t('motion.connectFirst', 'Connect first')
+            }
+          >
+            <Icon name="download" size={14} />
+            {loading ? t('motion.sync.syncing', 'Syncing…') : t('motion.sync.label', 'Sync')}
+          </button>
+          <button
+            type="button"
+            className="mo-btn mo-iconbtn"
+            disabled={total === 0}
+            onClick={onCopy}
+            title={t('motion.named.copy.title', 'Copy all $name=value settings to the clipboard')}
+          >
+            <Icon name="copy" size={14} />
+            {copied ? t('motion.copy.copied', 'Copied') : t('motion.copy.label', 'Copy $$')}
+          </button>
+          {editCount > 0 && (
+            <button
+              type="button"
+              className="mo-btn"
+              onClick={() => setEdits({})}
+              title={t('motion.discard.title', 'Discard pending edits')}
+            >
+              {t('motion.discard.label', 'Discard')}
+            </button>
+          )}
+          <span className="mo-grow" />
+          <span className="mo-status">
+            {total > 0
+              ? t('motion.status.parameters', '{count} parameters', { count: total })
+              : t('motion.status.notSynced', 'not synced yet')}
+            {lastReadAt != null && total > 0 && (
+              <>
+                {' · '}
+                {t('motion.status.syncedAt', 'synced {time}', {
+                  time: new Date(lastReadAt).toLocaleTimeString(),
+                })}
+              </>
+            )}
+          </span>
+        </div>
+        <div className="mo-note">
+          {t(
+            'motion.named.model',
+            'FluidNC uses NAMED settings: each row writes $name=value (press Enter or the write button). The full machine configuration lives in the YAML config file — $Config/Dump prints it to the Console.',
+          )}
+        </div>
+        {!connected && (
+          <div className="mo-note">
+            {total > 0
+              ? t(
+                  'motion.named.note.offlineSnapshot',
+                  'Showing the last-synced values. Connect to {label} to edit and re-sync.',
+                  { label: profile.label },
+                )
+              : t(
+                  'motion.named.note.connect',
+                  'Connect to a {label} device and press Sync to list its named settings ($$).',
+                  { label: profile.label },
+                )}
+          </div>
+        )}
+        <div className="mo-row mo-filter">
+          <input
+            className="mo-search"
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={t('motion.named.filter.placeholder', 'Filter settings (name or value)…')}
+            aria-label={t('motion.filter.searchAria', 'Search settings')}
+          />
+        </div>
+      </section>
+
+      {total > 0 && groups.length === 0 && (
+        <section className="mo-section">
+          <div className="mo-note">
+            {t('motion.filter.noMatches', 'No settings match the current filter.')}
+          </div>
+        </section>
+      )}
+      {groups.map(([seg, names]) => {
+        const groupTitle = seg === '' ? t('motion.named.groupGeneral', 'General') : seg
+        return (
+          <section className="mo-section" key={seg === '' ? '«general»' : seg}>
+            <h5 className="mo-group">{groupTitle}</h5>
+            <div className="mo-table" role="table" aria-label={groupTitle}>
+              {names.map((name) => {
+                const rest = seg === '' ? name : name.slice(seg.length + 1)
+                const editing = edits[name] !== undefined
+                const fieldVal = edits[name] ?? values[name] ?? ''
+                const busy = writing === name
+                return (
+                  <div className="mo-rowitem" role="row" key={name}>
+                    <div className="mo-cell mo-key">
+                      <span className="mo-num mo-path" title={`$${name}`}>
+                        {rest}
+                      </span>
+                    </div>
+                    <div className="mo-cell mo-edit">
+                      <input
+                        className={`mo-input named${editing ? ' edited' : ''}`}
+                        type="text"
+                        value={fieldVal}
+                        disabled={!connected || busy}
+                        spellCheck={false}
+                        onChange={(e) =>
+                          setEdits((m) => ({ ...m, [name]: e.target.value }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            void commit(name)
+                          } else if (e.key === 'Escape') {
+                            revert(name)
+                          }
+                        }}
+                        aria-label={t('motion.named.aria.value', '{name} value', { name })}
+                      />
+                      {editing && (
+                        <button
+                          type="button"
+                          className="mo-btn mo-iconbtn"
+                          disabled={!connected || busy}
+                          onClick={() => void commit(name)}
+                          title={t(
+                            'motion.named.write.title',
+                            'Write {name}={value} to the controller (Enter)',
+                            { name: `$${name}`, value: fieldVal.trim() },
+                          )}
+                          aria-label={t('motion.named.write.aria', 'Write {name}', {
+                            name: `$${name}`,
+                          })}
+                        >
+                          <Icon name="upload" size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
+
+      {/* YAML config — the real source of truth on FluidNC. */}
+      <section className="mo-section">
+        <h5 className="mo-group">{t('motion.named.yaml.heading', 'YAML config')}</h5>
+        <div className="mo-note">
+          {t(
+            'motion.named.yaml.note',
+            'Machine structure (axes, motors, spindles, pins, homing) is defined in the YAML config file on the controller, not in the settings above. $Config/Dump prints the running config to the Console; $SS shows the startup log; type $Bye in the Console to restart the controller.',
+          )}
+        </div>
+        <div className="mo-row">
+          <button
+            type="button"
+            className="mo-btn primary"
+            disabled={!connected}
+            onClick={() => send('$Config/Dump')}
+            title={
+              connected
+                ? t(
+                    'motion.named.dump.title',
+                    'Send $Config/Dump — the YAML config streams into the Console',
+                  )
+                : t('motion.connectFirst', 'Connect first')
+            }
+          >
+            {t('motion.named.dump.label', 'Dump YAML ($Config/Dump)')}
+          </button>
+          <button
+            type="button"
+            className="mo-btn"
+            disabled={!connected}
+            onClick={() => send('$SS')}
+            title={t('motion.named.ss.title', 'Send $SS — show the startup log in the Console')}
+          >
+            {t('motion.named.ss.label', 'Startup log ($SS)')}
+          </button>
+          <span className="mo-grow" />
+          {!connected && (
+            <span className="mo-status">{t('motion.connectFirst', 'Connect first')}</span>
+          )}
+        </div>
+      </section>
+
+      <section className="mo-section">
+        <h5 className="mo-group">{t('motion.cap.heading', 'Capabilities')}</h5>
+        <CapabilitySummary caps={profile.capabilities} />
+      </section>
+
+      <section className="mo-section">
+        <h5 className="mo-group">{t('motion.notes.heading', 'About this controller')}</h5>
+        <div className="mo-note">{t(notesKeyFor(profile.kind), profile.notes)}</div>
+      </section>
     </div>
   )
 }

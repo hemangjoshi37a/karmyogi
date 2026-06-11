@@ -160,6 +160,29 @@
 .mc-field > .mc-label { flex: 0 0 auto; min-width: 40px; }
 .mc-input-grow { width: auto; flex: 1 1 auto; min-width: 56px; }
 .mc-unit { font-size: 10px; color: var(--fg-muted); flex: 0 0 auto; }
+/* Adobe-style compact control: draggable slider + small typable number. */
+.mc-slider {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 4px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.mc-slider-num {
+  flex: 0 0 auto;
+  width: 58px;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+.mc-slider-num::-webkit-outer-spin-button,
+.mc-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+@media (pointer: coarse) {
+  .mc-slider { height: 6px; }
+}
 
 .mc-seg {
   display: inline-flex;
@@ -456,6 +479,53 @@
 .jog-btn.cancel { color: var(--danger); }
 .jog-spacer { visibility: hidden; }
 
+/* Go-to-zero button injected into the Z column's empty center cell — fills the
+   cell so it reads as part of the Z pad (Z+ / Go-to-zero / Z−). */
+.jog-z-center {
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.mc-goto-zero {
+  width: 100%;
+  height: 100%;
+  min-height: 34px;
+  padding: 2px;
+}
+
+/* ---- WCS row (Work Coordinate System) above the jog arrows ----
+   The six W1–W6 chips share the width evenly in one tight row so they sit as a
+   compact band over the jog pad. */
+.mc-wcs-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+}
+.mc-wcs-row .coord-wcs-chip {
+  min-width: 0;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+/* ---- jog row: XY/Z pad on the left, stacked Zero X/Y/Z column on the right -- */
+.mc-jog-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mc-zero-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mc-zero-btn {
+  justify-content: flex-start;
+  min-height: 34px;
+  white-space: nowrap;
+}
+
 /* ---- override controls ---- */
 .ov-grid {
   display: grid;
@@ -519,6 +589,9 @@
   }
   .jog-btn { min-height: 44px; min-width: 44px; }
   .jogpad { gap: 8px; }
+  .mc-goto-zero { min-height: 44px; }
+  .mc-zero-btn { min-height: 44px; }
+  .mc-wcs-row .coord-wcs-chip { min-height: 40px; }
   .console-input-row input { min-height: 38px; }
   .dro .dro-val { font-size: clamp(14px, 6vw, 18px); }
 }

@@ -122,6 +122,16 @@ export interface ViewerProps {
   /** Called to EXIT lasso mode (Cancel button / Escape) without deleting. */
   onLassoExit?: () => void
   /**
+   * Pick mode: click a single toolpath line/segment to select it; Shift/Ctrl-
+   * click adds/removes from a multi-selection. Distinct from lasso (only one
+   * active at a time). Reuses the SAME selection→re-emit pipeline as the lasso.
+   */
+  pick?: boolean
+  /** Called with the KEPT segments after the user confirms a pick deletion. */
+  onPickDelete?: (kept: Segment[]) => void
+  /** Called to EXIT pick mode (Cancel button / Escape) without deleting. */
+  onPickExit?: () => void
+  /**
    * Show the faint colored per-section selection boxes (the "toolpath cubes"
    * that double as click-to-select-gizmo hit regions). Default true.
    */
@@ -132,6 +142,27 @@ export interface ViewerProps {
    * loaded program's bounding box. Default false.
    */
   showDimensions?: boolean
+  /**
+   * Layers overlay: master show/hide for ALL toolpaths (per-section paths AND
+   * the combined/reveal path). Default true.
+   */
+  showToolpaths?: boolean
+  /**
+   * Layers overlay: per-section visibility, keyed by section id. A section
+   * missing from the map (or mapped to a non-false value) is shown. Lets the
+   * legend tree hide individual toolpaths. Default: all visible.
+   */
+  sectionVisibility?: Record<string, boolean>
+  /**
+   * Layers overlay: show the model / drawing preview (the viewport-drawn 2D/3D
+   * shapes). Default true.
+   */
+  showShapes?: boolean
+  /**
+   * Layers overlay: show the machine bed (grid + dimensions + bed wireframe
+   * cube). Default true.
+   */
+  showBed?: boolean
 }
 
 const FOV = 45
@@ -169,8 +200,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     lasso = false,
     onLassoDelete,
     onLassoExit,
+    pick = false,
+    onPickDelete,
+    onPickExit,
     showJobBoxes = true,
     showDimensions = false,
+    showToolpaths = true,
+    sectionVisibility,
+    showShapes = true,
+    showBed = true,
   },
   ref,
 ) {
@@ -261,6 +299,21 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     }
   }, [lasso])
 
+  // ---- Pick (individual segment) selection -----------------------------------
+  // A click on a toolpath line in pick mode toggles that segment in this set
+  // (plain click = single-select; Shift/Ctrl-click = add/remove). The set indexes
+  // into `parsed.segments`, the SAME array the lasso selects from — so deletion
+  // can reuse the exact selection→re-emit pipeline.
+  const [pickSel, setPickSel] = useState<Set<number>>(new Set())
+  // Leaving pick mode (or a fresh program) clears the selection.
+  useEffect(() => {
+    if (!pick) setPickSel(new Set())
+  }, [pick])
+  // A new program (different segment array) invalidates stale indices.
+  useEffect(() => {
+    setPickSel(new Set())
+  }, [parsed.segments])
+
   // Auto-recover: if the context is still lost ~1.2s after the event (i.e. the
   // browser did not fire `webglcontextrestored` on its own), remount the Canvas.
   useEffect(() => {
@@ -298,6 +351,34 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [removeShape])
+
+  // Pick-mode keyboard: Delete/Backspace removes the current individual selection
+  // (via the SAME re-emit pipeline as the lasso); Escape clears the selection, or
+  // exits pick mode when nothing is selected — mirroring the lasso's Escape.
+  useEffect(() => {
+    if (!pick) return
+    const onKey = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable))
+        return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (pickSel.size === 0) return
+        const el = containerRef.current
+        const scoped = hoverRef.current || !!(el && el.contains(document.activeElement))
+        if (!scoped) return
+        e.preventDefault()
+        const kept = parsed.segments.filter((_, i) => !pickSel.has(i))
+        onPickDelete?.(kept)
+        setPickSel(new Set())
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        if (pickSel.size > 0) setPickSel(new Set())
+        else onPickExit?.()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pick, pickSel, parsed.segments, onPickDelete, onPickExit])
 
   // Live G-code: shapes → safe G-code → program store section "viewport shapes".
   // Debounced so dragging the gizmo doesn't thrash the program/visualizer.
@@ -383,8 +464,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       >
         <ambientLight intensity={0.8} />
         <directionalLight position={[100, -100, 300]} intensity={0.6} />
-        <Bed width={width} depth={depth} height={height} />
-        <ViewportShapes onDraggingChanged={onGizmoDragging} />
+        <group visible={showBed}>
+          <Bed width={width} depth={depth} height={height} showLabels={showBed} />
+        </group>
+        <group visible={showShapes}>
+          <ViewportShapes onDraggingChanged={onGizmoDragging} />
+        </group>
         <StockBlock visible={showStock} />
       {carveSim && revealIndex !== undefined && revealIndex >= 0 && (
         <CarvedStock
@@ -400,30 +485,36 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           gizmo can live-drag ONLY the selected section's group (matrixAutoUpdate
           off on that one; the gizmo writes its matrix imperatively at 60fps and
           resets to identity once the new placement is baked). */}
-      {revealing ? (
-        parsed.segments.length > 0 && (
-          <Toolpath
-            segments={parsed.segments}
-            revealIndex={revealIndex}
-            revealPoint={revealPoint}
-          />
-        )
-      ) : sectionPaths && sectionPaths.length > 0 ? (
-        sectionPaths.map((sp) => {
-          const isLive = sp.id === liveSectionId
-          return (
-            <group
-              key={sp.id}
-              ref={isLive ? liveGroupRef : undefined}
-              matrixAutoUpdate={!isLive}
-            >
-              <Toolpath segments={sp.segments} cutColor={sp.color} />
-            </group>
+      {/* Layers overlay master toggle: hide ALL toolpath geometry at once. */}
+      <group visible={showToolpaths}>
+        {revealing ? (
+          parsed.segments.length > 0 && (
+            <Toolpath
+              segments={parsed.segments}
+              revealIndex={revealIndex}
+              revealPoint={revealPoint}
+            />
           )
-        })
-      ) : (
-        parsed.segments.length > 0 && <Toolpath segments={parsed.segments} />
-      )}
+        ) : sectionPaths && sectionPaths.length > 0 ? (
+          sectionPaths.map((sp) => {
+            const isLive = sp.id === liveSectionId
+            // Per-section visibility from the layers tree (absent / non-false = shown).
+            const visible = sectionVisibility?.[sp.id] !== false
+            return (
+              <group
+                key={sp.id}
+                ref={isLive ? liveGroupRef : undefined}
+                matrixAutoUpdate={!isLive}
+                visible={visible}
+              >
+                <Toolpath segments={sp.segments} cutColor={sp.color} />
+              </group>
+            )
+          })
+        ) : (
+          parsed.segments.length > 0 && <Toolpath segments={parsed.segments} />
+        )}
+      </group>
       {parsed.bounds && <BoundsBox bounds={parsed.bounds} dark={theme === 'dark'} />}
       {/* Engineering-style 3D dimension annotations (toggleable from the toolbar). */}
       {showDimensions && parsed.bounds && (
@@ -453,6 +544,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           clicking the box (re-selecting the same section) is an idempotent no-op. */}
       {onSelectSection &&
         showJobBoxes &&
+        /* In pick mode the clickable job boxes would swallow segment clicks
+           (their stopPropagation wins the raycast), so suppress them while
+           picking individual toolpath lines. */
+        !pick &&
         sectionBoxes?.map((sb) => {
           const isSelected = sb.id === selectedSectionId
           return (
@@ -482,6 +577,24 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       {/* Red highlight of the lasso-selected moves, pending Delete/Cancel. */}
       {lasso && lassoSel && (
         <SelectedSegments segments={parsed.segments} indices={lassoSel.idx} />
+      )}
+      {/* Pick mode: invisible raycast lines that map a click to a segment index. */}
+      {pick && parsed.segments.length > 0 && (
+        <PickSegments
+          segments={parsed.segments}
+          onPick={(i, additive) => {
+            setPickSel((prev) => {
+              const next = new Set(additive ? prev : [])
+              if (additive && prev.has(i)) next.delete(i)
+              else next.add(i)
+              return next
+            })
+          }}
+        />
+      )}
+      {/* Red highlight of the individually-picked moves, pending Delete/Cancel. */}
+      {pick && pickSel.size > 0 && (
+        <SelectedSegments segments={parsed.segments} indices={pickSel} />
       )}
       {/* Live camera → 3D overlay (self-gated on the camera-calib store's `enabled`). */}
       <CameraBedPlane />
@@ -606,6 +719,66 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
             }}
           >
             {t('common.cancel', 'Cancel')}
+          </button>
+        </div>
+      )}
+      {/* Confirm bar once an individual pick selection exists (mirrors the lasso). */}
+      {pick && pickSel.size > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: 14,
+            transform: 'translateX(-50%)',
+            zIndex: 7,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 12px',
+            borderRadius: 8,
+            background: 'var(--bg-elev, #1b1f24)',
+            border: '1px solid var(--border, #3a4048)',
+            boxShadow: '0 6px 22px rgba(0,0,0,0.4)',
+            font: '12px/1.3 system-ui, sans-serif',
+            color: 'var(--fg, #cfd6dd)',
+          }}
+        >
+          <span>
+            {t('vz.pickSelected', 'Delete {n} selected move(s)? Safe-Z is kept around the gap.', {
+              n: String(pickSel.size),
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const kept = parsed.segments.filter((_, i) => !pickSel.has(i))
+              onPickDelete?.(kept)
+              setPickSel(new Set())
+            }}
+            style={{
+              padding: '5px 12px',
+              borderRadius: 6,
+              border: 'none',
+              background: 'var(--danger, #e5484d)',
+              color: '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            {t('vz.lassoDelete', 'Delete')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPickSel(new Set())}
+            style={{
+              padding: '5px 12px',
+              borderRadius: 6,
+              border: '1px solid var(--border, #3a4048)',
+              background: 'transparent',
+              color: 'var(--fg, #cfd6dd)',
+              cursor: 'pointer',
+            }}
+          >
+            {t('vz.pickClear', 'Clear')}
           </button>
         </div>
       )}
@@ -869,6 +1042,71 @@ function LassoApply({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [polygon])
   return null
+}
+
+/**
+ * Pick mode hit layer: one invisible(ish) wide-threshold LineSegments built from
+ * ALL segments, so a click maps deterministically to a segment index. The
+ * geometry is non-indexed (segment i uses vertices 2i / 2i+1), so the raycast
+ * hit's vertex index → `floor(index / 2)` is the segment index. A bumped
+ * per-object raycast threshold makes a thin toolpath line forgiving to click.
+ * Renders nothing visible (the highlight is drawn by SelectedSegments).
+ */
+function PickSegments({
+  segments,
+  onPick,
+}: {
+  segments: Segment[]
+  onPick: (index: number, additive: boolean) => void
+}) {
+  const geom = useMemo(() => {
+    const pts: number[] = []
+    for (const s of segments) {
+      pts.push(s.from[0], s.from[1], s.from[2], s.to[0], s.to[1], s.to[2])
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+    return g
+  }, [segments])
+  useEffect(() => () => geom.dispose(), [geom])
+
+  // Widen the hit corridor: the default Line raycast threshold (~1) is fussy for
+  // a thin mm-scale toolpath. Patch this object's raycast to use a generous
+  // threshold, restoring the shared canvas raycaster's value afterwards so it
+  // never leaks to other pickables.
+  const lineRef = useRef<THREE.LineSegments | null>(null)
+  const setLineRef = (line: THREE.LineSegments | null) => {
+    lineRef.current = line
+    if (!line) return
+    const base = THREE.LineSegments.prototype.raycast
+    line.raycast = (raycaster, intersects) => {
+      const params = raycaster.params.Line
+      const prev = params ? params.threshold : 1
+      if (params) params.threshold = 3
+      base.call(line, raycaster, intersects)
+      if (params) params.threshold = prev
+    }
+  }
+
+  return (
+    <lineSegments
+      ref={setLineRef}
+      geometry={geom}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        if (e.index === undefined) return
+        e.stopPropagation()
+        const segIndex = Math.floor(e.index / 2)
+        if (segIndex < 0 || segIndex >= segments.length) return
+        const additive = !!(e.shiftKey || e.ctrlKey || e.metaKey)
+        onPick(segIndex, additive)
+      }}
+    >
+      {/* Invisible material: the path is already drawn by <Toolpath>; this layer
+          exists purely as a forgiving click target mapped to a segment index. */}
+      <lineBasicMaterial transparent opacity={0} depthWrite={false} />
+    </lineSegments>
+  )
 }
 
 /** Draw the lasso-selected segments as bright red lines (the about-to-delete set). */
