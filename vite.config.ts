@@ -25,12 +25,100 @@ declare const process: { env: Record<string, string | undefined> }
 // Default (no HTTPS env) keeps plain http://localhost for normal local dev.
 const useHttps = !!process.env.HTTPS
 
+// Build identity, computed once when Vite loads this config. Baked into the app
+// via `define` (so the running bundle knows which build it is) AND written to
+// `dist/build-info.json` by the plugin below (so a loaded tab can fetch the
+// server's latest build identity and detect when it has gone stale). The epoch
+// is the source of truth; the base-36 string is a short human-ish version id.
+const buildEpoch = Date.now()
+const buildTime = new Date(buildEpoch).toISOString()
+const buildVersion = buildEpoch.toString(36)
+
+/**
+ * Emits `build-info.json` at the dist root after the bundle is generated:
+ *   { version, buildTime, bytes, totalBytes, files: [{ url, bytes }] }
+ *
+ * `files` is the BOOT GRAPH only — the entry chunk(s) + their transitive STATIC
+ * imports + all CSS — i.e. exactly what's needed to run the new version. Lazy
+ * panels, locale chunks, vendor-three etc. are excluded (the service worker
+ * runtime-caches those on first use), so a forced update stays light and the
+ * progress bar shows an honest "download the new app" size rather than all
+ * ~14 MB of split chunks. `bytes` = sum of `files`; `totalBytes` = the whole
+ * build's JS+CSS (for reference). Fetched with `cache: 'no-store'`, so it always
+ * reflects the freshest deploy on the server.
+ */
+function buildInfoEmitter() {
+  type Chunk = { type: string; code?: string; source?: string | Uint8Array; isEntry?: boolean; imports?: string[] }
+  const byteLen = (raw: unknown) =>
+    typeof raw === 'string'
+      ? Buffer.byteLength(raw)
+      : raw instanceof Uint8Array
+        ? raw.byteLength
+        : 0
+  return {
+    name: 'karmyogi-build-info',
+    apply: 'build' as const,
+    generateBundle(_opts: unknown, bundle: Record<string, Chunk>) {
+      const chunks: Record<string, Chunk> = {}
+      let totalBytes = 0
+      for (const [fileName, c] of Object.entries(bundle)) {
+        if (fileName.endsWith('.js') && c.type === 'chunk') chunks[fileName] = c
+        if (fileName.endsWith('.js') || fileName.endsWith('.css')) {
+          totalBytes += byteLen(c.type === 'chunk' ? c.code : c.source)
+        }
+      }
+      // BFS the static-import graph from the entry chunk(s).
+      const boot = new Set<string>()
+      const queue: string[] = []
+      for (const [fileName, c] of Object.entries(chunks)) {
+        if (c.isEntry) {
+          boot.add(fileName)
+          queue.push(fileName)
+        }
+      }
+      while (queue.length) {
+        const fn = queue.pop()!
+        for (const imp of chunks[fn]?.imports ?? []) {
+          if (chunks[imp] && !boot.has(imp)) {
+            boot.add(imp)
+            queue.push(imp)
+          }
+        }
+      }
+      const files: { url: string; bytes: number }[] = []
+      let bytes = 0
+      for (const fileName of boot) {
+        const b = byteLen(chunks[fileName].code)
+        bytes += b
+        files.push({ url: '/' + fileName, bytes: b })
+      }
+      for (const [fileName, c] of Object.entries(bundle)) {
+        if (fileName.endsWith('.css')) {
+          const b = byteLen(c.source)
+          bytes += b
+          files.push({ url: '/' + fileName, bytes: b })
+        }
+      }
+      ;(this as unknown as { emitFile: (f: unknown) => void }).emitFile({
+        type: 'asset',
+        fileName: 'build-info.json',
+        source: JSON.stringify({ version: buildVersion, buildTime, bytes, totalBytes, files }, null, 2),
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(buildVersion),
+    __BUILD_TIME__: JSON.stringify(buildTime),
+  },
   plugins: [
     react(),
     cameraFrameReceiver(),
     machineBridgeReceiver(),
+    buildInfoEmitter(),
     ...(useHttps ? [basicSsl()] : []),
     // PWA / offline: precache ONLY the small, always-needed app shell so the
     // first-install download stays light (it was ~18MB because the ~7.6MB OCCT
@@ -44,8 +132,13 @@ export default defineConfig({
     //     asset is skipped by the precache and runtime-cached instead.
     // Uses the existing public/manifest.webmanifest (manifest: false).
     VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: 'auto',
+      // 'prompt' (not 'autoUpdate') so the waiting SW does NOT skipWaiting on its
+      // own — src/pwa/PwaManager.tsx decides WHEN to apply the update (it defers
+      // the reload while a job is streaming to the machine) and drives the
+      // visible download-progress UI. Registration is handled by useRegisterSW in
+      // that component, so injectRegister is disabled to avoid double-registering.
+      registerType: 'prompt',
+      injectRegister: null,
       manifest: false,
       workbox: {
         // Precache the lightweight shell only (no wasm).

@@ -287,6 +287,21 @@
 .km-about-desc { font-size: 13px; line-height: 1.5; color: var(--fg); margin: 0; }
 .km-about-by { font-size: 13px; margin: 0; }
 .km-about-by a { color: var(--accent); }
+.km-about-build {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 4px;
+}
+.km-about-build-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+.km-about-build-row dt { color: var(--fg-muted); margin: 0; }
+.km-about-build-row dd { margin: 0; font-family: var(--fs-mono, monospace); color: var(--fg); }
 .km-about-links { display: flex; flex-direction: column; gap: 8px; }
 .km-about-link {
   display: inline-flex;

@@ -1,0 +1,244 @@
+/* PWA install reminder + auto-update progress cards.
+   Small, dismissable, fixed bottom-right (stacks). Enterprise-grade polish:
+   icon chips, layered elevation, a gradient progress bar with a moving sheen.
+   Themed via the shared CSS variables so they follow light/dark. */
+
+.km-pwa-stack {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483000; /* above modals/popovers */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 340px;
+  max-width: calc(100vw - 36px);
+  pointer-events: none; /* the cards re-enable it */
+}
+
+.km-pwa-card {
+  pointer-events: auto;
+  position: relative;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-elev) 100%, transparent), var(--bg-elev));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow:
+    0 1px 0 0 color-mix(in srgb, var(--fg) 6%, transparent) inset,
+    0 18px 48px -12px rgba(0, 0, 0, 0.55),
+    0 4px 12px -6px rgba(0, 0, 0, 0.4);
+  padding: 14px;
+  font-size: var(--fs-body);
+  animation: km-pwa-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* a thin accent hairline along the top edge */
+.km-pwa-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.55;
+}
+
+@keyframes km-pwa-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* header row: chip + titles + close */
+.km-pwa-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+.km-pwa-chip {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+.km-pwa-chip img {
+  border-radius: 6px;
+  display: block;
+}
+.km-pwa-chip-accent {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--accent);
+}
+
+.km-pwa-titles {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 1px;
+}
+.km-pwa-titles strong {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.km-pwa-sub {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.km-pwa-x {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: -3px -3px 0 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border-radius: 7px;
+  transition: background 0.12s, color 0.12s;
+}
+.km-pwa-x:hover {
+  background: var(--bg-input);
+  color: var(--fg);
+}
+
+/* progress bar */
+.km-pwa-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  overflow: hidden;
+  margin: 13px 0 8px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.km-pwa-bar-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 78%, #000 0%),
+    var(--accent)
+  );
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+/* moving sheen across the filled portion */
+.km-pwa-bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.35),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: km-pwa-sheen 1.4s ease-in-out infinite;
+}
+.km-pwa-bar-indet {
+  width: 34% !important;
+  animation: km-pwa-indet 1.15s ease-in-out infinite;
+}
+@keyframes km-pwa-sheen {
+  100% {
+    transform: translateX(220%);
+  }
+}
+@keyframes km-pwa-indet {
+  0% {
+    margin-left: -34%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+
+/* meta line under the bar: big % left, bytes right */
+.km-pwa-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.km-pwa-pct {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.km-pwa-bytes {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-family: var(--fs-mono, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+/* install action buttons */
+.km-pwa-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 13px;
+}
+.km-pwa-btn {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg);
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 550;
+  padding: 0 12px;
+  transition: border-color 0.12s, background 0.12s, filter 0.12s;
+}
+.km-pwa-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
+}
+.km-pwa-btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 650;
+  box-shadow: 0 4px 14px -6px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.km-pwa-btn-primary:hover {
+  background: var(--accent);
+  filter: brightness(1.07);
+}
+
+@media (max-width: 600px) {
+  .km-pwa-stack {
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    width: auto;
+    max-width: none;
+  }
+}

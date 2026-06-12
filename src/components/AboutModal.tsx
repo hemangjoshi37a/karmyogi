@@ -1,6 +1,14 @@
+import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import { useT } from '../i18n'
 import { usePolicies } from './policies'
+import {
+  RUNNING_VERSION,
+  RUNNING_BUILD_TIME,
+  fetchBuildInfo,
+  formatBytes,
+  formatBuildTime,
+} from '../pwa/buildInfo'
 
 interface AboutModalProps {
   open: boolean
@@ -39,6 +47,21 @@ function BugGlyph() {
 export function AboutModal({ open, onClose, repoUrl, issuesUrl }: AboutModalProps) {
   const t = useT()
   const policies = usePolicies()
+  // Build size comes from the server's build-info.json (the running build's own
+  // descriptor); version + timestamp are baked into the bundle so they're always
+  // available even in dev / offline.
+  const [sizeLabel, setSizeLabel] = useState<string | null>(null)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    void fetchBuildInfo().then((info) => {
+      if (alive && info) setSizeLabel(formatBytes(info.bytes))
+    })
+    return () => {
+      alive = false
+    }
+  }, [open])
+
   return (
     <>
     <Modal open={open} title={t('about.title', 'About karmyogi')} onClose={onClose} width={460}>
@@ -79,6 +102,23 @@ export function AboutModal({ open, onClose, repoUrl, issuesUrl }: AboutModalProp
             <BugGlyph /> {t('about.report', 'Report a bug')}
           </a>
         </div>
+
+        <dl className="km-about-build">
+          <div className="km-about-build-row">
+            <dt>{t('about.version', 'Version')}</dt>
+            <dd>{RUNNING_VERSION}</dd>
+          </div>
+          <div className="km-about-build-row">
+            <dt>{t('about.built', 'Built')}</dt>
+            <dd>{formatBuildTime(RUNNING_BUILD_TIME)}</dd>
+          </div>
+          {sizeLabel && (
+            <div className="km-about-build-row">
+              <dt>{t('about.size', 'Build size')}</dt>
+              <dd>{sizeLabel}</dd>
+            </div>
+          )}
+        </dl>
 
         {policies.list}
       </div>

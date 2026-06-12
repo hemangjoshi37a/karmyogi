@@ -29,6 +29,7 @@ import { MotionPanel } from '../panels/MotionPanel'
 // panelRegistry.ts (the tab can be removed later — kept for now so Probe is
 // reachable both ways). Do not remove the registry entry yet.
 import { ProbePanel } from '../panels/ProbePanel'
+import { PwaManager } from '../pwa/PwaManager'
 import '../styles/topbar.css'
 import '../styles/shell-extra.css'
 
@@ -432,6 +433,7 @@ export function Shell() {
         repoUrl={REPO_URL}
         issuesUrl={ISSUES_URL}
       />
+      <PwaManager />
     </div>
   )
 }
