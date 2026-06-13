@@ -1,8 +1,7 @@
 import { useMemo } from 'react'
-import { Line, Text, Billboard, Html } from '@react-three/drei'
+import { Line, Text, Billboard } from '@react-three/drei'
 import * as THREE from 'three'
 import type { Bounds } from './gcodeToPolylines'
-import { useT } from '../i18n'
 
 /**
  * Engineering-drawing-style 3D dimension annotations for the loaded toolpath's
@@ -27,7 +26,7 @@ import { useT } from '../i18n'
  * front corner. Pure presentation — no business logic.
  */
 
-/** One loaded file/model's own toolpath extent (for the per-file size list). */
+/** One loaded file/model's own toolpath extent (used to union the combined extent). */
 export interface PerFileDimension {
   id: string
   name: string
@@ -38,11 +37,6 @@ export interface DimensionsProps {
   /** The COMBINED toolpath extent (union of all loaded files). */
   bounds: Bounds
   dark: boolean
-  /**
-   * Per-file extents. When more than one is present a compact per-file size
-   * list is shown alongside the combined 3D dimension arrows.
-   */
-  perFile?: PerFileDimension[]
 }
 
 /** Format a length in mm with at most 1 decimal, trimming trailing zeros. */
@@ -50,33 +44,12 @@ function fmt(v: number): string {
   return `${(Math.round(v * 10) / 10).toString()} mm`
 }
 
-/** Format an extent as "Δx × Δy × Δz mm" with at most 1 decimal each. */
-function fmtSize(b: Bounds): string {
-  const dx = b.max[0] - b.min[0]
-  const dy = b.max[1] - b.min[1]
-  const dz = b.max[2] - b.min[2]
-  const n = (v: number) => (Math.round(v * 10) / 10).toString()
-  return `${n(dx)} × ${n(dy)} × ${n(dz)} mm`
-}
-
-export function Dimensions({ bounds, dark, perFile }: DimensionsProps) {
-  const t = useT()
+export function Dimensions({ bounds, dark }: DimensionsProps) {
   const data = useMemo(() => buildDimensions(bounds), [bounds])
 
   const lineColor = dark ? '#9fb3c8' : '#475569'
   const textColor = dark ? '#e2e8f0' : '#1e293b'
   const textOutline = dark ? '#15181c' : '#e7ecf1'
-
-  // Only show the per-file list when more than one file is loaded — a single
-  // file is fully described by the combined 3D arrows.
-  const multiFile = perFile && perFile.length > 1
-
-  // Anchor the per-file list at the box's back-top-left corner so it sits clear
-  // of the X/Y/Z dimension arrows (which hug the front/left/bottom edges).
-  const listAnchor: V3 | null =
-    multiFile && bounds
-      ? [bounds.min[0], bounds.max[1], bounds.max[2]]
-      : null
 
   return (
     <group>
@@ -128,46 +101,6 @@ export function Dimensions({ bounds, dark, perFile }: DimensionsProps) {
             </Billboard>
           </group>
         ))}
-
-      {/* Per-file size list (only when >1 file is loaded). Compact HTML overlay
-          anchored at the combined box so each loaded file's OWN extent is shown
-          clearly associated with its name, without cluttering the scene with a
-          full arrow set per file. Theme-aware, matches the viewer overlay style. */}
-      {multiFile && listAnchor && (
-        <Html position={listAnchor} style={{ pointerEvents: 'none' }} zIndexRange={[5, 0]}>
-          <div
-            style={{
-              transform: 'translate(8px, -50%)',
-              minWidth: 150,
-              padding: '6px 8px',
-              borderRadius: 6,
-              font: '11px/1.35 system-ui, sans-serif',
-              background: dark ? 'rgba(21,24,28,0.82)' : 'rgba(231,236,241,0.9)',
-              border: `1px solid ${dark ? '#3a4048' : '#c4ccd6'}`,
-              color: textColor,
-              boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: 3, opacity: 0.85 }}>
-              {t('vz.perFileSizes', 'Per-file size (Δx × Δy × Δz)')}
-            </div>
-            {perFile!.map((f) => (
-              <div
-                key={f.id}
-                style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}
-              >
-                <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>
-                  {f.name}
-                </span>
-                <span style={{ opacity: 0.85, fontVariantNumeric: 'tabular-nums' }}>
-                  {fmtSize(f.bounds)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Html>
-      )}
     </group>
   )
 }

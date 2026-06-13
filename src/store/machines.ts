@@ -32,6 +32,15 @@ import { useMachine } from './machine'
 export type TransportKind = 'serial' | 'mock' | 'websocket'
 export type MachineLinkStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
+/** Firmware classified by a port probe (see serial/portScan.ts). */
+export type DetectedFirmware =
+  | 'grbl'
+  | 'grblhal'
+  | 'fluidnc'
+  | 'marlin'
+  | 'smoothie'
+  | 'unknown'
+
 export interface MachineEntry {
   id: string
   /** User-facing label (defaults from the transport: port id / "Mock" / URL). */
@@ -43,6 +52,30 @@ export interface MachineEntry {
   status: MachineLinkStatus
   /** Last error for this machine, if any. */
   error?: string
+
+  // ─── Auto-scan (Task #97) metadata — set for entries created by probing a
+  // granted serial port. Web Serial only exposes {usbVendorId, usbProductId}
+  // (no OS path), so a port is identified/deduped by those ids. ───
+  /** USB vendor id of the detected serial port (for dedupe + the label). */
+  usbVendorId?: number
+  /** USB product id of the detected serial port. */
+  usbProductId?: number
+  /** Friendly USB bridge-chip / port label, e.g. "CH340 (1A86:7523)". */
+  portLabel?: string
+  /** Firmware detected by probing the port. */
+  firmware?: DetectedFirmware
+  /** Firmware version string if the probe reported one. */
+  firmwareVersion?: string
+}
+
+/** A machine discovered + probed by scanGrantedPorts(), passed to upsertDetected. */
+export interface DetectedMachine {
+  label: string
+  usbVendorId?: number
+  usbProductId?: number
+  portLabel: string
+  firmware: DetectedFirmware
+  firmwareVersion?: string
 }
 
 interface MachinesState {
@@ -52,6 +85,13 @@ interface MachinesState {
 
   /** Add a saved machine; returns its id. */
   addMachine: (m: { label?: string; kind: TransportKind; url?: string }) => string
+  /**
+   * Upsert a serial machine discovered by an auto-scan (Task #97). Dedupes on the
+   * USB vendor:product id (the only stable identifier Web Serial exposes — there
+   * is no OS port path). Updates the label/firmware/chip of an existing entry, or
+   * adds a new one. Returns its id. Never disturbs the active connection.
+   */
+  upsertDetected: (m: DetectedMachine) => string
   /** Remove a saved machine (disconnects it first if active). */
   removeMachine: (id: string) => void
   /** Rename a saved machine. */
@@ -109,6 +149,52 @@ export const useMachines = create<MachinesState>()(
           kind,
           url: kind === 'websocket' ? url : undefined,
           status: 'disconnected',
+        }
+        set((s) => ({ machines: [...s.machines, entry] }))
+        return id
+      },
+
+      upsertDetected: (m) => {
+        // Dedupe by USB vendor:product. Two ports with the SAME vendor:product
+        // (e.g. two identical CH340 boards) are indistinguishable to Web Serial —
+        // they collapse into one farm entry, which is the honest representation of
+        // what the API tells us. If ids are missing, dedupe by portLabel instead.
+        const matchKey = (e: MachineEntry): boolean =>
+          m.usbVendorId != null && m.usbProductId != null
+            ? e.kind === 'serial' &&
+              e.usbVendorId === m.usbVendorId &&
+              e.usbProductId === m.usbProductId
+            : e.kind === 'serial' && e.portLabel === m.portLabel
+        const existing = get().machines.find(matchKey)
+        if (existing) {
+          set((s) => ({
+            machines: s.machines.map((e) =>
+              e.id === existing.id
+                ? {
+                    ...e,
+                    label: m.label,
+                    portLabel: m.portLabel,
+                    firmware: m.firmware,
+                    firmwareVersion: m.firmwareVersion,
+                    usbVendorId: m.usbVendorId,
+                    usbProductId: m.usbProductId,
+                  }
+                : e,
+            ),
+          }))
+          return existing.id
+        }
+        const id = newId()
+        const entry: MachineEntry = {
+          id,
+          label: m.label,
+          kind: 'serial',
+          status: 'disconnected',
+          usbVendorId: m.usbVendorId,
+          usbProductId: m.usbProductId,
+          portLabel: m.portLabel,
+          firmware: m.firmware,
+          firmwareVersion: m.firmwareVersion,
         }
         set((s) => ({ machines: [...s.machines, entry] }))
         return id
@@ -221,6 +307,13 @@ export const useMachines = create<MachinesState>()(
           kind: m.kind,
           url: m.url,
           status: 'disconnected' as MachineLinkStatus,
+          // Persist the scan metadata so detected machines keep their port label
+          // + firmware across reloads (and dedupe correctly on the next scan).
+          usbVendorId: m.usbVendorId,
+          usbProductId: m.usbProductId,
+          portLabel: m.portLabel,
+          firmware: m.firmware,
+          firmwareVersion: m.firmwareVersion,
         })),
         activeId: s.activeId,
       }),

@@ -180,6 +180,30 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
     setSaveErrors({})
   }
 
+  /** Save a SINGLE edited parameter to the machine (the per-row Save button). */
+  const saveOne = async (num: number, val: string) => {
+    setSaving(true)
+    try {
+      await grbl.writeSetting(num, val)
+      // Clear this row's pending edit + any prior error for it.
+      setEdits((e) => {
+        const next = { ...e }
+        delete next[num]
+        return next
+      })
+      setSaveErrors((errs) => {
+        const next = { ...errs }
+        delete next[num]
+        return next
+      })
+    } catch (e) {
+      setSaveErrors((errs) => ({ ...errs, [num]: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setSaving(false)
+      grbl.readSettings().catch(() => {})
+    }
+  }
+
   /** Set a row to its default ONLY if it differs numerically (parseFloat). */
   const resetToDefault = (num: number, def: string, current: string) => {
     if (parseFloat(current) === parseFloat(def)) return
@@ -343,8 +367,9 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
 
   return (
     <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and GRBL settings')}>
-      {/* Read / status */}
-      <section className="mo-section">
+      {/* Read / status — sticks to the top of the (scrolling) modal so the
+          Sync/Save toolbar stays reachable while the parameters scroll. */}
+      <section className="mo-section mo-sticky-head">
         <h4>
           {t('motion.heading.settingsFor', '{label} settings ($$)', {
             label: profile.label,
@@ -563,6 +588,23 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
                       <span className="mo-pending" title={t('motion.pending.title', 'Edited — click Save changes')}>
                         <Icon name="info" size={12} />
                       </span>
+                    )}
+                    {/* Per-row Save: save JUST this changed parameter, without
+                        committing every other pending edit. Mirrors the per-row
+                        reset (home) button; shown only while this row is edited. */}
+                    {editing && (
+                      <button
+                        type="button"
+                        className="mo-btn mo-saveone mo-iconbtn"
+                        disabled={!connected || saving}
+                        onClick={() => void saveOne(s.number, fieldVal)}
+                        title={t('motion.saveOne.title', 'Save ${num} to the machine now', {
+                          num: s.number,
+                        })}
+                        aria-label={t('motion.saveOne.aria', 'Save ${num}', { num: s.number })}
+                      >
+                        <Icon name="upload" size={13} />
+                      </button>
                     )}
                     {def !== undefined && (
                       <button

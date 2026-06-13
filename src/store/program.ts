@@ -68,6 +68,14 @@ interface ProgramStore {
   cursor: number
   /** True while the program is actively streaming to the controller. */
   streaming: boolean
+  /**
+   * True while a feature tab is computing a toolpath in the background (e.g. the
+   * 3D carve worker or a heavy model import). Drives a "Generating…" indicator in
+   * the Program panel so the user knows the app is working.
+   */
+  generating: boolean
+  /** Set the background-generation indicator. */
+  setGenerating: (b: boolean) => void
   /** Upsert a section keyed by `name` (replace its body, or append if new). */
   setProgram: (name: string, gcode: string) => void
   /**
@@ -212,6 +220,8 @@ export const useProgram = create<ProgramStore>((set, get) => ({
   selectedSectionId: null,
   cursor: -1,
   streaming: false,
+  generating: false,
+  setGenerating: (generating) => set({ generating }),
   setProgram: (name, gcode) => {
     const { sections, selectedSectionId } = get()
     const idx = sections.findIndex((s) => s.name === name)

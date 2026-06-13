@@ -313,6 +313,247 @@
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
 }
 
+/* ─────────────────── themed slider field (SliderField) ───────────────────
+   A full-width row: label · draggable accent-filled slider · small typable
+   number+unit. Mirrors the carving tab's `.cc-slider`/`.cc-sfield`; themed
+   purely via CSS vars so it follows light AND dark. Used in Settings and on
+   each object card's weave block. When `.wp-sfields` wraps the grid, the
+   fields stack ONE per row so the slider has room to drag. */
+.wp-sfields {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+}
+.weld-sfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.weld-sfield:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.weld-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  width: 86px;
+  min-width: 38px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.weld-sfield:focus-within .weld-sfield-lbl {
+  color: var(--fg);
+}
+.weld-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* the number-input + unit share one bordered frame; the <input> is borderless */
+.weld-sfield-num {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 80px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.weld-sfield-num:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.weld-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.weld-sfield-num input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.weld-sfield-num input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.weld-sfield-num input::-webkit-outer-spin-button,
+.weld-sfield-num input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.weld-sfield-num i {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--fg-muted);
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Themed draggable slider — track + thumb via theme vars (light/dark), accent
+   fill to the LEFT of the thumb from the inline `--pct` (WebKit/Blink) and
+   ::-moz-range-progress (Firefox). */
+.weld-slider {
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.weld-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--pct, 0%),
+    var(--bg-elev) var(--pct, 0%) 100%
+  );
+}
+.weld-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.weld-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.weld-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.weld-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.weld-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.weld-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.weld-slider:focus-visible {
+  outline: none;
+}
+.weld-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.weld-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so it's grabbable. */
+@media (pointer: coarse) {
+  .weld-slider { height: 24px; }
+  .weld-slider::-webkit-slider-runnable-track,
+  .weld-slider::-moz-range-track,
+  .weld-slider::-moz-range-progress { height: 6px; }
+  .weld-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .weld-slider::-moz-range-thumb { width: 17px; height: 17px; }
+  .weld-sfield-num { height: var(--ctl-h-touch); }
+}
+
+/* A slider-row that hosts a segmented control instead of a slider (Arc On/Off). */
+.weld-sfield-toggle .wp-seg {
+  flex: 1 1 0;
+  min-width: 34px;
+}
+
+/* ─────────────── compact segmented control (enums / toggles) ───────────────
+   Themed pill row: each option a flush button; the active one fills with the
+   accent. Used for Arc On/Off and the per-object weave pattern. */
+.wp-seg {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-width: 0;
+}
+.wp-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ctl-h);
+  padding: 0 10px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 0;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s, color 0.12s;
+}
+.wp-seg-btn:last-child {
+  border-right: 0;
+}
+.wp-seg-btn:not(.is-on):hover {
+  color: var(--accent);
+}
+.wp-seg-btn.is-on {
+  color: var(--accent-fg);
+  background: var(--accent);
+  font-weight: 600;
+}
+/* The pattern selector spans the full card width and wraps its 4 options. */
+.weld-pattern-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  grid-column: 1 / -1;
+}
+.wp-seg-pattern {
+  flex: 1 1 0;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 /* ───────────────────────── object list ───────────────────────── */
 .wp-objects {
   flex: 1 1 auto;
@@ -451,11 +692,12 @@
   flex: 0 1 120px;
 }
 
-/* per-object weave grid */
+/* per-object weave block — full-width slider rows, one per line so each slider
+   has room to drag (matches the carving tab's single-column slider grid). */
 .wp-ocard-weave {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: var(--sp-2) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
   padding-top: var(--sp-2);
   border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
@@ -571,11 +813,16 @@
   .wp-fields {
     grid-template-columns: 1fr 1fr;
   }
+  /* Slider rows always stay full-width so the slider keeps room to drag. */
+  .wp-sfields {
+    grid-template-columns: 1fr;
+  }
   .wp-input input,
   .wp-field select,
   .wp-switch,
-  .wp-ocard-weave select,
-  .wp-kind-btn {
+  .wp-kind-btn,
+  .weld-sfield-num,
+  .wp-seg-btn {
     height: var(--ctl-h-touch);
   }
   .wp-mini input {
@@ -607,11 +854,15 @@
     .wp-fields {
       grid-template-columns: 1fr 1fr;
     }
+    .wp-sfields {
+      grid-template-columns: 1fr;
+    }
     .wp-input input,
     .wp-field select,
     .wp-switch,
-    .wp-ocard-weave select,
     .wp-kind-btn,
+    .weld-sfield-num,
+    .wp-seg-btn,
     .wp-mini input {
       height: var(--ctl-h-touch);
     }

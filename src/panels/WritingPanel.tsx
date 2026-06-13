@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Polyline } from '../core/geometry'
 import { Toolpath } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
@@ -66,6 +66,78 @@ function AlignGlyph({ align }: { align: 'left' | 'center' | 'right' }) {
       <path d={`M${short.x1} 12h${short.x2 - short.x1}`} />
       <path d="M3 18h18" />
     </svg>
+  )
+}
+
+/**
+ * Sleek slider + typable number + unit row for a Writing numeric param. Mirrors
+ * the CadCam tab's `SliderField` technique (themed `.cc-slider` accent fill via
+ * the inline `--mc-pct`, exact entry in the `.cc-slider-num` box) so it matches
+ * the rest of the app and themes cleanly in light + dark. The slider clamps to
+ * [min,max] for dragging; the number box allows exact (even out-of-range) entry,
+ * which the caller's own `clampNum` guard then sanitises — keeping typing fully
+ * usable alongside the slider, with units preserved.
+ */
+function WrSlider({
+  icon,
+  label,
+  htmlFor,
+  unit,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  title,
+}: {
+  icon: ReactNode
+  label: string
+  htmlFor: string
+  unit?: string
+  value: number
+  onChange: (n: number) => void
+  min: number
+  max: number
+  step: number
+  title?: string
+}) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  const pct =
+    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
+  return (
+    <div className="cc-sfield" title={title}>
+      <label className="cc-sfield-lbl" htmlFor={htmlFor}>
+        <span className="cc-sfield-ico" aria-hidden>{icon}</span>
+        <span className="cc-sfield-txt">{label}</span>
+      </label>
+      <input
+        type="range"
+        className="cc-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="cc-sfield-num">
+        <input
+          id={htmlFor}
+          type="number"
+          inputMode="decimal"
+          className="cc-slider-num"
+          min={min}
+          max={max}
+          step={step}
+          value={String(value)}
+          aria-label={label}
+          onChange={(e) => onChange(clampNum(e.target.value, value, min, max))}
+        />
+        {unit ? <span className="cc-sfield-unit">{unit}</span> : null}
+      </span>
+    </div>
   )
 }
 
@@ -175,7 +247,6 @@ export function WritingPanel() {
   const [penUpZ, setPenUpZ] = usePersistentState('karmyogi.writing.penUpZ', 5)
   const [penDownZ, setPenDownZ] = usePersistentState('karmyogi.writing.penDownZ', 0)
   const [feed, setFeed] = usePersistentState('karmyogi.writing.feed', 1500)
-  const [showAdvanced, setShowAdvanced] = usePersistentState('karmyogi.writing.showAdvanced', false)
 
   // Styling (persisted).
   const [bold, setBold] = usePersistentState('karmyogi.writing.bold', false)
@@ -595,21 +666,21 @@ export function WritingPanel() {
               onChange={(e) => setText(e.target.value)}
               placeholder={t('writing.text.placeholder', 'Type here. Use Enter for a new line.')}
               title={t('writing.text.title.tip', 'Text to plot. Press Enter for a new line.')}
-              rows={3}
+              rows={2}
               spellCheck={false}
             />
           </div>
         </section>
 
-        {/* ---- Font: picker + icon toolbar + style toggles + mode ---- */}
+        {/* ---- Font & Style: sleek dense toolbar — font picker + source icons +
+             Stroke/Outline mode on one line, then Style (B/I/U) + Align on one ---- */}
         <section className="wr-card wr-span">
-          <h3>{t('writing.font.title', 'Font')}</h3>
-          <div className="wr-card-body">
-            {/* picker + compact icon toolbar (upload / built-in / system fonts) */}
+          <h3>{t('writing.font.title', 'Font & Style')}</h3>
+          <div className="wr-card-body wr-fs">
+            {/* row 1: font select + source icons + Stroke/Outline mode, packed tight */}
             <div className="wr-font-row">
-              <label className="wr-field wr-font-pick" title={t('writing.font.pickTip', 'Choose a font: built-in Hershey (offline), a bundled font, an uploaded file, or one of your loaded system fonts.')}>
-                <span>{t('writing.font.pick', 'Font')}</span>
-                <select value={fontId} onChange={(e) => setFontId(e.target.value)}>
+              <label className="wr-font-pick" title={t('writing.font.pickTip', 'Choose a font: built-in Hershey (offline), a bundled font, an uploaded file, or one of your loaded system fonts.')}>
+                <select value={fontId} onChange={(e) => setFontId(e.target.value)} aria-label={t('writing.font.pick', 'Font')}>
                   <optgroup label={t('writing.font.group.bundled', 'Bundled')}>
                     {catalog.map((e) => (
                       <option key={e.id} value={e.id}>
@@ -659,6 +730,33 @@ export function WritingPanel() {
                   onClick={() => void loadSystem()}
                 />
               </div>
+              {/* Stroke / Outline segmented mode toggle — sits inline on the font row */}
+              <div className="wr-mode" role="group" aria-label={t('writing.mode.label', 'G-code mode')}>
+                <button
+                  type="button"
+                  className={'wr-seg' + (genMode === 'stroke' ? ' is-active' : '')}
+                  aria-pressed={genMode === 'stroke'}
+                  onClick={() => setGenMode('stroke')}
+                  title={t('writing.mode.strokeTip', 'Follow the font centerlines (single-stroke). Best for Hershey/JSON fonts; outline fonts use the built-in stroke font.')}
+                >
+                  {t('writing.mode.stroke', 'Stroke')}
+                  {!canStroke && <span className="wr-seg-note">·{t('writing.mode.builtin', 'built-in')}</span>}
+                </button>
+                <button
+                  type="button"
+                  className={'wr-seg' + (genMode === 'outline' ? ' is-active' : '')}
+                  aria-pressed={genMode === 'outline'}
+                  onClick={() => setGenMode('outline')}
+                  disabled={!canOutline}
+                  title={
+                    canOutline
+                      ? t('writing.mode.outlineTip', 'Engrave around each glyph contour. Best for TTF/OTF fonts.')
+                      : t('writing.mode.outlineNa', 'Outline mode needs a TTF/OTF font. Pick or upload one.')
+                  }
+                >
+                  {t('writing.mode.outline', 'Outline')}
+                </button>
+              </div>
               <input
                 ref={fileRef}
                 type="file"
@@ -672,36 +770,8 @@ export function WritingPanel() {
               />
             </div>
 
-            {/* Stroke / Outline segmented mode toggle */}
-            <div className="wr-mode" role="group" aria-label={t('writing.mode.label', 'G-code mode')}>
-              <button
-                type="button"
-                className={'wr-seg' + (genMode === 'stroke' ? ' is-active' : '')}
-                aria-pressed={genMode === 'stroke'}
-                onClick={() => setGenMode('stroke')}
-                title={t('writing.mode.strokeTip', 'Follow the font centerlines (single-stroke). Best for Hershey/JSON fonts; outline fonts use the built-in stroke font.')}
-              >
-                {t('writing.mode.stroke', 'Stroke')}
-                {!canStroke && <span className="wr-seg-note">·{t('writing.mode.builtin', 'built-in')}</span>}
-              </button>
-              <button
-                type="button"
-                className={'wr-seg' + (genMode === 'outline' ? ' is-active' : '')}
-                aria-pressed={genMode === 'outline'}
-                onClick={() => setGenMode('outline')}
-                disabled={!canOutline}
-                title={
-                  canOutline
-                    ? t('writing.mode.outlineTip', 'Engrave around each glyph contour. Best for TTF/OTF fonts.')
-                    : t('writing.mode.outlineNa', 'Outline mode needs a TTF/OTF font. Pick or upload one.')
-                }
-              >
-                {t('writing.mode.outline', 'Outline')}
-              </button>
-            </div>
-
-            {/* B / I / U style toggles + size */}
-            <div className="wr-style-row">
+            {/* row 2: Style (B/I/U) + Align (left/center/right) packed on ONE tight row */}
+            <div className="wr-styleline">
               <div className="wr-style-toggles" role="group" aria-label={t('writing.style.label', 'Text style')}>
                 <button
                   type="button"
@@ -725,34 +795,13 @@ export function WritingPanel() {
                   title={t('writing.style.underline', 'Underline — add a line under each row of text.')}
                 >U</button>
               </div>
-              <label className="wr-field wr-size" title={t('writing.charHeight.tip', 'Cap height of the text in millimetres (font size).')}>
-                <span>{t('writing.size', 'Size')}</span>
-                <span className="wr-input">
-                  <input type="number" inputMode="decimal" min={0.5} step={0.5} value={charHeight}
-                    onChange={(e) => setCharHeight(clampNum(e.target.value, charHeight, 0.5, 1000))} />
-                  <em>mm</em>
-                </span>
-              </label>
-            </div>
-
-            {missing.length > 0 && (
-              <p className="wr-warn" role="status">
-                {t('writing.missingGlyphs', 'Missing glyph(s): {glyphs} — rendered as blank space.', {
-                  glyphs: missing.map((c) => (c === ' ' ? '␣' : c)).join(' '),
-                })}
-              </p>
-            )}
-          </div>
-        </section>
-
-        {/* ---- Essentials: alignment, pen Z, feed — icon-labelled fields ---- */}
-        <section className="wr-card">
-          <h3>{t('writing.penLayout.title', 'Pen & Layout')}</h3>
-          <div className="wr-card-body">
-            {/* Alignment as icon toggle buttons (left / center / right). */}
-            <div className="wr-field" title={t('writing.alignment.tip', 'Horizontal alignment of each line of text.')}>
-              <span className="wr-ic-label" aria-hidden="true"><AlignGlyph align="center" /></span>
-              <div className="wr-align" role="group" aria-label={t('writing.alignment', 'Alignment')}>
+              <span className="wr-vsep" aria-hidden="true" />
+              <div
+                className="wr-align"
+                role="group"
+                aria-label={t('writing.alignment', 'Alignment')}
+                title={t('writing.alignment.tip', 'Horizontal alignment of each line of text.')}
+              >
                 {ALIGN_OPTIONS.map((o) => (
                   <button
                     key={o.value}
@@ -767,35 +816,99 @@ export function WritingPanel() {
               </div>
             </div>
 
-            <div className="wr-grid">
-              <label className="wr-field wr-ic" title={t('writing.penUpZ.tip', 'Pen-up Z — height the pen lifts to for travel moves (safe-Z), in mm.')}>
-                <span className="wr-ic-label" aria-hidden="true"><Icon name="upload" size={13} /> Z</span>
-                <span className="wr-input">
-                  <input type="number" inputMode="decimal" step={0.5} value={penUpZ}
-                    onChange={(e) => setPenUpZ(clampNum(e.target.value, penUpZ, -1000, 1000))}
-                    aria-label={t('writing.penUpZ', 'Pen up Z')} />
-                  <em>mm</em>
-                </span>
-              </label>
-              <label className="wr-field wr-ic" title={t('writing.penDownZ.tip', 'Pen-down Z — height the pen drops to while drawing, in mm.')}>
-                <span className="wr-ic-label" aria-hidden="true"><Icon name="download" size={13} /> Z</span>
-                <span className="wr-input">
-                  <input type="number" inputMode="decimal" step={0.5} value={penDownZ}
-                    onChange={(e) => setPenDownZ(clampNum(e.target.value, penDownZ, -1000, 1000))}
-                    aria-label={t('writing.penDownZ', 'Pen down Z')} />
-                  <em>mm</em>
-                </span>
-              </label>
-              <label className="wr-field wr-ic" title={t('writing.feed.tip', 'Feed — drawing (pen-down) feed rate, in mm per minute.')}>
-                <span className="wr-ic-label" aria-hidden="true">{t('writing.feed.glyph', 'F')}</span>
-                <span className="wr-input">
-                  <input type="number" inputMode="decimal" min={1} step={50} value={feed}
-                    onChange={(e) => setFeed(clampNum(e.target.value, feed, 1, 100000))}
-                    aria-label={t('writing.feed', 'Feed')} />
-                  <em>mm/min</em>
-                </span>
-              </label>
-            </div>
+            {missing.length > 0 && (
+              <p className="wr-warn" role="status">
+                {t('writing.missingGlyphs', 'Missing glyph(s): {glyphs} — rendered as blank space.', {
+                  glyphs: missing.map((c) => (c === ' ' ? '␣' : c)).join(' '),
+                })}
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* ---- Size & spacing — slider rows (size, line + letter spacing) ---- */}
+        <section className="wr-card">
+          <h3>{t('writing.sizeSpacing.title', 'Size & Spacing')}</h3>
+          <div className="wr-card-body wr-sliders">
+            <WrSlider
+              icon={<span className="wr-glyph">A</span>}
+              label={t('writing.size', 'Size')}
+              htmlFor="wr-size"
+              unit="mm"
+              min={0.5}
+              max={100}
+              step={0.5}
+              value={charHeight}
+              onChange={setCharHeight}
+              title={t('writing.charHeight.tip', 'Cap height of the text in millimetres (font size).')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">≡</span>}
+              label={t('writing.lineSpacing', 'Line spacing')}
+              htmlFor="wr-line"
+              unit="×"
+              min={0.5}
+              max={4}
+              step={0.1}
+              value={lineSpacing}
+              onChange={setLineSpacing}
+              title={t('writing.lineSpacing.tip', 'Baseline-to-baseline distance as a multiple of char height.')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">A·A</span>}
+              label={t('writing.letterSpacing', 'Letter spacing')}
+              htmlFor="wr-letter"
+              unit="mm"
+              min={0}
+              max={20}
+              step={0.5}
+              value={letterSpacing}
+              onChange={setLetterSpacing}
+              title={t('writing.letterSpacing.tip', 'Extra gap added after each character, in millimetres.')}
+            />
+          </div>
+        </section>
+
+        {/* ---- Pen Z & feed — slider rows ---- */}
+        <section className="wr-card">
+          <h3>{t('writing.penZ.title', 'Pen Z & Feed')}</h3>
+          <div className="wr-card-body wr-sliders">
+            <WrSlider
+              icon={<Icon name="upload" size={14} />}
+              label={t('writing.penUpZ', 'Pen up Z')}
+              htmlFor="wr-penup"
+              unit="mm"
+              min={-10}
+              max={50}
+              step={0.5}
+              value={penUpZ}
+              onChange={setPenUpZ}
+              title={t('writing.penUpZ.tip', 'Pen-up Z — height the pen lifts to for travel moves (safe-Z), in mm.')}
+            />
+            <WrSlider
+              icon={<Icon name="download" size={14} />}
+              label={t('writing.penDownZ', 'Pen down Z')}
+              htmlFor="wr-pendown"
+              unit="mm"
+              min={-10}
+              max={50}
+              step={0.5}
+              value={penDownZ}
+              onChange={setPenDownZ}
+              title={t('writing.penDownZ.tip', 'Pen-down Z — height the pen drops to while drawing, in mm.')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">{t('writing.feed.glyph', 'F')}</span>}
+              label={t('writing.feed', 'Feed')}
+              htmlFor="wr-feed"
+              unit="mm/min"
+              min={1}
+              max={6000}
+              step={50}
+              value={feed}
+              onChange={setFeed}
+              title={t('writing.feed.tip', 'Feed — drawing (pen-down) feed rate, in mm per minute.')}
+            />
 
             {/* SAFETY: pen-down must sit BELOW pen-up (which is the safe-Z). If it
                 doesn't, the pen never lifts for travel and drags across the work. */}
@@ -812,60 +925,35 @@ export function WritingPanel() {
           </div>
         </section>
 
-        {/* ---- Advanced (collapsed by default) ---- */}
-        <section className={'wr-card wr-collapsible' + (showAdvanced ? ' is-open' : '')}>
-          <h3>
-            <button
-              type="button"
-              className="wr-toggle"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              aria-expanded={showAdvanced}
-            >
-              <span className="wr-caret">
-                <Icon name={showAdvanced ? 'chevron-down' : 'chevron-right'} size={12} />
-              </span>
-              {t('writing.advanced', 'Advanced')}
-              <span className="wr-toggle-note">{t('writing.advanced.note', 'spacing & origin')}</span>
-            </button>
-          </h3>
-          {showAdvanced && (
-            <div className="wr-card-body">
-              <div className="wr-grid">
-                <label className="wr-field" title={t('writing.lineSpacing.tip', 'Baseline-to-baseline distance as a multiple of char height.')}>
-                  <span>{t('writing.lineSpacing', 'Line spacing')}</span>
-                  <span className="wr-input">
-                    <input type="number" inputMode="decimal" min={0.5} step={0.1} value={lineSpacing}
-                      onChange={(e) => setLineSpacing(clampNum(e.target.value, lineSpacing, 0.1, 100))} />
-                    <em>×</em>
-                  </span>
-                </label>
-                <label className="wr-field" title={t('writing.letterSpacing.tip', 'Extra gap added after each character, in millimetres.')}>
-                  <span>{t('writing.letterSpacing', 'Letter spacing')}</span>
-                  <span className="wr-input">
-                    <input type="number" inputMode="decimal" min={0} step={0.5} value={letterSpacing}
-                      onChange={(e) => setLetterSpacing(clampNum(e.target.value, letterSpacing, 0, 1000))} />
-                    <em>mm</em>
-                  </span>
-                </label>
-                <label className="wr-field" title={t('writing.originX.tip', 'Shift the whole text block along X, in millimetres.')}>
-                  <span>{t('writing.originX', 'Origin X')}</span>
-                  <span className="wr-input">
-                    <input type="number" inputMode="decimal" step={1} value={originX}
-                      onChange={(e) => setOriginX(clampNum(e.target.value, originX, -100000, 100000))} />
-                    <em>mm</em>
-                  </span>
-                </label>
-                <label className="wr-field" title={t('writing.originY.tip', 'Shift the whole text block along Y, in millimetres.')}>
-                  <span>{t('writing.originY', 'Origin Y')}</span>
-                  <span className="wr-input">
-                    <input type="number" inputMode="decimal" step={1} value={originY}
-                      onChange={(e) => setOriginY(clampNum(e.target.value, originY, -100000, 100000))} />
-                    <em>mm</em>
-                  </span>
-                </label>
-              </div>
-            </div>
-          )}
+        {/* ---- Placement — origin sliders ---- */}
+        <section className="wr-card">
+          <h3>{t('writing.placement.title', 'Placement')}</h3>
+          <div className="wr-card-body wr-sliders">
+            <WrSlider
+              icon={<span className="wr-glyph">X</span>}
+              label={t('writing.originX', 'Origin X')}
+              htmlFor="wr-originx"
+              unit="mm"
+              min={-300}
+              max={300}
+              step={1}
+              value={originX}
+              onChange={setOriginX}
+              title={t('writing.originX.tip', 'Shift the whole text block along X, in millimetres.')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">Y</span>}
+              label={t('writing.originY', 'Origin Y')}
+              htmlFor="wr-originy"
+              unit="mm"
+              min={-300}
+              max={300}
+              step={1}
+              value={originY}
+              onChange={setOriginY}
+              title={t('writing.originY.tip', 'Shift the whole text block along Y, in millimetres.')}
+            />
+          </div>
         </section>
 
         </div>

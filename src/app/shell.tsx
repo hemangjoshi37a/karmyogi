@@ -316,29 +316,25 @@ export function Shell() {
   return (
     <div className="app-shell">
       <header className="topbar" data-mobile={isMobile ? 'true' : undefined}>
-        <span className="brand">
+        {/* Brand. The "by hjLabs.in · MIT License" credit (previously a separate
+            app-bar element) is now a hover tooltip on the title to free up bar
+            space; the clickable hjLabs.in + MIT links live in the About modal. */}
+        <span className="brand" title="by hjLabs.in · MIT License">
           <img
             className="brand-mark"
             src="/icon-mark.png"
             width={22}
             height={22}
             alt="karmyogi — meditating yogi mark"
-            title="karmyogi"
           />
           <span className="brand-word">karm<span className="accent">yogi</span></span>
         </span>
-        <span className="brand-by">
-          by <a href="https://hjLabs.in" target="_blank" rel="noopener noreferrer">hjLabs.in</a>
-          {' · '}
-          <a
-            href={`${REPO_URL}/blob/main/LICENSE`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="karmyogi is open source under the MIT License — view LICENSE on GitHub"
-          >
-            MIT
-          </a>
-        </span>
+        {/* About ⓘ — first action, right next to the title. */}
+        <IconButton
+          icon="ⓘ"
+          label="About karmyogi (source, license, report a bug)"
+          onClick={() => setShowAbout(true)}
+        />
         <span className="spacer" />
         {isMobile ? (
           /* Mobile: a tight, single-row action strip — notifications, one compact
@@ -385,19 +381,15 @@ export function Shell() {
                 </button>
                 <IconButton icon="+" label="Zoom in" onClick={zoomIn} />
               </span>
-              <NotificationBell />
-              <UserChip />
               <LanguageSwitcher />
-              <IconButton
-                icon="ⓘ"
-                label="About karmyogi (source, license, report a bug)"
-                onClick={() => setShowAbout(true)}
-              />
               <IconButton
                 icon={theme === 'dark' ? '☀' : '☾'}
                 label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
                 onClick={toggleTheme}
               />
+              {/* Notification bell second-to-last, user profile last. */}
+              <NotificationBell />
+              <UserChip />
             </span>
           </>
         )}
@@ -414,7 +406,7 @@ export function Shell() {
           />
         </div>
       )}
-      <Modal open={showMotion} title="Motion / GRBL Settings" onClose={() => setShowMotion(false)}>
+      <Modal open={showMotion} title="Motion Settings" onClose={() => setShowMotion(false)}>
         {/* Tall but bounded: 72vh of the modal body when there's room, and at
             least 320px so the panel stays usable on short viewports — the modal
             body (overflow:auto) scrolls anything that doesn't fit. */}

@@ -413,6 +413,261 @@
   white-space: pre;
 }
 
+/* === Themed slider rows for slicing/print params =========================
+   Mirrors `.cc-slider`/`.cc-sfield` from cadcam.css (the 2D/3D Carving
+   "Position & Size" rows) and the Controller jog "Feed" slider. Each is a
+   FULL-WIDTH single-column row: glyph + label + draggable accent-filled
+   slider + bordered number frame + unit suffix. All colours are theme CSS
+   variables (--accent / --bg-input / --bg-elev / --border / --fg / --fg-muted)
+   so it follows light AND dark. Replicated locally as `.pr-*` so print.css
+   doesn't import cadcam/controller CSS. */
+.pr-sfields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: center;
+}
+.pr-sfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.pr-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.pr-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Fixed-ish label column so the sliders all start at the same x; shrinkable
+     so it never pushes the slider/number off the row; truncates with ellipsis. */
+  flex: 0 1 auto;
+  width: 104px;
+  min-width: 38px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.pr-sfield:focus-within .pr-sfield-lbl { color: var(--fg); }
+.pr-sfield-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
+}
+.pr-sfield:focus-within .pr-sfield-ico { color: var(--accent); opacity: 1; }
+.pr-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* number-input + unit share one bordered frame (the real <input> is borderless
+   inside it), matching .cc-sfield-num. */
+.pr-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 96px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.pr-sfield-num:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.pr-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.pr-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Themed draggable slider — track + thumb use theme vars; the accent fill to the
+   LEFT of the thumb comes from the inline --mc-pct (WebKit/Blink gradient) and
+   from ::-moz-range-progress (Firefox). */
+.pr-slider {
+  /* basis 0 (not auto) so the range input doesn't claim its ~129px default width
+     and push the number box onto a 2nd line; it grows to fill instead. */
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.pr-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--mc-pct, 0%),
+    var(--bg-elev) var(--mc-pct, 0%) 100%
+  );
+}
+.pr-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.pr-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.pr-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.pr-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.pr-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.pr-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.pr-slider:focus-visible { outline: none; }
+.pr-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.pr-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* the small typable number input inside the bordered .pr-sfield-num frame */
+.pr-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.pr-slider-num:focus { outline: none; box-shadow: none; }
+.pr-slider-num::-webkit-outer-spin-button,
+.pr-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so the slider is grabbable
+   on a phone (matches the carving/jog slider's coarse sizing). */
+@media (pointer: coarse) {
+  .pr-slider { height: 24px; }
+  .pr-slider::-webkit-slider-runnable-track,
+  .pr-slider::-moz-range-track,
+  .pr-slider::-moz-range-progress { height: 6px; }
+  .pr-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .pr-slider::-moz-range-thumb { width: 17px; height: 17px; }
+}
+
+/* === Segmented control (.pr-seg) for enum/toggle choices ==================
+   Compact icon-led pills mirroring .cc-opseg / .laser-seg: glyph + label inline,
+   active pill fills with the accent. Themed only via CSS vars (light + dark). */
+.pr-segrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+.pr-segrow-label {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.pr-seg {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.pr-seg-btn {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  min-height: calc(var(--ctl-h) - 6px);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.pr-seg-btn:hover {
+  color: var(--fg);
+}
+.pr-seg-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.pr-seg-lbl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pr-seg-btn.is-on {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.pr-seg-btn.is-on .pr-seg-ico {
+  color: var(--accent-fg);
+}
+
 /* --- narrow panel (≤560px): one column of cards, off PANEL width --- */
 @container printpanel (max-width: 560px) {
   .print-cards {
@@ -436,10 +691,12 @@
   .print-icon-btn.icon-btn {
     min-width: var(--ctl-h-touch);
   }
-  .print-field input {
+  .print-field input,
+  .pr-sfield-num {
     height: var(--ctl-h-touch);
   }
-  .print-check {
+  .print-check,
+  .pr-seg-btn {
     min-height: var(--ctl-h-touch);
   }
 }
@@ -467,10 +724,12 @@
     .print-icon-btn.icon-btn {
       min-width: var(--ctl-h-touch);
     }
-    .print-field input {
+    .print-field input,
+    .pr-sfield-num {
       height: var(--ctl-h-touch);
     }
-    .print-check {
+    .print-check,
+    .pr-seg-btn {
       min-height: var(--ctl-h-touch);
     }
   }

@@ -267,78 +267,221 @@
   padding: var(--sp-4);
 }
 
-/* Compact field grid: number fields pack left tightly and wrap naturally,
-   never stretching one-per-huge-column across the card. */
-.sig-fields {
+/* ---- Slider field rows (label · slider · number · unit) ----
+   Sleek one-line rows modelled on CadCamPanel's `.cc-sfield`/`.cc-slider`. Each
+   field is a FULL-WIDTH row in a single-column grid so the slider has room to
+   drag. Themed entirely via CSS vars (accent fill via the inline `--pct`), so it
+   follows light AND dark. Replicated locally as `.sig-*` so signature.css owns
+   its own widget (no cross-import of cadcam/controller CSS). */
+.sig-sgrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  grid-template-columns: 1fr;
   gap: var(--sp-2) var(--sp-3);
-  align-items: end;
+  align-items: center;
 }
-
-.sig-field {
+.sig-sfield {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
   min-width: 0;
-  font-size: var(--fs-label);
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
 }
-.sig-field > span:first-child {
+.sig-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.sig-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Fixed-ish label column so the sliders all start at the same x. Shrinkable so
+     it never pushes the slider/number off the row; truncates with ellipsis. */
+  flex: 0 1 auto;
+  width: 92px;
+  min-width: 38px;
+  font-size: var(--fs-label);
+  font-weight: 500;
   color: var(--fg-muted);
 }
-/* Threshold range spans the card on its own row. */
-.sig-field-range {
-  width: 100%;
-}
-
-/* checkbox rows wrap into a tight group */
-.sig-checks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-4);
-}
-.sig-check {
-  flex-direction: row;
+.sig-sfield:focus-within .sig-sfield-lbl { color: var(--fg); }
+.sig-sfield-ico {
+  display: inline-flex;
   align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-ctl);
-}
-.sig-check input {
-  width: 16px;
-  height: 16px;
+  justify-content: center;
   flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
 }
-.sig-check span {
-  color: var(--fg);
-}
-
-/* range slider — compact on desktop */
-.sig-field input[type='range'] {
-  width: 100%;
-  height: var(--ctl-h);
-  min-height: 0;
-}
-
-/* number input + unit suffix */
-.sig-input {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.sig-input input {
+.sig-sfield:focus-within .sig-sfield-ico { color: var(--accent); opacity: 1; }
+.sig-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex: 1 1 auto;
   min-width: 0;
-  height: var(--ctl-h);
-  min-height: 0;
 }
-.sig-input input:disabled {
-  opacity: 0.5;
-}
-.sig-input em {
+/* number-input + unit share one bordered frame; the real <input> is borderless. */
+.sig-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   flex: 0 0 auto;
-  font-style: normal;
-  font-size: var(--fs-label);
+  width: 84px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.sig-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.sig-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.sig-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
   color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Themed draggable slider — mirrors .cc-slider. Track + thumb use theme vars; the
+   accent fill to the LEFT of the thumb comes from the inline `--pct` (WebKit/Blink
+   gradient) and from ::-moz-range-progress (Firefox). */
+.sig-slider {
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.sig-slider:disabled { opacity: 0.5; cursor: not-allowed; }
+.sig-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--pct, 0%),
+    var(--bg-elev) var(--pct, 0%) 100%
+  );
+}
+.sig-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.sig-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.sig-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.sig-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.sig-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.sig-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.sig-slider:focus-visible { outline: none; }
+.sig-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.sig-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* small typable number input inside the bordered .sig-sfield-num frame */
+.sig-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.sig-slider-num:focus { outline: none; box-shadow: none; }
+.sig-slider-num:disabled { opacity: 0.5; }
+.sig-slider-num::-webkit-outer-spin-button,
+.sig-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so the slider is grabbable
+   on a phone. */
+@media (pointer: coarse) {
+  .sig-slider { height: 24px; }
+  .sig-slider::-webkit-slider-runnable-track,
+  .sig-slider::-moz-range-track,
+  .sig-slider::-moz-range-progress { height: 6px; }
+  .sig-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .sig-slider::-moz-range-thumb { width: 17px; height: 17px; }
+}
+
+/* ---- Compact segmented toggle buttons (Invert / Lock aspect) ----
+   Pill toggles in a tight wrapping row, mirroring `.cc-opseg`'s look. */
+.sig-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.sig-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--ctl-h);
+  padding: 4px var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  line-height: 1.1;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.sig-toggle:hover { border-color: var(--accent); color: var(--fg); }
+.sig-toggle.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent);
+  color: var(--fg);
 }
 
 .sig-btn {
@@ -482,8 +625,10 @@
   .sig-disclosure {
     min-height: var(--ctl-h-touch);
   }
-  .sig-input input,
-  .sig-field input[type='range'] {
+  .sig-toggle {
+    min-height: var(--ctl-h-touch);
+  }
+  .sig-sfield-num {
     height: var(--ctl-h-touch);
   }
   .sig-drop {
@@ -514,8 +659,10 @@
     .sig-disclosure {
       min-height: var(--ctl-h-touch);
     }
-    .sig-input input,
-    .sig-field input[type='range'] {
+    .sig-toggle {
+      min-height: var(--ctl-h-touch);
+    }
+    .sig-sfield-num {
       height: var(--ctl-h-touch);
     }
     .sig-drop {

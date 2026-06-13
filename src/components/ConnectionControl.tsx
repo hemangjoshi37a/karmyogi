@@ -5,6 +5,7 @@ import { BlePort } from '../serial/blePort'
 import { UsbPort } from '../serial/usbPort'
 import { mixedContentReason, normalizeWsUrl } from '../serial/wsPort'
 import { useMachine, useMachineProfile, usePersistentState, useMachines } from '../store'
+import { scanGrantedPorts, requestPort, isSerialScanSupported } from '../serial/portScan'
 import { CONTROLLER_LIST, profileFor, canLiveConnect } from '../machine/controllers'
 import type { ControllerKind } from '../machine/types'
 import { useT } from '../i18n'
@@ -94,7 +95,61 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
   const addMachine = useMachines((s) => s.addMachine)
   const removeMachine = useMachines((s) => s.removeMachine)
   const connectMachine = useMachines((s) => s.connectMachine)
+  const upsertDetected = useMachines((s) => s.upsertDetected)
   const activeEntry = machines.find((m) => m.id === activeId) ?? null
+
+  // --- auto-scan of granted serial ports (Task #97) ---
+  // Web Serial has NO blanket "grant all ports" permission and NO OS port path —
+  // see serial/portScan.ts for the full constraints. The model: the user clicks
+  // "Add port…" ONCE per device (a gesture-gated chooser); thereafter every scan
+  // (incl. this auto-scan on mount) is silent and prompt-free.
+  const serialScan = isSerialScanSupported()
+  const [scanning, setScanning] = useState(false)
+  const FW_LABEL: Record<string, string> = {
+    grbl: 'GRBL',
+    grblhal: 'grblHAL',
+    fluidnc: 'FluidNC',
+    marlin: 'Marlin',
+    smoothie: 'Smoothie',
+    unknown: 'Serial',
+  }
+
+  const runScan = useRef(async () => {})
+  runScan.current = async () => {
+    if (!serialScan) return
+    setScanning(true)
+    try {
+      const found = await scanGrantedPorts()
+      for (const p of found) {
+        // The active connection's port is skipped inside scanGrantedPorts, so any
+        // entry here is safe to upsert without disturbing a live link.
+        upsertDetected({
+          label: p.label,
+          usbVendorId: p.info.vendorId,
+          usbProductId: p.info.productId,
+          portLabel: p.chip,
+          firmware: p.firmware,
+          firmwareVersion: p.version,
+        })
+      }
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  // One automatic, prompt-free scan on mount/load to self-populate the farm from
+  // already-granted ports. Guarded so it never throws into render.
+  useEffect(() => {
+    void runScan.current()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const addPort = async () => {
+    const port = await requestPort()
+    if (!port) return // chooser dismissed
+    // Granting registers the port with the browser; the scan then probes it.
+    await runScan.current()
+  }
 
   const profile = profileFor(controllerKind)
   // Baud the next connection will open at: the user's override (if any) wins over
@@ -185,6 +240,11 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
         machines={machines}
         activeId={activeId}
         connecting={connecting}
+        serialScan={serialScan}
+        scanning={scanning}
+        fwLabel={FW_LABEL}
+        onScan={() => void runScan.current()}
+        onAddPort={() => void addPort()}
         onSwitch={(id) => void connectMachine(id)}
         onRemove={(id) => removeMachine(id)}
         onAddWs={(url, label) => {
@@ -223,7 +283,7 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
           className="km-conn-icon"
           iconName="settings"
           iconSize={15}
-          label={t('conn.settings', 'Motion / GRBL settings')}
+          label={t('conn.settings', 'Motion Settings')}
           onClick={onOpenSettings}
         />
       )}
@@ -640,6 +700,16 @@ interface MachineSwitcherProps {
   machines: ReturnType<typeof useMachines.getState>['machines']
   activeId: string | null
   connecting: boolean
+  /** Whether Web Serial (and thus Scan / Add port) is available in this browser. */
+  serialScan: boolean
+  /** True while a port scan/probe is in progress. */
+  scanning: boolean
+  /** firmware key → display label, for the per-entry firmware badge. */
+  fwLabel: Record<string, string>
+  /** Re-scan already-granted ports (silent, prompt-free). */
+  onScan: () => void
+  /** Grant a new port via the browser chooser (user gesture), then scan. */
+  onAddPort: () => void
   onSwitch: (id: string) => void
   onRemove: (id: string) => void
   onAddWs: (url: string, label?: string) => void
@@ -656,6 +726,11 @@ function MachineSwitcher({
   machines,
   activeId,
   connecting,
+  serialScan,
+  scanning,
+  fwLabel,
+  onScan,
+  onAddPort,
   onSwitch,
   onRemove,
   onAddWs,
@@ -717,6 +792,48 @@ function MachineSwitcher({
       {open && (
         <div className="km-farm-pop">
           <div className="km-farm-head">{t('conn.machine.farm', 'Machine farm')}</div>
+          {serialScan && (
+            <div
+              className="km-farm-scan"
+              style={{
+                display: 'flex',
+                gap: 6,
+                padding: '8px 10px 6px',
+                borderBottom: '1px solid var(--border)',
+              }}
+            >
+              <button
+                className="km-conn-btn"
+                disabled={scanning}
+                onClick={onScan}
+                title={t(
+                  'conn.machine.scanTitle',
+                  'Re-scan the serial ports you’ve already granted and detect each one’s firmware. No prompt — runs automatically on load too.',
+                )}
+              >
+                {scanning ? t('conn.machine.scanning', 'Scanning…') : t('conn.machine.scan', 'Scan ports')}
+              </button>
+              <button
+                className="km-conn-btn primary"
+                disabled={scanning}
+                onClick={onAddPort}
+                title={t(
+                  'conn.machine.addPortTitle',
+                  'Grant a USB serial port (one-time per device — the browser has no “grant all ports” option). After granting, scans are automatic.',
+                )}
+              >
+                {t('conn.machine.addPort', 'Add port…')}
+              </button>
+            </div>
+          )}
+          {serialScan && (
+            <div className="km-farm-hint" style={{ padding: '0 10px 6px' }}>
+              {t(
+                'conn.machine.scanHint',
+                'Granted USB ports are probed for firmware automatically. The browser only exposes the USB chip id (e.g. CH340 1A86:7523), not the OS port name.',
+              )}
+            </div>
+          )}
           <div className="km-farm-list">
             {machines.length === 0 && (
               <div className="km-farm-empty">
@@ -736,12 +853,47 @@ function MachineSwitcher({
                   title={
                     m.kind === 'websocket'
                       ? m.url
-                      : t('conn.machine.connectThis', 'Switch to and connect this machine')
+                      : m.portLabel
+                        ? t(
+                            'conn.machine.connectThisPort',
+                            'Switch to and connect this machine — {port}',
+                            { port: m.portLabel },
+                          )
+                        : t('conn.machine.connectThis', 'Switch to and connect this machine')
                   }
                 >
                   <span className="km-farm-dot" data-status={m.status} />
-                  <span className="km-farm-name">{m.label}</span>
-                  <span className="km-farm-kind">{m.kind}</span>
+                  <span
+                    className="km-farm-name"
+                    style={{ display: 'flex', flexDirection: 'column', gap: 1 }}
+                  >
+                    <span
+                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      {m.label}
+                    </span>
+                    {/* Port chip-id + firmware version sub-line for scanned serial
+                        entries — the only per-port identity Web Serial exposes. */}
+                    {(m.portLabel || m.firmwareVersion) && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--fg-muted)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {m.portLabel}
+                        {m.firmwareVersion ? ` · v${m.firmwareVersion}` : ''}
+                      </span>
+                    )}
+                  </span>
+                  <span className="km-farm-kind">
+                    {m.firmware && m.firmware !== 'unknown'
+                      ? fwLabel[m.firmware] ?? m.kind
+                      : m.kind}
+                  </span>
                 </button>
                 <button
                   className="km-farm-del"

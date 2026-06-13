@@ -203,68 +203,282 @@
   border-radius: 999px;
 }
 
-/* ───────────────────────── field grids ───────────────────────── */
-.sp-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
-  gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-3);
-  align-items: end;
+/* ─────────────────────── Gerber / drill layer picker ───────────────────────
+   Shown after a multi-layer ZIP is imported: a list of detected layers tagged
+   with a friendly solder-role, the best candidate (paste › copper › drill)
+   highlighted. Picking a layer turns its pad / hole centres into points. */
+.sp-gerber-pick .sp-card-head h4 {
+  margin-right: auto;
 }
-.sp-field {
+.sp-gerber-hint {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3) 0;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.sp-gerber-layers {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
 }
-.sp-field-label {
+.sp-gerber-layer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--ctl-h);
+  padding: var(--sp-1) var(--sp-2);
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: var(--fs-ctl);
+}
+.sp-gerber-layer:hover {
+  border-color: var(--accent);
+}
+.sp-gerber-layer.is-suggested {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-input));
+}
+.sp-gerber-layer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-gerber-suggested {
+  margin-left: var(--sp-1);
+  color: var(--accent);
+  font-size: var(--fs-label);
+}
+.sp-gerber-layer-role {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
+}
+@media (pointer: coarse) {
+  .sp-gerber-layer {
+    min-height: var(--ctl-h-touch);
+  }
+}
+
+/* ───────────────────────── settings field rows ─────────────────────────
+   Each global setting is a compact one-line slider row [label · range · number ·
+   unit], stacked one per line so the slider has room to drag — mirrors the
+   Carving panel's `.cc-slider`/`.cc-sfield`, the Drilling `.dr-slider`, and the
+   Controller jog "Feed" control. Dense by default; grows to touch targets in
+   the narrow container query / coarse-pointer block below. */
+.sp-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+/* --- Themed slider rows (label · range · number · unit) ------------------- */
+.sp-sfield,
+.sp-segfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.sp-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.sp-sfield-lbl {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  /* Fixed-ish label column so the sliders all start at the same x. Shrinkable so
+     it never pushes the slider/number off the row; truncates with ellipsis. */
+  flex: 0 1 auto;
+  width: 88px;
+  min-width: 40px;
   font-size: var(--fs-label);
+  font-weight: 500;
   color: var(--fg-muted);
-  white-space: nowrap;
 }
-
-/* slim input with optional inline unit suffix */
-.sp-input {
-  position: relative;
+.sp-sfield:focus-within .sp-sfield-lbl,
+.sp-segfield:focus-within .sp-sfield-lbl { color: var(--fg); }
+.sp-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* The number-input + unit share one bordered frame; the real <input> is
+   borderless inside it so the unit reads as a suffix. */
+.sp-sfield-num {
   display: flex;
   align-items: center;
-}
-.sp-input input {
-  width: 100%;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 78px;
   height: var(--ctl-h);
-  min-height: 0;
-  padding: 0 7px;
+  padding: 0 6px;
   box-sizing: border-box;
-  font-size: var(--fs-ctl);
-  color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
-.sp-input.has-unit input {
-  /* leave room for the unit suffix so digits never overlap it */
-  padding-right: 38px;
-}
-.sp-input input:focus {
-  outline: none;
+.sp-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.sp-sfield-num:focus-within {
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
 }
-.sp-input i {
-  position: absolute;
-  right: 7px;
-  font-style: normal;
+.sp-sfield-unit {
+  flex: 0 0 auto;
   font-size: 10px;
   color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
+  opacity: 0.8;
 }
-.sp-field select {
+
+/* Themed draggable range input. */
+.sp-slider {
+  /* basis 0 so the range input doesn't claim its default width and push the
+     number box onto a 2nd line; it grows to fill instead, keeping
+     label + slider + number on ONE row even in a slim docked column. */
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.sp-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--sol-pct, 0%),
+    var(--bg-elev) var(--sol-pct, 0%) 100%
+  );
+}
+.sp-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.sp-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.sp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.sp-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.sp-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.sp-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.sp-slider:focus-visible { outline: none; }
+.sp-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.sp-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* the small typable number input inside the bordered .sp-sfield-num frame */
+.sp-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.sp-slider-num:focus { outline: none; box-shadow: none; }
+.sp-slider-num::-webkit-outer-spin-button,
+.sp-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* --- Segmented (pill) enum control + the wider Approach select ------------
+   Mirrors the carving `.cc-opseg`: a tight row of mutually-exclusive pills that
+   share one bordered frame; the active one is filled with the accent. The
+   Approach select reuses the same row layout but stays a native <select> as it
+   has five options (too many for a comfortable pill row). */
+.sp-seg {
+  display: inline-flex;
+  flex: 1 1 0;
+  min-width: 0;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-input);
+}
+.sp-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
   height: var(--ctl-h);
-  min-height: 0;
+  padding: 0 8px;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s, color 0.12s;
+}
+.sp-seg-btn:first-child { border-left: none; }
+.sp-seg-btn:hover { color: var(--fg); }
+.sp-seg-btn.active {
+  color: var(--accent-fg);
+  background: var(--accent);
+  font-weight: 600;
+}
+.sp-seg-select {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ctl-h);
   padding: 0 6px;
   box-sizing: border-box;
   font-size: var(--fs-ctl);
@@ -273,9 +487,19 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.sp-field select:focus {
+.sp-seg-select:focus {
   outline: none;
   border-color: var(--accent);
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so the slider is
+   grabbable on a phone. */
+@media (pointer: coarse) {
+  .sp-slider { height: 24px; }
+  .sp-slider::-webkit-slider-runnable-track,
+  .sp-slider::-moz-range-track,
+  .sp-slider::-moz-range-progress { height: 6px; }
+  .sp-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .sp-slider::-moz-range-thumb { width: 17px; height: 17px; }
 }
 
 /* ───────────────────────── point table ───────────────────────── */
@@ -535,11 +759,12 @@
   .sp-settings {
     grid-template-columns: 1fr;
   }
-  .sp-fields {
-    grid-template-columns: 1fr 1fr;
-  }
-  .sp-input input,
-  .sp-field select {
+  /* Grow the slider number box, segmented pills and Approach select to the
+     ≥36px touch target; the slider thumb/track is handled by the coarse-pointer
+     block above. */
+  .sp-sfield-num,
+  .sp-seg-btn,
+  .sp-seg-select {
     height: var(--ctl-h-touch);
   }
   .sp-ico {
@@ -563,11 +788,9 @@
     .sp-settings {
       grid-template-columns: 1fr;
     }
-    .sp-fields {
-      grid-template-columns: 1fr 1fr;
-    }
-    .sp-input input,
-    .sp-field select {
+    .sp-sfield-num,
+    .sp-seg-btn,
+    .sp-seg-select {
       height: var(--ctl-h-touch);
     }
     .sp-ico {

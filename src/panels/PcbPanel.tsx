@@ -42,6 +42,9 @@ const EXCELLON_ACCEPT = '.drl,.xln,.txt,.nc,.exc'
 
 type StageId = 'isolation' | 'drill' | 'cutout'
 
+/** Names of paste/stencil layers — noted on the cutout card as "for Soldering". */
+const PASTE_NAME = /\.(gtp|gbp|crc|crs|spt|spb)$|paste|stencil|\bcream\b/i
+
 /** Roles that have an associated CAM operation (so a per-layer run is meaningful). */
 const ROLE_STAGE: Partial<Record<LayerRole, StageId>> = {
   CopperTop: 'isolation',
@@ -259,6 +262,73 @@ type RowGeom =
   | { kind: 'copper'; data: GerberData }
   | { kind: 'drill'; data: ExcellonData }
   | { kind: 'outline'; data: GerberData }
+
+/**
+ * Themed slider + number-input row for a numeric CAM parameter, mirroring the
+ * CadCam panel's SliderField (.cc-sfield / .cc-slider) so the PCB operation cards
+ * use the same control vocabulary as the rest of the app. Drag the slider for a
+ * coarse value or type an exact one in the number box; the slider clamps to
+ * [min,max] while typed values are committed verbatim (the caller's clamp guards
+ * the stored value).
+ */
+function SliderField({
+  label,
+  htmlFor,
+  unit,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+}: {
+  label: string
+  htmlFor: string
+  unit?: string
+  value: number
+  onChange: (n: number) => void
+  min: number
+  max: number
+  step: number
+}) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
+  return (
+    <div className="cc-sfield">
+      <label className="cc-sfield-lbl" htmlFor={htmlFor}>
+        <span className="cc-sfield-txt">{label}</span>
+      </label>
+      <input
+        type="range"
+        className="cc-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="cc-sfield-num">
+        <input
+          id={htmlFor}
+          type="number"
+          className="cc-slider-num"
+          min={min}
+          max={max}
+          step={step}
+          value={String(value)}
+          aria-label={label}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+          }}
+        />
+        {unit ? <span className="cc-sfield-unit">{unit}</span> : null}
+      </span>
+    </div>
+  )
+}
 
 function rowGeometry(t: TFn, row: LayerRow): RowGeom | { error: string } {
   const stage = ROLE_STAGE[row.role]
@@ -578,9 +648,18 @@ export function PcbPanel() {
     if (copperRow && copperRow.parsed.kind === 'copper') copper = copperRow.parsed.data
     if (!copper) copper = singleGerber
 
-    const drillRow = rowFor('Drill')
+    // A board may export several drill files (e.g. separate PTH + NPTH passes).
+    // Merge every Drill-assigned layer's hits into one set so drilling covers ALL
+    // holes — picking only the first file would silently skip the rest.
+    const drillRows = layers.filter((r) => r.role === 'Drill' && r.parsed.kind === 'drill')
     let drillData: ExcellonData | null = null
-    if (drillRow && drillRow.parsed.kind === 'drill') drillData = drillRow.parsed.data
+    if (drillRows.length === 1 && drillRows[0].parsed.kind === 'drill') {
+      drillData = drillRows[0].parsed.data
+    } else if (drillRows.length > 1) {
+      const merged = new ExcellonData()
+      for (const r of drillRows) if (r.parsed.kind === 'drill') merged.hits.push(...r.parsed.data.hits)
+      drillData = merged
+    }
     if (!drillData) drillData = singleDrill
 
     const outlineRow = rowFor('BoardOutline')
@@ -622,6 +701,79 @@ export function PcbPanel() {
         stage: stageLabel(t, stage),
         moves: res.tp.size(),
         mm: res.tp.cutLength().toFixed(1),
+      }),
+    )
+  }
+
+  // ---- per-operation (stage) Preview / Generate / Play ----
+  // These drive the operation cards. They build from the RESOLVED geometry (which
+  // aggregates every layer of a role — e.g. all drill files merged), so a card
+  // covers the whole board's task, not just one file.
+  const STAGE_ARM = (s: StageId) => `stage:${s}`
+
+  function previewStage(stage: StageId) {
+    setArmedRunId(null)
+    const res = buildGcode(stage, resolved)
+    if ('error' in res) {
+      fail(res.error)
+      return
+    }
+    pushProgram(res.gcode, `pcb-${stage}.nc`)
+    ok(
+      t('pcb.status.preview', 'Preview {verb} for {name}: {moves} moves, cut {mm} mm. Shown in Visualizer.', {
+        verb: stageVerb(t, stage),
+        name: stageLabel(t, stage),
+        moves: res.tp.size(),
+        mm: res.tp.cutLength().toFixed(1),
+      }),
+    )
+  }
+
+  // Tapping Run on an op card ARMS it (styled in-panel confirm, no native dialog).
+  function playStage(stage: StageId) {
+    if (!connected) {
+      fail(t('pcb.status.connectFirst', 'Connect to the machine before running a layer.'))
+      return
+    }
+    if (machineBusy) {
+      fail(t('pcb.status.busy', 'Machine is busy (running/paused) — wait for the current job to finish.'))
+      return
+    }
+    const res = buildGcode(stage, resolved)
+    if ('error' in res) {
+      fail(res.error)
+      return
+    }
+    pushProgram(res.gcode, `pcb-${stage}.nc`)
+    setArmedRunId(STAGE_ARM(stage))
+    ok(
+      t('pcb.status.armed', 'Armed {verb} for {name} — {moves} moves, {mm} mm. Confirm to run.', {
+        verb: stageVerb(t, stage),
+        name: stageLabel(t, stage),
+        moves: res.tp.size(),
+        mm: res.tp.cutLength().toFixed(1),
+      }),
+    )
+  }
+
+  function confirmRunStage(stage: StageId) {
+    setArmedRunId(null)
+    if (!connected || machineBusy) {
+      fail(t('pcb.status.busy', 'Machine is busy (running/paused) — wait for the current job to finish.'))
+      return
+    }
+    const res = buildGcode(stage, resolved)
+    if ('error' in res) {
+      fail(res.error)
+      return
+    }
+    const lines = pushProgram(res.gcode, `pcb-${stage}.nc`)
+    grbl.startProgram(lines)
+    ok(
+      t('pcb.status.streaming', 'Streaming {verb} for {name} — {lines} lines.', {
+        verb: stageVerb(t, stage),
+        name: stageLabel(t, stage),
+        lines: lines.length,
       }),
     )
   }
@@ -737,6 +889,24 @@ export function PcbPanel() {
   }, [resolved])
   const drillTools = resolved.drillData ? resolved.drillData.toolDiameters().length : 0
   const drillHitsCount = resolved.drillData ? resolved.drillData.hits.length : 0
+
+  // Names of the layer file(s) feeding each operation card, so the operator can
+  // see exactly which layers a task uses (or that it's falling back to copper /
+  // the single-file input). Computed from the current role assignments.
+  const opSources = useMemo(() => {
+    const copperRows = layers.filter(
+      (r) => (r.role === 'CopperTop' || r.role === 'CopperBottom') && !r.parseError,
+    )
+    const drillRows = layers.filter((r) => r.role === 'Drill' && !r.parseError)
+    const outlineRows = layers.filter((r) => r.role === 'BoardOutline' && !r.parseError)
+    const pasteRows = layers.filter((r) => PASTE_NAME.test(r.name))
+    return {
+      copper: copperRows.map((r) => r.name),
+      drill: drillRows.map((r) => r.name),
+      outline: outlineRows.map((r) => r.name),
+      paste: pasteRows.map((r) => r.name),
+    }
+  }, [layers])
 
   const stageReady: Record<StageId, boolean> = {
     isolation: hasCopper,
@@ -1286,10 +1456,276 @@ export function PcbPanel() {
           </section>
         )}
 
-        {/* ---- 3. Essentials (always handy) ---- */}
+        {/* ---- 3. Toolpath operations (one machining task per layer) ---- */}
+        {layers.length > 0 && (
+          <section className="pcb-section pcb-section-wide">
+            <h3>{t('pcb.ops.title', '3 · Toolpath operations')}</h3>
+            <div className="pcb-section-body">
+              <p className="pcb-hint">
+                {t(
+                  'pcb.ops.lead',
+                  'Each detected layer maps to one machining task. Tune its cut below, then Preview (show in Visualizer), Generate (send to Program), or Run (stream to the machine after a confirm).',
+                )}
+              </p>
+              <div className="pcb-ops-grid">
+                {/* === Isolation routing (copper) === */}
+                <div className={'pcb-op-card' + (hasCopper ? '' : ' pcb-op-disabled')}>
+                  <div className="pcb-op-head">
+                    <span className="pcb-op-icon">
+                      <Icon name="copy" size={16} />
+                    </span>
+                    <span className="pcb-op-title">{t('pcb.op.isolation.title', 'Isolation routing')}</span>
+                    <span className={'pcb-op-badge' + (hasCopper ? ' ok' : '')}>
+                      {hasCopper ? t('pcb.op.ready', 'ready') : t('pcb.op.isolation.none', 'no copper layer')}
+                    </span>
+                  </div>
+                  <div className="pcb-op-src">
+                    <span className="pcb-op-desc">
+                      {t('pcb.op.isolation.desc', 'Mills around copper traces & pads to electrically isolate them.')}
+                    </span>
+                    {opSources.copper.length > 0 && (
+                      <span className="pcb-op-layer" title={opSources.copper.join('\n')}>
+                        {opSources.copper.map(shortName).join(', ')}
+                      </span>
+                    )}
+                  </div>
+                  {hasCopper && (
+                    <div className="cc-sgrid pcb-op-params">
+                      <SliderField
+                        label={t('pcb.advanced.isolationPasses', 'Isolation passes')}
+                        htmlFor="pcb-iso-passes"
+                        value={params.passes}
+                        onChange={(n) => set('passes', Math.round(Math.min(8, Math.max(1, n))))}
+                        min={1}
+                        max={8}
+                        step={1}
+                      />
+                      <SliderField
+                        label={t('pcb.advanced.passStepover', 'Pass stepover')}
+                        htmlFor="pcb-iso-step"
+                        unit="mm"
+                        value={params.stepover}
+                        onChange={(n) => set('stepover', Math.max(0.05, n))}
+                        min={0.05}
+                        max={1}
+                        step={0.05}
+                      />
+                      <SliderField
+                        label={t('pcb.advanced.copperCutZ', 'Copper cut Z')}
+                        htmlFor="pcb-iso-z"
+                        unit="mm"
+                        value={params.copperZ}
+                        onChange={(n) => set('copperZ', Math.min(0, n))}
+                        min={-0.5}
+                        max={0}
+                        step={0.01}
+                      />
+                      <SliderField
+                        label={t('pcb.advanced.feedXY', 'Feed XY')}
+                        htmlFor="pcb-iso-feed"
+                        unit="mm/min"
+                        value={params.feedXY}
+                        onChange={(n) => set('feedXY', Math.max(1, n))}
+                        min={20}
+                        max={1200}
+                        step={10}
+                      />
+                    </div>
+                  )}
+                  <OpActions
+                    t={t}
+                    ready={hasCopper}
+                    armed={armedRunId === STAGE_ARM('isolation')}
+                    connected={connected}
+                    machineBusy={machineBusy}
+                    onPreview={() => previewStage('isolation')}
+                    onGenerate={() => sendStage('isolation')}
+                    onPlay={() => playStage('isolation')}
+                    onConfirm={() => confirmRunStage('isolation')}
+                    onCancel={() => setArmedRunId(null)}
+                  />
+                </div>
+
+                {/* === Drilling (Excellon) === */}
+                <div className={'pcb-op-card' + (hasDrill ? '' : ' pcb-op-disabled')}>
+                  <div className="pcb-op-head">
+                    <span className="pcb-op-icon">
+                      <Icon name="zero" size={16} />
+                    </span>
+                    <span className="pcb-op-title">{t('pcb.op.drill.title', 'Drilling')}</span>
+                    <span className={'pcb-op-badge' + (hasDrill ? ' ok' : '')}>
+                      {hasDrill
+                        ? t('pcb.op.drill.count', '{hits} holes · {tools}T', {
+                            hits: drillHitsCount,
+                            tools: drillTools,
+                          })
+                        : t('pcb.op.drill.none', 'no drill file')}
+                    </span>
+                  </div>
+                  <div className="pcb-op-src">
+                    <span className="pcb-op-desc">
+                      {hasDrill
+                        ? t('pcb.op.drill.desc', 'Plunge-drills every hole. Fit a drill bit per hole size.')
+                        : t(
+                            'pcb.op.drill.noneDesc',
+                            'This package has no Excellon drill file — drilling is unavailable.',
+                          )}
+                    </span>
+                    {opSources.drill.length > 0 && (
+                      <span className="pcb-op-layer" title={opSources.drill.join('\n')}>
+                        {opSources.drill.length > 1
+                          ? t('pcb.op.drill.merged', '{n} drill files merged', { n: opSources.drill.length })
+                          : opSources.drill.map(shortName).join(', ')}
+                      </span>
+                    )}
+                  </div>
+                  {hasDrill && (
+                    <div className="cc-sgrid pcb-op-params">
+                      <SliderField
+                        label={t('pcb.advanced.drillZ', 'Drill Z')}
+                        htmlFor="pcb-drill-z"
+                        unit="mm"
+                        value={params.drillZ}
+                        onChange={(n) => set('drillZ', Math.min(0, n))}
+                        min={-5}
+                        max={0}
+                        step={0.1}
+                      />
+                      <SliderField
+                        label={t('pcb.advanced.peckDepth', 'Peck depth (0 = off)')}
+                        htmlFor="pcb-drill-peck"
+                        unit="mm"
+                        value={params.peckDepth}
+                        onChange={(n) => set('peckDepth', Math.max(0, n))}
+                        min={0}
+                        max={3}
+                        step={0.1}
+                      />
+                      <SliderField
+                        label={t('pcb.advanced.feedZ', 'Plunge feed')}
+                        htmlFor="pcb-drill-feed"
+                        unit="mm/min"
+                        value={params.feedZ}
+                        onChange={(n) => set('feedZ', Math.max(1, n))}
+                        min={10}
+                        max={600}
+                        step={5}
+                      />
+                    </div>
+                  )}
+                  <OpActions
+                    t={t}
+                    ready={hasDrill}
+                    armed={armedRunId === STAGE_ARM('drill')}
+                    connected={connected}
+                    machineBusy={machineBusy}
+                    onPreview={() => previewStage('drill')}
+                    onGenerate={() => sendStage('drill')}
+                    onPlay={() => playStage('drill')}
+                    onConfirm={() => confirmRunStage('drill')}
+                    onCancel={() => setArmedRunId(null)}
+                  />
+                </div>
+
+                {/* === Board cutout (outline) === */}
+                <div className={'pcb-op-card' + (hasOutline || hasCopper ? '' : ' pcb-op-disabled')}>
+                  <div className="pcb-op-head">
+                    <span className="pcb-op-icon">
+                      <Icon name="frame" size={16} />
+                    </span>
+                    <span className="pcb-op-title">{t('pcb.op.cutout.title', 'Board cutout')}</span>
+                    <span className={'pcb-op-badge' + (hasOutline || hasCopper ? ' ok' : '')}>
+                      {hasOutline
+                        ? t('pcb.op.ready', 'ready')
+                        : hasCopper
+                        ? t('pcb.summary.fromCopper', 'from copper')
+                        : t('pcb.op.cutout.none', 'no outline layer')}
+                    </span>
+                  </div>
+                  <div className="pcb-op-src">
+                    <span className="pcb-op-desc">
+                      {t('pcb.op.cutout.desc', 'Profile-cuts the board outline so it releases from the stock.')}
+                    </span>
+                    {opSources.outline.length > 0 ? (
+                      <span className="pcb-op-layer" title={opSources.outline.join('\n')}>
+                        {opSources.outline.map(shortName).join(', ')}
+                      </span>
+                    ) : hasCopper ? (
+                      <span className="pcb-op-layer">
+                        {t('pcb.op.cutout.usingCopper', 'using copper bounds (no outline layer)')}
+                      </span>
+                    ) : null}
+                    {opSources.paste.length > 0 && (
+                      <span className="pcb-op-note" title={opSources.paste.join('\n')}>
+                        {t('pcb.op.paste.note', 'Paste layer present — solder it from the Soldering tab.')}
+                      </span>
+                    )}
+                  </div>
+                  {(hasOutline || hasCopper) && (
+                    <div className="cc-sgrid pcb-op-params">
+                      <SliderField
+                        label={t('pcb.advanced.cutoutDepth', 'Cutout depth')}
+                        htmlFor="pcb-cut-depth"
+                        unit="mm"
+                        value={params.cutoutDepth}
+                        onChange={(n) => set('cutoutDepth', Math.max(0.1, n))}
+                        min={0.1}
+                        max={6}
+                        step={0.1}
+                      />
+                      <SliderField
+                        label={t('pcb.advanced.holdingTabs', 'Holding tabs')}
+                        htmlFor="pcb-cut-tabs"
+                        value={params.tabs}
+                        onChange={(n) => set('tabs', Math.round(Math.min(12, Math.max(0, n))))}
+                        min={0}
+                        max={12}
+                        step={1}
+                      />
+                      <SliderField
+                        label={t('pcb.advanced.tabWidth', 'Tab width')}
+                        htmlFor="pcb-cut-tabw"
+                        unit="mm"
+                        value={params.tabWidth}
+                        onChange={(n) => set('tabWidth', Math.max(0.5, n))}
+                        min={0.5}
+                        max={10}
+                        step={0.5}
+                      />
+                      <SliderField
+                        label={t('pcb.advanced.feedXY', 'Feed XY')}
+                        htmlFor="pcb-cut-feed"
+                        unit="mm/min"
+                        value={params.feedXY}
+                        onChange={(n) => set('feedXY', Math.max(1, n))}
+                        min={20}
+                        max={1200}
+                        step={10}
+                      />
+                    </div>
+                  )}
+                  <OpActions
+                    t={t}
+                    ready={hasOutline || hasCopper}
+                    armed={armedRunId === STAGE_ARM('cutout')}
+                    connected={connected}
+                    machineBusy={machineBusy}
+                    onPreview={() => previewStage('cutout')}
+                    onGenerate={() => sendStage('cutout')}
+                    onPlay={() => playStage('cutout')}
+                    onConfirm={() => confirmRunStage('cutout')}
+                    onCancel={() => setArmedRunId(null)}
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ---- 4. Essentials (always handy) ---- */}
         <section className="pcb-section">
           <h3 className="pcb-h3-row">
-            <span>{t('pcb.essentials.title', '3 · Essentials')}</span>
+            <span>{t('pcb.essentials.title', '4 · Essentials')}</span>
             <SaveLoadButtons
               value={pcbDoc}
               onLoad={loadPcbDoc}
@@ -1517,5 +1953,80 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span>{label}</span>
       {children}
     </label>
+  )
+}
+
+/**
+ * The Preview / Generate / Run button row shared by every operation card. Run is
+ * a two-step armed confirm (styled in-panel, no native dialog): the first tap
+ * arms it (handled by the parent, which sets `armed`), and while armed this shows
+ * a Run-confirm + Cancel pair instead. Buttons disable when the op has no source
+ * layer (`ready`), or — for Run — when the machine is disconnected/busy.
+ */
+function OpActions({
+  t,
+  ready,
+  armed,
+  connected,
+  machineBusy,
+  onPreview,
+  onGenerate,
+  onPlay,
+  onConfirm,
+  onCancel,
+}: {
+  t: TFn
+  ready: boolean
+  armed: boolean
+  connected: boolean
+  machineBusy: boolean
+  onPreview: () => void
+  onGenerate: () => void
+  onPlay: () => void
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  if (armed) {
+    return (
+      <div className="pcb-op-actions">
+        <button className="pcb-run-confirm" onClick={onConfirm} disabled={machineBusy}>
+          <Icon name="play" size={13} />
+          {t('pcb.layers.confirmRun', 'Run')}
+        </button>
+        <button className="pcb-op-btn" onClick={onCancel}>
+          <Icon name="close" size={13} />
+          {t('pcb.layers.cancelRun', 'Cancel')}
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="pcb-op-actions">
+      <button className="pcb-op-btn" onClick={onPreview} disabled={!ready}>
+        <Icon name="eye" size={13} />
+        {t('pcb.op.preview', 'Preview')}
+      </button>
+      <button className="pcb-op-btn" onClick={onGenerate} disabled={!ready}>
+        <Icon name="download" size={13} />
+        {t('pcb.op.generate', 'Generate')}
+      </button>
+      <button
+        className="pcb-op-btn primary"
+        onClick={onPlay}
+        disabled={!ready || !connected || machineBusy}
+        title={
+          !ready
+            ? t('pcb.op.notReady', 'Assign the required layer first')
+            : !connected
+            ? t('pcb.layers.connectToRunTitle', 'Connect to the machine to run')
+            : machineBusy
+            ? t('pcb.layers.busyTitle', 'Machine is busy — wait for the current job')
+            : t('pcb.op.runTitle', 'Stream this operation to the machine')
+        }
+      >
+        <Icon name="play" size={13} />
+        {t('pcb.op.run', 'Run')}
+      </button>
+    </div>
   )
 }

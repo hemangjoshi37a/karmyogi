@@ -6,7 +6,20 @@ import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { InfoTip } from '../components/InfoTip'
 import { Modal } from '../components/Modal'
-import { Crosshair, MapPin, Settings } from 'lucide-react'
+import {
+  Crosshair,
+  MapPin,
+  Settings,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  Gauge,
+  FastForward,
+  Grip,
+  Timer,
+  Hash,
+  RotateCw,
+  Wind,
+} from 'lucide-react'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
@@ -178,29 +191,84 @@ function NumField(props: {
 }
 
 /**
- * A labelled parameter field: short label + optional ⓘ explainer (which works
- * on touch, where hover titles never fire) and the unit rendered as a muted
- * inline suffix inside the input — the Soldering NumField house pattern.
+ * Sleek slider + number-input + unit row for the settings params, mirroring the
+ * CadCam `SliderField` / Controller jog "Feed" pattern: a leading glyph + label,
+ * a themed draggable `.pnp-slider` (accent fill via the inline `--pct` var), a
+ * small typable `.pnp-slider-num` clamped to [min, max] for the slider but
+ * allowing exact entry, and an inline unit suffix. `value`/`onChange` carry the
+ * existing wiring untouched — only the WIDGET changes (number box → slider).
+ * `warn` tints the row when a validation rule flags it (e.g. unsafe Travel Z).
  */
-function PField(props: {
+function SliderField(props: {
+  icon: ReactNode
   label: string
+  value: number
+  onChange: (n: number) => void
+  min: number
+  max: number
+  step: number
   unit?: string
   info?: { title: string; body: string }
   warn?: boolean
-  children: ReactNode
 }) {
-  const { label, unit, info, warn, children } = props
+  const { icon, label, value, onChange, min, max, step, unit, info, warn } = props
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the slider's accent fill (read as --pct by the
+  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress). Uses
+  // the CLAMPED value so an out-of-range typed value doesn't overflow the fill.
+  const pct =
+    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft ?? String(value)
   return (
-    <label className={`pp-field${warn ? ' pp-field-warn' : ''}`}>
-      <span className="pp-field-label">
-        {label}
-        {info && <InfoTip topic="pnpField" title={info.title} body={info.body} />}
+    <div className={`pnp-sfield${warn ? ' pnp-sfield-warn' : ''}`}>
+      <span className="pnp-sfield-lbl">
+        <span className="pnp-sfield-ico" aria-hidden="true">
+          {icon}
+        </span>
+        <span className="pnp-sfield-txt">
+          {label}
+          {info && <InfoTip topic="pnpField" title={info.title} body={info.body} />}
+        </span>
       </span>
-      <span className={`pp-input${unit ? ' has-unit' : ''}`}>
-        {children}
-        {unit && <i>{unit}</i>}
+      <input
+        type="range"
+        className="pnp-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="pnp-sfield-num">
+        <input
+          type="number"
+          className="pnp-slider-num"
+          min={min}
+          max={max}
+          step={step}
+          value={shown}
+          aria-label={label}
+          aria-invalid={warn || undefined}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={(e) => setDraft(e.target.value)}
+          onBlur={(e) => {
+            // Commit verbatim on blur (caller's guard clamps/rounds); exact entry
+            // outside the slider range is allowed, only blank/NaN is rejected.
+            const v = parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+            setDraft(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          }}
+        />
+        {unit ? <span className="pnp-sfield-unit">{unit}</span> : null}
       </span>
-    </label>
+    </div>
   )
 }
 
@@ -565,17 +633,33 @@ export function PickPlacePanel() {
           <h3>{t('pnp.ops.title', 'Operations')}</h3>
           <div className="pp-card-body">
             <div className="pp-headrow">
-              <label className="pp-headsel">
-                {t('pnp.head.label', 'Head')}
-                <select
-                  value={params.headType}
-                  onChange={(e) => setParam('headType', e.target.value as PnpHeadType)}
-                  title={t('pnp.head.select.title', 'What is mounted at the head')}
+              <span className="pp-headsel-lbl">{t('pnp.head.label', 'Head')}</span>
+              <div
+                className="pnp-seg"
+                role="group"
+                aria-label={t('pnp.head.select.title', 'What is mounted at the head')}
+              >
+                <button
+                  type="button"
+                  className={'pnp-seg-btn' + (params.headType === 'vacuum' ? ' active' : '')}
+                  aria-pressed={params.headType === 'vacuum'}
+                  onClick={() => setParam('headType', 'vacuum')}
+                  title={t('pnp.head.opt.vacuum', 'Vacuum suction cup')}
                 >
-                  <option value="vacuum">{t('pnp.head.opt.vacuum', 'Vacuum suction cup')}</option>
-                  <option value="gripper">{t('pnp.head.opt.gripper', 'Gripper')}</option>
-                </select>
-              </label>
+                  <span className="pnp-seg-ico" aria-hidden="true"><Wind size={15} /></span>
+                  <span className="pnp-seg-lbl">{t('pnp.head.opt.vacuum', 'Vacuum suction cup')}</span>
+                </button>
+                <button
+                  type="button"
+                  className={'pnp-seg-btn' + (params.headType === 'gripper' ? ' active' : '')}
+                  aria-pressed={params.headType === 'gripper'}
+                  onClick={() => setParam('headType', 'gripper')}
+                  title={t('pnp.head.opt.gripper', 'Gripper')}
+                >
+                  <span className="pnp-seg-ico" aria-hidden="true"><Grip size={15} /></span>
+                  <span className="pnp-seg-lbl">{t('pnp.head.opt.gripper', 'Gripper')}</span>
+                </button>
+              </div>
             </div>
 
             <div className="pp-table-wrap">
@@ -833,96 +917,92 @@ export function PickPlacePanel() {
         <div className="pp-settings">
           <section className="pp-settings-group">
             <h4>{t('pnp.motion.title', 'Motion & {action}', { action: labels.on.toLowerCase() })}</h4>
-            <div className="pp-fields">
-              <PField
+            <div className="pnp-sgrid">
+              <SliderField
+                icon={<ArrowUpToLine size={15} />}
                 label={t('pnp.f.travelZ', 'Travel Z')}
                 unit={t('unit.mm', 'mm')}
                 warn={travelZUnsafe}
+                min={0}
+                max={60}
+                step={0.1}
+                value={params.travelZ}
+                onChange={(n) => setParam('travelZ', n)}
                 info={{
                   title: t('pnp.f.travelZ', 'Travel Z'),
                   body: t('pnp.field.travelZ.title', 'Safe clearance height for all XY travel'),
                 }}
-              >
-                <NumField
-                  step="0.1"
-                  value={params.travelZ}
-                  aria-invalid={travelZUnsafe || undefined}
-                  commit={(raw) => setParam('travelZ', num(raw, params.travelZ))}
-                />
-              </PField>
-              <PField
+              />
+              <SliderField
+                icon={<ArrowDownToLine size={15} />}
                 label={t('pnp.f.pickZ', 'Pick Z')}
                 unit={t('unit.mm', 'mm')}
+                min={-20}
+                max={40}
+                step={0.1}
+                value={params.pickZ}
+                onChange={(n) => setParam('pickZ', n)}
                 info={{
                   title: t('pnp.f.pickZ', 'Pick Z'),
                   body: t('pnp.field.pickZ.title', 'Height the head lowers to when picking up the part'),
                 }}
-              >
-                <NumField
-                  step="0.1"
-                  value={params.pickZ}
-                  commit={(raw) => setParam('pickZ', num(raw, params.pickZ))}
-                />
-              </PField>
-              <PField
+              />
+              <SliderField
+                icon={<MapPin size={15} />}
                 label={t('pnp.f.placeZ', 'Place Z')}
                 unit={t('unit.mm', 'mm')}
+                min={-20}
+                max={40}
+                step={0.1}
+                value={params.placeZ}
+                onChange={(n) => setParam('placeZ', n)}
                 info={{
                   title: t('pnp.f.placeZ', 'Place Z'),
                   body: t('pnp.field.placeZ.title', 'Height the head lowers to when placing the part down'),
                 }}
-              >
-                <NumField
-                  step="0.1"
-                  value={params.placeZ}
-                  commit={(raw) => setParam('placeZ', num(raw, params.placeZ))}
-                />
-              </PField>
-              <PField
+              />
+              <SliderField
+                icon={<Gauge size={15} />}
                 label={t('pnp.f.feedXY', 'Feed XY')}
                 unit={t('unit.mmPerMin', 'mm/min')}
+                min={0}
+                max={5000}
+                step={50}
+                value={params.feedXY}
+                onChange={(n) => setParam('feedXY', Math.max(0, n))}
                 info={{
                   title: t('pnp.f.feedXY', 'Feed XY'),
                   body: t('pnp.field.feedXY.title', 'Travel speed for XY moves'),
                 }}
-              >
-                <NumField
-                  step="100"
-                  min="0"
-                  value={params.feedXY}
-                  commit={(raw) => setParam('feedXY', Math.max(0, num(raw, params.feedXY)))}
-                />
-              </PField>
-              <PField
+              />
+              <SliderField
+                icon={<FastForward size={15} />}
                 label={t('pnp.f.feedZ', 'Feed Z')}
                 unit={t('unit.mmPerMin', 'mm/min')}
+                min={0}
+                max={2000}
+                step={10}
+                value={params.feedZ}
+                onChange={(n) => setParam('feedZ', Math.max(0, n))}
                 info={{
                   title: t('pnp.f.feedZ', 'Feed Z'),
                   body: t('pnp.field.feedZ.title', 'Plunge speed when lowering to pick/place height'),
                 }}
-              >
-                <NumField
-                  step="10"
-                  min="0"
-                  value={params.feedZ}
-                  commit={(raw) => setParam('feedZ', Math.max(0, num(raw, params.feedZ)))}
-                />
-              </PField>
-              <PField
+              />
+              <SliderField
+                icon={params.headType === 'gripper' ? <Grip size={15} /> : <Wind size={15} />}
                 label={t('pnp.f.strength', '{action} strength', { action: labels.on })}
                 unit={t('unit.sWord', 'S')}
+                min={0}
+                max={2000}
+                step={50}
+                value={params.gripRpm}
+                onChange={(n) => setParam('gripRpm', Math.max(0, n))}
                 info={{
                   title: t('pnp.f.strength', '{action} strength', { action: labels.on }),
                   body: t('pnp.field.strength.title', 'Spindle S value = vacuum / grip strength (M3 S…)'),
                 }}
-              >
-                <NumField
-                  step="100"
-                  min="0"
-                  value={params.gripRpm}
-                  commit={(raw) => setParam('gripRpm', Math.max(0, num(raw, params.gripRpm)))}
-                />
-              </PField>
+              />
             </div>
 
             {travelZUnsafe && (
@@ -941,64 +1021,81 @@ export function PickPlacePanel() {
 
           <section className="pp-settings-group">
             <h4>{t('pnp.advanced', 'Advanced')}</h4>
-            <div className="pp-fields">
-                <PField
+            <div className="pnp-sgrid">
+                <SliderField
+                  icon={<Timer size={15} />}
                   label={t('pnp.f.pickDwell', 'Pick dwell')}
                   unit={t('unit.ms', 'ms')}
+                  min={0}
+                  max={2000}
+                  step={50}
+                  value={params.pickDwellMs}
+                  onChange={(n) => setParam('pickDwellMs', Math.max(0, n))}
                   info={{
                     title: t('pnp.f.pickDwell', 'Pick dwell'),
                     body: t('pnp.field.pickDwell.title', 'Pause after gripping so the grip is secure (0 = none)'),
                   }}
-                >
-                  <NumField
-                    step="50"
-                    min="0"
-                    value={params.pickDwellMs}
-                    commit={(raw) => setParam('pickDwellMs', Math.max(0, num(raw, params.pickDwellMs)))}
-                  />
-                </PField>
-                <PField
+                />
+                <SliderField
+                  icon={<Timer size={15} />}
                   label={t('pnp.f.placeDwell', 'Place dwell')}
                   unit={t('unit.ms', 'ms')}
+                  min={0}
+                  max={2000}
+                  step={50}
+                  value={params.placeDwellMs}
+                  onChange={(n) => setParam('placeDwellMs', Math.max(0, n))}
                   info={{
                     title: t('pnp.f.placeDwell', 'Place dwell'),
                     body: t('pnp.field.placeDwell.title', 'Pause after releasing so the part settles (0 = none)'),
                   }}
-                >
-                  <NumField
-                    step="50"
-                    min="0"
-                    value={params.placeDwellMs}
-                    commit={(raw) => setParam('placeDwellMs', Math.max(0, num(raw, params.placeDwellMs)))}
-                  />
-                </PField>
-                <PField
+                />
+                <SliderField
+                  icon={<Hash size={15} />}
                   label={t('pnp.f.decimals', 'Decimals')}
+                  min={0}
+                  max={6}
+                  step={1}
+                  value={params.decimals}
+                  onChange={(n) =>
+                    setParam('decimals', Math.max(0, Math.min(6, Math.round(n))))
+                  }
                   info={{
                     title: t('pnp.f.decimals', 'Decimals'),
                     body: t('pnp.field.decimals.title', 'Decimal places used in emitted coordinates'),
                   }}
-                >
-                  <NumField
-                    step="1"
-                    min="0"
-                    max="6"
-                    value={params.decimals}
-                    commit={(raw) =>
-                      setParam('decimals', Math.max(0, Math.min(6, Math.round(num(raw, params.decimals)))))
-                    }
-                  />
-                </PField>
+                />
               </div>
 
-              <label className="pp-check">
-                <input
-                  type="checkbox"
-                  checked={params.rotaryAxis}
-                  onChange={(e) => setParam('rotaryAxis', e.target.checked)}
-                />
-                {t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)')}
-              </label>
+              <div className="pp-rotrow">
+                <span className="pnp-seg-rowlbl">
+                  <RotateCw size={14} aria-hidden="true" />
+                  {t('pnp.rotaryAxis.label', 'Part rotation (A-axis)')}
+                </span>
+                <div
+                  className="pnp-seg pnp-seg-bool"
+                  role="group"
+                  aria-label={t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)')}
+                >
+                  <button
+                    type="button"
+                    className={'pnp-seg-btn' + (!params.rotaryAxis ? ' active' : '')}
+                    aria-pressed={!params.rotaryAxis}
+                    onClick={() => setParam('rotaryAxis', false)}
+                  >
+                    {t('pnp.rotaryAxis.off', 'Off')}
+                  </button>
+                  <button
+                    type="button"
+                    className={'pnp-seg-btn' + (params.rotaryAxis ? ' active' : '')}
+                    aria-pressed={params.rotaryAxis}
+                    onClick={() => setParam('rotaryAxis', true)}
+                    title={t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)')}
+                  >
+                    {t('pnp.rotaryAxis.on', 'Emit A°')}
+                  </button>
+                </div>
+              </div>
               <p className="pp-hint">
                 {t('pnp.rot.note', 'Rotation is edited per-op in the Operations table.')}
               </p>

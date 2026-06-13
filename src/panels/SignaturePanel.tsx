@@ -1,12 +1,22 @@
 import {
   DragEvent,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import {
+  MoveHorizontal,
+  MoveVertical,
+  Contrast,
+  Spline,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  Gauge,
+} from 'lucide-react'
 import { useT } from '../i18n'
 import { Point, Polyline } from '../core/geometry'
 import {
@@ -58,6 +68,92 @@ function UndoGlyph() {
       <path d="M9 7L4 12l5 5" />
       <path d="M4 12h11a5 5 0 0 1 0 10h-1" />
     </svg>
+  )
+}
+
+/**
+ * Sleek slider + number-input + unit row, mirroring CadCamPanel's `SliderField`
+ * (one-line: leading glyph + label, themed draggable `.sig-slider` with an accent
+ * fill driven by the inline `--pct` var, a small typable `.sig-slider-num` and an
+ * inline unit). Local copy so signature.css/tsx own their own widget; the styling
+ * mirrors `.cc-slider` and is themed entirely through CSS vars (light + dark).
+ *
+ * `onChange` carries the field's existing wiring untouched — only the input WIDGET
+ * changes (number box → slider + input). The slider is clamped to [min, max] for
+ * dragging, but the number box accepts exact entry (caller's clampNum guards NaN).
+ */
+function SliderField({
+  icon,
+  label,
+  htmlFor,
+  unit,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  disabled,
+  title,
+}: {
+  icon: ReactNode
+  label: string
+  htmlFor: string
+  unit?: string
+  value: number
+  onChange: (n: number) => void
+  min: number
+  max: number
+  step: number
+  disabled?: boolean
+  title?: string
+}) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the accent fill (read as --pct by the WebKit/Blink
+  // track gradient; Firefox fills via ::-moz-range-progress). Uses the CLAMPED value
+  // so an out-of-range typed value never overflows the fill.
+  const pct =
+    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
+  return (
+    <div className="sig-sfield" title={title}>
+      <label className="sig-sfield-lbl" htmlFor={htmlFor}>
+        <span className="sig-sfield-ico" aria-hidden>
+          {icon}
+        </span>
+        <span className="sig-sfield-txt">{label}</span>
+      </label>
+      <input
+        type="range"
+        className="sig-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        disabled={disabled}
+        style={{ '--pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="sig-sfield-num">
+        <input
+          id={htmlFor}
+          type="number"
+          inputMode="decimal"
+          className="sig-slider-num"
+          min={min}
+          max={max}
+          step={step}
+          value={String(value)}
+          disabled={disabled}
+          aria-label={label}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+          }}
+        />
+        {unit ? <span className="sig-sfield-unit">{unit}</span> : null}
+      </span>
+    </div>
   )
 }
 
@@ -724,23 +820,29 @@ export function SignaturePanel() {
                   </text>
                 )}
               </svg>
-              <div className="sig-fields">
-                <label className="sig-field">
-                  <span>{t('sig.drawW', 'Draw area width')}</span>
-                  <span className="sig-input">
-                    <input type="number" inputMode="decimal" min={1} step={1} value={drawW}
-                      onChange={(e) => setDrawW(clampNum(e.target.value, drawW, 1, 100000))} />
-                    <em>mm</em>
-                  </span>
-                </label>
-                <label className="sig-field">
-                  <span>{t('sig.drawH', 'Draw area height')}</span>
-                  <span className="sig-input">
-                    <input type="number" inputMode="decimal" min={1} step={1} value={drawH}
-                      onChange={(e) => setDrawH(clampNum(e.target.value, drawH, 1, 100000))} />
-                    <em>mm</em>
-                  </span>
-                </label>
+              <div className="sig-sgrid">
+                <SliderField
+                  icon={<MoveHorizontal size={14} strokeWidth={1.8} />}
+                  label={t('sig.drawW', 'Draw area width')}
+                  htmlFor="sig-draw-w"
+                  unit="mm"
+                  min={1}
+                  max={300}
+                  step={1}
+                  value={drawW}
+                  onChange={(n) => setDrawW(clampNum(String(n), drawW, 1, 100000))}
+                />
+                <SliderField
+                  icon={<MoveVertical size={14} strokeWidth={1.8} />}
+                  label={t('sig.drawH', 'Draw area height')}
+                  htmlFor="sig-draw-h"
+                  unit="mm"
+                  min={1}
+                  max={300}
+                  step={1}
+                  value={drawH}
+                  onChange={(n) => setDrawH(clampNum(String(n), drawH, 1, 100000))}
+                />
               </div>
               <p className="sig-info">{info}</p>
             </section>
@@ -820,53 +922,59 @@ export function SignaturePanel() {
               <div className="sig-card-head">
                 <h4><span className="sig-step">2</span> {t('sig.step2', 'Adjust')}</h4>
               </div>
-              <label className="sig-field sig-field-range">
-                <span>{t('sig.threshold', 'Threshold ({n})', { n: threshold })}</span>
-                <input
-                  type="range"
+              <div className="sig-sgrid">
+                <SliderField
+                  icon={<Contrast size={14} strokeWidth={1.8} />}
+                  label={t('sig.thresholdLbl', 'Threshold')}
+                  htmlFor="sig-threshold"
                   min={0}
                   max={255}
                   step={1}
                   value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  onChange={(n) => setThreshold(clampNum(String(n), threshold, 0, 255))}
+                  title={t('sig.thresholdTip', 'Ink/background split point (0–255).')}
                 />
-              </label>
-              <div className="sig-fields">
-                <label className="sig-field">
-                  <span>{t('sig.targetW', 'Target width')}</span>
-                  <span className="sig-input">
-                    <input type="number" inputMode="decimal" min={1} step={1} value={targetW}
-                      onChange={(e) => setTargetW(clampNum(e.target.value, targetW, 1, 100000))} />
-                    <em>mm</em>
-                  </span>
-                </label>
-                <label className="sig-field">
-                  <span>{t('sig.targetH', 'Target height')}</span>
-                  <span className="sig-input">
-                    <input type="number" inputMode="decimal" min={1} step={1} value={targetH}
-                      disabled={lockAspect}
-                      onChange={(e) => setTargetH(clampNum(e.target.value, targetH, 1, 100000))} />
-                    <em>mm</em>
-                  </span>
-                </label>
+                <SliderField
+                  icon={<MoveHorizontal size={14} strokeWidth={1.8} />}
+                  label={t('sig.targetW', 'Target width')}
+                  htmlFor="sig-target-w"
+                  unit="mm"
+                  min={1}
+                  max={300}
+                  step={1}
+                  value={targetW}
+                  onChange={(n) => setTargetW(clampNum(String(n), targetW, 1, 100000))}
+                />
+                <SliderField
+                  icon={<MoveVertical size={14} strokeWidth={1.8} />}
+                  label={t('sig.targetH', 'Target height')}
+                  htmlFor="sig-target-h"
+                  unit="mm"
+                  min={1}
+                  max={300}
+                  step={1}
+                  value={targetH}
+                  disabled={lockAspect}
+                  onChange={(n) => setTargetH(clampNum(String(n), targetH, 1, 100000))}
+                />
               </div>
-              <div className="sig-checks">
-                <label className="sig-field sig-check">
-                  <input
-                    type="checkbox"
-                    checked={invert}
-                    onChange={(e) => setInvert(e.target.checked)}
-                  />
-                  <span>{t('sig.invert', 'Invert (dark background)')}</span>
-                </label>
-                <label className="sig-field sig-check">
-                  <input
-                    type="checkbox"
-                    checked={lockAspect}
-                    onChange={(e) => setLockAspect(e.target.checked)}
-                  />
-                  <span>{t('sig.lockAspect', 'Lock aspect (fit to width)')}</span>
-                </label>
+              <div className="sig-toggles">
+                <button
+                  type="button"
+                  className={'sig-toggle' + (invert ? ' active' : '')}
+                  aria-pressed={invert}
+                  onClick={() => setInvert(!invert)}
+                >
+                  {t('sig.invert', 'Invert (dark background)')}
+                </button>
+                <button
+                  type="button"
+                  className={'sig-toggle' + (lockAspect ? ' active' : '')}
+                  aria-pressed={lockAspect}
+                  onClick={() => setLockAspect(!lockAspect)}
+                >
+                  {t('sig.lockAspect', 'Lock aspect (fit to width)')}
+                </button>
               </div>
             </section>
           </>
@@ -885,57 +993,75 @@ export function SignaturePanel() {
             </span> {t('sig.advanced', 'Advanced')}
           </button>
           {showAdvanced && (
-            <div className="sig-fields sig-advanced">
+            <div className="sig-sgrid sig-advanced">
               {mode === 'image' && (
-                <label className="sig-field">
-                  <span>{t('sig.tolerance', 'Simplify tolerance')}</span>
-                  <span className="sig-input">
-                    <input type="number" inputMode="decimal" min={0} step={0.5} value={tolerance}
-                      onChange={(e) => setTolerance(clampNum(e.target.value, tolerance, 0, 1000))} />
-                    <em>px</em>
-                  </span>
-                </label>
+                <SliderField
+                  icon={<Spline size={14} strokeWidth={1.8} />}
+                  label={t('sig.tolerance', 'Simplify tolerance')}
+                  htmlFor="sig-tolerance"
+                  unit="px"
+                  min={0}
+                  max={20}
+                  step={0.5}
+                  value={tolerance}
+                  onChange={(n) => setTolerance(clampNum(String(n), tolerance, 0, 1000))}
+                />
               )}
-              <label className="sig-field">
-                <span>{t('sig.originX', 'Origin X')}</span>
-                <span className="sig-input">
-                  <input type="number" inputMode="decimal" step={1} value={originX}
-                    onChange={(e) => setOriginX(clampNum(e.target.value, originX, -100000, 100000))} />
-                  <em>mm</em>
-                </span>
-              </label>
-              <label className="sig-field">
-                <span>{t('sig.originY', 'Origin Y')}</span>
-                <span className="sig-input">
-                  <input type="number" inputMode="decimal" step={1} value={originY}
-                    onChange={(e) => setOriginY(clampNum(e.target.value, originY, -100000, 100000))} />
-                  <em>mm</em>
-                </span>
-              </label>
-              <label className="sig-field">
-                <span>{t('sig.penUpZ', 'Pen up Z')}</span>
-                <span className="sig-input">
-                  <input type="number" inputMode="decimal" step={0.5} value={penUpZ}
-                    onChange={(e) => setPenUpZ(clampNum(e.target.value, penUpZ, -1000, 1000))} />
-                  <em>mm</em>
-                </span>
-              </label>
-              <label className="sig-field">
-                <span>{t('sig.penDownZ', 'Pen down Z')}</span>
-                <span className="sig-input">
-                  <input type="number" inputMode="decimal" step={0.5} value={penDownZ}
-                    onChange={(e) => setPenDownZ(clampNum(e.target.value, penDownZ, -1000, 1000))} />
-                  <em>mm</em>
-                </span>
-              </label>
-              <label className="sig-field">
-                <span>{t('sig.feed', 'Feed')}</span>
-                <span className="sig-input">
-                  <input type="number" inputMode="decimal" min={1} step={50} value={feed}
-                    onChange={(e) => setFeed(clampNum(e.target.value, feed, 1, 100000))} />
-                  <em>mm/min</em>
-                </span>
-              </label>
+              <SliderField
+                icon={<MoveHorizontal size={14} strokeWidth={1.8} />}
+                label={t('sig.originX', 'Origin X')}
+                htmlFor="sig-origin-x"
+                unit="mm"
+                min={-300}
+                max={300}
+                step={1}
+                value={originX}
+                onChange={(n) => setOriginX(clampNum(String(n), originX, -100000, 100000))}
+              />
+              <SliderField
+                icon={<MoveVertical size={14} strokeWidth={1.8} />}
+                label={t('sig.originY', 'Origin Y')}
+                htmlFor="sig-origin-y"
+                unit="mm"
+                min={-300}
+                max={300}
+                step={1}
+                value={originY}
+                onChange={(n) => setOriginY(clampNum(String(n), originY, -100000, 100000))}
+              />
+              <SliderField
+                icon={<ArrowUpToLine size={14} strokeWidth={1.8} />}
+                label={t('sig.penUpZ', 'Pen up Z')}
+                htmlFor="sig-pen-up"
+                unit="mm"
+                min={-20}
+                max={50}
+                step={0.5}
+                value={penUpZ}
+                onChange={(n) => setPenUpZ(clampNum(String(n), penUpZ, -1000, 1000))}
+              />
+              <SliderField
+                icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
+                label={t('sig.penDownZ', 'Pen down Z')}
+                htmlFor="sig-pen-down"
+                unit="mm"
+                min={-20}
+                max={50}
+                step={0.5}
+                value={penDownZ}
+                onChange={(n) => setPenDownZ(clampNum(String(n), penDownZ, -1000, 1000))}
+              />
+              <SliderField
+                icon={<Gauge size={14} strokeWidth={1.8} />}
+                label={t('sig.feed', 'Feed')}
+                htmlFor="sig-feed"
+                unit="mm/min"
+                min={1}
+                max={10000}
+                step={50}
+                value={feed}
+                onChange={(n) => setFeed(clampNum(String(n), feed, 1, 100000))}
+              />
               {/* SAFETY: pen-down must sit BELOW pen-up (the safe-Z) or the pen
                   never lifts for travel and drags across the work. */}
               {penDownZ >= penUpZ && (

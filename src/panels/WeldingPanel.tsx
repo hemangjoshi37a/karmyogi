@@ -119,6 +119,14 @@ const VALID_PATTERNS: WeavePattern[] = [
   WeavePattern.Circular,
 ]
 
+/** Weave-pattern options for the per-object segmented selector (value + i18n). */
+const WEAVE_OPTIONS: { value: WeavePattern; key: string; label: string }[] = [
+  { value: WeavePattern.Straight, key: 'weld.pattern.straight', label: 'Straight' },
+  { value: WeavePattern.Zigzag, key: 'weld.pattern.zigzag', label: 'Zigzag' },
+  { value: WeavePattern.Sine, key: 'weld.pattern.sine', label: 'Sine' },
+  { value: WeavePattern.Circular, key: 'weld.pattern.circular', label: 'Circular' },
+]
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
 
@@ -222,37 +230,60 @@ function ToolButton(props: {
   )
 }
 
-/** A slim number field with an inline unit suffix, matching the dense theme. */
-function NumField(props: {
+/**
+ * Sleek slider + number-input + unit row, mirroring the carving tab's
+ * `SliderField` (a full-width row: label · themed `.weld-slider` · small typable
+ * number · unit suffix). The slider's accent fill is driven by the inline
+ * `--pct` CSS var (WebKit/Blink gradient) and `::-moz-range-progress` (Firefox).
+ * The number box still allows EXACT entry outside [min,max]; only the slider
+ * track is clamped, so the wiring (and emitted G-code) is unchanged.
+ */
+function SliderField(props: {
   label: string
   value: number
   unit?: string
-  step?: string
-  min?: string
-  max?: string
+  min: number
+  max: number
+  step: number
   onChange: (n: number) => void
+  /** Allow exact (out-of-range) typed entry; only the slider track is clamped. */
   parse?: (v: string, fallback: number) => number
   info?: { title: string; body: string }
 }) {
-  const { label, value, unit, step = '0.1', min, max, onChange, parse = num, info } = props
+  const { label, value, unit, min, max, step, onChange, parse = num, info } = props
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <label className="wp-field">
-      <span className="wp-field-label">
-        {label}
+    <div className="weld-sfield">
+      <span className="weld-sfield-lbl">
+        <span className="weld-sfield-txt">{label}</span>
         {info && <InfoTip topic="weldField" title={info.title} body={info.body} />}
       </span>
-      <span className={`wp-input${unit ? ' has-unit' : ''}`}>
+      <input
+        type="range"
+        className="weld-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="weld-sfield-num">
         <input
           type="number"
           step={step}
           min={min}
           max={max}
           value={value}
+          aria-label={label}
           onChange={(e) => onChange(parse(e.target.value, value))}
         />
         {unit && <i>{unit}</i>}
       </span>
-    </label>
+    </div>
   )
 }
 
@@ -663,10 +694,13 @@ export function WeldingPanel() {
                 body={t('weld.motion.body', 'Global motion. Safe-Z is the guaranteed retract; plunge feed lowers to the weld Z. Smoothness sets sampled points per weave cycle. Per-object travel speed lives on each card.')}
               />
             </div>
-            <div className="wp-fields">
-              <NumField
+            <div className="wp-fields wp-sfields">
+              <SliderField
                 label={t('weld.field.safeZ', 'Safe-Z')}
                 unit={t('unit.mm', 'mm')}
+                min={0}
+                max={50}
+                step={0.5}
                 value={params.safeZ}
                 onChange={(n) => setParams((p) => ({ ...p, safeZ: n }))}
                 info={{
@@ -674,11 +708,12 @@ export function WeldingPanel() {
                   body: t('weld.field.safeZ.body', 'Guaranteed retract height before any XY travel and at program end.'),
                 }}
               />
-              <NumField
+              <SliderField
                 label={t('weld.field.plungeF', 'Plunge')}
                 unit={t('unit.mmPerMin', 'mm/min')}
-                step="10"
-                min="1"
+                min={1}
+                max={2000}
+                step={10}
                 value={params.plungeFeed}
                 onChange={(n) => setParams((p) => ({ ...p, plungeFeed: n }))}
                 info={{
@@ -686,11 +721,12 @@ export function WeldingPanel() {
                   body: t('weld.field.plungeF.body', 'Feed rate used to lower the torch from Safe-Z to the weld Z.'),
                 }}
               />
-              <NumField
+              <SliderField
                 label={t('weld.field.segs', 'Smoothness')}
                 unit={t('unit.ptsPerCyc', 'pts/cyc')}
-                step="1"
-                min="2"
+                min={2}
+                max={64}
+                step={1}
                 value={params.segmentsPerCycle}
                 parse={intNum}
                 onChange={(n) => setParams((p) => ({ ...p, segmentsPerCycle: n }))}
@@ -699,11 +735,11 @@ export function WeldingPanel() {
                   body: t('weld.field.segs.body', 'Sampled points per weave cycle. Higher = smoother sine/circular curves at the cost of more G-code lines.'),
                 }}
               />
-              <NumField
+              <SliderField
                 label={t('weld.field.decimals', 'Decimals')}
-                step="1"
-                min="0"
-                max="6"
+                min={0}
+                max={6}
+                step={1}
                 value={params.decimals}
                 parse={(v, fb) => clampDecimals(intNum(v, fb))}
                 onChange={(n) => setParams((p) => ({ ...p, decimals: clampDecimals(n) }))}
@@ -724,30 +760,41 @@ export function WeldingPanel() {
                 body={t('weld.arc.body', 'The spindle output is the welder/arc: M3 (S = power) strikes it, M5 stops it. Gas pre-flow runs before striking; post-flow runs after stopping.')}
               />
             </div>
-            <div className="wp-fields">
-              <label className="wp-field wp-field-check">
-                <span className="wp-field-label">
-                  {t('weld.field.useArc', 'Arc control')}
+            <div className="wp-fields wp-sfields">
+              <div className="weld-sfield weld-sfield-toggle">
+                <span className="weld-sfield-lbl">
+                  <span className="weld-sfield-txt">{t('weld.field.useArc', 'Arc control')}</span>
                   <InfoTip
                     topic="weldUseArc"
                     title={t('weld.field.useArc', 'Arc control')}
                     body={t('weld.field.useArc.body', 'Emit M3/M5 around each object. Turn off to move the path without striking the arc (dry run).')}
                   />
                 </span>
-                <label className={`wp-switch${params.useArc ? ' is-on' : ''}`}>
-                  <input
-                    type="checkbox"
-                    checked={params.useArc}
-                    onChange={(e) => setParams((p) => ({ ...p, useArc: e.target.checked }))}
-                  />
-                  <span>{params.useArc ? t('weld.on', 'On') : t('weld.off', 'Off')}</span>
-                </label>
-              </label>
-              <NumField
+                <div className="wp-seg" role="group" aria-label={t('weld.field.useArc', 'Arc control')}>
+                  <button
+                    type="button"
+                    className={`wp-seg-btn${params.useArc ? ' is-on' : ''}`}
+                    aria-pressed={params.useArc}
+                    onClick={() => setParams((p) => ({ ...p, useArc: true }))}
+                  >
+                    {t('weld.on', 'On')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`wp-seg-btn${!params.useArc ? ' is-on' : ''}`}
+                    aria-pressed={!params.useArc}
+                    onClick={() => setParams((p) => ({ ...p, useArc: false }))}
+                  >
+                    {t('weld.off', 'Off')}
+                  </button>
+                </div>
+              </div>
+              <SliderField
                 label={t('weld.field.arcPower', 'Arc power')}
                 unit={t('unit.sWord', 'S')}
-                step="10"
-                min="0"
+                min={0}
+                max={1000}
+                step={10}
                 value={params.arcPower}
                 onChange={(n) => setParams((p) => ({ ...p, arcPower: n }))}
                 info={{
@@ -755,10 +802,12 @@ export function WeldingPanel() {
                   body: t('weld.field.arcPower.body', 'Emitted as the S word (M3 S<power>). Set 0 for a plain M3 with no power word.'),
                 }}
               />
-              <NumField
+              <SliderField
                 label={t('weld.field.preFlow', 'Pre-flow')}
                 unit={t('unit.s', 's')}
-                min="0"
+                min={0}
+                max={10}
+                step={0.1}
                 value={params.preFlowSeconds}
                 onChange={(n) => setParams((p) => ({ ...p, preFlowSeconds: n }))}
                 info={{
@@ -766,10 +815,12 @@ export function WeldingPanel() {
                   body: t('weld.field.preFlow.body', 'Gas dwell (G4 P) after lowering but before the arc strikes. 0 = none.'),
                 }}
               />
-              <NumField
+              <SliderField
                 label={t('weld.field.postFlow', 'Post-flow')}
                 unit={t('unit.s', 's')}
-                min="0"
+                min={0}
+                max={10}
+                step={0.1}
                 value={params.postFlowSeconds}
                 onChange={(n) => setParams((p) => ({ ...p, postFlowSeconds: n }))}
                 info={{
@@ -965,68 +1016,58 @@ function ObjectCard(props: {
       </div>
 
       <div className="wp-ocard-weave" onClick={stop}>
-        <label className="wp-mini">
-          <span>{obj.kind === 'line' ? t('weld.weave.travel', 'Travel') : t('weld.weave.peripheral', 'Periph.')}</span>
-          <span className="wp-mini-unit">
-            <input
-              type="number"
-              step="10"
-              min="1"
-              value={obj.kind === 'line' ? obj.travelFeed : obj.peripheralFeed}
-              onChange={(e) =>
-                obj.kind === 'line'
-                  ? onUpdate({ travelFeed: num(e.target.value, obj.travelFeed) })
-                  : onUpdate({ peripheralFeed: num(e.target.value, obj.peripheralFeed) })
-              }
-            />
-            <i>{t('unit.mmPerMin', 'mm/min')}</i>
+        <div className="weld-pattern-row">
+          <span className="weld-sfield-lbl">
+            <span className="weld-sfield-txt">{t('weld.weave.pattern', 'Pattern')}</span>
           </span>
-        </label>
-        <label className="wp-mini">
-          <span>{t('weld.weave.pattern', 'Pattern')}</span>
-          <select
-            value={obj.pattern}
-            onChange={(e) => onUpdate({ pattern: e.target.value as WeavePattern })}
-          >
-            <option value={WeavePattern.Straight}>{t('weld.pattern.straight', 'Straight')}</option>
-            <option value={WeavePattern.Zigzag}>{t('weld.pattern.zigzag', 'Zigzag')}</option>
-            <option value={WeavePattern.Sine}>{t('weld.pattern.sine', 'Sine')}</option>
-            <option value={WeavePattern.Circular}>{t('weld.pattern.circular', 'Circular')}</option>
-          </select>
-        </label>
-        <label className="wp-mini">
-          <span>{t('weld.weave.amp', 'Amplitude')}</span>
-          <span className="wp-mini-unit">
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={obj.amplitude}
-              onChange={(e) => onUpdate({ amplitude: num(e.target.value, obj.amplitude) })}
-            />
-            <i>{t('unit.mm', 'mm')}</i>
-          </span>
-        </label>
-        <label className="wp-mini">
-          <span className="wp-mini-info">
-            {t('weld.weave.patSpeed', 'Pattern speed')}
-            <InfoTip
-              topic="weldPatSpeed"
-              title={t('weld.weave.patSpeed', 'Pattern speed')}
-              body={t('weld.weave.patSpeed.body', 'A second, independent speed (mm/min) that sets how fast the weave oscillates. Density = pattern-speed ÷ travel-speed: higher pattern speed packs more cycles per mm (denser weave), lower stretches them out (scattered).')}
-            />
-          </span>
-          <span className="wp-mini-unit">
-            <input
-              type="number"
-              step="10"
-              min="1"
-              value={obj.patternSpeed}
-              onChange={(e) => onUpdate({ patternSpeed: num(e.target.value, obj.patternSpeed) })}
-            />
-            <i>{t('unit.mmPerMin', 'mm/min')}</i>
-          </span>
-        </label>
+          <div className="wp-seg wp-seg-pattern" role="group" aria-label={t('weld.weave.pattern', 'Pattern')}>
+            {WEAVE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`wp-seg-btn${obj.pattern === opt.value ? ' is-on' : ''}`}
+                aria-pressed={obj.pattern === opt.value}
+                title={t(opt.key, opt.label)}
+                onClick={() => onUpdate({ pattern: opt.value })}
+              >
+                {t(opt.key, opt.label)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <SliderField
+          label={obj.kind === 'line' ? t('weld.weave.travel', 'Travel') : t('weld.weave.peripheral', 'Periph.')}
+          unit={t('unit.mmPerMin', 'mm/min')}
+          min={1}
+          max={3000}
+          step={10}
+          value={obj.kind === 'line' ? obj.travelFeed : obj.peripheralFeed}
+          onChange={(n) =>
+            obj.kind === 'line' ? onUpdate({ travelFeed: n }) : onUpdate({ peripheralFeed: n })
+          }
+        />
+        <SliderField
+          label={t('weld.weave.amp', 'Amplitude')}
+          unit={t('unit.mm', 'mm')}
+          min={0}
+          max={20}
+          step={0.1}
+          value={obj.amplitude}
+          onChange={(n) => onUpdate({ amplitude: n })}
+        />
+        <SliderField
+          label={t('weld.weave.patSpeed', 'Pattern speed')}
+          unit={t('unit.mmPerMin', 'mm/min')}
+          min={1}
+          max={3000}
+          step={10}
+          value={obj.patternSpeed}
+          onChange={(n) => onUpdate({ patternSpeed: n })}
+          info={{
+            title: t('weld.weave.patSpeed', 'Pattern speed'),
+            body: t('weld.weave.patSpeed.body', 'A second, independent speed (mm/min) that sets how fast the weave oscillates. Density = pattern-speed ÷ travel-speed: higher pattern speed packs more cycles per mm (denser weave), lower stretches them out (scattered).'),
+          }}
+        />
       </div>
     </div>
   )

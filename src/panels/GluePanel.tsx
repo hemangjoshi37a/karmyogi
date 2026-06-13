@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useT } from '../i18n'
 import { useProgram, usePersistentState, useNotifications } from '../store'
 import { IconButton } from '../components/IconButton'
@@ -25,6 +25,92 @@ function gcodeLines(gcode: string): string[] {
 const num = (v: string, fallback: number): number => {
   const n = parseFloat(v)
   return Number.isFinite(n) ? n : fallback
+}
+
+/**
+ * Themed slider + number-input + unit row for the dispenser/motion parameters,
+ * mirroring the 2D/3D Carving "Position & Size" rows and the Controller jog
+ * "Feed" control. A full-width row: leading glyph + label, a themed draggable
+ * `.glue-slider` (accent fill via the inline `--mc-pct` var), a small typable
+ * `.glue-slider-num` inside a bordered frame, and an inline unit suffix.
+ *
+ * The slider clamps to [min, max]; the number input commits the EXACT typed
+ * value (so out-of-slider-range entry still works). All colours come from theme
+ * CSS variables so it follows light/dark like the rest of the app.
+ */
+function SliderField({
+  icon,
+  label,
+  htmlFor,
+  unit,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  invalid,
+  title,
+}: {
+  icon: ReactNode
+  label: string
+  htmlFor: string
+  unit?: string
+  value: number
+  onChange: (n: number) => void
+  min: number
+  max: number
+  step: number
+  invalid?: boolean
+  title?: string
+}) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the accent fill (read as --mc-pct by the
+  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress). Uses
+  // the CLAMPED value so an out-of-range typed value doesn't overflow the fill.
+  const pct =
+    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
+  return (
+    <div className="glue-sfield" title={title}>
+      <label className="glue-sfield-lbl" htmlFor={htmlFor}>
+        <span className="glue-sfield-ico" aria-hidden>
+          {icon}
+        </span>
+        <span className="glue-sfield-txt">{label}</span>
+      </label>
+      <input
+        type="range"
+        className="glue-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className={invalid ? 'glue-sfield-num glue-sfield-num-bad' : 'glue-sfield-num'}>
+        <input
+          id={htmlFor}
+          type="number"
+          className="glue-slider-num"
+          min={min}
+          max={max}
+          step={step}
+          value={String(value)}
+          aria-invalid={invalid ? 'true' : undefined}
+          aria-label={label}
+          onChange={(e) => {
+            // Allow EXACT entry (don't clamp the typed number) — only blank/NaN
+            // is rejected (caller keeps the previous value).
+            const v = parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+          }}
+        />
+        {unit ? <span className="glue-sfield-unit">{unit}</span> : null}
+      </span>
+    </div>
+  )
 }
 
 /** Bed size in mm (bottom-left = machine origin [0,0]). */
@@ -977,63 +1063,57 @@ export function GluePanel() {
           {/* Dispenser & motion (essentials) */}
           <section className="gp-card">
             <h3 className="gp-card-title">{t('glue.motion.title', 'Dispenser & motion')}</h3>
-            <div className="gp-fields">
-              <label title={t('glue.field.dispenseZ.title', 'Z height (mm) at which the dispenser touches down to lay a bead')}>
-                {t('glue.field.dispenseZ', 'Dispense Z')}
-                <span className="gp-input has-unit">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={params.dispenseZ}
-                    className={degenerateZ ? 'gp-input-bad' : undefined}
-                    aria-invalid={degenerateZ ? 'true' : undefined}
-                    onChange={(e) => setParams({ ...params, dispenseZ: num(e.target.value, params.dispenseZ) })}
-                  />
-                  <i>{t('unit.mm', 'mm')}</i>
-                </span>
-              </label>
-              <label title={t('glue.field.travelZ.title', 'Safe Z height (mm) for rapid travel between shapes')}>
-                {t('glue.field.travelZ', 'Travel Z')}
-                <span className="gp-input has-unit">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={params.travelZ}
-                    className={degenerateZ ? 'gp-input-bad' : undefined}
-                    aria-invalid={degenerateZ ? 'true' : undefined}
-                    onChange={(e) => setParams({ ...params, travelZ: num(e.target.value, params.travelZ) })}
-                  />
-                  <i>{t('unit.mm', 'mm')}</i>
-                </span>
-              </label>
-              <label title={t('glue.field.feed.title', 'Trace feed rate (mm/min) while dispensing along an outline')}>
-                {t('glue.field.feed', 'Feed')}
-                <span className="gp-input has-unit">
-                  <input
-                    type="number"
-                    step="10"
-                    min="0"
-                    value={params.feed}
-                    onChange={(e) => setParams({ ...params, feed: num(e.target.value, params.feed) })}
-                  />
-                  <i>{t('unit.mmPerMin', 'mm/min')}</i>
-                </span>
-              </label>
-              <label title={t('glue.field.dispenseRate.title', 'Dispenser output rate (drives the spindle/feeder S-word)')}>
-                {t('glue.field.dispenseRate', 'Dispense rate')}
-                <span className="gp-input has-unit">
-                  <input
-                    type="number"
-                    step="100"
-                    min="0"
-                    value={params.dispenseRate}
-                    onChange={(e) =>
-                      setParams({ ...params, dispenseRate: num(e.target.value, params.dispenseRate) })
-                    }
-                  />
-                  <i>{t('unit.sWord', 'S')}</i>
-                </span>
-              </label>
+            <div className="glue-sfields">
+              <SliderField
+                icon={<Icon name="probe" size={14} />}
+                label={t('glue.field.dispenseZ', 'Dispense Z')}
+                htmlFor="glue-dispenseZ"
+                unit={t('unit.mm', 'mm')}
+                value={params.dispenseZ}
+                min={-10}
+                max={50}
+                step={0.1}
+                invalid={degenerateZ}
+                title={t('glue.field.dispenseZ.title', 'Z height (mm) at which the dispenser touches down to lay a bead')}
+                onChange={(v) => setParams({ ...params, dispenseZ: v })}
+              />
+              <SliderField
+                icon={<Icon name="home" size={14} />}
+                label={t('glue.field.travelZ', 'Travel Z')}
+                htmlFor="glue-travelZ"
+                unit={t('unit.mm', 'mm')}
+                value={params.travelZ}
+                min={0}
+                max={60}
+                step={0.1}
+                invalid={degenerateZ}
+                title={t('glue.field.travelZ.title', 'Safe Z height (mm) for rapid travel between shapes')}
+                onChange={(v) => setParams({ ...params, travelZ: v })}
+              />
+              <SliderField
+                icon={<Icon name="jog" size={14} />}
+                label={t('glue.field.feed', 'Feed')}
+                htmlFor="glue-feed"
+                unit={t('unit.mmPerMin', 'mm/min')}
+                value={params.feed}
+                min={0}
+                max={3000}
+                step={10}
+                title={t('glue.field.feed.title', 'Trace feed rate (mm/min) while dispensing along an outline')}
+                onChange={(v) => setParams({ ...params, feed: Math.max(0, v) })}
+              />
+              <SliderField
+                icon={<Icon name="spindle" size={14} />}
+                label={t('glue.field.dispenseRate', 'Dispense rate')}
+                htmlFor="glue-dispenseRate"
+                unit={t('unit.sWord', 'S')}
+                value={params.dispenseRate}
+                min={0}
+                max={2000}
+                step={50}
+                title={t('glue.field.dispenseRate.title', 'Dispenser output rate (drives the spindle/feeder S-word)')}
+                onChange={(v) => setParams({ ...params, dispenseRate: Math.max(0, v) })}
+              />
             </div>
 
             {/* Advanced (collapsed) */}
@@ -1047,68 +1127,59 @@ export function GluePanel() {
               {t('glue.adv', 'Advanced')}
             </button>
             {showAdvanced && (
-              <div className="gp-fields gp-adv">
-                <label title={t('glue.field.plungeFeed.title', 'Feed rate (mm/min) for the descent from Travel Z to Dispense Z')}>
-                  {t('glue.field.plungeFeed', 'Plunge feed')}
-                  <span className="gp-input has-unit">
-                    <input
-                      type="number"
-                      step="10"
-                      min="0"
-                      value={params.plungeFeed}
-                      onChange={(e) =>
-                        setParams({ ...params, plungeFeed: num(e.target.value, params.plungeFeed) })
-                      }
-                    />
-                    <i>{t('unit.mmPerMin', 'mm/min')}</i>
-                  </span>
-                </label>
-                <label title={t('glue.field.settle.title', 'Dwell (ms) after touch-down before moving, so the bead starts cleanly')}>
-                  {t('glue.field.settle', 'Settle')}
-                  <span className="gp-input has-unit">
-                    <input
-                      type="number"
-                      step="50"
-                      min="0"
-                      value={params.settleMs}
-                      onChange={(e) =>
-                        setParams({ ...params, settleMs: num(e.target.value, params.settleMs) })
-                      }
-                    />
-                    <i>{t('unit.ms', 'ms')}</i>
-                  </span>
-                </label>
-                <label title={t('glue.field.postDwell.title', 'Dwell (ms) after the dispenser stops, before retracting')}>
-                  {t('glue.field.postDwell', 'Post dwell')}
-                  <span className="gp-input has-unit">
-                    <input
-                      type="number"
-                      step="50"
-                      min="0"
-                      value={params.postDwellMs}
-                      onChange={(e) =>
-                        setParams({ ...params, postDwellMs: num(e.target.value, params.postDwellMs) })
-                      }
-                    />
-                    <i>{t('unit.ms', 'ms')}</i>
-                  </span>
-                </label>
-                <label title={t('glue.field.decimals.title', 'Coordinate decimal places in the emitted G-code (0–5)')}>
-                  {t('glue.field.decimals', 'Decimals')}
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    max="5"
-                    value={params.decimals}
-                    onChange={(e) =>
-                      setParams({
-                        ...params,
-                        decimals: Math.max(0, Math.min(5, Math.round(num(e.target.value, params.decimals)))),
-                      })
-                    }
-                  />
-                </label>
+              <div className="glue-sfields gp-adv">
+                <SliderField
+                  icon={<Icon name="jog" size={14} />}
+                  label={t('glue.field.plungeFeed', 'Plunge feed')}
+                  htmlFor="glue-plungeFeed"
+                  unit={t('unit.mmPerMin', 'mm/min')}
+                  value={params.plungeFeed}
+                  min={0}
+                  max={1500}
+                  step={10}
+                  title={t('glue.field.plungeFeed.title', 'Feed rate (mm/min) for the descent from Travel Z to Dispense Z')}
+                  onChange={(v) => setParams({ ...params, plungeFeed: Math.max(0, v) })}
+                />
+                <SliderField
+                  icon={<Icon name="pause" size={14} />}
+                  label={t('glue.field.settle', 'Settle')}
+                  htmlFor="glue-settle"
+                  unit={t('unit.ms', 'ms')}
+                  value={params.settleMs}
+                  min={0}
+                  max={2000}
+                  step={50}
+                  title={t('glue.field.settle.title', 'Dwell (ms) after touch-down before moving, so the bead starts cleanly')}
+                  onChange={(v) => setParams({ ...params, settleMs: Math.max(0, v) })}
+                />
+                <SliderField
+                  icon={<Icon name="pause" size={14} />}
+                  label={t('glue.field.postDwell', 'Post dwell')}
+                  htmlFor="glue-postDwell"
+                  unit={t('unit.ms', 'ms')}
+                  value={params.postDwellMs}
+                  min={0}
+                  max={2000}
+                  step={50}
+                  title={t('glue.field.postDwell.title', 'Dwell (ms) after the dispenser stops, before retracting')}
+                  onChange={(v) => setParams({ ...params, postDwellMs: Math.max(0, v) })}
+                />
+                <SliderField
+                  icon={<Icon name="settings" size={14} />}
+                  label={t('glue.field.decimals', 'Decimals')}
+                  htmlFor="glue-decimals"
+                  value={params.decimals}
+                  min={0}
+                  max={5}
+                  step={1}
+                  title={t('glue.field.decimals.title', 'Coordinate decimal places in the emitted G-code (0–5)')}
+                  onChange={(v) =>
+                    setParams({
+                      ...params,
+                      decimals: Math.max(0, Math.min(5, Math.round(v))),
+                    })
+                  }
+                />
               </div>
             )}
           </section>

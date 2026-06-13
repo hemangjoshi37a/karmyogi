@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useMachine, useProgram, useNotifications, usePersistentState } from '../store'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
@@ -115,37 +115,64 @@ function ToolButton(props: {
   )
 }
 
-/** A slim number field with an inline unit suffix, matching the dense theme. */
+/**
+ * A themed slider + number-input + unit row, mirroring the Carving panel's
+ * `SliderField` (and the Controller jog "Feed" control): a compact one-line row of
+ * [label · range slider · number input · unit]. The range shows a CSS accent fill
+ * via the inline `--dr-pct` custom property; the number input stays editable so
+ * exact typing still works. `slider` sets the drag range/step (min/max/step),
+ * while the typed value is NOT clamped to that range — only blank/NaN is rejected —
+ * so values outside the convenient slider range can still be entered by hand.
+ */
 function NumField(props: {
   label: string
   value: number
   unit?: string
-  step?: string
-  min?: string
-  max?: string
+  /** Slider drag bounds + granularity. */
+  min: number
+  max: number
+  step: number
   onChange: (n: number) => void
+  /** Optional coercion of a typed value (e.g. integer-only for Decimals). */
   parse?: (v: string, fallback: number) => number
   info?: { title: string; body: string }
 }) {
-  const { label, value, unit, step = '0.1', min, max, onChange, parse = num, info } = props
+  const { label, value, unit, min, max, step, onChange, parse = num, info } = props
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the slider's accent fill (read as --dr-pct by the
+  // WebKit/Blink gradient; Firefox fills via ::-moz-range-progress). Uses the
+  // CLAMPED value so an out-of-range typed value doesn't overflow the fill.
+  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <label className="scf-field">
-      <span className="scf-field-label">
-        {label}
+    <div className="dr-sfield">
+      <span className="dr-sfield-lbl">
+        <span className="dr-sfield-txt">{label}</span>
         {info && <InfoTip topic="drillField" title={info.title} body={info.body} />}
       </span>
-      <span className={`scf-input${unit ? ' has-unit' : ''}`}>
+      <input
+        type="range"
+        className="dr-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--dr-pct': `${pct}%` } as CSSProperties}
+        onChange={(e) => onChange(clamp(parse(e.target.value, value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="dr-sfield-num">
         <input
           type="number"
+          className="dr-slider-num"
           step={step}
-          min={min}
-          max={max}
-          value={value}
+          value={String(value)}
+          aria-label={label}
           onChange={(e) => onChange(parse(e.target.value, value))}
         />
-        {unit && <i>{unit}</i>}
+        {unit && <span className="dr-sfield-unit">{unit}</span>}
       </span>
-    </label>
+    </div>
   )
 }
 
@@ -537,7 +564,9 @@ export function DrillingPanel() {
               <NumField
                 label={t('drill.field.holeDepth', 'Hole depth')}
                 unit={t('unit.mm', 'mm')}
-                min="0"
+                min={0}
+                max={50}
+                step={0.5}
                 value={params.holeDepth}
                 onChange={(n) => setParams((p) => ({ ...p, holeDepth: n }))}
                 info={{
@@ -548,7 +577,9 @@ export function DrillingPanel() {
               <NumField
                 label={t('drill.field.peck', 'Peck')}
                 unit={t('unit.mm', 'mm')}
-                min="0"
+                min={0}
+                max={10}
+                step={0.25}
                 value={params.peck}
                 onChange={(n) => setParams((p) => ({ ...p, peck: n }))}
                 info={{
@@ -605,7 +636,9 @@ export function DrillingPanel() {
               <NumField
                 label={t('drill.field.recessDepth', 'Recess depth')}
                 unit={t('unit.mm', 'mm')}
-                min="0"
+                min={0}
+                max={20}
+                step={0.25}
                 value={params.recessDepth}
                 onChange={(n) => setParams((p) => ({ ...p, recessDepth: n }))}
                 info={{
@@ -616,7 +649,9 @@ export function DrillingPanel() {
               <NumField
                 label={t('drill.field.toolDia', 'Tool ⌀')}
                 unit={t('unit.mm', 'mm')}
-                min="0.01"
+                min={0.5}
+                max={12}
+                step={0.1}
                 value={params.toolDia}
                 onChange={(n) => setParams((p) => ({ ...p, toolDia: n }))}
                 info={{
@@ -650,8 +685,9 @@ export function DrillingPanel() {
               <NumField
                 label={t('drill.field.plunge', 'Plunge')}
                 unit={t('unit.mmPerMin', 'mm/min')}
-                step="10"
-                min="0"
+                min={10}
+                max={1000}
+                step={10}
                 value={params.plunge}
                 onChange={(n) => setParams((p) => ({ ...p, plunge: n }))}
                 info={{
@@ -662,8 +698,9 @@ export function DrillingPanel() {
               <NumField
                 label={t('drill.field.feed', 'Feed')}
                 unit={t('unit.mmPerMin', 'mm/min')}
-                step="10"
-                min="0"
+                min={10}
+                max={2000}
+                step={10}
                 value={params.feed}
                 onChange={(n) => setParams((p) => ({ ...p, feed: n }))}
                 info={{
@@ -674,7 +711,9 @@ export function DrillingPanel() {
               <NumField
                 label={t('drill.field.safeZ', 'Safe-Z')}
                 unit={t('unit.mm', 'mm')}
-                min="0"
+                min={1}
+                max={50}
+                step={0.5}
                 value={params.safeZ}
                 onChange={(n) => setParams((p) => ({ ...p, safeZ: n }))}
                 info={{
@@ -684,9 +723,9 @@ export function DrillingPanel() {
               />
               <NumField
                 label={t('drill.field.decimals', 'Decimals')}
-                step="1"
-                min="0"
-                max="6"
+                min={0}
+                max={6}
+                step={1}
                 value={params.decimals}
                 parse={(v, fb) => clampDecimals(intNum(v, fb))}
                 onChange={(n) => setParams((p) => ({ ...p, decimals: clampDecimals(n) }))}

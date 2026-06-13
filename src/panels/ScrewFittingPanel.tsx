@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useMachine, useProgram, useNotifications, usePersistentState } from '../store'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
@@ -7,6 +7,19 @@ import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
+import {
+  MoveHorizontal,
+  MoveVertical,
+  ArrowDownToLine,
+  ArrowUpToLine,
+  Timer,
+  Gauge,
+  FastForward,
+  ChevronsDown,
+  Drill,
+  Magnet,
+  Hash,
+} from 'lucide-react'
 import {
   defaultScrewDrivePoint,
   defaultScrewDrivingParams,
@@ -30,11 +43,6 @@ function gcodeLines(gcode: string): string[] {
 
 const num = (v: string, fallback: number): number => {
   const n = parseFloat(v)
-  return Number.isFinite(n) ? n : fallback
-}
-
-const intNum = (v: string, fallback: number): number => {
-  const n = parseInt(v, 10)
   return Number.isFinite(n) ? n : fallback
 }
 
@@ -91,37 +99,71 @@ function ToolButton(props: {
   )
 }
 
-/** A slim number field with an inline unit suffix, matching the dense theme. */
-function NumField(props: {
+/**
+ * Sleek slider + number-input + unit row for the loader/driver/motion parameters,
+ * mirroring CadCamPanel's `SliderField` and the Controller jog "Feed" control.
+ * One compact line: leading glyph + label, a themed draggable `.sd-slider` (accent
+ * fill via the inline `--pct` var), a small typable number box clamped to
+ * [min, max] for the slider but allowing exact entry, and an inline unit suffix.
+ * The `value`/`onChange` wiring is unchanged from the old NumField — only the
+ * input WIDGET changes (number box → slider + number).
+ */
+function SliderField(props: {
+  icon: ReactNode
   label: string
   value: number
   unit?: string
-  step?: string
-  min?: string
-  max?: string
+  min: number
+  max: number
+  step: number
   onChange: (n: number) => void
-  parse?: (v: string, fallback: number) => number
   info?: { title: string; body: string }
 }) {
-  const { label, value, unit, step = '0.1', min, max, onChange, parse = num, info } = props
+  const { icon, label, value, unit, min, max, step, onChange, info } = props
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the slider's accent fill (read as --pct by the
+  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress). Uses
+  // the CLAMPED value so an out-of-range typed value never overflows the fill.
+  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <label className="swd-field">
-      <span className="swd-field-label">
-        {label}
+    <div className="sd-sfield">
+      <span className="sd-sfield-lbl">
+        <span className="sd-sfield-ico" aria-hidden>
+          {icon}
+        </span>
+        <span className="sd-sfield-txt">{label}</span>
         {info && <InfoTip topic="screwDriveField" title={info.title} body={info.body} />}
       </span>
-      <span className={`swd-input${unit ? ' has-unit' : ''}`}>
+      <input
+        type="range"
+        className="sd-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--pct': `${pct}%` } as CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="sd-sfield-num">
         <input
           type="number"
-          step={step}
           min={min}
           max={max}
-          value={value}
-          onChange={(e) => onChange(parse(e.target.value, value))}
+          step={step}
+          value={String(value)}
+          aria-label={label}
+          onChange={(e) => {
+            // Allow EXACT entry (don't clamp the typed number) — only blank/NaN is
+            // rejected; the caller's own guards clamp where it matters (feeds etc.).
+            const v = parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+          }}
         />
         {unit && <i>{unit}</i>}
       </span>
-    </label>
+    </div>
   )
 }
 
@@ -523,9 +565,13 @@ export function ScrewFittingPanel() {
               />
             </div>
             <div className="swd-fields">
-              <NumField
+              <SliderField
+                icon={<MoveHorizontal size={14} strokeWidth={1.8} />}
                 label={t('screw.field.pickupX', 'Pickup X')}
                 unit={t('unit.mm', 'mm')}
+                min={0}
+                max={400}
+                step={0.5}
                 value={params.pickupX}
                 onChange={(n) => setParams((p) => ({ ...p, pickupX: n }))}
                 info={{
@@ -533,9 +579,13 @@ export function ScrewFittingPanel() {
                   body: t('screw.field.pickupX.body', 'Loader X the bit moves to in order to pick up a screw.'),
                 }}
               />
-              <NumField
+              <SliderField
+                icon={<MoveVertical size={14} strokeWidth={1.8} />}
                 label={t('screw.field.pickupY', 'Pickup Y')}
                 unit={t('unit.mm', 'mm')}
+                min={0}
+                max={400}
+                step={0.5}
                 value={params.pickupY}
                 onChange={(n) => setParams((p) => ({ ...p, pickupY: n }))}
                 info={{
@@ -543,9 +593,13 @@ export function ScrewFittingPanel() {
                   body: t('screw.field.pickupY.body', 'Loader Y the bit moves to in order to pick up a screw.'),
                 }}
               />
-              <NumField
+              <SliderField
+                icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
                 label={t('screw.field.pickZ', 'Pick Z')}
                 unit={t('unit.mm', 'mm')}
+                min={-50}
+                max={20}
+                step={0.1}
                 value={params.pickZ}
                 onChange={(n) => setParams((p) => ({ ...p, pickZ: n }))}
                 info={{
@@ -553,10 +607,13 @@ export function ScrewFittingPanel() {
                   body: t('screw.field.pickZ.body', 'Height the magnetic bit descends to at the loader to grab a screw (absolute, usually negative).'),
                 }}
               />
-              <NumField
+              <SliderField
+                icon={<Magnet size={14} strokeWidth={1.8} />}
                 label={t('screw.field.pickDwell', 'Pick dwell')}
                 unit={t('unit.s', 's')}
-                min="0"
+                min={0}
+                max={10}
+                step={0.1}
                 value={params.pickDwellSec}
                 onChange={(n) => setParams((p) => ({ ...p, pickDwellSec: n }))}
                 info={{
@@ -577,11 +634,13 @@ export function ScrewFittingPanel() {
               />
             </div>
             <div className="swd-fields">
-              <NumField
+              <SliderField
+                icon={<Gauge size={14} strokeWidth={1.8} />}
                 label={t('screw.field.driverRPM', 'Driver')}
                 unit={t('unit.sWord', 'S')}
-                step="100"
-                min="0"
+                min={0}
+                max={24000}
+                step={100}
                 value={params.driverRPM}
                 onChange={(n) => setParams((p) => ({ ...p, driverRPM: n }))}
                 info={{
@@ -589,11 +648,13 @@ export function ScrewFittingPanel() {
                   body: t('screw.field.driverRPM.body', 'Spindle speed word (S) that spins the electric screwdriver while driving (M3).'),
                 }}
               />
-              <NumField
+              <SliderField
+                icon={<FastForward size={14} strokeWidth={1.8} />}
                 label={t('screw.field.pushFeed', 'Push')}
                 unit={t('unit.mmPerMin', 'mm/min')}
-                step="10"
-                min="0"
+                min={0}
+                max={2000}
+                step={10}
                 value={params.pushFeed}
                 onChange={(n) => setParams((p) => ({ ...p, pushFeed: n }))}
                 info={{
@@ -601,11 +662,13 @@ export function ScrewFittingPanel() {
                   body: t('screw.field.pushFeed.body', 'The speed of pushing — the Z plunge feed while driving the screw down into the work.'),
                 }}
               />
-              <NumField
+              <SliderField
+                icon={<ChevronsDown size={14} strokeWidth={1.8} />}
                 label={t('screw.field.approachFeed', 'Approach')}
                 unit={t('unit.mmPerMin', 'mm/min')}
-                step="10"
-                min="0"
+                min={0}
+                max={2000}
+                step={10}
                 value={params.approachFeed}
                 onChange={(n) => setParams((p) => ({ ...p, approachFeed: n }))}
                 info={{
@@ -613,10 +676,13 @@ export function ScrewFittingPanel() {
                   body: t('screw.field.approachFeed.body', 'Feed rate for the descent onto the loader when picking a screw.'),
                 }}
               />
-              <NumField
+              <SliderField
+                icon={<Timer size={14} strokeWidth={1.8} />}
                 label={t('screw.field.seatDwell', 'Seat dwell')}
                 unit={t('unit.s', 's')}
-                min="0"
+                min={0}
+                max={10}
+                step={0.1}
                 value={params.seatDwellSec}
                 onChange={(n) => setParams((p) => ({ ...p, seatDwellSec: n }))}
                 info={{
@@ -637,9 +703,13 @@ export function ScrewFittingPanel() {
               />
             </div>
             <div className="swd-fields">
-              <NumField
+              <SliderField
+                icon={<Drill size={14} strokeWidth={1.8} />}
                 label={t('screw.field.defaultDepth', 'Default depth')}
                 unit={t('unit.mm', 'mm')}
+                min={-50}
+                max={20}
+                step={0.1}
                 value={params.defaultDepth}
                 onChange={(n) => setParams((p) => ({ ...p, defaultDepth: n }))}
                 info={{
@@ -647,10 +717,13 @@ export function ScrewFittingPanel() {
                   body: t('screw.field.defaultDepth.body', 'Depth a newly added screw is driven to (negative = into the work). Each point can override it.'),
                 }}
               />
-              <NumField
+              <SliderField
+                icon={<ArrowUpToLine size={14} strokeWidth={1.8} />}
                 label={t('screw.field.safeZ', 'Safe-Z')}
                 unit={t('unit.mm', 'mm')}
-                min="0"
+                min={0}
+                max={60}
+                step={0.5}
                 value={params.safeZ}
                 onChange={(n) => setParams((p) => ({ ...p, safeZ: n }))}
                 info={{
@@ -658,19 +731,34 @@ export function ScrewFittingPanel() {
                   body: t('screw.field.safeZ.body', 'Guaranteed retract height before any XY travel and at program end.'),
                 }}
               />
-              <NumField
-                label={t('screw.field.decimals', 'Decimals')}
-                step="1"
-                min="0"
-                max="6"
-                value={params.decimals}
-                parse={(v, fb) => clampDecimals(intNum(v, fb))}
-                onChange={(n) => setParams((p) => ({ ...p, decimals: clampDecimals(n) }))}
-                info={{
-                  title: t('screw.field.decimals', 'Decimals'),
-                  body: t('screw.field.decimals.body', 'Number of decimal places in the emitted coordinates (0–6).'),
-                }}
-              />
+            </div>
+            {/* Coordinate precision is a small enum (0–6) — a segmented control reads
+                clearer than a slider and snaps to exact integers. */}
+            <div className="sd-enum-row">
+              <span className="sd-enum-lbl">
+                <span className="sd-sfield-ico" aria-hidden>
+                  <Hash size={14} strokeWidth={1.8} />
+                </span>
+                {t('screw.field.decimals', 'Decimals')}
+                <InfoTip
+                  topic="screwDriveField"
+                  title={t('screw.field.decimals', 'Decimals')}
+                  body={t('screw.field.decimals.body', 'Number of decimal places in the emitted coordinates (0–6).')}
+                />
+              </span>
+              <div className="sd-seg" role="group" aria-label={t('screw.field.decimals', 'Decimals')}>
+                {[0, 1, 2, 3, 4, 5, 6].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    className={'sd-seg-btn' + (clampDecimals(params.decimals) === d ? ' active' : '')}
+                    aria-pressed={clampDecimals(params.decimals) === d}
+                    onClick={() => setParams((p) => ({ ...p, decimals: d }))}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </section>

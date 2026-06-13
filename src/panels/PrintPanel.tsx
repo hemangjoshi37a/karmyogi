@@ -5,12 +5,13 @@ import {
   useState,
   type ChangeEvent,
   type DragEvent,
+  type ReactNode,
 } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
 import { useT } from '../i18n'
-import { Icon } from '../components/Icons'
+import { Icon, type IconName } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
@@ -122,6 +123,145 @@ interface MeshInfo {
 const f1 = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : '—')
 
 /**
+ * Themed slider + number-input + unit row for slicing/print parameters, mirroring
+ * the 2D/3D Carving "Position & Size" rows and the Controller jog "Feed" control.
+ * A full-width row: leading glyph + label, a themed draggable `.pr-slider` (accent
+ * fill via the inline `--mc-pct` var), a small typable number input inside a
+ * bordered frame, and an inline unit suffix.
+ *
+ * The slider clamps to [min, max]; the number input commits the EXACT typed value
+ * (so out-of-slider-range entry still works). All colours come from theme CSS
+ * variables so it follows light/dark like the rest of the app.
+ */
+function SliderField({
+  icon,
+  label,
+  htmlFor,
+  unit,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  title,
+}: {
+  icon: ReactNode
+  label: string
+  htmlFor: string
+  unit?: string
+  value: number
+  onChange: (n: number) => void
+  min: number
+  max: number
+  step: number
+  title?: string
+}) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the accent fill (read as --mc-pct by the
+  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress). Uses
+  // the CLAMPED value so an out-of-range typed value doesn't overflow the fill.
+  const pct =
+    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
+  return (
+    <div className="pr-sfield" title={title}>
+      <label className="pr-sfield-lbl" htmlFor={htmlFor}>
+        <span className="pr-sfield-ico" aria-hidden>
+          {icon}
+        </span>
+        <span className="pr-sfield-txt">{label}</span>
+      </label>
+      <input
+        type="range"
+        className="pr-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="pr-sfield-num">
+        <input
+          id={htmlFor}
+          type="number"
+          className="pr-slider-num"
+          min={min}
+          max={max}
+          step={step}
+          value={String(value)}
+          aria-label={label}
+          onChange={(e) => {
+            // Allow EXACT entry (don't clamp the typed number) — only blank/NaN
+            // is rejected (caller keeps the previous value).
+            const v = parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+          }}
+        />
+        {unit ? <span className="pr-sfield-unit">{unit}</span> : null}
+      </span>
+    </div>
+  )
+}
+
+interface SegOption<T extends string> {
+  value: T
+  label: string
+  icon?: IconName
+  title?: string
+}
+
+/**
+ * Compact icon-led segmented control (mirrors `.cc-opseg`) for enum/toggle choices
+ * — replaces bare checkboxes. Themed via CSS vars; the active pill fills with the
+ * accent. Each button is a real <button role=radio> so it stays keyboard- and
+ * touch-friendly.
+ */
+function SegControl<T extends string>(props: {
+  ariaLabel: string
+  value: T
+  options: SegOption<T>[]
+  onChange: (v: T) => void
+}) {
+  const { ariaLabel, value, options, onChange } = props
+  return (
+    <div className="pr-seg" role="radiogroup" aria-label={ariaLabel}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          className={`pr-seg-btn${value === o.value ? ' is-on' : ''}`}
+          title={o.title}
+          onClick={() => onChange(o.value)}
+        >
+          {o.icon && (
+            <span className="pr-seg-ico" aria-hidden>
+              <Icon name={o.icon} size={14} />
+            </span>
+          )}
+          <span className="pr-seg-lbl">{o.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** A labelled row pairing a caption with a segmented control. */
+function SegRow({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+  return (
+    <div className="pr-segrow">
+      <span className="pr-segrow-label" title={title}>
+        {label}
+      </span>
+      {children}
+    </div>
+  )
+}
+
+/**
  * 3D Printing panel: import an STL, arrange it on the bed, choose FDM settings,
  * slice to G-code (basic perimeters + rectilinear infill), preview it in the
  * shared Visualizer, and stream it to a GRBL-based printer.
@@ -221,12 +361,6 @@ export function PrintPanel() {
 
   function set<K extends keyof PrintSettings>(key: K, value: PrintSettings[K]) {
     setSettings((s) => ({ ...s, [key]: value }))
-  }
-  function num(key: keyof PrintSettings) {
-    return (e: ChangeEvent<HTMLInputElement>) => {
-      const v = parseFloat(e.target.value)
-      set(key, (Number.isFinite(v) ? v : 0) as PrintSettings[typeof key])
-    }
   }
 
   // Invalidate the previously sliced G-code whenever the inputs that produced it
@@ -731,30 +865,94 @@ export function PrintPanel() {
         <section className="print-section">
           <h3>{t('print.settings.title', '3 · Print settings')}</h3>
           <div className="print-section-body">
-            <div className="print-grid">
-              <Field label={t('print.field.layerHeight', 'Layer height (mm)')}>
-                <input type="number" step="0.05" min="0.05" value={settings.layerHeight} onChange={num('layerHeight')} />
-              </Field>
-              <Field label={t('print.field.infill', 'Infill (%)')}>
-                <input type="number" step="5" min="0" max="100" value={settings.infill} onChange={num('infill')} />
-              </Field>
-              <Field label={t('print.field.perimeters', 'Perimeters (walls)')}>
-                <input type="number" step="1" min="1" max="8" value={settings.perimeters} onChange={num('perimeters')} />
-              </Field>
-              <Field label={t('print.field.nozzleTemp', 'Nozzle temp (°C)')}>
-                <input type="number" step="5" min="0" value={settings.nozzleTemp} onChange={num('nozzleTemp')} />
-              </Field>
-              <Field label={t('print.field.bedTemp', 'Bed temp (°C)')}>
-                <input type="number" step="5" min="0" value={settings.bedTemp} onChange={num('bedTemp')} />
-              </Field>
-              <Field label={t('print.field.printSpeed', 'Print speed (mm/min)')}>
-                <input type="number" step="60" min="60" value={settings.printSpeed} onChange={num('printSpeed')} />
-              </Field>
+            <div className="pr-sfields">
+              <SliderField
+                icon={<Icon name="frame" size={14} />}
+                label={t('print.field.layerHeight', 'Layer height')}
+                htmlFor="pr-layerHeight"
+                unit={t('unit.mm', 'mm')}
+                value={settings.layerHeight}
+                min={0.05}
+                max={0.4}
+                step={0.01}
+                title={t('print.field.layerHeight.title', 'Z height (mm) of each printed layer')}
+                onChange={(v) => set('layerHeight', v)}
+              />
+              <SliderField
+                icon={<Icon name="settings" size={14} />}
+                label={t('print.field.infill', 'Infill')}
+                htmlFor="pr-infill"
+                unit={t('unit.pct', '%')}
+                value={settings.infill}
+                min={0}
+                max={100}
+                step={5}
+                title={t('print.field.infill.title', 'Interior fill density (0–100%)')}
+                onChange={(v) => set('infill', v)}
+              />
+              <SliderField
+                icon={<Icon name="frame" size={14} />}
+                label={t('print.field.perimeters', 'Perimeters')}
+                htmlFor="pr-perimeters"
+                unit={t('unit.walls', 'walls')}
+                value={settings.perimeters}
+                min={1}
+                max={8}
+                step={1}
+                title={t('print.field.perimeters.title', 'Number of outer wall loops per layer')}
+                onChange={(v) => set('perimeters', Math.round(v))}
+              />
+              <SliderField
+                icon={<Icon name="spindle" size={14} />}
+                label={t('print.field.nozzleTemp', 'Nozzle temp')}
+                htmlFor="pr-nozzleTemp"
+                unit={t('unit.degC', '°C')}
+                value={settings.nozzleTemp}
+                min={150}
+                max={300}
+                step={5}
+                title={t('print.field.nozzleTemp.title', 'Hot-end target temperature')}
+                onChange={(v) => set('nozzleTemp', v)}
+              />
+              <SliderField
+                icon={<Icon name="home" size={14} />}
+                label={t('print.field.bedTemp', 'Bed temp')}
+                htmlFor="pr-bedTemp"
+                unit={t('unit.degC', '°C')}
+                value={settings.bedTemp}
+                min={0}
+                max={120}
+                step={5}
+                title={t('print.field.bedTemp.title', 'Heated-bed target temperature (0 = off)')}
+                onChange={(v) => set('bedTemp', v)}
+              />
+              <SliderField
+                icon={<Icon name="jog" size={14} />}
+                label={t('print.field.printSpeed', 'Print speed')}
+                htmlFor="pr-printSpeed"
+                unit={t('unit.mmPerMin', 'mm/min')}
+                value={settings.printSpeed}
+                min={300}
+                max={6000}
+                step={60}
+                title={t('print.field.printSpeed.title', 'Feed rate while extruding')}
+                onChange={(v) => set('printSpeed', v)}
+              />
             </div>
-            <label className="print-check">
-              <input type="checkbox" checked={settings.fan} onChange={(e) => set('fan', e.target.checked)} />
-              <span>{t('print.fan', 'Part-cooling fan (on after first layer)')}</span>
-            </label>
+            <SegRow
+              label={t('print.fan', 'Part-cooling fan')}
+              title={t('print.fan.title', 'Turns the part-cooling fan on after the first layer')}
+            >
+              <SegControl
+                ariaLabel={t('print.fan', 'Part-cooling fan')}
+                value={settings.fan ? 'on' : 'off'}
+                options={[
+                  { value: 'on', label: t('print.toggle.on', 'On') },
+                  { value: 'off', label: t('print.toggle.off', 'Off') },
+                ]}
+                onChange={(v) => set('fan', v === 'on')}
+              />
+            </SegRow>
           </div>
         </section>
 
@@ -770,33 +968,106 @@ export function PrintPanel() {
           </button>
           {showAdvanced && (
             <div className="print-section-body">
-              <div className="print-grid">
-                <Field label={t('print.field.filamentDia', 'Filament Ø (mm)')}>
-                  <input type="number" step="0.05" min="0.5" value={settings.filamentDiameter} onChange={num('filamentDiameter')} />
-                </Field>
-                <Field label={t('print.field.lineWidth', 'Line width (mm)')}>
-                  <input type="number" step="0.05" min="0.1" value={settings.lineWidth} onChange={num('lineWidth')} />
-                </Field>
-                <Field label={t('print.field.travelSpeed', 'Travel speed (mm/min)')}>
-                  <input type="number" step="120" min="120" value={settings.travelSpeed} onChange={num('travelSpeed')} />
-                </Field>
-                <Field label={t('print.field.retractDist', 'Retract dist (mm)')}>
-                  <input type="number" step="0.1" min="0" value={settings.retractDistance} onChange={num('retractDistance')} />
-                </Field>
-                <Field label={t('print.field.retractSpeed', 'Retract speed (mm/min)')}>
-                  <input type="number" step="120" min="60" value={settings.retractSpeed} onChange={num('retractSpeed')} />
-                </Field>
-                <Field label={t('print.field.firstLayerTemp', 'First-layer temp (°C)')}>
-                  <input type="number" step="5" min="0" value={settings.firstLayerTemp} onChange={num('firstLayerTemp')} />
-                </Field>
-                <Field label={t('print.field.firstLayerSpeed', 'First-layer speed (mm/min)')}>
-                  <input type="number" step="60" min="60" value={settings.firstLayerSpeed} onChange={num('firstLayerSpeed')} />
-                </Field>
+              <div className="pr-sfields">
+                <SliderField
+                  icon={<Icon name="spindle" size={14} />}
+                  label={t('print.field.filamentDia', 'Filament Ø')}
+                  htmlFor="pr-filamentDia"
+                  unit={t('unit.mm', 'mm')}
+                  value={settings.filamentDiameter}
+                  min={1.5}
+                  max={3}
+                  step={0.05}
+                  title={t('print.field.filamentDia.title', 'Filament diameter (1.75 or 2.85 mm) — used for extrusion volume')}
+                  onChange={(v) => set('filamentDiameter', v)}
+                />
+                <SliderField
+                  icon={<Icon name="frame" size={14} />}
+                  label={t('print.field.lineWidth', 'Line width')}
+                  htmlFor="pr-lineWidth"
+                  unit={t('unit.mm', 'mm')}
+                  value={settings.lineWidth}
+                  min={0.2}
+                  max={1}
+                  step={0.05}
+                  title={t('print.field.lineWidth.title', 'Extrusion width of a single line (usually ≈ nozzle diameter)')}
+                  onChange={(v) => set('lineWidth', v)}
+                />
+                <SliderField
+                  icon={<Icon name="jog" size={14} />}
+                  label={t('print.field.travelSpeed', 'Travel speed')}
+                  htmlFor="pr-travelSpeed"
+                  unit={t('unit.mmPerMin', 'mm/min')}
+                  value={settings.travelSpeed}
+                  min={600}
+                  max={12000}
+                  step={120}
+                  title={t('print.field.travelSpeed.title', 'Rapid (non-extruding) move speed')}
+                  onChange={(v) => set('travelSpeed', v)}
+                />
+                <SliderField
+                  icon={<Icon name="probe" size={14} />}
+                  label={t('print.field.retractDist', 'Retract dist')}
+                  htmlFor="pr-retractDist"
+                  unit={t('unit.mm', 'mm')}
+                  value={settings.retractDistance}
+                  min={0}
+                  max={8}
+                  step={0.1}
+                  title={t('print.field.retractDist.title', 'Filament pull-back on travel to prevent stringing')}
+                  onChange={(v) => set('retractDistance', v)}
+                />
+                <SliderField
+                  icon={<Icon name="jog" size={14} />}
+                  label={t('print.field.retractSpeed', 'Retract speed')}
+                  htmlFor="pr-retractSpeed"
+                  unit={t('unit.mmPerMin', 'mm/min')}
+                  value={settings.retractSpeed}
+                  min={600}
+                  max={6000}
+                  step={120}
+                  title={t('print.field.retractSpeed.title', 'Speed of the retraction/de-retraction move')}
+                  onChange={(v) => set('retractSpeed', v)}
+                />
+                <SliderField
+                  icon={<Icon name="spindle" size={14} />}
+                  label={t('print.field.firstLayerTemp', 'First-layer temp')}
+                  htmlFor="pr-firstLayerTemp"
+                  unit={t('unit.degC', '°C')}
+                  value={settings.firstLayerTemp}
+                  min={150}
+                  max={300}
+                  step={5}
+                  title={t('print.field.firstLayerTemp.title', 'Hot-end temperature for the first layer (often a touch hotter)')}
+                  onChange={(v) => set('firstLayerTemp', v)}
+                />
+                <SliderField
+                  icon={<Icon name="jog" size={14} />}
+                  label={t('print.field.firstLayerSpeed', 'First-layer speed')}
+                  htmlFor="pr-firstLayerSpeed"
+                  unit={t('unit.mmPerMin', 'mm/min')}
+                  value={settings.firstLayerSpeed}
+                  min={300}
+                  max={3000}
+                  step={60}
+                  title={t('print.field.firstLayerSpeed.title', 'Slower feed rate for a well-adhered first layer')}
+                  onChange={(v) => set('firstLayerSpeed', v)}
+                />
               </div>
-              <label className="print-check">
-                <input type="checkbox" checked={settings.skirt} onChange={(e) => set('skirt', e.target.checked)} />
-                <span>{t('print.skirt', 'Skirt (priming loop on first layer)')}</span>
-              </label>
+              <SegRow
+                label={t('print.skirt', 'Skirt')}
+                title={t('print.skirt.title', 'Priming loop around the object on the first layer')}
+              >
+                <SegControl
+                  ariaLabel={t('print.skirt', 'Skirt')}
+                  value={settings.skirt ? 'on' : 'off'}
+                  options={[
+                    { value: 'on', label: t('print.toggle.on', 'On') },
+                    { value: 'off', label: t('print.toggle.off', 'Off') },
+                  ]}
+                  onChange={(v) => set('skirt', v === 'on')}
+                />
+              </SegRow>
             </div>
           )}
         </section>
@@ -943,15 +1214,6 @@ export function PrintPanel() {
         }
       />
     </div>
-  )
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="print-field">
-      <span>{label}</span>
-      {children}
-    </label>
   )
 }
 

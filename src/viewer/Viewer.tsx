@@ -573,7 +573,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           the work origin (0,0,0), which would otherwise inflate the size of any
           job not starting at zero — so we recompute from the moves themselves. */}
       {showDimensions && dimExtent && (
-        <Dimensions bounds={dimExtent} dark={theme === 'dark'} perFile={perFileDims} />
+        <Dimensions bounds={dimExtent} dark={theme === 'dark'} />
       )}
       {/* Red sphere marking the toolpath START (where work-zero / "Zero all" sits). */}
       {parsed.segments.length > 0 && (
@@ -665,7 +665,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       <OrientationGizmo theme={theme} />
       <ViewController bounds={controlBounds} bedSize={bedSize} apiRef={apiRef} />
       </Canvas>
-      {/* Independent axis-arrow indicator (mirrors the main camera), bottom-left. */}
+      {/* Colored XYZ axis indicator (top-left). Pure SVG overlay driven by the
+          shared camera quaternion — NOT a second WebGL canvas — so it can't
+          flicker/blank from context thrashing the way a 2nd <Canvas> did. */}
       <AxisOverlay theme={theme} />
       {/* Lasso DRAW surface (HTML, captures the freeform polygon in canvas px).
           Shown only while in lasso mode with no pending selection. */}

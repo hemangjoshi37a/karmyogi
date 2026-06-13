@@ -304,6 +304,88 @@ function CamSection({
   )
 }
 
+/**
+ * Sleek slider + number-input + unit row — a local replica of the CadCam panel's
+ * SliderField (and the Controller jog "Feed" control), restyled with `.cam-*`
+ * classes so camera.css owns its own slider chrome (no cross-panel CSS import).
+ * A full-width row: leading glyph + label, a themed draggable `.cam-slider`
+ * (accent fill via the inline `--pct` var), a small typable `.cam-slider-num`,
+ * and an optional unit suffix. `value`/`onChange` carry the field's existing
+ * wiring untouched — only the input WIDGET changes (number box → slider + input).
+ */
+function CamSlider({
+  icon,
+  label,
+  htmlFor,
+  unit,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  disabled,
+  title,
+}: {
+  icon?: ReactNode
+  label: string
+  htmlFor: string
+  unit?: string
+  value: number
+  onChange: (n: number) => void
+  min: number
+  max: number
+  step: number
+  disabled?: boolean
+  title?: string
+}) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  const pct =
+    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
+  return (
+    <div className="cam-sfield" title={title}>
+      <label className="cam-sfield-lbl" htmlFor={htmlFor}>
+        {icon != null && (
+          <span className="cam-sfield-ico" aria-hidden>
+            {icon}
+          </span>
+        )}
+        <span className="cam-sfield-txt">{label}</span>
+      </label>
+      <input
+        type="range"
+        className="cam-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        disabled={disabled}
+        style={{ '--pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="cam-sfield-num">
+        <input
+          id={htmlFor}
+          type="number"
+          className="cam-slider-num"
+          min={min}
+          max={max}
+          step={step}
+          value={String(value)}
+          disabled={disabled}
+          aria-label={label}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+          }}
+        />
+        {unit ? <span className="cam-sfield-unit">{unit}</span> : null}
+      </span>
+    </div>
+  )
+}
+
 export function CameraPanel() {
   const t = useT()
   const supported =
@@ -2267,31 +2349,25 @@ export function CameraPanel() {
                   'Adjust the live feed. Only settings your camera reports are shown; values are saved and re-applied when the camera restarts.',
                 )}
               </p>
-              <div className="cam-fields cam-fields-3d">
+              <div className="cam-sgrid">
                 {caps.map((cap) => {
                   const value =
                     cap.name in overrides
                       ? overrides[cap.name]
                       : cap.current ?? (cap.min + cap.max) / 2
                   const id = `cam-adv-${s}-${cap.name}`
-                  const digits = cap.step < 1 ? 2 : 0
                   return (
-                    <label key={cap.name} htmlFor={id}>
-                      <span className="cam-flabel">
-                        {t(cap.key, cap.label)} · {value.toFixed(digits)}
-                      </span>
-                      <input
-                        id={id}
-                        className="cam-range"
-                        type="range"
-                        min={cap.min}
-                        max={cap.max}
-                        step={cap.step}
-                        value={value}
-                        onChange={(e) => setAdvValue(s, cap.name, parseFloat(e.target.value))}
-                        aria-label={t(cap.key, cap.label)}
-                      />
-                    </label>
+                    <CamSlider
+                      key={cap.name}
+                      icon={<Icon name="settings" size={13} />}
+                      label={t(cap.key, cap.label)}
+                      htmlFor={id}
+                      value={value}
+                      onChange={(v) => setAdvValue(s, cap.name, v)}
+                      min={cap.min}
+                      max={cap.max}
+                      step={cap.step}
+                    />
                   )
                 })}
               </div>
@@ -2558,33 +2634,33 @@ export function CameraPanel() {
               {t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).')}
             </p>
           )}
-          <div className="cam-fields">
-            <label htmlFor="cam-tl-interval">
-              <span className="cam-flabel">{t('cam.timelapse.interval', 'Interval (s)')}</span>
-              <input
-                id="cam-tl-interval"
-                className="cam-input"
-                type="text"
-                inputMode="decimal"
-                value={tlInterval}
-                disabled={tlActive}
-                onChange={(e) => setTlInterval(e.target.value)}
-                aria-label={t('cam.timelapse.intervalAria', 'Timelapse interval (seconds)')}
-              />
-            </label>
-            <label htmlFor="cam-tl-fps">
-              <span className="cam-flabel">{t('cam.timelapse.fps', 'Playback FPS')}</span>
-              <input
-                id="cam-tl-fps"
-                className="cam-input"
-                type="text"
-                inputMode="numeric"
-                value={tlFps}
-                disabled={tlActive}
-                onChange={(e) => setTlFps(e.target.value)}
-                aria-label={t('cam.timelapse.fpsAria', 'Timelapse playback FPS')}
-              />
-            </label>
+          <div className="cam-sgrid">
+            <CamSlider
+              icon={<Icon name="settings" size={13} />}
+              label={t('cam.timelapse.interval', 'Interval')}
+              htmlFor="cam-tl-interval"
+              unit="s"
+              value={parseFloat(tlInterval) || 0}
+              onChange={(v) => setTlInterval(String(v))}
+              min={0.2}
+              max={60}
+              step={0.2}
+              disabled={tlActive}
+              title={t('cam.timelapse.intervalAria', 'Timelapse interval (seconds)')}
+            />
+            <CamSlider
+              icon={<Icon name="play" size={13} />}
+              label={t('cam.timelapse.fps', 'Playback FPS')}
+              htmlFor="cam-tl-fps"
+              unit="fps"
+              value={parseFloat(tlFps) || 0}
+              onChange={(v) => setTlFps(String(Math.round(v)))}
+              min={1}
+              max={60}
+              step={1}
+              disabled={tlActive}
+              title={t('cam.timelapse.fpsAria', 'Timelapse playback FPS')}
+            />
           </div>
           {!canCapture && recorderSupported && (
             <p className="cam-hint">
@@ -2651,32 +2727,40 @@ export function CameraPanel() {
           </p>
 
           {/* show-in-3D toggle + opacity */}
-          <div className="cam-fields cam-fields-3d">
-            <label className="cam-switch cam-switch-wide">
-              <input
-                type="checkbox"
-                checked={calib.enabled}
-                onChange={() => calib.toggleEnabled()}
-                aria-label={t('cam.bt.showAria', 'Show the live camera overlay in the 3D viewport')}
-              />
-              <span>{t('cam.bt.show', 'Show camera in 3D')}</span>
-            </label>
-            <label htmlFor="cam-bt-opacity">
-              <span className="cam-flabel">
-                {t('cam.bt.opacity', 'Overlay opacity')} · {Math.round(calib.overlayOpacity * 100)}%
-              </span>
-              <input
-                id="cam-bt-opacity"
-                className="cam-range"
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={calib.overlayOpacity}
-                onChange={(e) => calib.setOpacity(parseFloat(e.target.value))}
-                aria-label={t('cam.bt.opacityAria', 'Bed overlay opacity')}
-              />
-            </label>
+          <div className="cam-seg-row">
+            <span className="cam-seg-label">{t('cam.bt.show', 'Show camera in 3D')}</span>
+            <div className="cam-seg" role="group" aria-label={t('cam.bt.showAria', 'Show the live camera overlay in the 3D viewport')}>
+              <button
+                type="button"
+                className={`cam-seg-btn${calib.enabled ? ' on' : ''}`}
+                onClick={() => { if (!calib.enabled) calib.toggleEnabled() }}
+                aria-pressed={calib.enabled}
+              >
+                {t('cam.bt.showOn', 'On')}
+              </button>
+              <button
+                type="button"
+                className={`cam-seg-btn${!calib.enabled ? ' on' : ''}`}
+                onClick={() => { if (calib.enabled) calib.toggleEnabled() }}
+                aria-pressed={!calib.enabled}
+              >
+                {t('cam.bt.showOff', 'Off')}
+              </button>
+            </div>
+          </div>
+          <div className="cam-sgrid">
+            <CamSlider
+              icon={<Icon name="eye" size={13} />}
+              label={t('cam.bt.opacity', 'Overlay opacity')}
+              htmlFor="cam-bt-opacity"
+              unit="%"
+              value={Math.round(calib.overlayOpacity * 100)}
+              onChange={(v) => calib.setOpacity(Math.min(1, Math.max(0, v / 100)))}
+              min={0}
+              max={100}
+              step={5}
+              title={t('cam.bt.opacityAria', 'Bed overlay opacity')}
+            />
           </div>
 
           {/* slot + method choosers (segmented) */}
@@ -2839,35 +2923,33 @@ export function CameraPanel() {
                   )}
                 </p>
               </details>
-              <div className="cam-fields">
-                <label htmlFor="cam-auto-spread">
-                  <span className="cam-flabel">{t('cam.bt.auto.spread', 'Spread (mm)')}</span>
-                  <input
-                    id="cam-auto-spread"
-                    className="cam-input"
-                    type="text"
-                    inputMode="decimal"
-                    value={autoSpread}
-                    disabled={autoRun.running}
-                    onChange={(e) => setAutoSpread(e.target.value)}
-                    aria-label={t('cam.bt.auto.spreadAria', 'Grid half-extent in mm')}
-                  />
-                </label>
-                <label htmlFor="cam-auto-pts">
-                  <span className="cam-flabel">
-                    {t('cam.bt.auto.pts', 'Points per side')} · {autoPointCount} {t('cam.bt.auto.ptsUnit', 'points')}
-                  </span>
-                  <input
-                    id="cam-auto-pts"
-                    className="cam-input"
-                    type="text"
-                    inputMode="numeric"
-                    value={autoPts}
-                    disabled={autoRun.running}
-                    onChange={(e) => setAutoPts(e.target.value)}
-                    aria-label={t('cam.bt.auto.ptsAria', 'Grid points per side')}
-                  />
-                </label>
+              <div className="cam-sgrid">
+                <CamSlider
+                  icon={<Icon name="frame" size={13} />}
+                  label={t('cam.bt.auto.spread', 'Spread')}
+                  htmlFor="cam-auto-spread"
+                  unit="mm"
+                  value={autoSpreadMm}
+                  onChange={(v) => setAutoSpread(String(v))}
+                  min={1}
+                  max={100}
+                  step={1}
+                  disabled={autoRun.running}
+                  title={t('cam.bt.auto.spreadAria', 'Grid half-extent in mm')}
+                />
+                <CamSlider
+                  icon={<Icon name="add" size={13} />}
+                  label={t('cam.bt.auto.pts', 'Points/side')}
+                  htmlFor="cam-auto-pts"
+                  unit={t('cam.bt.auto.ptsUnit', '→ {n}', { n: autoPointCount })}
+                  value={autoPtsPerSide}
+                  onChange={(v) => setAutoPts(String(Math.round(v)))}
+                  min={2}
+                  max={8}
+                  step={1}
+                  disabled={autoRun.running}
+                  title={t('cam.bt.auto.ptsAria', 'Grid points per side')}
+                />
               </div>
               {!autoRun.running && autoReason && (
                 <p className="cam-warn cam-disabled-why">{autoReason}</p>
@@ -3427,43 +3509,43 @@ export function CameraPanel() {
               {t('cam.bt.job.detect', 'Detect from stock QR')}
             </button>
           </div>
-          <div className="cam-fields">
-            <label htmlFor="cam-job-w">
-              <span className="cam-flabel">{t('cam.bt.job.w', 'Width (mm)')}</span>
-              <input
-                id="cam-job-w"
-                className="cam-input"
-                type="text"
-                inputMode="decimal"
-                value={jobW}
-                onChange={(e) => setJobW(e.target.value)}
-                aria-label={t('cam.bt.job.wAria', 'Job width in mm')}
-              />
-            </label>
-            <label htmlFor="cam-job-d">
-              <span className="cam-flabel">{t('cam.bt.job.d', 'Depth (mm)')}</span>
-              <input
-                id="cam-job-d"
-                className="cam-input"
-                type="text"
-                inputMode="decimal"
-                value={jobD}
-                onChange={(e) => setJobD(e.target.value)}
-                aria-label={t('cam.bt.job.dAria', 'Job depth in mm')}
-              />
-            </label>
-            <label htmlFor="cam-job-thk">
-              <span className="cam-flabel">{t('cam.bt.job.thk', 'Thickness (mm)')}</span>
-              <input
-                id="cam-job-thk"
-                className="cam-input"
-                type="text"
-                inputMode="decimal"
-                value={jobThk}
-                onChange={(e) => setJobThk(e.target.value)}
-                aria-label={t('cam.bt.job.thkAria', 'Job thickness in mm')}
-              />
-            </label>
+          <div className="cam-sgrid">
+            <CamSlider
+              icon={<Icon name="frame" size={13} />}
+              label={t('cam.bt.job.w', 'Width')}
+              htmlFor="cam-job-w"
+              unit="mm"
+              value={parseFloat(jobW) || 0}
+              onChange={(v) => setJobW(String(v))}
+              min={0}
+              max={Math.max(500, bed.width)}
+              step={1}
+              title={t('cam.bt.job.wAria', 'Job width in mm')}
+            />
+            <CamSlider
+              icon={<Icon name="frame" size={13} />}
+              label={t('cam.bt.job.d', 'Depth')}
+              htmlFor="cam-job-d"
+              unit="mm"
+              value={parseFloat(jobD) || 0}
+              onChange={(v) => setJobD(String(v))}
+              min={0}
+              max={Math.max(500, bed.depth)}
+              step={1}
+              title={t('cam.bt.job.dAria', 'Job depth in mm')}
+            />
+            <CamSlider
+              icon={<Icon name="probe" size={13} />}
+              label={t('cam.bt.job.thk', 'Thickness')}
+              htmlFor="cam-job-thk"
+              unit="mm"
+              value={parseFloat(jobThk) || 0}
+              onChange={(v) => setJobThk(String(v))}
+              min={0}
+              max={100}
+              step={0.5}
+              title={t('cam.bt.job.thkAria', 'Job thickness in mm')}
+            />
           </div>
           <div className="cam-row">
             <button

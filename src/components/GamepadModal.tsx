@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Modal } from './Modal'
 import { GamepadModel3D } from './GamepadModel3D'
 import { type GamepadState } from '../machine/useGamepad'
+import { tabLegend } from '../machine/gamepadTabActions'
 import { useT } from '../i18n'
 import './../styles/gamepad.css'
 
@@ -48,6 +49,12 @@ function MapRow({ icon, control, action }: { icon: ReactNode; control: string; a
   )
 }
 
+/** Friendly title for the tabs that have context bindings (for the legend head). */
+const TAB_TITLE: Record<string, string> = {
+  program: 'Program',
+  cadcam: '2D/3D Carving',
+}
+
 export function GamepadModal({
   open,
   onClose,
@@ -62,6 +69,10 @@ export function GamepadModal({
 }: GamepadModalProps) {
   const t = useT()
   const name = controllerName(gp, t)
+  // CONTEXT-AWARE legend: what the face buttons do on the CURRENTLY-ACTIVE tab.
+  // Empty for tabs that fall back to the global mapping (shown below).
+  const legend = tabLegend(gp.activeTab)
+  const tabTitle = gp.activeTab ? TAB_TITLE[gp.activeTab] ?? gp.activeTab : undefined
 
   return (
     <Modal open={open} onClose={onClose} title={t('gp.title', 'Game controller')} width={760}>
@@ -147,6 +158,33 @@ export function GamepadModal({
                 'Pair your controller over Bluetooth, or plug it in via USB or its wireless dongle, then press any button. Works the same on desktop and Android.',
               )}
         </p>
+
+        {/* CONTEXT layer: what the buttons do on the active tab (overrides the
+            global mapping below for these buttons). Shown only when the active
+            tab has bindings; otherwise the global mapping fully applies. */}
+        {legend.length > 0 && (
+          <div
+            className="gp-map"
+            style={{
+              border: '1px solid var(--accent)',
+              borderRadius: 'var(--radius, 6px)',
+              background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+              padding: '8px 10px',
+            }}
+          >
+            <h4>
+              {t('gp.ctx.title', 'On this tab')}
+              {tabTitle ? <span style={{ color: 'var(--fg-muted)' }}> · {tabTitle}</span> : null}
+            </h4>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', fontSize: 12, color: 'var(--fg-muted)' }}>
+              {legend.map((row) => (
+                <span key={row.control}>
+                  <strong style={{ color: 'var(--accent)' }}>{row.control}</strong>: {row.action}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Mapping reference (compact legend — to be replaced by on-model callouts) */}
         <div className="gp-map">

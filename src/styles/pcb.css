@@ -703,3 +703,276 @@
     width: 100%;
   }
 }
+
+/* =====================================================================
+   Toolpath-operation cards (section 3). One card per machining task
+   (isolation / drilling / cutout), each with its own themed sliders and a
+   Preview / Generate / Run action row. Cards tile into a responsive grid that
+   collapses to one column when the panel is narrow.
+   ===================================================================== */
+.pcb-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-2);
+}
+.pcb-op-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  transition: border-color 0.12s, opacity 0.12s;
+}
+.pcb-op-card.pcb-op-disabled {
+  opacity: 0.6;
+}
+.pcb-op-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.pcb-op-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.pcb-op-title {
+  font-weight: 600;
+  font-size: var(--fs-body);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcb-op-badge {
+  flex: 0 0 auto;
+  padding: 1px var(--sp-2);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pcb-op-badge.ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+.pcb-op-src {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  line-height: 1.35;
+}
+.pcb-op-layer {
+  color: var(--fg);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-label);
+  word-break: break-all;
+}
+.pcb-op-note {
+  color: var(--accent);
+  opacity: 0.95;
+}
+.pcb-op-params {
+  margin: 2px 0;
+}
+.pcb-op-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: auto;
+}
+.pcb-op-btn {
+  flex: 1 1 auto;
+  min-height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+@container pcbpanel (max-width: 560px) {
+  .pcb-ops-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .pcb-ops-grid {
+    grid-template-columns: 1fr;
+  }
+  .pcb-op-btn {
+    min-height: var(--ctl-h-touch);
+  }
+}
+
+/* --- Local copy of the CadCam SliderField widget (.cc-sfield / .cc-slider),
+   so the operation cards use the same themed slider as the rest of the app
+   without pcb.css importing cadcam.css. Track + thumb follow theme vars; the
+   accent fill comes from the inline --mc-pct (WebKit/Blink) and
+   ::-moz-range-progress (Firefox). --- */
+.pcb-op-card .cc-sgrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-1) var(--sp-2);
+  align-items: center;
+}
+.pcb-op-card .cc-sfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+}
+.pcb-op-card .cc-sfield-lbl {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  width: 92px;
+  min-width: 38px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.pcb-op-card .cc-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pcb-op-card .cc-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 76px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.pcb-op-card .cc-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.pcb-op-card .cc-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+.pcb-op-card .cc-slider {
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.pcb-op-card .cc-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--mc-pct, 0%),
+    var(--bg-elev) var(--mc-pct, 0%) 100%
+  );
+}
+.pcb-op-card .cc-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.pcb-op-card .cc-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.pcb-op-card .cc-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.pcb-op-card .cc-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.pcb-op-card .cc-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.pcb-op-card .cc-slider-num:focus {
+  outline: none;
+  box-shadow: none;
+}
+.pcb-op-card .cc-slider-num::-webkit-outer-spin-button,
+.pcb-op-card .cc-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+@media (pointer: coarse) {
+  .pcb-op-card .cc-slider {
+    height: 24px;
+  }
+  .pcb-op-card .cc-slider::-webkit-slider-runnable-track,
+  .pcb-op-card .cc-slider::-moz-range-track,
+  .pcb-op-card .cc-slider::-moz-range-progress {
+    height: 6px;
+  }
+  .pcb-op-card .cc-slider::-webkit-slider-thumb {
+    width: 17px;
+    height: 17px;
+    margin-top: -6px;
+  }
+  .pcb-op-card .cc-slider::-moz-range-thumb {
+    width: 17px;
+    height: 17px;
+  }
+  .pcb-op-card .cc-sfield-num {
+    height: var(--ctl-h-touch);
+  }
+}

@@ -264,17 +264,305 @@
   min-height: var(--ctl-h);
 }
 
-/* --- head-type selector --- */
-.pp-headsel {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
+/* --- head-type selector (now a themed segmented control) --- */
+.pp-headsel-lbl {
+  flex: 0 0 auto;
   font-size: var(--fs-label);
   color: var(--fg-muted);
 }
-.pp-headsel select {
+
+/* ───────────────────────── segmented controls ─────────────────────────
+   Themed icon-led segmented buttons (mirrors CadCam `.cc-opseg`): glyph + label
+   inline, active fills with the accent. Used for the head-type picker and the
+   rotary-axis Off/Emit toggle. All colors via theme vars (light + dark). */
+.pnp-seg {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: var(--sp-1);
+}
+.pnp-seg-bool {
+  flex: 0 0 auto;
+}
+.pnp-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  padding: 5px var(--sp-2);
+  min-height: var(--ctl-h);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  line-height: 1.1;
+  font-size: var(--fs-ctl);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.pnp-seg-btn:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.pnp-seg-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.pnp-seg-lbl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pnp-seg-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.pnp-seg-btn.active .pnp-seg-ico {
+  color: var(--accent-fg);
+}
+
+/* rotary-axis toggle row: label + Off/Emit segmented pair */
+.pp-rotrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.pnp-seg-rowlbl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+
+/* ───────────────────────── slider param rows ─────────────────────────
+   Sleek slider + number-input + unit rows (mirrors CadCam `.cc-sfield` /
+   `.cc-slider`). One field per FULL-WIDTH row so the slider has room to drag:
+   leading glyph + label, themed draggable track (accent fill via the inline
+   `--pct` var), then a small typable number frame with an inline unit suffix.
+   Track + thumb use theme vars so it follows light/dark. */
+.pnp-sgrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: center;
+}
+.pnp-sfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.pnp-sfield:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.pnp-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  width: 96px;
+  min-width: 38px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.pnp-sfield:focus-within .pnp-sfield-lbl {
+  color: var(--fg);
+}
+.pnp-sfield-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
+}
+.pnp-sfield:focus-within .pnp-sfield-ico {
+  color: var(--accent);
+  opacity: 1;
+}
+.pnp-sfield-txt {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pnp-sfield-warn .pnp-sfield-lbl {
+  color: var(--warn);
+}
+
+/* the number-input + unit share one bordered frame; the real <input> is
+   borderless inside it (matches CadCam `.cc-sfield-num`). */
+.pnp-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 84px;
   height: var(--ctl-h);
-  min-height: 0;
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.pnp-sfield-num:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.pnp-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.pnp-sfield-warn .pnp-sfield-num {
+  border-color: var(--warn);
+}
+.pnp-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+.pnp-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.pnp-slider-num:focus {
+  outline: none;
+  box-shadow: none;
+}
+.pnp-slider-num::-webkit-outer-spin-button,
+.pnp-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Themed draggable slider — track + thumb use theme vars; the accent fill to the
+   LEFT of the thumb comes from the inline `--pct` (WebKit/Blink gradient) and
+   from ::-moz-range-progress (Firefox). */
+.pnp-slider {
+  /* basis 0 so the range input doesn't claim its default width and push the
+     number box onto a 2nd line; it grows to fill instead. */
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.pnp-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--pct, 0%),
+    var(--bg-elev) var(--pct, 0%) 100%
+  );
+}
+.pnp-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.pnp-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.pnp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.pnp-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.pnp-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.pnp-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.pnp-slider:focus-visible {
+  outline: none;
+}
+.pnp-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.pnp-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so it's grabbable. */
+@media (pointer: coarse) {
+  .pnp-slider {
+    height: 24px;
+  }
+  .pnp-slider::-webkit-slider-runnable-track,
+  .pnp-slider::-moz-range-track,
+  .pnp-slider::-moz-range-progress {
+    height: 6px;
+  }
+  .pnp-slider::-webkit-slider-thumb {
+    width: 17px;
+    height: 17px;
+    margin-top: -6px;
+  }
+  .pnp-slider::-moz-range-thumb {
+    width: 17px;
+    height: 17px;
+  }
+  .pnp-seg-btn {
+    min-height: var(--ctl-h-touch);
+  }
 }
 
 /* --- compact field grid: fields pack left tightly and wrap naturally, never

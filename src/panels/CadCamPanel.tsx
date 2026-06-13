@@ -548,6 +548,7 @@ function jobCarveParams(
 export function CadCamPanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
+  const setGenerating = useProgram((s) => s.setGenerating)
   const bed = useBed()
 
   // ---- multi-job carving store -------------------------------------------
@@ -596,7 +597,7 @@ export function CadCamPanel() {
   const [importError, setImportError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
-  const [, setBusy] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [nestWarn, setNestWarn] = useState<string[]>([])
 
   // 2D state (DXF / EPS / AI)
@@ -819,6 +820,37 @@ export function CadCamPanel() {
    * Import ONE file. `renestAfter` lets a multi-file drop add every model first
    * and re-nest only once at the end (avoids N intermediate nests + N warnings).
    */
+  /**
+   * Center a freshly-imported 2D drawing on the bed by setting Offset X/Y.
+   * DXF/EPS files carry their own (often corner-anchored) coordinates, which
+   * otherwise drop the toolpath wherever the file's coordinates happen to sit.
+   *
+   * IMPORTANT — the bed CENTER is the WORK ORIGIN (0,0), not (bedW/2, bedD/2):
+   * the viewer draws the bed grid centered on the origin (usable area
+   * [-W/2..+W/2] × [-D/2..+D/2]) and the bed-fit check is relative to that. So
+   * we solve for the offset that lands the drawing's bbox center on (0,0),
+   * accounting for the current X/Y scale (placed center = min + halfExtent*scale
+   * + offset). Centering on (bedW/2, bedD/2) put it in the +X+Y corner instead.
+   * The user can still nudge Offset X/Y (or drag in the viewer) afterward.
+   */
+  function centerDrawingOnBed(polys: Polyline[]) {
+    const b = new BBox()
+    for (const pl of polys) for (const p of pl.points) b.expand(p)
+    if (!b.isValid()) return
+    const halfW = (b.max.x - b.min.x) / 2
+    const halfH = (b.max.y - b.min.y) / 2
+    const round2 = (n: number) => Math.round(n * 100) / 100
+    setP2d((p) => {
+      const sx = p.scaleX > 0 ? p.scaleX : 1
+      const sy = p.scaleY > 0 ? p.scaleY : 1
+      return {
+        ...p,
+        offsetX: round2(-(b.min.x + halfW * sx)),
+        offsetY: round2(-(b.min.y + halfH * sy)),
+      }
+    })
+  }
+
   async function loadFile(file: File, renestAfter = true) {
     setImportError(null)
     setWarnings([])
@@ -953,6 +985,17 @@ export function CadCamPanel() {
     if (epsPolys) return epsPolys
     return []
   }, [mode, drawing, epsPolys])
+  // Center each newly-imported 2D drawing on the bed. Keyed on the drawing / eps
+  // IDENTITY so it fires once per NEW import (any load path) — re-importing or
+  // switching files re-centers, while manual Offset X/Y edits afterward stick
+  // (those don't change the drawing identity). Solved from the drawing's bbox so
+  // it lands on the bed centre instead of wherever the file's own coordinates sit.
+  useEffect(() => {
+    if (mode !== '2d') return
+    const polys = drawing ? drawing.flatten() : epsPolys
+    if (polys && polys.length) centerDrawingOnBed(polys)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawing, epsPolys])
   // Natural (unscaled) bounds — drives the Width/Height fields + scale-about-corner.
   const naturalBounds = useMemo(() => {
     const b = new BBox()
@@ -1022,8 +1065,24 @@ export function CadCamPanel() {
     return out
   }
 
+  // The last program NAME this panel pushed for the 2D drawing. The name encodes
+  // the operation (e.g. "drawing — Profile Outside"), so switching operation
+  // changes the name. We track the previous name and remove that section before
+  // pushing the new one, so changing the op UPDATES the single drawing toolpath
+  // in place instead of STACKING a fresh section for every op/side switch.
+  const last2DNameRef = useRef<string | null>(null)
+
+  /** Drop our previously-pushed 2D section (used when the drawing has nothing to emit). */
+  function clear2DSection() {
+    if (last2DNameRef.current) {
+      setProgram(last2DNameRef.current, '') // clear-on-empty removes the section
+      last2DNameRef.current = null
+    }
+  }
+
   function generate2D(): string {
     if (polylines.length === 0) {
+      clear2DSection()
       setGcode('')
       setLineCount(0)
       return ''
@@ -1031,6 +1090,7 @@ export function CadCamPanel() {
     const camParams = build2DCamParams()
     const toolpaths = build2DToolpaths(camParams)
     if (toolpaths.length === 0) {
+      clear2DSection()
       setGcode('')
       setLineCount(0)
       return ''
@@ -1055,7 +1115,14 @@ export function CadCamPanel() {
     })
     const out = emitter.emitProgram(toolpaths)
     const count = out.split('\n').filter((l) => l.length > 0).length
+    // Switching operation/side changes progName; remove the prior-named section
+    // first so we replace (update) the single drawing toolpath rather than leave
+    // the old operation's section stacked alongside the new one.
+    if (last2DNameRef.current && last2DNameRef.current !== progName) {
+      setProgram(last2DNameRef.current, '')
+    }
     setProgram(progName, out)
+    last2DNameRef.current = progName
     setGcode(out)
     setLineCount(count)
     return out
@@ -1068,7 +1135,16 @@ export function CadCamPanel() {
   } | null>(null)
   // Carve progress 0..1 (null = not carving). Drives a small "carving…" bar so a
   // heavy relief no longer freezes the UI — the compute runs off-thread.
-  const [, setCarveProgress] = useState<number | null>(null)
+  const [carveProgress, setCarveProgress] = useState<number | null>(null)
+
+  // Mirror "is this panel computing in the background?" to the shared program
+  // store, so the Program panel can show a "Generating…" indicator. Covers a
+  // heavy model import, the 3D carve worker, and the 2D regen (busy).
+  useEffect(() => {
+    setGenerating(importing || busy || carveProgress !== null)
+  }, [importing, busy, carveProgress, setGenerating])
+  // On unmount, clear the indicator so a closed panel can't leave it stuck on.
+  useEffect(() => () => setGenerating(false), [setGenerating])
 
   // The active carve worker (null when idle), held in a ref so a replace/cancel
   // can terminate it without re-rendering. `carveJobIdRef` is a monotonic id so a
@@ -1352,6 +1428,33 @@ export function CadCamPanel() {
     return () => ro.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, jobs.length])
+
+  // Delete the SELECTED model/job (and its toolpath) with the Delete key — the
+  // keyboard equivalent of the job's trash button. Scoped so it never fires
+  // while typing in a field, when another handler already consumed the key (e.g.
+  // the viewer deleting a selected shape/segment), or when this panel is hidden.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' || e.defaultPrevented) return
+      const tgt = e.target as HTMLElement | null
+      if (
+        tgt &&
+        (tgt.tagName === 'INPUT' ||
+          tgt.tagName === 'TEXTAREA' ||
+          tgt.tagName === 'SELECT' ||
+          tgt.isContentEditable)
+      )
+        return
+      if (!isPanelVisible()) return
+      const id = useCarveJobs.getState().selectedId
+      if (!id) return
+      e.preventDefault()
+      removeJob(id)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [removeJob])
 
   function doRenest() {
     const res = renest(bed.width, bed.depth)

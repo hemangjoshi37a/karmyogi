@@ -12,6 +12,7 @@ import { WsPort, normalizeWsUrl, mixedContentReason } from './wsPort'
 import { BlePort, describeBleRequestError } from './blePort'
 import { UsbPort } from './usbPort'
 import { Streamer, type StreamMode } from './streamer'
+import { playCompletionChime } from './completionChime'
 import { RealtimeByte } from './realtime'
 import { isStatusReport, isParserStateLine } from './status'
 import {
@@ -312,8 +313,16 @@ class GrblController {
             cancelRaf(cursorRaf)
             cursorRaf = null
           }
+          // Natural completion only — abort goes through streamer.reset(), which
+          // never fires onIdle. Signal the finished cycle with a chime + a console
+          // line so the user knows the machine is done without watching.
+          const wasStreaming = useProgram.getState().streaming
           useProgram.getState().setStreaming?.(false)
           useProgram.getState().setCursor?.(-1)
+          if (wasStreaming) {
+            playCompletionChime()
+            useConsole.getState().push('info', '✓ Program complete — cycle finished.')
+          }
         },
       })
       machine.setConnection('connected')

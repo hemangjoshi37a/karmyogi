@@ -17,15 +17,15 @@ import {
   type SolderPoint,
   type SolderingParams,
 } from '../core/soldering'
-import { importGerber } from '../core/gerber'
-import { padsToSolderPoints } from '../core/solderFromGerber'
+import {
+  classifySolderCandidates,
+  extractSolderPoints,
+  type SolderLayerCandidate,
+  type SolderLayerKind,
+} from '../core/solderFromGerber'
 import {
   unzipGerberPackage,
-  layerRoleLabel,
-  layerRoleLabelKey,
   GerberPackageError,
-  type LayerRole,
-  type PackageEntry,
 } from '../core/gerberPackage'
 import '../styles/soldering.css'
 
@@ -197,37 +197,101 @@ function ToolButton(props: {
   )
 }
 
-/** A slim number field with an inline unit suffix, matching the dense theme. */
+/**
+ * A themed slider + number-input + unit row, mirroring the Carving panel's
+ * `SliderField` and the Controller jog "Feed" control: a compact one-line row of
+ * [label · range slider · number input · unit]. The range shows a CSS accent fill
+ * via the inline `--sol-pct` custom property; the number input stays editable so
+ * exact typing still works. `min`/`max`/`step` set the slider drag range/step,
+ * while the typed value is NOT clamped to that range (only blank/NaN is rejected,
+ * via `parse`), so values outside the convenient slider range can still be typed.
+ */
 function NumField(props: {
   label: string
   value: number
   unit?: string
-  step?: string
-  min?: string
-  max?: string
+  /** Slider drag bounds + granularity. */
+  min: number
+  max: number
+  step: number
   onChange: (n: number) => void
+  /** Optional coercion of a typed value (e.g. integer-only for Decimals). */
   parse?: (v: string, fallback: number) => number
   info?: { title: string; body: string }
 }) {
-  const { label, value, unit, step = '0.1', min, max, onChange, parse = num, info } = props
+  const { label, value, unit, min, max, step, onChange, parse = num, info } = props
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the slider's accent fill (read as --sol-pct by the
+  // WebKit/Blink gradient; Firefox fills via ::-moz-range-progress). Uses the
+  // CLAMPED value so an out-of-range typed value doesn't overflow the fill.
+  const pct =
+    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <label className="sp-field">
-      <span className="sp-field-label">
-        {label}
+    <div className="sp-sfield">
+      <span className="sp-sfield-lbl">
+        <span className="sp-sfield-txt">{label}</span>
         {info && <InfoTip topic="solderField" title={info.title} body={info.body} />}
       </span>
-      <span className={`sp-input${unit ? ' has-unit' : ''}`}>
+      <input
+        type="range"
+        className="sp-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--sol-pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(parse(e.target.value, value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="sp-sfield-num">
         <input
           type="number"
+          className="sp-slider-num"
           step={step}
-          min={min}
-          max={max}
-          value={value}
+          value={String(value)}
+          aria-label={label}
           onChange={(e) => onChange(parse(e.target.value, value))}
         />
-        {unit && <i>{unit}</i>}
+        {unit && <span className="sp-sfield-unit">{unit}</span>}
       </span>
-    </label>
+    </div>
+  )
+}
+
+/**
+ * A compact segmented (pill) control for a small enum — mirrors the `.cc-opseg`
+ * carving control and the `.sp-radio` chips. All-options-visible, the active one
+ * highlighted in the accent. Used for the new-point default Feed type.
+ */
+function SegField<T extends string>(props: {
+  label: string
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (v: T) => void
+  info?: { title: string; body: string }
+}) {
+  const { label, value, options, onChange, info } = props
+  return (
+    <div className="sp-segfield">
+      <span className="sp-sfield-lbl">
+        <span className="sp-sfield-txt">{label}</span>
+        {info && <InfoTip topic="solderField" title={info.title} body={info.body} />}
+      </span>
+      <div className="sp-seg" role="group" aria-label={label}>
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            className={`sp-seg-btn${o.value === value ? ' active' : ''}`}
+            aria-pressed={o.value === value}
+            onClick={() => onChange(o.value)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -267,9 +331,10 @@ export function SolderingPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Hidden <input type=file> trigger for "Import from Gerber".
   const gerberInputRef = useRef<HTMLInputElement>(null)
-  // When a ZIP holds several layers, hold the candidate layers here and show a
-  // compact picker so the operator chooses the one that carries the solder pads.
-  const [gerberLayers, setGerberLayers] = useState<PackageEntry[] | null>(null)
+  // When a ZIP holds several layers, hold the classified candidate layers here
+  // and show a compact picker so the operator chooses the one that carries the
+  // solder pads (best candidate — usually the paste layer — pre-highlighted).
+  const [gerberLayers, setGerberLayers] = useState<SolderLayerCandidate[] | null>(null)
 
   // Global generator params (programName is fixed here; metric stays mm/G21).
   const [params, setParams] = useState<SolderParams>(() => {
@@ -408,34 +473,29 @@ export function SolderingPanel() {
     reader.readAsText(file)
   }
 
-  // Turn the chosen Gerber layer text into soldering points and merge them into
-  // the list. Each pad flash centre becomes a point built from the current
-  // new-point defaults (Free-Z / Touch-Z / feed / approach), so the imported
-  // points are individually editable exactly like manual ones and the operator
-  // zeros the machine to the board origin then tweaks each as usual. When the
-  // list is non-empty the operator chooses APPEND or REPLACE.
-  function importPadsFromText(text: string, layerName: string) {
-    const res = importGerber(text)
-    if (!res.ok) {
+  // Turn the chosen layer (Gerber pad layer OR Excellon drill file) into
+  // soldering points and merge them into the list. Each pad flash centre (or
+  // drilled-hole centre) becomes a point built from the current new-point
+  // defaults (Free-Z / Touch-Z / feed / approach), so the imported points are
+  // individually editable exactly like manual ones and the operator zeros the
+  // machine to the board origin then tweaks each as usual. When the list is
+  // non-empty the operator chooses APPEND or REPLACE.
+  function importPointsFromLayer(text: string, layerName: string, kind: SolderLayerKind) {
+    const res = extractSolderPoints(text, kind, clampDecimals(params.decimals))
+    if (!res.ok || res.points.length === 0) {
       notify(
         'warn',
-        t('solder.gerber.parseError', 'Could not read that Gerber layer: {error}', {
-          error: res.error ?? t('solder.gerber.noGeometry', 'no geometry'),
-        }),
+        kind === 'drill'
+          ? t('solder.gerber.noHoles', 'No drilled holes found in {layer}.', { layer: layerName })
+          : t(
+              'solder.gerber.noPads',
+              'No pads found on {layer}. Pick the paste, copper or drill layer.',
+              { layer: layerName },
+            ),
       )
       return
     }
-    const xy = padsToSolderPoints(res.data, clampDecimals(params.decimals))
-    if (xy.length === 0) {
-      notify(
-        'warn',
-        t('solder.gerber.noPads', 'No pads (flashes) found on {layer}. Pick the paste or top-copper layer.', {
-          layer: layerName,
-        }),
-      )
-      return
-    }
-    const imported = xy.map((p) => newRow(p.x, p.y))
+    const imported = res.points.map((p) => newRow(p.x, p.y))
     // Offer REPLACE vs APPEND only when there is existing work to preserve.
     let replace = false
     if (points.length > 0) {
@@ -451,25 +511,26 @@ export function SolderingPanel() {
     setSelected(-1)
     notify(
       'success',
-      t('solder.gerber.imported', 'Imported {n} pad(s) as solder points from {layer}.', {
+      t('solder.gerber.imported', 'Imported {n} point(s) from {layer}.', {
         n: imported.length,
         layer: layerName,
       }),
     )
   }
 
-  // Read a chosen file. A ZIP is unzipped and (if it holds more than one layer)
-  // surfaced in the layer picker — defaulting to the paste / top-copper layer
-  // where pads live. A single Gerber file is imported directly.
+  // Read a chosen file. A ZIP is unzipped, every entry classified for soldering
+  // (paste / copper / drill / other) and — when it holds more than one layer —
+  // surfaced in the layer picker with the best candidate (usually the paste
+  // layer) pre-highlighted. A single file is imported directly.
   function loadGerberFile(file: File) {
     setGerberLayers(null)
     if (/\.zip$/i.test(file.name)) {
       file
         .arrayBuffer()
         .then((buf) => {
-          let entries: PackageEntry[]
+          let cands: SolderLayerCandidate[]
           try {
-            entries = unzipGerberPackage(new Uint8Array(buf))
+            cands = classifySolderCandidates(unzipGerberPackage(new Uint8Array(buf)))
           } catch (err) {
             notify(
               'warn',
@@ -481,13 +542,10 @@ export function SolderingPanel() {
             )
             return
           }
-          // Only Gerber copper/paste-style layers carry pad flashes; drill
-          // (Excellon) files are not Gerber and would not parse here, so keep
-          // every entry but let the picker default to a useful one.
-          if (entries.length === 1) {
-            importPadsFromText(entries[0].text, entries[0].name)
+          if (cands.length === 1) {
+            importPointsFromLayer(cands[0].entry.text, cands[0].entry.name, cands[0].kind)
           } else {
-            setGerberLayers(entries)
+            setGerberLayers(cands)
           }
         })
         .catch((err) =>
@@ -497,10 +555,13 @@ export function SolderingPanel() {
         )
       return
     }
-    // Single Gerber text file.
+    // Single Gerber / drill text file — classify by name so a lone .DRL is read
+    // as Excellon and a lone .gbr/.gtp as Gerber.
     file
       .text()
-      .then((text) => importPadsFromText(text, file.name))
+      .then((text) => importPointsFromLayer(text, file.name, classifySolderCandidates([
+        { name: file.name, text, role: 'Unknown', size: text.length },
+      ])[0].kind))
       .catch((err) =>
         notify('warn', t('solder.gerber.readError', 'Could not read file: {detail}', {
           detail: err instanceof Error ? err.message : String(err),
@@ -508,20 +569,20 @@ export function SolderingPanel() {
       )
   }
 
-  // The layer the picker pre-selects: prefer the solder-paste layer (where SMD
-  // pads live), then top copper, else the first listed layer.
-  function defaultLayerName(entries: PackageEntry[]): string {
-    const paste = entries.find((e) => /paste|\.(gtp|gbp)$/i.test(e.name))
-    if (paste) return paste.name
-    const top = entries.find((e) => e.role === 'CopperTop')
-    if (top) return top.name
-    return entries[0]?.name ?? ''
-  }
-
-  // Friendly localised role label for a layer entry (Drill layers are not
-  // Gerber and won't yield pads — flagged for the operator).
-  function layerRoleText(role: LayerRole): string {
-    return t(layerRoleLabelKey(role), layerRoleLabel(role))
+  // Friendly localised role label for a solder-layer candidate kind.
+  function solderKindLabel(kind: SolderLayerKind): string {
+    switch (kind) {
+      case 'paste':
+        return t('solder.kind.paste', 'Paste (pads)')
+      case 'copper-top':
+        return t('solder.kind.copperTop', 'Top Copper')
+      case 'copper-bottom':
+        return t('solder.kind.copperBottom', 'Bottom Copper')
+      case 'drill':
+        return t('solder.kind.drill', 'Drill (holes)')
+      default:
+        return t('solder.kind.other', 'Other')
+    }
   }
 
   // Clear all points (confirm first when non-empty), and drop the synced section
@@ -690,7 +751,7 @@ export function SolderingPanel() {
           <input
             ref={gerberInputRef}
             type="file"
-            accept=".zip,.gbr,.ger,.gtl,.gbl,.gtp,.gbp,.art,.txt"
+            accept=".zip,.gbr,.ger,.gtl,.gbl,.gtp,.gbp,.gts,.gbs,.art,.drl,.xln,.drd,.exc,.nc,.tap,.txt"
             style={{ display: 'none' }}
             onChange={(e) => {
               const f = e.target.files?.[0]
@@ -726,61 +787,39 @@ export function SolderingPanel() {
               <Icon name="close" size={14} />
             </button>
           </div>
-          <p className="sp-gerber-hint" style={{ margin: '0 0 8px', opacity: 0.8, fontSize: '0.85em' }}>
+          <p className="sp-gerber-hint">
             {t(
               'solder.gerber.pickHint',
-              'Pick the Gerber layer with the solder pads (usually the paste or top-copper layer). Each pad becomes one solder point.',
+              'Pick the layer with the solder pads (usually the paste layer, else top copper, else the PTH drill). Each pad / hole becomes one solder point.',
             )}
           </p>
-          {(() => {
-            const def = defaultLayerName(gerberLayers)
-            return (
-              <div
-                className="sp-gerber-layers"
-                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+          <div className="sp-gerber-layers">
+            {gerberLayers.map((c, i) => (
+              <button
+                key={c.entry.name}
+                type="button"
+                className={`sp-gerber-layer${i === 0 ? ' is-suggested' : ''}`}
+                onClick={() => {
+                  setGerberLayers(null)
+                  importPointsFromLayer(c.entry.text, c.entry.name, c.kind)
+                }}
+                title={t('solder.gerber.layerTitle', '{name} — {role}', {
+                  name: c.entry.name,
+                  role: solderKindLabel(c.kind),
+                })}
               >
-                {gerberLayers.map((e) => (
-                  <button
-                    key={e.name}
-                    type="button"
-                    className="sp-gerber-layer"
-                    onClick={() => {
-                      setGerberLayers(null)
-                      importPadsFromText(e.text, e.name)
-                    }}
-                    title={t('solder.gerber.layerTitle', '{name} — {role}', {
-                      name: e.name,
-                      role: layerRoleText(e.role),
-                    })}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '6px 8px',
-                      minHeight: 36,
-                      textAlign: 'left',
-                      border: e.name === def ? '1px solid var(--accent, #4a90d9)' : '1px solid var(--border, #444)',
-                      borderRadius: 4,
-                      background: 'var(--surface-2, transparent)',
-                      color: 'inherit',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {e.name}
-                      {e.name === def && (
-                        <span style={{ marginLeft: 6, opacity: 0.7, fontSize: '0.8em' }}>
-                          {t('solder.gerber.suggested', '(suggested)')}
-                        </span>
-                      )}
+                <span className="sp-gerber-layer-name">
+                  {c.entry.name}
+                  {i === 0 && (
+                    <span className="sp-gerber-suggested">
+                      {t('solder.gerber.suggested', '(suggested)')}
                     </span>
-                    <span style={{ opacity: 0.7, fontSize: '0.8em', flexShrink: 0 }}>{layerRoleText(e.role)}</span>
-                  </button>
-                ))}
-              </div>
-            )
-          })()}
+                  )}
+                </span>
+                <span className="sp-gerber-layer-role">{solderKindLabel(c.kind)}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -837,6 +876,9 @@ export function SolderingPanel() {
               <NumField
                 label={t('solder.field.freeZ', 'Free-Z')}
                 unit={t('unit.mm', 'mm')}
+                min={0}
+                max={30}
+                step={0.5}
                 value={defaults.freeZ}
                 onChange={(n) => setDefaults((d) => ({ ...d, freeZ: n }))}
                 info={{
@@ -847,6 +889,9 @@ export function SolderingPanel() {
               <NumField
                 label={t('solder.field.touchZ', 'Touch-Z')}
                 unit={t('unit.mm', 'mm')}
+                min={-10}
+                max={10}
+                step={0.1}
                 value={defaults.touchZ}
                 onChange={(n) => setDefaults((d) => ({ ...d, touchZ: n }))}
                 info={{
@@ -857,34 +902,32 @@ export function SolderingPanel() {
               <NumField
                 label={t('solder.field.feed', 'Feed')}
                 unit={t('unit.s', 's')}
-                min="0"
+                min={0}
+                max={5}
+                step={0.1}
                 value={defaults.feedSeconds}
-                onChange={(n) => setDefaults((d) => ({ ...d, feedSeconds: n }))}
+                onChange={(n) => setDefaults((d) => ({ ...d, feedSeconds: Math.max(0, n) }))}
                 info={{
                   title: t('solder.field.feed', 'Feed'),
                   body: t('solder.field.feed.body', 'How long the wire feeder runs at each point (seconds).'),
                 }}
               />
-              <label className="sp-field">
-                <span className="sp-field-label">
-                  {t('solder.field.feedType', 'Feed type')}
-                  <InfoTip
-                    topic="solderFeedType"
-                    title={t('solder.field.feedType', 'Feed type')}
-                    body={t('solder.field.feedType.body', 'Pre-solder feeds wire before touch-down; touch-down feeds while the tip is down.')}
-                  />
-                </span>
-                <select
-                  value={defaults.type}
-                  onChange={(e) => setDefaults((d) => ({ ...d, type: e.target.value as SolderFeedType }))}
-                >
-                  <option value={SolderFeedType.PreSolder}>{t('solder.feedType.preSolder', 'pre-solder')}</option>
-                  <option value={SolderFeedType.TouchDown}>{t('solder.feedType.touchDown', 'touch-down')}</option>
-                </select>
-              </label>
-              <label className="sp-field">
-                <span className="sp-field-label">
-                  {t('solder.field.approach', 'Approach')}
+              <SegField<SolderFeedType>
+                label={t('solder.field.feedType', 'Feed type')}
+                value={defaults.type}
+                options={[
+                  { value: SolderFeedType.PreSolder, label: t('solder.feedType.preSolder', 'pre-solder') },
+                  { value: SolderFeedType.TouchDown, label: t('solder.feedType.touchDown', 'touch-down') },
+                ]}
+                onChange={(v) => setDefaults((d) => ({ ...d, type: v }))}
+                info={{
+                  title: t('solder.field.feedType', 'Feed type'),
+                  body: t('solder.field.feedType.body', 'Pre-solder feeds wire before touch-down; touch-down feeds while the tip is down.'),
+                }}
+              />
+              <div className="sp-segfield">
+                <span className="sp-sfield-lbl">
+                  <span className="sp-sfield-txt">{t('solder.field.approach', 'Approach')}</span>
                   <InfoTip
                     topic="solderApproach"
                     title={t('solder.field.approach', 'Approach')}
@@ -892,6 +935,7 @@ export function SolderingPanel() {
                   />
                 </span>
                 <select
+                  className="sp-seg-select"
                   value={defaults.approach}
                   onChange={(e) => setDefaults((d) => ({ ...d, approach: e.target.value as SolderApproach }))}
                 >
@@ -899,7 +943,7 @@ export function SolderingPanel() {
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
-              </label>
+              </div>
             </div>
           </div>
 
@@ -916,6 +960,9 @@ export function SolderingPanel() {
               <NumField
                 label={t('solder.field.safeZ', 'Safe-Z')}
                 unit={t('unit.mm', 'mm')}
+                min={0}
+                max={50}
+                step={0.5}
                 value={params.safeZ}
                 onChange={(n) => setParams((p) => ({ ...p, safeZ: n }))}
                 info={{
@@ -926,10 +973,11 @@ export function SolderingPanel() {
               <NumField
                 label={t('solder.field.feederS', 'Feeder')}
                 unit={t('unit.sWord', 'S')}
-                step="100"
-                min="0"
+                min={0}
+                max={2000}
+                step={100}
                 value={params.feederRPM}
-                onChange={(n) => setParams((p) => ({ ...p, feederRPM: n }))}
+                onChange={(n) => setParams((p) => ({ ...p, feederRPM: Math.max(0, n) }))}
                 info={{
                   title: t('solder.field.feederS', 'Feeder'),
                   body: t('solder.field.feederS.body', 'Spindle speed word (S) that drives the solder-wire feeder.'),
@@ -938,10 +986,11 @@ export function SolderingPanel() {
               <NumField
                 label={t('solder.field.plungeF', 'Plunge')}
                 unit={t('unit.mmPerMin', 'mm/min')}
-                step="10"
-                min="0"
+                min={0}
+                max={1000}
+                step={10}
                 value={params.plungeFeed}
-                onChange={(n) => setParams((p) => ({ ...p, plungeFeed: n }))}
+                onChange={(n) => setParams((p) => ({ ...p, plungeFeed: Math.max(0, n) }))}
                 info={{
                   title: t('solder.field.plungeF', 'Plunge'),
                   body: t('solder.field.plungeF.body', 'Feed rate used to lower the tip from Free-Z to Touch-Z.'),
@@ -950,9 +999,11 @@ export function SolderingPanel() {
               <NumField
                 label={t('solder.field.settle', 'Settle')}
                 unit={t('unit.s', 's')}
-                min="0"
+                min={0}
+                max={5}
+                step={0.1}
                 value={params.settleSeconds}
-                onChange={(n) => setParams((p) => ({ ...p, settleSeconds: n }))}
+                onChange={(n) => setParams((p) => ({ ...p, settleSeconds: Math.max(0, n) }))}
                 info={{
                   title: t('solder.field.settle', 'Settle'),
                   body: t('solder.field.settle.body', 'Dwell after each touch-down so the joint settles before lifting.'),
@@ -960,9 +1011,9 @@ export function SolderingPanel() {
               />
               <NumField
                 label={t('solder.field.decimals', 'Decimals')}
-                step="1"
-                min="0"
-                max="6"
+                min={0}
+                max={6}
+                step={1}
                 value={params.decimals}
                 parse={(v, fb) => clampDecimals(intNum(v, fb))}
                 onChange={(n) => setParams((p) => ({ ...p, decimals: clampDecimals(n) }))}

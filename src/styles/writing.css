@@ -95,15 +95,6 @@
   min-width: 0;
 }
 
-/* Compact field grid: fields pack left tightly and wrap naturally instead of
-   stretching one-per-huge-column. */
-.wr-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--field-min)), 1fr));
-  gap: var(--sp-2) var(--sp-3);
-  align-items: end;
-}
-
 .wr-field {
   display: flex;
   flex-direction: column;
@@ -112,27 +103,6 @@
   min-width: 0;
 }
 .wr-field > span:first-child {
-  color: var(--fg-muted);
-}
-
-/* number input + unit suffix */
-.wr-input {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-}
-.wr-input input {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  height: var(--ctl-h);
-  min-height: 0;
-  font-size: var(--fs-ctl);
-}
-.wr-input em {
-  flex: 0 0 auto;
-  font-style: normal;
-  font-size: var(--fs-label);
   color: var(--fg-muted);
 }
 
@@ -145,6 +115,194 @@
   font-size: var(--fs-ctl);
 }
 
+/* --- Slider param stack (Size & Spacing / Pen Z & Feed / Placement) ---
+   Tight, full-width slider ROWS modelled on the CadCam tab. The `.cc-*` classes
+   are replicated here (identical to cadcam.css) so this panel themes the slider
+   the same way without importing another panel's stylesheet. */
+.wr-sliders {
+  gap: var(--sp-1);
+}
+.wr-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cc-sfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.cc-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.cc-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  width: 96px;
+  min-width: 40px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.cc-sfield:focus-within .cc-sfield-lbl { color: var(--fg); }
+.cc-sfield-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
+}
+.cc-sfield:focus-within .cc-sfield-ico { color: var(--accent); opacity: 1; }
+.cc-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cc-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 84px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.cc-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cc-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cc-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Themed draggable slider — track + thumb via theme vars (light/dark); accent
+   fill to the LEFT of the thumb from the inline `--mc-pct` (Blink) and from
+   ::-moz-range-progress (Firefox). */
+.cc-slider {
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.cc-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--mc-pct, 0%),
+    var(--bg-elev) var(--mc-pct, 0%) 100%
+  );
+}
+.cc-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.cc-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.cc-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.cc-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.cc-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.cc-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.cc-slider:focus-visible { outline: none; }
+.cc-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.cc-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* the small typable number input inside the bordered .cc-sfield-num frame */
+.cc-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.cc-slider-num:focus { outline: none; box-shadow: none; }
+.cc-slider-num::-webkit-outer-spin-button,
+.cc-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Touch / coarse-pointer sizing — bigger track + thumb so it's grabbable. */
+@media (pointer: coarse) {
+  .cc-slider { height: 24px; }
+  .cc-slider::-webkit-slider-runnable-track,
+  .cc-slider::-moz-range-track,
+  .cc-slider::-moz-range-progress { height: 6px; }
+  .cc-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .cc-slider::-moz-range-thumb { width: 17px; height: 17px; }
+}
+
 .wr-text {
   width: 100%;
   box-sizing: border-box;
@@ -155,39 +313,49 @@
   line-height: 1.4;
 }
 
-/* Font picker: compact toolbar (load = secondary, built-in = icon button). */
+/* ---- Sleek, compact Font & Style section ----
+   A dense two-line toolbar: line 1 = font select + source icons + Stroke/Outline
+   mode; line 2 = Style (B/I/U) + Align packed side by side. Tight gaps, small
+   controls, wraps on narrow widths. */
+.wr-fs {
+  gap: var(--sp-1);
+}
+
+/* line 1: font select + source icons + mode toggle, packed tight on one row */
 .wr-font-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
 }
 /* hidden native file input — triggered via the styled button */
 .wr-file {
   display: none;
 }
 
-/* Font picker dropdown grows to fill; the icon toolbar stays compact beside it. */
+/* Font picker dropdown grows to fill; the icons + mode stay compact beside it. */
 .wr-font-pick {
-  flex: 1 1 180px;
+  display: flex;
+  flex: 1 1 140px;
   min-width: 0;
 }
 .wr-font-pick select {
   width: 100%;
+  height: var(--ctl-h);
+  min-height: 0;
+  font-size: var(--fs-ctl);
 }
 
 /* Compact icon toolbar (upload / built-in / load-system-fonts) — AutoCAD-palette
-   feel, mirrors the dense icon buttons used in Glue/Soldering. Aligns to the
-   bottom of the labelled picker beside it. */
+   feel, mirrors the dense icon buttons used in Glue/Soldering. */
 .wr-font-tools {
   display: inline-flex;
-  align-self: flex-end;
   gap: var(--sp-1);
 }
 .wr-font-tools .wr-icon.icon-btn {
-  width: var(--icon-btn);
+  width: var(--ctl-h);
   height: var(--ctl-h);
-  min-width: var(--icon-btn);
+  min-width: var(--ctl-h);
   min-height: 0;
   padding: 0;
   color: var(--fg);
@@ -213,10 +381,9 @@
   opacity: 0.7;
 }
 
-/* ---- Stroke | Outline segmented control ---- */
+/* ---- Stroke | Outline segmented control (sits inline on the font row) ---- */
 .wr-mode {
   display: inline-flex;
-  align-self: flex-start;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -228,7 +395,7 @@
   gap: 4px;
   height: var(--ctl-h);
   min-height: 0;
-  padding: 0 var(--sp-3);
+  padding: 0 var(--sp-2);
   font: inherit;
   font-size: var(--fs-ctl);
   color: var(--fg-muted);
@@ -259,13 +426,24 @@
   opacity: 0.8;
 }
 
-/* ---- B / I / U style toggles + size ---- */
-.wr-style-row {
+/* ---- line 2: Style (B/I/U) + Align packed on ONE tight row, thin divider ---- */
+.wr-styleline {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--sp-3);
+  align-items: center;
+  gap: var(--sp-1);
 }
+/* thin vertical divider between the Style and Align clusters */
+.wr-vsep {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  min-height: var(--ctl-h);
+  margin: 0 var(--sp-1);
+  background: var(--border);
+}
+
+/* ---- B / I / U style toggles ---- */
 .wr-style-toggles {
   display: inline-flex;
   gap: var(--sp-1);
@@ -305,74 +483,14 @@
 .wr-tgl-u {
   text-decoration: underline;
 }
-.wr-size {
-  flex: 0 0 auto;
-  width: 96px;
-}
 
-/* ---- icon-labelled Pen & Layout fields ---- */
-/* A small glyph stands in for the verbose label; the explainer lives in title=.
-   Reused for pen-up/down Z and feed (stacked: glyph above the input). */
-.wr-ic-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: var(--fs-ctl);
-  line-height: 1;
-  color: var(--fg-muted);
-}
-
-/* Alignment as an icon toggle group (⬅ ⬛ ➡) sitting beside its glyph. */
+/* Alignment as an icon toggle group (left / center / right). */
 .wr-align {
   display: inline-flex;
   gap: var(--sp-1);
 }
 .wr-align .wr-tgl {
   font-size: 13px;
-}
-
-/* collapsible toggle (Advanced + Raw G-code) */
-.wr-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  width: 100%;
-  height: var(--ctl-h-lg);
-  min-height: 0;
-  padding: var(--sp-1) var(--pad-card-x);
-  font-size: var(--fs-section);
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  text-align: left;
-  color: var(--fg-muted);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-.wr-toggle:hover {
-  color: var(--fg);
-}
-.wr-toggle .wr-caret {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-}
-.wr-toggle .wr-toggle-note {
-  flex: 0 0 auto;
-  margin-left: auto;
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-/* Advanced/raw card collapses to just the toggle header */
-.wr-collapsible > h3 {
-  padding: 0;
-  border-bottom: none;
-}
-.wr-collapsible.is-open > h3 {
-  border-bottom: 1px solid var(--border);
 }
 
 .wr-warn {
@@ -388,107 +506,58 @@
   flex: 0 0 auto;
 }
 
-/* Inline icons in compact field labels (pen-up/down Z, alignment) line up with
-   the adjacent text. */
-.wr-ic-label svg {
-  vertical-align: -2px;
-}
-
-/* ---- narrow docked column (≤430px panel width): instead of one tall column,
-   the field grid keeps tiling into a compact masonry of tight fields (label
-   stacked above a ~3-char input) so 3–4 settings sit per row and the panel stays
-   short. Labels go small-uppercase to match the Soldering panel; controls grow
-   to the ≥36px touch target. Driven by the PANEL's OWN width (container query),
-   so it fires when docked narrow on a wide window — not just at phone viewport.
-   Mirrors .sp-pcard-grid / .sp-mini in soldering.css for a consistent look. */
+/* ---- narrow docked column (≤430px panel width): the ribbon groups stack and
+   stretch, the font picker + tool icons go full-width, and the segmented + toggle
+   controls grow to the ≥36px touch target. The slider rows already reflow (label
+   shrinks, slider fills, number box stays). Driven by the PANEL's OWN width
+   (container query) so it fires when docked narrow on a wide window too. */
 @container writingpanel (max-width: 430px) {
-  /* compact masonry: each field ~76px min, so 3–5 settings tile per row at a
-     narrow panel width instead of stacking into one tall column. */
-  .wr-grid {
-    grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-    gap: var(--sp-2);
-    align-items: start;
-  }
-  /* small uppercase labels, tight stacked input (Soldering .sp-mini look) */
-  .wr-field {
-    gap: 2px;
-  }
-  .wr-field > span:first-child {
-    font-size: var(--fs-label);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  /* unit suffix wraps tight under/beside the input; shrink it and let the input
-     keep a usable minimum so a long unit (mm/min) never crushes the field. */
-  .wr-input {
-    gap: 3px;
-  }
-  .wr-input input {
-    min-width: 36px;
-  }
-  .wr-input em {
-    font-size: 10px;
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-  .wr-input input,
-  .wr-field select,
-  .wr-field input,
-  .wr-toggle {
-    height: var(--ctl-h-touch);
-  }
-  /* font picker stacks full-width; the icon toolbar spreads its buttons evenly
-     beneath it at touch size. */
+  /* font picker takes the full first line; the icon toolbar + mode wrap below it
+     at touch size, still on the same tight toolbar (no stacked clusters). */
   .wr-font-pick {
     flex: 1 1 100%;
   }
-  .wr-font-tools {
-    flex: 1 1 100%;
-    align-self: stretch;
-    justify-content: flex-start;
+  .wr-font-pick select {
+    height: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
   }
   .wr-font-tools .wr-icon.icon-btn {
-    flex: 1 1 0;
+    width: var(--ctl-h-touch);
     height: var(--ctl-h-touch);
     min-width: var(--ctl-h-touch);
   }
-  /* segmented mode control fills the row, each half growing equally */
+  /* segmented mode control grows to fill remaining width at touch size */
   .wr-mode {
-    display: flex;
-    align-self: stretch;
-    width: 100%;
+    flex: 1 1 auto;
   }
   .wr-seg {
     flex: 1 1 0;
     justify-content: center;
     height: var(--ctl-h-touch);
   }
-  /* B/I/U toggles + size keep on one row but grow to touch targets */
-  .wr-style-row {
-    gap: var(--sp-2);
-  }
   .wr-tgl {
     width: var(--ctl-h-touch);
     height: var(--ctl-h-touch);
     min-width: var(--ctl-h-touch);
   }
-  .wr-size {
-    flex: 1 1 auto;
-    width: auto;
-    min-width: 76px;
+  .wr-vsep {
+    min-height: var(--ctl-h-touch);
+  }
+  /* slider number box stays usable but compact; label may shrink */
+  .cc-sfield-lbl {
+    width: 78px;
+  }
+  .cc-sfield-num {
+    width: 78px;
+    height: var(--ctl-h-touch);
   }
 }
 
 /* ---- mobile / touch (≤768px): bigger tap targets everywhere. Also a
    container query — measures the panel, not the window. */
 @container writingpanel (max-width: 768px) {
-  .wr-input input,
   .wr-field select,
-  .wr-field input,
-  .wr-toggle {
+  .wr-field input {
     height: var(--ctl-h-touch);
     min-height: var(--ctl-h-touch);
   }
@@ -500,22 +569,25 @@
     height: var(--ctl-h-touch);
     min-width: var(--ctl-h-touch);
   }
+  .cc-sfield-num {
+    height: var(--ctl-h-touch);
+  }
 }
 
 /* Fallback for browsers without container-query support: key off the window so
    phone-width viewports still get single-column + touch-friendly sizing. */
 @supports not (container-type: inline-size) {
   @media (max-width: 768px) {
-    .wr-cards,
-    .wr-grid {
+    .wr-cards {
       grid-template-columns: 1fr;
     }
-    .wr-input input,
     .wr-field select,
-    .wr-field input,
-    .wr-toggle {
+    .wr-field input {
       height: var(--ctl-h-touch);
       min-height: var(--ctl-h-touch);
+    }
+    .cc-sfield-num {
+      height: var(--ctl-h-touch);
     }
   }
 }

@@ -515,6 +515,202 @@
   pointer-events: none;
 }
 
+/* === Themed slider rows for the dispenser/motion params ===================
+   Mirrors `.cc-slider`/`.cc-sfield` from cadcam.css (the 2D/3D Carving
+   "Position & Size" rows) and the Controller jog "Feed" slider. Each is a
+   FULL-WIDTH single-column row: glyph + label + draggable accent-filled
+   slider + bordered number frame + unit suffix. All colours are theme CSS
+   variables (--accent / --bg-input / --bg-elev / --border / --fg / --fg-muted)
+   so it follows light AND dark. Replicated locally as `.glue-*` so glue.css
+   doesn't import cadcam/controller CSS. */
+.glue-sfields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: center;
+}
+.glue-sfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.glue-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.glue-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Fixed-ish label column so the sliders all start at the same x; shrinkable
+     so it never pushes the slider/number off the row; truncates with ellipsis. */
+  flex: 0 1 auto;
+  width: 96px;
+  min-width: 38px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.glue-sfield:focus-within .glue-sfield-lbl { color: var(--fg); }
+.glue-sfield-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
+}
+.glue-sfield:focus-within .glue-sfield-ico { color: var(--accent); opacity: 1; }
+.glue-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* number-input + unit share one bordered frame (the real <input> is borderless
+   inside it), matching .cc-sfield-num. */
+.glue-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 86px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.glue-sfield-num:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.glue-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+/* Degenerate-Z marking: red border (matches .gp-input-bad). */
+.glue-sfield-num-bad,
+.glue-sfield-num-bad:hover { border-color: var(--danger); }
+.glue-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Themed draggable slider — track + thumb use theme vars; the accent fill to the
+   LEFT of the thumb comes from the inline --mc-pct (WebKit/Blink gradient) and
+   from ::-moz-range-progress (Firefox). */
+.glue-slider {
+  /* basis 0 (not auto) so the range input doesn't claim its ~129px default width
+     and push the number box onto a 2nd line; it grows to fill instead. */
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.glue-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--mc-pct, 0%),
+    var(--bg-elev) var(--mc-pct, 0%) 100%
+  );
+}
+.glue-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.glue-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.glue-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.glue-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.glue-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.glue-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.glue-slider:focus-visible { outline: none; }
+.glue-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.glue-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* the small typable number input inside the bordered .glue-sfield-num frame */
+.glue-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.glue-slider-num:focus { outline: none; box-shadow: none; }
+.glue-slider-num::-webkit-outer-spin-button,
+.glue-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so the slider is grabbable
+   on a phone (matches the carving/jog slider's coarse sizing). */
+@media (pointer: coarse) {
+  .glue-slider { height: 24px; }
+  .glue-slider::-webkit-slider-runnable-track,
+  .glue-slider::-moz-range-track,
+  .glue-slider::-moz-range-progress { height: 6px; }
+  .glue-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .glue-slider::-moz-range-thumb { width: 17px; height: 17px; }
+}
+
 /* --- advanced section --- */
 .gp-adv {
   padding-top: var(--sp-2);

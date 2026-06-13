@@ -122,6 +122,8 @@ let timer: ReturnType<typeof setInterval> | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let flushing = false
 let activeTab: string | undefined
+/** Listeners notified whenever the active tab changes (see subscribeActiveTab). */
+const activeTabListeners = new Set<(tab: string | undefined) => void>()
 /** Wall-clock of the last presence write, to skip redundant heartbeat writes. */
 let lastPresenceWriteAt = 0
 /** Wall-clock of the last localStorage mirror of the buffer (throttle). */
@@ -298,6 +300,15 @@ export function setActiveTab(tab: string | undefined): void {
   }
   activeTab = tab
   tabEnteredAt = now
+  // Notify any reactive consumers (e.g. context-aware gamepad mapping) of the
+  // change. Listeners must never throw out into the tab-switch path.
+  for (const fn of activeTabListeners) {
+    try {
+      fn(tab)
+    } catch {
+      /* a listener throwing must not break tab switching */
+    }
+  }
   if (tab) track('tab_enter', { tab })
 }
 
@@ -308,6 +319,17 @@ export function getSessionId(): string {
 /** The currently-active tab/panel id (undefined when none). Read-only accessor. */
 export function getActiveTab(): string | undefined {
   return activeTab
+}
+
+/**
+ * Subscribe to active-tab changes. The listener fires whenever `setActiveTab`
+ * records a DIFFERENT tab id (it is NOT called for redundant same-tab sets), so
+ * consumers get one callback per real switch. Returns an unsubscribe function.
+ * Read-only: this never alters `setActiveTab`'s existing dwell/track behaviour.
+ */
+export function subscribeActiveTab(fn: (tab: string | undefined) => void): () => void {
+  activeTabListeners.add(fn)
+  return () => activeTabListeners.delete(fn)
 }
 
 /** A stable key for coalescing identical consecutive events. */

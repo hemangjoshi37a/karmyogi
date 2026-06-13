@@ -47,8 +47,11 @@
 
 /* ---- Scrubber: a range input painted as an accent progress bar ---- */
 .pt-scrub {
-  flex: 1 1 160px;
-  min-width: 120px;
+  /* 80% of the previous baseline width (basis 160→128, min 120→96) so the
+     speed buttons stay on the same row at narrower visualizer widths. Still
+     flex-grow:1, so it expands to fill any spare space exactly as before. */
+  flex: 1 1 128px;
+  min-width: 96px;
   display: flex;
   align-items: center;
 }

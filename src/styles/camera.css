@@ -437,56 +437,189 @@
   }
 }
 
-/* ---- compact fields grid (replaces the over-spread label+input rows) ---- */
-.cam-fields {
+/* ---- sleek slider rows (label · range · number · unit) — a local replica of
+   CadCam's .cc-slider / Controller's .mc-slider so camera.css owns its own
+   slider chrome (no cross-panel CSS import). Single-column stack so each slider
+   has room to drag, like the Controller jog "Feed". ---- */
+.cam-sgrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  grid-template-columns: 1fr;
   gap: var(--sp-2) var(--sp-3);
-  align-items: end;
+  align-items: center;
 }
-.cam-fields > label {
+.cam-sfield {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.cam-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.cam-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  width: 92px;
+  min-width: 38px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.cam-sfield:focus-within .cam-sfield-lbl { color: var(--fg); }
+.cam-sfield-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
+}
+.cam-sfield:focus-within .cam-sfield-ico { color: var(--accent); opacity: 1; }
+.cam-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
   min-width: 0;
 }
-.cam-flabel {
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  line-height: 1.2;
-}
-.cam-fields .cam-input {
-  width: 100%;
-}
-.cam-input {
-  min-height: var(--ctl-h);
-  padding: 0 var(--sp-2);
+/* The number-input + unit share one bordered frame; the real <input> is
+   borderless inside it. */
+.cam-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 78px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--fs-ctl);
-  font-family: ui-monospace, monospace;
-  text-align: right;
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
 }
-.cam-input:focus {
-  outline: none;
+.cam-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cam-sfield-num:focus-within {
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
 }
-.cam-input:disabled {
-  opacity: 0.55;
+.cam-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+/* Themed draggable slider — accent fill to the LEFT of the thumb via the inline
+   `--pct` (WebKit/Blink gradient) and ::-moz-range-progress (Firefox). */
+.cam-slider {
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.cam-slider:disabled { opacity: 0.5; cursor: not-allowed; }
+.cam-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--pct, 0%),
+    var(--bg-elev) var(--pct, 0%) 100%
+  );
+}
+.cam-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.cam-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.cam-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.cam-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.cam-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.cam-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.cam-slider:focus-visible { outline: none; }
+.cam-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.cam-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* the small typable number input inside the bordered .cam-sfield-num frame */
+.cam-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.cam-slider-num:focus { outline: none; box-shadow: none; }
+.cam-slider-num:disabled { opacity: 0.5; }
+.cam-slider-num::-webkit-outer-spin-button,
+.cam-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so the slider is
+   grabbable on a phone. */
+@media (pointer: coarse) {
+  .cam-slider { height: 24px; }
+  .cam-slider::-webkit-slider-runnable-track,
+  .cam-slider::-moz-range-track,
+  .cam-slider::-moz-range-progress { height: 6px; }
+  .cam-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .cam-slider::-moz-range-thumb { width: 17px; height: 17px; }
 }
 
-/* ---- 3D toggle + opacity field row ---- */
-.cam-fields-3d {
-  grid-template-columns: 1fr;
-  gap: var(--sp-2);
-}
-.cam-range {
-  width: 100%;
-  accent-color: var(--accent);
-}
 .cam-switch {
   display: inline-flex;
   align-items: center;
@@ -1078,9 +1211,6 @@
   .cam-cards {
     grid-template-columns: 1fr;
   }
-  .cam-fields {
-    grid-template-columns: 1fr;
-  }
   .cam-row .cam-btn.cam-grow {
     flex: 1 1 100%;
   }
@@ -1090,16 +1220,20 @@
   .cam-seg-btn {
     flex: 1 1 auto;
   }
+  /* Let the slider's number frame have a touch-friendly minimum width. */
+  .cam-sfield-lbl {
+    width: 80px;
+  }
 }
 
 /* ---- touch (≤480px panel width): bigger tap targets. Container query —
    measures the panel, not the window. ---- */
 @container campanel (max-width: 480px) {
   .cam-btn,
-  .cam-input,
   .cam-select,
   .cam-seg-btn,
   .cam-sec-head,
+  .cam-sfield-num,
   .cam-icon-btn.icon-btn {
     min-height: var(--ctl-h-touch);
   }
@@ -1114,14 +1248,13 @@
    phone-width viewports still get the touch-friendly sizing + single column. */
 @supports not (container-type: inline-size) {
   @media (max-width: 480px) {
-    .cam-cards,
-    .cam-fields {
+    .cam-cards {
       grid-template-columns: 1fr;
     }
     .cam-btn,
-    .cam-input,
     .cam-select,
     .cam-seg-btn,
+    .cam-sfield-num,
     .cam-icon-btn.icon-btn {
       min-height: var(--ctl-h-touch);
     }

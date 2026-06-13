@@ -40,6 +40,7 @@ export function ProgramPanel() {
   const sections = useProgram((s) => s.sections)
   const cursor = useProgram((s) => s.cursor)
   const streaming = useProgram((s) => s.streaming)
+  const generating = useProgram((s) => s.generating)
   const setProgram = useProgram((s) => s.setProgram)
   const removeSection = useProgram((s) => s.removeSection)
   const setSectionColor = useProgram((s) => s.setSectionColor)
@@ -433,6 +434,14 @@ export function ProgramPanel() {
                     count: sections.length,
                   })}
             </span>
+            {/* Background-compute indicator: a feature tab (e.g. 3D carving) is
+                generating/updating a toolpath off the main thread. */}
+            {generating && (
+              <span className="pp-generating" role="status">
+                <span className="pp-generating-spin" aria-hidden="true" />
+                {t('prog.generating', 'Generating…')}
+              </span>
+            )}
             {/* Upload a G-code file → adds a NEW section (same copy/download/
                 delete controls as tab-generated sections). */}
             <div className="pp-sections-actions">

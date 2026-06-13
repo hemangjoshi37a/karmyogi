@@ -4,7 +4,10 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 7px;
+  /* No TOP padding: it would sit above the sticky header's pin point (top:0),
+     letting a scrolled row peek through the gap. The sticky header supplies its
+     own top padding instead; bottom/side padding stays here. */
+  padding: 0 7px 7px;
   height: 100%;
   overflow: auto;
   color: var(--fg);
@@ -15,6 +18,22 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+/* Top toolbar (Sync/Save/status) pinned to the top of the scrolling panel so it
+   stays reachable while the parameter groups scroll under it. Negative margins
+   let its background cover the panel's padding edges; the border + shadow keep
+   scrolled rows from bleeding through. */
+.mo-sticky-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-panel);
+  /* Side margins reclaim the panel's horizontal padding so the header bg spans
+     edge-to-edge; no negative top (the panel has no top padding now). */
+  margin: 0 -7px 2px;
+  padding: 7px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 4px 8px -6px rgba(0, 0, 0, 0.5);
 }
 .mo-section > h4 {
   margin: 0;
@@ -207,6 +226,19 @@
   line-height: 1;
 }
 .mo-reset:disabled { opacity: 0.3; }
+/* Per-row Save — same shape as the reset button, accent-filled so "save this
+   one" reads distinctly from "reset this one". */
+.mo-saveone {
+  min-width: 28px;
+  padding: 3px 8px;
+  font-size: 14px;
+  line-height: 1;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.mo-saveone:hover:not(:disabled) { filter: brightness(1.07); border-color: var(--accent); }
+.mo-saveone:disabled { opacity: 0.4; }
 
 /* ---- buttons with a leading icon ---- */
 .mo-iconbtn {

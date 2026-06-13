@@ -55,38 +55,60 @@
   text-overflow: ellipsis;
 }
 
-/* CO2 / Fiber mode radio — segmented control pinned right. */
-.lp-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
+/* CO2 / Fiber mode segmented control — pinned right in the header. */
+.lp-mode-wrap {
   margin-left: auto;
+}
+
+/* ───────────────────────── segmented control (.laser-seg) ─────────────────────────
+   Compact icon-led pills mirroring .cc-opseg: glyph + label inline, active pill
+   fills with the accent. Themed only via CSS vars (light + dark). */
+.laser-seg {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
   padding: 2px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.lp-mode-opt {
+.laser-seg-btn {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--sp-1);
-  height: calc(var(--ctl-h) - 6px);
+  min-height: calc(var(--ctl-h) - 6px);
   padding: 0 var(--sp-3);
   font-size: var(--fs-ctl);
   font-weight: 600;
+  line-height: 1.1;
   color: var(--fg-muted);
+  background: transparent;
+  border: 0;
   border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
 }
-.lp-mode-opt input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
+.laser-seg-btn:hover {
+  color: var(--fg);
 }
-.lp-mode-opt.is-on {
+.laser-seg-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.laser-seg-lbl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.laser-seg-btn.is-on {
   background: var(--accent);
+  color: var(--accent-fg);
+}
+.laser-seg-btn.is-on .laser-seg-ico {
   color: var(--accent-fg);
 }
 
@@ -145,57 +167,211 @@
   white-space: nowrap;
 }
 
-/* ───────────────────────── fields grid ───────────────────────── */
-.lp-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
-  gap: var(--sp-2);
-}
-.lp-field {
+/* ───────────────────────── slider fields (.laser-sfield) ─────────────────────────
+   Sleek one-line rows mirroring the CAD/CAM `.cc-sfield`/`.cc-slider`: leading
+   glyph + label · themed draggable range (accent fill via inline `--pct`) · a
+   small typable number box with inline unit. Themed only via CSS vars. */
+.lp-sliders {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sp-1);
+}
+.laser-sfield {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
   min-width: 0;
+  padding: 1px 2px;
+  border-radius: var(--radius);
+  transition: background 0.12s;
 }
-.lp-field-label {
+.laser-sfield:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.laser-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  width: 92px;
+  min-width: 38px;
   font-size: var(--fs-label);
+  font-weight: 500;
   color: var(--fg-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.lp-input {
+.laser-sfield:focus-within .laser-sfield-lbl {
+  color: var(--fg);
+}
+.laser-sfield-ico {
   display: inline-flex;
   align-items: center;
-  height: var(--ctl-h);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
 }
-.lp-input input {
+.laser-sfield:focus-within .laser-sfield-ico {
+  color: var(--accent);
+  opacity: 1;
+}
+.laser-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex: 1 1 auto;
   min-width: 0;
-  height: 100%;
-  padding: 0 var(--sp-2);
-  border: 0;
-  background: transparent;
-  color: var(--fg);
-  font-size: var(--fs-ctl);
 }
-.lp-input.has-unit i {
+
+/* number-input + unit share one bordered frame; the real <input> is borderless. */
+.laser-snum {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   flex: 0 0 auto;
-  padding: 0 var(--sp-2);
-  font-style: normal;
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  border-left: 1px solid var(--border);
+  width: 80px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
 }
-.lp-input input:focus {
+.laser-snum:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.laser-snum:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.laser-snum input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.laser-snum input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.laser-snum input::-webkit-outer-spin-button,
+.laser-snum input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.laser-snum i {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* themed draggable slider — track + thumb from theme vars; accent fill to the
+   LEFT of the thumb via inline `--pct` (WebKit/Blink gradient) + ::-moz-range-progress. */
+.laser-slider {
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.laser-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--pct, 0%),
+    var(--bg-elev) var(--pct, 0%) 100%
+  );
+}
+.laser-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.laser-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.laser-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.laser-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.laser-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.laser-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.laser-slider:focus-visible {
   outline: none;
 }
-.lp-input:focus-within {
-  border-color: var(--accent);
+.laser-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.laser-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* coarse-pointer / touch sizing — larger track + thumb so it stays grabbable. */
+@media (pointer: coarse) {
+  .laser-slider { height: 24px; }
+  .laser-slider::-webkit-slider-runnable-track,
+  .laser-slider::-moz-range-track,
+  .laser-slider::-moz-range-progress { height: 6px; }
+  .laser-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .laser-slider::-moz-range-thumb { width: 17px; height: 17px; }
+}
+
+/* a label + segmented-control row (e.g. Power mode). */
+.lp-segrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.lp-segrow-label {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
 }
 
 /* ───────────────────────── buttons / toggles ───────────────────────── */
@@ -239,36 +415,6 @@
   cursor: pointer;
 }
 
-/* ───────────────────────── radio rows ───────────────────────── */
-.lp-radio-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.lp-radio-label {
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-}
-.lp-radio {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  height: var(--ctl-h);
-  padding: 0 var(--sp-3);
-  font-size: var(--fs-ctl);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.lp-radio.is-on {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-
 /* ───────────────────────── hints / warnings ───────────────────────── */
 .lp-hint {
   margin: 0;
@@ -307,15 +453,18 @@
 
 /* ───────────────────────── narrow / mobile (container query) ───────────────────────── */
 @container laserpanel (max-width: 480px) {
-  .lp-input,
-  .lp-radio {
+  .laser-snum {
     height: var(--ctl-h-touch);
   }
   .lp-btn {
     height: var(--ctl-h-touch);
   }
-  .lp-mode-opt {
-    height: var(--ctl-h-touch);
+  .laser-seg-btn {
+    min-height: var(--ctl-h-touch);
+  }
+  /* let the label + slider share the row, number box drops below on very narrow */
+  .laser-sfield-lbl {
+    width: 78px;
   }
   .lp-status-sync {
     margin-left: 0;

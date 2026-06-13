@@ -233,61 +233,275 @@
   border-radius: 999px;
 }
 
-/* ───────────────────────── field grids ───────────────────────── */
+/* ───────────────────────── slider field rows ─────────────────────────
+   Each tunable parameter is a single compact line: leading glyph + label, a
+   themed draggable range slider (accent fill via the inline `--pct` var), then a
+   small typable number box with an inline unit suffix. Mirrors CadCamPanel's
+   `.cc-slider` / `.cc-sfield` technique but scoped locally (`.sd-*`) so this file
+   doesn't import cadcam.css. Single column so labels + sliders all line up. */
 .swd-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
-  gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-3);
-  align-items: end;
+  grid-template-columns: 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  align-items: center;
 }
-.swd-field {
+.sd-sfield {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
   min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
 }
-.swd-field-label {
+.sd-sfield:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.sd-sfield-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Fixed-ish label column so the sliders all start at the same x. Shrinkable so
+     it never pushes the slider/number off the row; truncates with ellipsis. */
+  flex: 0 1 auto;
+  width: 96px;
+  min-width: 40px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.sd-sfield:focus-within .sd-sfield-lbl {
+  color: var(--fg);
+}
+.sd-sfield-ico {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  font-size: var(--fs-label);
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
   color: var(--fg-muted);
+  opacity: 0.85;
+  transition: color 0.12s, opacity 0.12s;
+}
+.sd-sfield:focus-within .sd-sfield-ico {
+  color: var(--accent);
+  opacity: 1;
+}
+.sd-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.swd-input {
-  position: relative;
+/* the number-input + unit share one bordered frame; the real <input> is borderless */
+.sd-sfield-num {
   display: flex;
   align-items: center;
-}
-.swd-input input {
-  width: 100%;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 84px;
   height: var(--ctl-h);
-  min-height: 0;
-  padding: 0 7px;
-  box-sizing: border-box;
-  font-size: var(--fs-ctl);
-  color: var(--fg);
+  padding: 0 6px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
 }
-.swd-input.has-unit input {
-  padding-right: 38px;
+.sd-sfield-num:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
-.swd-input input:focus {
-  outline: none;
+.sd-sfield-num:focus-within {
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
 }
-.swd-input i {
-  position: absolute;
-  right: 7px;
+.sd-sfield-num input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.sd-sfield-num input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.sd-sfield-num input::-webkit-outer-spin-button,
+.sd-sfield-num input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.sd-sfield-num i {
+  flex: 0 0 auto;
   font-style: normal;
   font-size: 10px;
   color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Themed draggable slider — track + thumb use theme vars (light/dark); the accent
+   fill to the LEFT of the thumb comes from the inline `--pct` (WebKit/Blink
+   gradient) and from ::-moz-range-progress (Firefox). */
+.sd-slider {
+  /* basis 0 (not auto) so the range input doesn't claim its default width and
+     push the number box onto a 2nd line; it grows to fill instead. */
+  flex: 1 1 0;
+  min-width: 40px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.sd-slider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.sd-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--pct, 0%),
+    var(--bg-elev) var(--pct, 0%) 100%
+  );
+}
+.sd-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.sd-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.sd-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.sd-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.sd-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.sd-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.sd-slider:focus-visible {
+  outline: none;
+}
+.sd-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.sd-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so it's grabbable. */
+@media (pointer: coarse) {
+  .sd-slider {
+    height: 26px;
+  }
+  .sd-slider::-webkit-slider-runnable-track,
+  .sd-slider::-moz-range-track,
+  .sd-slider::-moz-range-progress {
+    height: 6px;
+  }
+  .sd-slider::-webkit-slider-thumb {
+    width: 17px;
+    height: 17px;
+    margin-top: -6px;
+  }
+  .sd-slider::-moz-range-thumb {
+    width: 17px;
+    height: 17px;
+  }
+}
+
+/* ───────────── segmented enum control (e.g. coordinate Decimals) ───────────── */
+.sd-enum-row {
+  display: flex;
+  align-items: center;
+  gap: 3px 8px;
+  flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-3) var(--sp-3);
+}
+.sd-enum-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  width: 96px;
+  min-width: 40px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.sd-seg {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  gap: var(--sp-1);
+}
+.sd-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ctl-h);
+  padding: 0 2px;
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.sd-seg-btn:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.sd-seg-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
 }
 
 /* ───────────────────────── point table ───────────────────────── */
@@ -494,10 +708,8 @@
   .swd-settings {
     grid-template-columns: 1fr;
   }
-  .swd-fields {
-    grid-template-columns: 1fr 1fr;
-  }
-  .swd-input input {
+  .sd-sfield-num,
+  .sd-seg-btn {
     height: var(--ctl-h-touch);
   }
   .swd-ico {
@@ -518,10 +730,8 @@
     .swd-settings {
       grid-template-columns: 1fr;
     }
-    .swd-fields {
-      grid-template-columns: 1fr 1fr;
-    }
-    .swd-input input {
+    .sd-sfield-num,
+    .sd-seg-btn {
       height: var(--ctl-h-touch);
     }
     .swd-ico {

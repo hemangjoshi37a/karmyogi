@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useProgram, usePersistentState } from '../store'
 import { useT } from '../i18n'
-import { Icon } from '../components/Icons'
+import { Icon, type IconName } from '../components/Icons'
 import { FrameButton } from '../components/FrameButton'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
@@ -54,43 +54,118 @@ function gcodeLineCount(gcode: string): number {
   return n
 }
 
-const num = (v: string, fallback: number): number => {
-  const n = parseFloat(v)
-  return Number.isFinite(n) ? n : fallback
-}
-const intNum = (v: string, fallback: number): number => {
-  const n = parseInt(v, 10)
-  return Number.isFinite(n) ? n : fallback
-}
-
-/** Slim number field with an inline unit suffix, matching the dense theme. */
-function NumField(props: {
+/**
+ * Sleek slider + number-input + unit row, modelled on the CAD/CAM panel's
+ * `SliderField` (which mirrors the Controller jog "Feed" control). A compact
+ * one-line row: leading glyph + label · themed draggable `.laser-slider`
+ * (accent fill via the inline `--pct` var) · small typable `.laser-snum`
+ * clamped to [min, max] for the slider but allowing exact entry · inline unit.
+ *
+ * `value`/`onChange` carry the existing wiring untouched — only the input WIDGET
+ * changes (bare number box → slider + number). All theming is via CSS vars so it
+ * follows light/dark.
+ */
+function SliderField(props: {
+  icon: ReactNode
   label: string
   value: number
+  min: number
+  max: number
+  step?: number
   unit?: string
-  step?: string
-  min?: string
-  max?: string
   title?: string
+  integer?: boolean
   onChange: (n: number) => void
-  parse?: (v: string, fallback: number) => number
 }) {
-  const { label, value, unit, step = '1', min, max, title, onChange, parse = num } = props
+  const { icon, label, value, min, max, step = 1, unit, title, integer, onChange } = props
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  // Filled-track percentage for the accent fill (read as --pct by the WebKit/Blink
+  // track gradient; Firefox fills via ::-moz-range-progress). Uses the CLAMPED
+  // value so an out-of-range typed value doesn't overflow the fill.
+  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <label className="lp-field" title={title}>
-      <span className="lp-field-label">{label}</span>
-      <span className={`lp-input${unit ? ' has-unit' : ''}`}>
+    <div className="laser-sfield" title={title}>
+      <span className="laser-sfield-lbl">
+        <span className="laser-sfield-ico" aria-hidden>
+          {icon}
+        </span>
+        <span className="laser-sfield-txt">{label}</span>
+      </span>
+      <input
+        type="range"
+        className="laser-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        style={{ '--pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="laser-snum">
         <input
           type="number"
-          step={step}
           min={min}
           max={max}
-          value={value}
-          onChange={(e) => onChange(parse(e.target.value, value))}
+          step={step}
+          value={String(value)}
+          aria-label={label}
+          onChange={(e) => {
+            // Allow EXACT entry (don't clamp the typed number) — only blank/NaN is
+            // rejected; the caller's own guard re-clamps where it must reach the emitter.
+            const v = integer ? parseInt(e.target.value, 10) : parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+          }}
         />
-        {unit && <i>{unit}</i>}
+        {unit ? <i>{unit}</i> : null}
       </span>
-    </label>
+    </div>
+  )
+}
+
+/** One option in a {@link SegControl}. */
+interface SegOption<T> {
+  value: T
+  label: string
+  icon?: IconName
+  title?: string
+}
+
+/**
+ * Compact icon-led segmented control (mirrors `.cc-opseg`) for mode/enum choices
+ * — replaces the bare radio rows. Themed via CSS vars; the active pill fills with
+ * the accent. Each button is a real <button role=radio> so it stays keyboard- and
+ * touch-friendly.
+ */
+function SegControl<T extends string>(props: {
+  ariaLabel: string
+  value: T
+  options: SegOption<T>[]
+  onChange: (v: T) => void
+}) {
+  const { ariaLabel, value, options, onChange } = props
+  return (
+    <div className="laser-seg" role="radiogroup" aria-label={ariaLabel}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          className={`laser-seg-btn${value === o.value ? ' is-on' : ''}`}
+          title={o.title}
+          onClick={() => onChange(o.value)}
+        >
+          {o.icon && (
+            <span className="laser-seg-ico" aria-hidden>
+              <Icon name={o.icon} size={14} />
+            </span>
+          )}
+          <span className="laser-seg-lbl">{o.label}</span>
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -464,25 +539,16 @@ export function LaserPanel() {
         <div className="lp-head-title">
           <span className="lp-head-name">{t('laser.title', 'Laser Cutting')}</span>
         </div>
-        <div className="lp-mode" role="radiogroup" aria-label={t('laser.mode.aria', 'Laser mode')}>
-          <label className={`lp-mode-opt${mode === LaserMode.CO2 ? ' is-on' : ''}`}>
-            <input
-              type="radio"
-              name="lp-mode"
-              checked={mode === LaserMode.CO2}
-              onChange={() => setMode(LaserMode.CO2)}
-            />
-            {t('laser.mode.co2', 'CO2')}
-          </label>
-          <label className={`lp-mode-opt${mode === LaserMode.Fiber ? ' is-on' : ''}`}>
-            <input
-              type="radio"
-              name="lp-mode"
-              checked={mode === LaserMode.Fiber}
-              onChange={() => setMode(LaserMode.Fiber)}
-            />
-            {t('laser.mode.fiber', 'Fiber')}
-          </label>
+        <div className="lp-mode-wrap">
+          <SegControl
+            ariaLabel={t('laser.mode.aria', 'Laser mode')}
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: LaserMode.CO2, label: t('laser.mode.co2', 'CO2'), icon: 'laser' },
+              { value: LaserMode.Fiber, label: t('laser.mode.fiber', 'Fiber'), icon: 'laser' },
+            ]}
+          />
         </div>
         <FrameButton
           lines={gcode ? gcode.split(/\r?\n/) : []}
@@ -615,38 +681,48 @@ export function LaserPanel() {
             {t('laser.sheet.nest', 'Nest')}
           </label>
         </div>
-        <div className="lp-fields">
-          <NumField
+        <div className="lp-sliders">
+          <SliderField
+            icon={<Icon name="frame" size={14} />}
             label={t('laser.sheet.w', 'Sheet W')}
             unit="mm"
-            min="1"
+            min={1}
+            max={2000}
+            step={1}
             value={sheetW}
             onChange={(n) => setSheetW(n)}
             title={t('laser.sheet.w.title', 'Usable sheet width (X).')}
           />
-          <NumField
+          <SliderField
+            icon={<Icon name="frame" size={14} />}
             label={t('laser.sheet.h', 'Sheet H')}
             unit="mm"
-            min="1"
+            min={1}
+            max={2000}
+            step={1}
             value={sheetH}
             onChange={(n) => setSheetH(n)}
             title={t('laser.sheet.h.title', 'Usable sheet height (Y).')}
           />
-          <NumField
+          <SliderField
+            icon={<Icon name="jog" size={14} />}
             label={t('laser.sheet.spacing', 'Spacing')}
             unit="mm"
-            min="0"
-            step="0.5"
+            min={0}
+            max={50}
+            step={0.5}
             value={margin}
             onChange={(n) => setMargin(n)}
             title={t('laser.sheet.spacing.title', 'Gap kept between parts and around the sheet edge.')}
           />
-          <NumField
+          <SliderField
+            icon={<Icon name="duplicate" size={14} />}
             label={t('laser.sheet.qty', 'Quantity')}
-            min="1"
-            max={String(MAX_QUANTITY)}
+            min={1}
+            max={MAX_QUANTITY}
+            step={1}
+            integer
             value={quantity}
-            parse={intNum}
             onChange={(n) => setQuantity(clamp(Math.floor(n), 1, MAX_QUANTITY))}
             title={t('laser.sheet.qty.title', 'Number of copies of the imported part to lay out (max {max}).', { max: MAX_QUANTITY })}
           />
@@ -689,22 +765,25 @@ export function LaserPanel() {
         <div className="lp-card-head">
           <h4>{t('laser.cut.title', 'Cut parameters')}</h4>
         </div>
-        <div className="lp-fields">
-          <NumField
+        <div className="lp-sliders">
+          <SliderField
+            icon={<Icon name="jog" size={14} />}
             label={t('laser.cut.speed', 'Cut speed')}
             unit="mm/min"
-            min="1"
-            step="10"
+            min={1}
+            max={10000}
+            step={10}
             value={params.cutFeed}
             onChange={(n) => setParams({ cutFeed: n })}
             title={t('laser.cut.speed.title', 'Feed rate while cutting (G1 F…).')}
           />
-          <NumField
+          <SliderField
+            icon={<Icon name="laser" size={14} />}
             label={t('laser.cut.power', 'Power')}
             unit="S"
-            min="0"
-            max={String(params.sMax)}
-            step="10"
+            min={0}
+            max={Math.max(1, params.sMax)}
+            step={10}
             value={params.power}
             onChange={(n) => setParams({ power: clamp(n, 0, Math.max(1, params.sMax)) })}
             title={t('laser.cut.power.title', 'Laser power as an S value (0..{sMax} = 0..100%). Currently {pct}%.', {
@@ -712,63 +791,63 @@ export function LaserPanel() {
               pct: powerPct,
             })}
           />
-          <NumField
+          <SliderField
+            icon={<Icon name="laser" size={14} />}
             label={t('laser.cut.powerPct', 'Power %')}
             unit="%"
-            min="0"
-            max="100"
+            min={0}
+            max={100}
+            step={1}
             value={powerPct}
             onChange={(n) => setParams({ power: powerFromPercent(n, params.sMax) })}
             title={t('laser.cut.powerPct.title', 'Laser power as a percentage of S-max.')}
           />
-          <NumField
+          <SliderField
+            icon={<Icon name="settings" size={14} />}
             label={t('laser.cut.sMax', 'S-max')}
-            min="1"
-            step="10"
+            min={1}
+            max={2000}
+            step={10}
             value={params.sMax}
             onChange={(n) => setParams({ sMax: n })}
             title={t('laser.cut.sMax.title', 'Max S value the controller maps to 100% (GRBL $30).')}
           />
-          <NumField
+          <SliderField
+            icon={<Icon name="copy" size={14} />}
             label={t('laser.cut.passes', 'Passes')}
-            min="1"
+            min={1}
+            max={50}
+            step={1}
+            integer
             value={params.passes}
-            parse={intNum}
             onChange={(n) => setParams({ passes: n })}
             title={t('laser.cut.passes.title', 'How many times each contour is cut.')}
           />
-          <NumField
+          <SliderField
+            icon={<Icon name="settings" size={14} />}
             label={t('laser.cut.decimals', 'Decimals')}
-            min="0"
-            max="6"
+            min={0}
+            max={6}
+            step={1}
+            integer
             value={params.decimals}
-            parse={intNum}
             onChange={(n) => setParams({ decimals: n })}
             title={t('laser.cut.decimals.title', 'Coordinate precision in the emitted G-code.')}
           />
         </div>
-        <div className="lp-radio-row">
-          <span className="lp-radio-label" title={t('laser.powerMode.title', 'M4 dynamic scales power with feed (best for cutting); M3 is constant power.')}>
+        <div className="lp-segrow">
+          <span className="lp-segrow-label" title={t('laser.powerMode.title', 'M4 dynamic scales power with feed (best for cutting); M3 is constant power.')}>
             {t('laser.powerMode', 'Power mode')}
           </span>
-          <label className={`lp-radio${params.powerMode === LaserPowerMode.Dynamic ? ' is-on' : ''}`}>
-            <input
-              type="radio"
-              name="lp-powermode"
-              checked={params.powerMode === LaserPowerMode.Dynamic}
-              onChange={() => setParams({ powerMode: LaserPowerMode.Dynamic })}
-            />
-            {t('laser.powerMode.dynamic', 'M4 dynamic')}
-          </label>
-          <label className={`lp-radio${params.powerMode === LaserPowerMode.Constant ? ' is-on' : ''}`}>
-            <input
-              type="radio"
-              name="lp-powermode"
-              checked={params.powerMode === LaserPowerMode.Constant}
-              onChange={() => setParams({ powerMode: LaserPowerMode.Constant })}
-            />
-            {t('laser.powerMode.constant', 'M3 constant')}
-          </label>
+          <SegControl
+            ariaLabel={t('laser.powerMode', 'Power mode')}
+            value={params.powerMode}
+            onChange={(v) => setParams({ powerMode: v })}
+            options={[
+              { value: LaserPowerMode.Dynamic, label: t('laser.powerMode.dynamic', 'M4 dynamic'), icon: 'play' },
+              { value: LaserPowerMode.Constant, label: t('laser.powerMode.constant', 'M3 constant'), icon: 'spindle' },
+            ]}
+          />
         </div>
       </section>
 
@@ -799,22 +878,25 @@ export function LaserPanel() {
           </label>
         </div>
         {params.pierce ? (
-          <div className="lp-fields">
-            <NumField
+          <div className="lp-sliders">
+            <SliderField
+              icon={<Icon name="laser" size={14} />}
               label={t('laser.pierce.power', 'Pierce power')}
               unit="S"
-              min="0"
-              max={String(params.sMax)}
-              step="10"
+              min={0}
+              max={Math.max(1, params.sMax)}
+              step={10}
               value={params.piercePower}
               onChange={(n) => setParams({ piercePower: clamp(n, 0, Math.max(1, params.sMax)) })}
               title={t('laser.pierce.power.title', 'Beam power during the pre-cut pierce dwell (0..{sMax}).', { sMax: params.sMax })}
             />
-            <NumField
+            <SliderField
+              icon={<Icon name="pause" size={14} />}
               label={t('laser.pierce.time', 'Pierce time')}
               unit="s"
-              min="0"
-              step="0.05"
+              min={0}
+              max={5}
+              step={0.05}
               value={params.pierceTime}
               onChange={(n) => setParams({ pierceTime: n })}
               title={t('laser.pierce.time.title', 'Dwell at the contour start before cutting begins (G4 P…).')}
@@ -843,13 +925,14 @@ export function LaserPanel() {
           </label>
         </div>
         {params.useFocusZ ? (
-          <div className="lp-fields">
-            <NumField
+          <div className="lp-sliders">
+            <SliderField
+              icon={<Icon name="probe" size={14} />}
               label={t('laser.focus.z', 'Focus Z')}
               unit="mm"
-              step="0.1"
-              min="0"
-              max="200"
+              min={0}
+              max={200}
+              step={0.1}
               value={params.focusZ}
               onChange={(n) => setParams({ focusZ: clamp(n, 0, 200) })}
               title={t('laser.focus.z.title', 'Absolute Z moved to at program start to set focus (0..200 mm). Negative Z is blocked — there is no safe-Z retract before this move.')}

@@ -324,6 +324,178 @@
   accent-color: var(--accent);
 }
 
+/* --- Themed slider rows (label · range · number · unit) ---------------------
+   Mirrors the Carving panel's `.cc-slider`/`.cc-sfield` and the Controller jog
+   "Feed" control: a compact one-line row. Each row spans the FULL field grid so
+   the slider has room to drag (one slider per line). Track + thumb use theme
+   vars (light/dark); the accent fill to the LEFT of the thumb comes from the
+   inline `--dr-pct` (WebKit/Blink gradient) and from ::-moz-range-progress. */
+.dr-sfield {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.dr-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.dr-sfield-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  /* Fixed-ish label column so the sliders all start at the same x. Shrinkable so
+     it never pushes the slider/number off the row; truncates with ellipsis. */
+  flex: 0 1 auto;
+  width: 92px;
+  min-width: 40px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.dr-sfield:focus-within .dr-sfield-lbl { color: var(--fg); }
+.dr-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* The number-input + unit share one bordered frame (matches .scf-input) so the
+   unit reads as a suffix; the real <input> is borderless inside it. */
+.dr-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 80px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.dr-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.dr-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.dr-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Themed draggable range input. */
+.dr-slider {
+  /* basis 0 so the range input doesn't claim its ~129px default width and push
+     the number box onto a 2nd line; it grows to fill instead, keeping
+     label + slider + number on ONE row even in a slim docked column. */
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.dr-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--dr-pct, 0%),
+    var(--bg-elev) var(--dr-pct, 0%) 100%
+  );
+}
+.dr-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.dr-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.dr-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.dr-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.dr-slider:hover::-webkit-slider-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.dr-slider:hover::-moz-range-thumb {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.dr-slider:focus-visible { outline: none; }
+.dr-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.dr-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* the small typable number input inside the bordered .dr-sfield-num frame */
+.dr-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.dr-slider-num:focus { outline: none; box-shadow: none; }
+.dr-slider-num::-webkit-outer-spin-button,
+.dr-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Touch / coarse-pointer sizing — larger track + thumb so the slider is grabbable
+   on a phone. */
+@media (pointer: coarse) {
+  .dr-slider { height: 24px; }
+  .dr-slider::-webkit-slider-runnable-track,
+  .dr-slider::-moz-range-track,
+  .dr-slider::-moz-range-progress { height: 6px; }
+  .dr-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .dr-slider::-moz-range-thumb { width: 17px; height: 17px; }
+}
+
 /* a small read-only chip summarising the resolved preset diameters */
 .scf-preset-note {
   grid-column: 1 / -1;

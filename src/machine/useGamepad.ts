@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getActiveTab, subscribeActiveTab } from '../track/activity'
+import { tabActionFor } from './gamepadTabActions'
 
 /**
  * Game-controller (Web Gamepad API) support for the machine Controller.
@@ -121,6 +123,11 @@ export interface GamepadState {
   enabled: boolean
   setEnabled: (v: boolean) => void
   /**
+   * The currently-active dock tab id, mirrored reactively so the modal can show
+   * the CONTEXT-AWARE button legend for the active tab (see gamepadTabActions).
+   */
+  activeTab: string | undefined
+  /**
    * Play a haptic feedback pattern on the active pad (feature-detected; a no-op
    * when unsupported or disabled). Call this from the caller on machine-state
    * TRANSITIONS — not every frame.
@@ -213,6 +220,22 @@ export function useGamepad(
   optionsRef.current = options
   const onEnabledChangeRef = useRef(onEnabledChange)
   onEnabledChangeRef.current = onEnabledChange
+
+  // Currently-active dock tab id, kept fresh so the poll loop can pick the
+  // CONTEXT-AWARE button mapping for that tab (see gamepadTabActions). Seeded
+  // from the current value and updated reactively via subscribeActiveTab — read
+  // through a ref so the rAF loop never restarts on a tab change.
+  const activeTabRef = useRef<string | undefined>(getActiveTab())
+  const [activeTab, setActiveTabState] = useState<string | undefined>(() => getActiveTab())
+  useEffect(() => {
+    const cur = getActiveTab()
+    activeTabRef.current = cur
+    setActiveTabState(cur)
+    return subscribeActiveTab((tab) => {
+      activeTabRef.current = tab
+      setActiveTabState(tab)
+    })
+  }, [])
 
   // Index of the active gamepad (the most recently connected one).
   const padIndex = useRef<number | null>(null)
@@ -432,17 +455,42 @@ export function useGamepad(
       }
 
       // --- Edge-triggered discrete actions (fire once per press) ---
+      // CONTEXT LAYER: for each button rising edge, the currently-active dock
+      // tab may override the global action (e.g. on the Program tab, A streams /
+      // X pauses / B aborts). If the active tab has a binding for that button we
+      // run it INSTEAD of the global `onAction`; otherwise the global mapping
+      // applies, so the controller stays useful on every (unbound) tab.
+      const tab = activeTabRef.current
       const prev = prevPressed.current
-      for (const key of Object.keys(BUTTON_ACTION)) {
-        const i = Number(key)
+      // The set of buttons that can carry a discrete action is the union of the
+      // global mapping AND this tab's overrides (LB/RB/B may be tab-only).
+      const candidates = new Set<number>(Object.keys(BUTTON_ACTION).map(Number))
+      candidates.add(Btn.A)
+      candidates.add(Btn.B)
+      candidates.add(Btn.X)
+      candidates.add(Btn.Y)
+      candidates.add(Btn.LB)
+      candidates.add(Btn.RB)
+      for (const i of candidates) {
         // Triggers (LT/RT) are reserved for Z jog above — never as actions.
         if (i === Btn.LT || i === Btn.RT) continue
         const down = pressedNow[i] ?? false
         const was = prev[i] ?? false
-        if (down && !was) {
-          const action = BUTTON_ACTION[i]
-          if (action) handlersRef.current.onAction(action)
+        if (!down || was) continue // not a rising edge
+        const ctx = tabActionFor(tab, i)
+        if (ctx) {
+          // Tab-specific action wins. It is self-guarding (no-op when the
+          // machine is disconnected / nothing is selected) and never throws,
+          // but wrap it so a faulty action can't kill the poll loop.
+          try {
+            ctx.run()
+          } catch {
+            /* a context action throwing must not break the gamepad loop */
+          }
+          continue
         }
+        const action = BUTTON_ACTION[i]
+        if (action) handlersRef.current.onAction(action)
       }
       prevPressed.current = pressedNow
 
@@ -474,6 +522,7 @@ export function useGamepad(
     axes,
     enabled,
     setEnabled,
+    activeTab,
     rumble,
   }
 }
