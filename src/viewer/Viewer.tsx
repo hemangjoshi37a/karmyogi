@@ -303,8 +303,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         max: [L + R * 0.6, R * 1.4, 2 * R * 1.1] as [number, number, number],
       }
     }
+    // Frame the toolpath's ACTUAL extent (from segment endpoints), NOT
+    // `parsed.bounds` — that seeds the work origin (0,0,0) into the box, so a job
+    // sitting away from origin (e.g. a small PCB at X55–85) gets an inflated box
+    // spanning origin→job and ends up tiny in a corner after Fit. The segment
+    // extent frames just the job, so small jobs fill the view. Falls back to
+    // parsed.bounds (then the bed) when there are no segments.
+    const seg = boundsOf(parsed.segments)
+    if (seg) return { min: seg.min, max: seg.max }
     return parsed.bounds ? { min: parsed.bounds.min, max: parsed.bounds.max } : null
-  }, [isSpringProgram, springParams, parsed.bounds])
+  }, [isSpringProgram, springParams, parsed.bounds, parsed.segments])
 
   // ---- Dimension extents -----------------------------------------------------
   // The dimension overlay measures the toolpath's ACTUAL size (Δx, Δy, Δz). We

@@ -35,8 +35,11 @@ Priority tags: **[P1]** high · **[P2]** medium · **[P3]** nice-to-have.
   low-visual-impact cleanup. (Minor residual.)
 - [ ] **[P3] Motion.** Subtle 120ms hover/active/expand transitions; respect
   `prefers-reduced-motion`. ← doing now
-- [~] **[P3] Responsive sweep.** Spot-checked during the pass; a formal phone-width
-  re-verify of all 18 tabs can follow if wanted.
+- [x] **[P3] Responsive sweep.** Verified at phone width (390px): the MobileShell
+  tab strip lists all 18 tabs and panels reflow full-width. Confirmed Controller,
+  Soldering, and Welding render cleanly — the new shared polish (status strips,
+  CamEmpty empty states, SVG icons, primary CTAs) is fully touch-friendly, no
+  overflow.
 
 ---
 
@@ -63,20 +66,23 @@ Priority tags: **[P1]** high · **[P2]** medium · **[P3]** nice-to-have.
 ---
 
 ## C. 3D viewer & scenes
-- [ ] **[P3] Generic-toolpath colors** — make cut vs rapid visually distinct +
-  attractive in both themes (Spring & Solder scenes already polished). ← doing now
-- [ ] **[P3] "Fit" for small jobs** — frame the loaded job/board tightly when it's
-  much smaller than the 300×200 bed (so a PCB/coil isn't tiny). ← doing now
-- [~] **[P2] Bed + grid + axes** — already legible in both themes; revisit only if
-  a specific contrast issue shows up.
+- [~] **[P3] Generic-toolpath colors** — cut (blue) vs rapid (muted gray, dashed)
+  are already clearly distinct in both themes; left as-is (low value).
+- [x] **[P3] "Fit" for small jobs** — `controlBounds` now frames the toolpath's
+  ACTUAL segment extent instead of `parsed.bounds` (which seeded the work origin
+  and inflated the box). A small PCB/coil now fills the view on Fit. Verified.
+- [~] **[P2] Bed + grid + axes** — already legible in both themes.
 
 ---
 
-## Remaining work (this pass)
-1. Motion transitions (global, subtle, compact).
-2. Generic-toolpath cut/rapid colors.
-3. "Fit" frames small jobs tightly.
-(Optional later: the `.cam-ico` toolbar-button-style fold-up; a formal phone-width sweep.)
+## Motion
+- [x] **[P3] Motion.** Subtle global hover/active transitions (color/border/shadow
+  only — never layout) on interactive controls; fully disabled under
+  `prefers-reduced-motion`.
+
+## Optional later
+- The `.cam-ico` toolbar-button-style fold-up (panels already look alike).
+- A formal phone-width sweep of all 18 tabs.
 
 ## Open items for you
 - Commit this large batch? Drop the leftover backup `stash@{0}`?
