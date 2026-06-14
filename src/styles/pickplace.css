@@ -232,6 +232,9 @@
 }
 .pp-card > h3 {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: var(--sp-1) var(--pad-card-x);
   font-size: var(--fs-section);
   font-weight: 600;

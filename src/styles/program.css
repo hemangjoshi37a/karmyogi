@@ -42,12 +42,12 @@
 .pp-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-1, 4px);
   break-inside: avoid;
-  margin: 0 0 6px;
-  padding: 6px 7px;
+  margin: 0 0 var(--sp-2, 6px);
+  padding: var(--sp-2, 6px) 7px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius, 6px);
   background: var(--bg-elev);
 }
 
@@ -101,7 +101,13 @@
   min-height: var(--ctl-h-lg, 34px);
   font-weight: 700;
   font-size: var(--fs-body, 14px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
+.pp-stream svg,
+.pp-icon-btn svg { display: block; }
 .pp-icon-btn {
   min-width: var(--icon-btn, 28px);
   min-height: var(--ctl-h, 28px);
@@ -215,7 +221,7 @@
 .pp-section-disclosure {
   display: flex;
   align-items: center;
-  gap: var(--sp-2, 6px);
+  gap: var(--sp-1, 4px);
   flex: 1 1 auto;
   min-width: 0;
   min-height: var(--ctl-h, 28px);
@@ -313,7 +319,7 @@
 .pp-progress-eta {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-2, 6px);
 }
 .pp-progress {
   display: flex;

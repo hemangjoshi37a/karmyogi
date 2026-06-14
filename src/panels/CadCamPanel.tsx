@@ -83,8 +83,10 @@ import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
+import { CamEmpty } from '../components/cam/CamUI'
 import { useT } from '../i18n'
 import '../styles/cadcam.css'
+import '../styles/cam.css'
 
 /** Which import family is currently loaded — drives the whole panel layout. */
 type Mode = 'none' | '3d' | '2d' | 'step' | 'cdr'
@@ -1655,6 +1657,7 @@ export function CadCamPanel() {
           {/* ================= 1 · IMPORT / DROP ================= */}
           <section className="cc-section cc-span">
             <h3>
+              <span className="cam-card-ico"><Icon name="upload" size={15} /></span>
               {mode === '3d' ? t('cc.models', 'Models') : t('cc.model', 'Model')}
               {mode === '3d' && (
                 <span className="cc-h3-actions">
@@ -1740,9 +1743,16 @@ export function CadCamPanel() {
               {/* 3D multi-model: empty-state, nesting warnings & bed hint —
                   moved here from the old standalone "Jobs" section. */}
               {mode === '3d' && jobs.length === 0 && (
-                <span className="cc-hint">
-                  {t('cc.noJobs', 'No models yet — Add a model above. Import again to nest more side-by-side.')}
-                </span>
+                <CamEmpty
+                  icon={<Icon name="upload" size={22} />}
+                  title={t('cc.empty.title', 'No models yet')}
+                  hint={t('cc.empty.hint', 'Import a model to add a job — import again to nest more side-by-side.')}
+                  action={
+                    <button type="button" className="cam-primary" onClick={() => fileRef.current?.click()}>
+                      <Icon name="upload" size={15} /> {t('cc.upload', 'Upload')}
+                    </button>
+                  }
+                />
               )}
               {mode === '3d' && nestWarn.length > 0 && (
                 <ul className="cc-warnings">
@@ -1812,7 +1822,10 @@ export function CadCamPanel() {
           {/* ============ 2 · BIT + MATERIAL (the only choices a beginner
                 makes — everything else is auto-computed below) ============ */}
           <section className="cc-section cc-toolstrip cc-primary">
-            <h3>{t('cc.pickBitMat', 'Bit & material')}</h3>
+            <h3>
+              <Drill className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+              {t('cc.pickBitMat', 'Bit & material')}
+            </h3>
             <div className="cc-section-body">
               {/* Graphical bit + material card (replaces the old 3 bit selects
                   + material dropdown row). */}
@@ -1899,7 +1912,10 @@ export function CadCamPanel() {
           {mode === '2d' && (
             <>
               <section className="cc-section">
-                <h3>{t('cc.operation', 'Operation')}</h3>
+                <h3>
+                  <Layers className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                  {t('cc.operation', 'Operation')}
+                </h3>
                 <div className="cc-section-body">
                   <div className="cc-opseg" role="group" aria-label={t('cc.operation', 'Operation')}>
                     {(['Engrave', 'Profile', 'Pocket'] as Op[]).map((o) => (
@@ -1945,7 +1961,10 @@ export function CadCamPanel() {
               {/* Position & size — offset + uniform scale (or type a target W/H to
                   auto-fit), mirroring the placement controls 3D jobs already have. */}
               <section className="cc-section">
-                <h3>{t('cc.posSize', 'Position & size')}</h3>
+                <h3>
+                  <Maximize2 className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                  {t('cc.posSize', 'Position & size')}
+                </h3>
                 <div className="cc-section-body">
                   <div className="cc-sgrid">
                     <SliderField
@@ -2052,7 +2071,10 @@ export function CadCamPanel() {
               </section>
 
               <section className="cc-section">
-                <h3>{t('cc.toolCut', 'Tool & cut')}</h3>
+                <h3>
+                  <Gauge className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                  {t('cc.toolCut', 'Tool & cut')}
+                </h3>
                 <div className="cc-section-body">
                   <div className="cc-sgrid">
                     <SliderField
@@ -2126,7 +2148,10 @@ export function CadCamPanel() {
               </section>
 
               <section className="cc-section">
-                <h3>{t('cc.zMode', 'Z mode')}</h3>
+                <h3>
+                  <ArrowUpToLine className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                  {t('cc.zMode', 'Z mode')}
+                </h3>
                 <div className="cc-section-body">
                   <div className="cc-zmode">
                     <button

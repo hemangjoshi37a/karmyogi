@@ -35,6 +35,8 @@ import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
+import { CamStatus, CamEmpty } from '../components/cam/CamUI'
+import '../styles/cam.css'
 import '../styles/signature.css'
 
 /** Named program section this panel owns in the combined program. */
@@ -754,13 +756,21 @@ export function SignaturePanel() {
         </button>
       </div>
 
+      <CamStatus
+        items={[
+          { value: previewPolys.length, unit: t('sig.status.strokes', 'strokes') },
+          { value: countPoints(previewPolys), unit: t('sig.status.points', 'points') },
+          { value: rawLineCount, unit: t('sig.status.gcode', 'G-code lines') },
+        ]}
+      />
+
       <div className="sig-cards">
         {mode === 'draw' ? (
           <>
             {/* ============ Freehand draw surface (centerpiece) ============ */}
             <section className="sig-card sig-card-wide">
               <div className="sig-card-head">
-                <h4>{t('sig.draw.title', 'Sign here')}</h4>
+                <h4><Icon name="frame" size={14} className="cam-card-ico" /> {t('sig.draw.title', 'Sign here')}</h4>
                 <div className="sig-draw-tools">
                   <IconButton
                     type="button"
@@ -852,7 +862,7 @@ export function SignaturePanel() {
             {/* ============ Traced preview (centerpiece) ============ */}
             <section className="sig-card sig-preview-card sig-card-wide">
               <div className="sig-card-head">
-                <h4>{t('sig.preview.title', 'Traced preview')}</h4>
+                <h4><Icon name="camera" size={14} className="cam-card-ico" /> {t('sig.preview.title', 'Traced preview')}</h4>
                 {previewPolys.length > 0 && (
                   <span className="sig-badge">{t('sig.preview.strokes', '{n} stroke(s)', { n: previewPolys.length })}</span>
                 )}
@@ -871,11 +881,19 @@ export function SignaturePanel() {
                     ))}
                   </svg>
                 ) : (
-                  <span className="sig-preview-empty">
-                    {raster
-                      ? t('sig.preview.noVectors', 'No vectors yet — adjust the threshold.')
-                      : t('sig.preview.upload', 'Upload an image to see the live trace here.')}
-                  </span>
+                  <CamEmpty
+                    icon={<Icon name="camera" size={22} />}
+                    title={
+                      raster
+                        ? t('sig.preview.noVectors.title', 'No vectors yet')
+                        : t('sig.preview.upload.title', 'No image loaded')
+                    }
+                    hint={
+                      raster
+                        ? t('sig.preview.noVectors', 'No vectors yet — adjust the threshold.')
+                        : t('sig.preview.upload', 'Upload an image to see the live trace here.')
+                    }
+                  />
                 )}
               </div>
               <p className="sig-info">{info}</p>

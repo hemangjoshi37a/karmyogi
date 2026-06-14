@@ -20,6 +20,8 @@ import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
+import { CamStatus, CamEmpty } from '../components/cam/CamUI'
+import '../styles/cam.css'
 import {
   parseStl,
   STL_STRIDE,
@@ -753,7 +755,7 @@ export function PrintPanel() {
         <div className="print-cards">
         {/* ---- 1. Import ---- */}
         <section className="print-section">
-          <h3>{t('print.import.title', '1 · Import STL')}</h3>
+          <h3><Icon name="upload" size={14} className="cam-card-ico" /> {t('print.import.title', '1 · Import STL')}</h3>
           <div className="print-section-body">
             <div
               className={'print-drop' + (dragOver ? ' print-dragover' : '')}
@@ -782,6 +784,13 @@ export function PrintPanel() {
               />
             </div>
             {loadError && <div className="print-error">{loadError}</div>}
+            {!meshInfo && !loadError && (
+              <CamEmpty
+                icon={<Icon name="frame" size={22} />}
+                title={t('print.empty.title', 'No model loaded')}
+                hint={t('print.empty.hint', 'Open or drop an STL file to arrange, slice, and print it.')}
+              />
+            )}
             {meshInfo && (
               <div className="print-info">
                 {t('print.meshInfo', '{name} — {tris} triangles · {format} STL', {
@@ -797,7 +806,7 @@ export function PrintPanel() {
         {/* ---- 2. Preview + Arrange (full-width: holds the primary 3D preview) ---- */}
         {placed && (
           <section className="print-section print-card-wide">
-            <h3>{t('print.arrange.title', '2 · Arrange')}</h3>
+            <h3><Icon name="frame" size={14} className="cam-card-ico" /> {t('print.arrange.title', '2 · Arrange')}</h3>
             <div className="print-section-body">
               <div className="print-viewport">
                 <MeshPreview triangles={placed.mesh.triangles} fits={placed.fits} bedX={bedX} bedY={bedY} />
@@ -863,7 +872,7 @@ export function PrintPanel() {
 
         {/* ---- 3. Print settings ---- */}
         <section className="print-section">
-          <h3>{t('print.settings.title', '3 · Print settings')}</h3>
+          <h3><Icon name="settings" size={14} className="cam-card-ico" /> {t('print.settings.title', '3 · Print settings')}</h3>
           <div className="print-section-body">
             <div className="pr-sfields">
               <SliderField
@@ -1074,7 +1083,7 @@ export function PrintPanel() {
 
         {/* ---- 5. Slice & send (full-width: primary action bar + g-code) ---- */}
         <section className="print-section print-card-wide">
-          <h3>{t('print.slice.title', '4 · Slice & print')}</h3>
+          <h3><Icon name="play" size={14} className="cam-card-ico" /> {t('print.slice.title', '4 · Slice & print')}</h3>
           <div className="print-section-body">
             <div className="print-actions">
               <button className="print-btn primary" onClick={doSlice} disabled={!placed || slicing}>
@@ -1132,6 +1141,26 @@ export function PrintPanel() {
               </div>
             )}
 
+            {lastGcode && (
+              <CamStatus
+                synced={false}
+                items={[
+                  { value: lastGcode.lines, unit: t('print.status.lines', 'G-code lines') },
+                  ...(estimate
+                    ? [
+                        {
+                          value: (estimate.filamentMm / 1000).toFixed(2),
+                          unit: t('print.status.filamentM', 'm filament'),
+                        },
+                        {
+                          value: fmtDuration(estimate.timeSeconds),
+                          unit: t('print.status.est', 'est.'),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            )}
             {estimate && (
               <div className="print-estimate">
                 <span className="print-estimate-item">

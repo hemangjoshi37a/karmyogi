@@ -34,6 +34,94 @@ import { PwaManager } from '../pwa/PwaManager'
 import '../styles/topbar.css'
 import '../styles/shell-extra.css'
 
+/**
+ * Local inline-SVG glyphs for the TOP BAR only (the ones the shared `Icon` set
+ * doesn't cover). Each is a 24×24, `currentColor`, stroke-based mark so it
+ * recolors with the theme and stays crisp at any zoom — replacing the old emoji
+ * glyphs (↺ − + ☀ ☾ ⋯ ✦ ⓘ) that rendered inconsistently across platforms.
+ * Decorative: the wrapping button carries the title + aria-label.
+ */
+type GlyphProps = { size?: number }
+const svgBase = (size: number) =>
+  ({
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+    focusable: 'false' as const,
+  })
+
+/** Reset layout — counter-clockwise refresh arrow. */
+function ResetGlyph({ size = 16 }: GlyphProps) {
+  return (
+    <svg {...svgBase(size)}>
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v4h4" />
+    </svg>
+  )
+}
+/** Zoom out — minus. */
+function MinusGlyph({ size = 16 }: GlyphProps) {
+  return (
+    <svg {...svgBase(size)}>
+      <path d="M5 12h14" />
+    </svg>
+  )
+}
+/** Zoom in — plus. */
+function PlusGlyph({ size = 16 }: GlyphProps) {
+  return (
+    <svg {...svgBase(size)}>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  )
+}
+/** Light theme — sun. */
+function SunGlyph({ size = 16 }: GlyphProps) {
+  return (
+    <svg {...svgBase(size)}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </svg>
+  )
+}
+/** Dark theme — moon. */
+function MoonGlyph({ size = 16 }: GlyphProps) {
+  return (
+    <svg {...svgBase(size)}>
+      <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z" />
+    </svg>
+  )
+}
+/** Theme glyph by mode — sun when dark (switch to light), moon when light. */
+function ThemeGlyph({ theme, size = 16 }: GlyphProps & { theme: 'dark' | 'light' }) {
+  return theme === 'dark' ? <SunGlyph size={size} /> : <MoonGlyph size={size} />
+}
+/** Overflow "more" — horizontal dots. */
+function MoreGlyph({ size = 16 }: GlyphProps) {
+  return (
+    <svg {...svgBase(size)}>
+      <circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+/** AI assistant — sparkle. */
+function SparkleGlyph({ size = 16 }: GlyphProps) {
+  return (
+    <svg {...svgBase(size)}>
+      <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />
+    </svg>
+  )
+}
+
 // CAM-mode + utility panels that share the left group as tabs by default.
 const LEFT_TABS = [
   { id: 'cadcam', title: '2D/3D Carving' },
@@ -383,17 +471,17 @@ export function Shell() {
             />
             <span className="topbar-actions">
               <PanelLauncher onOpenPanel={onOpenPanel} isPanelOpen={isPanelOpen} />
-              <IconButton icon="↺" label="Reset dock layout to default" onClick={onReset} />
+              <IconButton icon={<ResetGlyph />} label="Reset dock layout to default" onClick={onReset} />
               <span className="zoom-group" title="UI zoom">
-                <IconButton icon="−" label="Zoom out" onClick={zoomOut} />
+                <IconButton icon={<MinusGlyph />} label="Zoom out" onClick={zoomOut} />
                 <button onClick={resetZoom} aria-label="Reset zoom" title="Reset zoom to 100%">
                   {Math.round(uiScale * 100)}%
                 </button>
-                <IconButton icon="+" label="Zoom in" onClick={zoomIn} />
+                <IconButton icon={<PlusGlyph />} label="Zoom in" onClick={zoomIn} />
               </span>
               <LanguageSwitcher />
               <IconButton
-                icon={theme === 'dark' ? '☀' : '☾'}
+                icon={<ThemeGlyph theme={theme} />}
                 label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
                 onClick={toggleTheme}
               />
@@ -549,7 +637,7 @@ function MobileMore({
   return (
     <div className="topbar-overflow" ref={wrapRef}>
       <IconButton
-        icon="⋯"
+        icon={<MoreGlyph />}
         label={moreLabel}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -572,11 +660,11 @@ function MobileMore({
               openAiBubble()
             }}
           >
-            <span className="topbar-more-ico">✦</span>
+            <span className="topbar-more-ico"><SparkleGlyph size={18} /></span>
             <span>{aiLabel}</span>
           </button>
           <button className="topbar-more-item" role="menuitem" onClick={onToggleTheme}>
-            <span className="topbar-more-ico">{theme === 'dark' ? '☀' : '☾'}</span>
+            <span className="topbar-more-ico"><ThemeGlyph theme={theme} size={18} /></span>
             <span>{themeLabel}</span>
           </button>
           <button
@@ -587,17 +675,17 @@ function MobileMore({
               onAbout()
             }}
           >
-            <span className="topbar-more-ico">ⓘ</span>
+            <span className="topbar-more-ico"><Icon name="info" size={18} /></span>
             <span>{aboutLabel}</span>
           </button>
           <div className="topbar-more-sep" />
           <div className="topbar-overflow-head">{zoomLabel}</div>
           <div className="topbar-overflow-zoom zoom-group">
-            <IconButton icon="−" label="Zoom out" onClick={onZoomOut} />
+            <IconButton icon={<MinusGlyph />} label="Zoom out" onClick={onZoomOut} />
             <button onClick={onResetZoom} aria-label="Reset zoom" title="Reset zoom to 100%">
               {Math.round(uiScale * 100)}%
             </button>
-            <IconButton icon="+" label="Zoom in" onClick={onZoomIn} />
+            <IconButton icon={<PlusGlyph />} label="Zoom in" onClick={onZoomIn} />
           </div>
         </div>
       )}

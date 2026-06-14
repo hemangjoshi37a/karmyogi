@@ -1,14 +1,18 @@
 /* Top-bar additions: icon-only buttons, notification bell, panel launcher.
    Owned by the app-shell agent; do not put density tokens here. */
 
-/* Slim top bar: tighten gaps so the icon buttons cluster tightly on the right. */
+/* Slim top bar: tighten gaps so the icon buttons cluster tightly on the right.
+   Desktop keeps everything on a SINGLE row (no wrap) at common widths. */
 .topbar .topbar-actions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 3px;
 }
 
-/* Icon-only button: square-ish, glyph centered, native title tooltip. */
+/* Icon-only button: square-ish, glyph centered, native title tooltip. Tightened
+   horizontal padding so the row of SVG buttons clusters compactly while keeping
+   a 30px+ tap target. */
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -16,7 +20,7 @@
   gap: 0;
   min-width: 30px;
   min-height: 30px;
-  padding: 4px 6px;
+  padding: 4px;
   line-height: 1;
   position: relative;
 }
@@ -27,9 +31,13 @@
   position: relative;
   font-size: 15px;
 }
+/* Inline-SVG glyphs in the bar inherit the button color and stay crisp. */
+.icon-btn-glyph svg { display: block; }
 
 /* The zoom group sits tight; −/+ are icon-only, the % readout stays. */
-.topbar .zoom-group { gap: 1px; }
+.topbar .zoom-group { gap: 0; }
+/* Keep the % readout compact and from stretching the bar. */
+.topbar .zoom-group > button { padding: 4px 5px; font-variant-numeric: tabular-nums; }
 
 /* ---- Notification bell ---- */
 .notif { position: relative; display: inline-flex; }

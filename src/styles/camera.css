@@ -158,6 +158,9 @@
 }
 .cam-card-head > h4 {
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-section);
   font-weight: 600;
   letter-spacing: 0.5px;
@@ -352,10 +355,18 @@
 .cam-stage {
   position: relative;
   width: 100%;
+  /* Hold a 4/3 frame whether the live <video> fills it or the off-state prompt
+     centers in it (the prompt no longer carries its own aspect-ratio). */
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
   overflow: hidden;
+}
+.cam-stage > .cam-video {
+  width: 100%;
 }
 .cam-stage[data-live='true'] {
   border-color: var(--accent);
@@ -377,26 +388,10 @@
 .cam-video[data-clickable='true'] {
   cursor: crosshair;
 }
-.cam-empty {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: 16px 14px;
-  text-align: center;
-  aspect-ratio: 4 / 3;
-  align-items: center;
-  justify-content: center;
-}
-.cam-empty > strong {
-  font-size: var(--fs-ctl);
-  color: var(--fg);
-}
-.cam-empty > span {
-  font-size: var(--fs-label);
-  line-height: 1.45;
-  color: var(--fg-muted);
-  max-width: 38ch;
-}
+/* (The former `.cam-empty` camera-stage rules were removed: the camera-off
+   prompt now uses the shared <CamEmpty> (`.cam-empty` in cam.css). Keeping a
+   second global `.cam-empty` here forced a 4/3 aspect-ratio onto every panel's
+   shared empty state — a cross-panel collision.) */
 
 /* ---- REC indicator ---- */
 .cam-rec {

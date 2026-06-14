@@ -28,6 +28,7 @@ import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
 import type { StatusNote } from '../core/fontLibrary'
 import '../styles/writing.css'
+import '../styles/cam.css'
 
 const ALIGN_OPTIONS: { value: TextAlign; key: string; label: string; align: 'left' | 'center' | 'right' }[] = [
   { value: TextAlign.Left, key: 'writing.align.left', label: 'Left', align: 'left' },
@@ -669,7 +670,10 @@ export function WritingPanel() {
         {/* ---- Text (spans full width) ---- */}
         <section className="wr-card wr-span">
           <h3 className="wr-card-head">
-            <span>{t('writing.text.title', 'Text')}</span>
+            <span>
+              <span className="cam-card-ico wr-glyph" aria-hidden>T</span>
+              {t('writing.text.title', 'Text')}
+            </span>
             <SaveLoadButtons
               value={doc}
               onLoad={loadDoc}
@@ -700,7 +704,10 @@ export function WritingPanel() {
         {/* ---- Font & Style: sleek dense toolbar — font picker + source icons +
              Stroke/Outline mode on one line, then Style (B/I/U) + Align on one ---- */}
         <section className="wr-card wr-span">
-          <h3>{t('writing.font.title', 'Font & Style')}</h3>
+          <h3>
+            <span className="cam-card-ico wr-glyph" aria-hidden>F</span>
+            {t('writing.font.title', 'Font & Style')}
+          </h3>
           <div className="wr-card-body wr-fs">
             {/* row 1: font select + source icons + Stroke/Outline mode, packed tight */}
             <div className="wr-font-row">
@@ -853,7 +860,10 @@ export function WritingPanel() {
 
         {/* ---- Size & spacing — slider rows (size, line + letter spacing) ---- */}
         <section className="wr-card">
-          <h3>{t('writing.sizeSpacing.title', 'Size & Spacing')}</h3>
+          <h3>
+            <span className="cam-card-ico wr-glyph" aria-hidden>↔</span>
+            {t('writing.sizeSpacing.title', 'Size & Spacing')}
+          </h3>
           <div className="wr-card-body wr-sliders">
             <WrSlider
               icon={<span className="wr-glyph">A</span>}
@@ -896,7 +906,10 @@ export function WritingPanel() {
 
         {/* ---- Pen Z & feed — slider rows ---- */}
         <section className="wr-card">
-          <h3>{t('writing.penZ.title', 'Pen Z & Feed')}</h3>
+          <h3>
+            <span className="cam-card-ico"><Icon name="download" size={14} /></span>
+            {t('writing.penZ.title', 'Pen Z & Feed')}
+          </h3>
           <div className="wr-card-body wr-sliders">
             <WrSlider
               icon={<Icon name="upload" size={14} />}
@@ -952,7 +965,10 @@ export function WritingPanel() {
 
         {/* ---- Placement — origin sliders ---- */}
         <section className="wr-card">
-          <h3>{t('writing.placement.title', 'Placement')}</h3>
+          <h3>
+            <span className="cam-card-ico wr-glyph" aria-hidden>+</span>
+            {t('writing.placement.title', 'Placement')}
+          </h3>
           <div className="wr-card-body wr-sliders">
             <WrSlider
               icon={<span className="wr-glyph">X</span>}

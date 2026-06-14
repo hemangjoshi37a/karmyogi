@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ControllerKind } from '../machine/types'
 import { useT } from '../i18n'
+import { Icon } from './Icons'
 
 /**
  * A small "drivers" affordance next to the firmware selector. Web Serial talks to
@@ -132,7 +133,7 @@ export function FirmwareDrivers({ kind }: { kind: ControllerKind }) {
         title={t('conn.drivers.title', 'USB driver downloads (needed on Windows to see the port)')}
         aria-label={t('conn.drivers.label', 'USB driver downloads')}
       >
-        ⬇
+        <Icon name="download" size={16} />
       </button>
       {open &&
         createPortal(

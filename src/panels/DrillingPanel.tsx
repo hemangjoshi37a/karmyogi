@@ -20,7 +20,9 @@ import {
   type ScrewPoint,
   type ScrewPresetKey,
 } from '../core/drilling'
+import { CamEmpty } from '../components/cam/CamUI'
 import '../styles/drilling.css'
+import '../styles/cam.css'
 
 /** Clamp decimals to the range toFixed() accepts (0..6) — guards the render-phase
  * useMemo from a RangeError that would white-screen the panel. */
@@ -518,7 +520,10 @@ export function DrillingPanel() {
         <section className="scf-settings">
           <div className="scf-card">
             <div className="scf-card-head">
-              <h4>{t('drill.hole.title', 'Hole')}</h4>
+              <h4>
+                <span className="cam-card-ico"><Icon name="probe" size={14} /></span>
+                {t('drill.hole.title', 'Hole')}
+              </h4>
               <InfoTip
                 topic="drillHole"
                 title={t('drill.hole.title', 'Hole')}
@@ -599,7 +604,10 @@ export function DrillingPanel() {
 
           <div className="scf-card">
             <div className="scf-card-head">
-              <h4>{t('drill.recess.title', 'Head recess')}</h4>
+              <h4>
+                <span className="cam-card-ico"><Icon name="frame" size={14} /></span>
+                {t('drill.recess.title', 'Head recess')}
+              </h4>
               <InfoTip
                 topic="drillRecess"
                 title={t('drill.recess.title', 'Head recess')}
@@ -674,7 +682,10 @@ export function DrillingPanel() {
 
           <div className="scf-card">
             <div className="scf-card-head">
-              <h4>{t('drill.motion.title', 'Feeds & motion')}</h4>
+              <h4>
+                <span className="cam-card-ico"><Icon name="jog" size={14} /></span>
+                {t('drill.motion.title', 'Feeds & motion')}
+              </h4>
               <InfoTip
                 topic="drillMotion"
                 title={t('drill.motion.title', 'Feeds & motion')}
@@ -742,7 +753,10 @@ export function DrillingPanel() {
       {/* Points — compact editable table (reflows to stacked cards when narrow). */}
       <div className="scf-card scf-points">
         <div className="scf-card-head">
-          <h4>{t('drill.points.title', 'Hole points')}</h4>
+          <h4>
+            <span className="cam-card-ico"><Icon name="probe" size={14} /></span>
+            {t('drill.points.title', 'Hole points')}
+          </h4>
           <span className="scf-card-count">{points.length}</span>
         </div>
         <div className="scf-table-wrap">
@@ -759,10 +773,19 @@ export function DrillingPanel() {
               {points.length === 0 && (
                 <tr>
                   <td colSpan={4} className="scf-empty">
-                    {t(
-                      'drill.table.empty',
-                      'No holes yet. Press + to add one, or ⌖ to record the machine position.',
-                    )}
+                    <CamEmpty
+                      icon={<Icon name="add" size={22} />}
+                      title={t('drill.empty.title', 'No hole points yet')}
+                      hint={t(
+                        'drill.empty.hint',
+                        'Add a point, or jog the machine and record its position.',
+                      )}
+                      action={
+                        <button type="button" className="cam-primary" onClick={addRow}>
+                          <Icon name="add" size={15} /> {t('drill.toolbar.add', 'Add point')}
+                        </button>
+                      }
+                    />
                   </td>
                 </tr>
               )}
@@ -837,12 +860,19 @@ export function DrillingPanel() {
         {/* Narrow PANEL: each point becomes a compact card. */}
         <div className="scf-cards">
           {points.length === 0 && (
-            <p className="scf-empty">
-              {t(
-                'drill.table.empty',
-                'No holes yet. Press + to add one, or ⌖ to record the machine position.',
+            <CamEmpty
+              icon={<Icon name="add" size={22} />}
+              title={t('drill.empty.title', 'No hole points yet')}
+              hint={t(
+                'drill.empty.hint',
+                'Add a point, or jog the machine and record its position.',
               )}
-            </p>
+              action={
+                <button type="button" className="cam-primary" onClick={addRow}>
+                  <Icon name="add" size={15} /> {t('drill.toolbar.add', 'Add point')}
+                </button>
+              }
+            />
           )}
           {points.map((pt, i) => (
             <div

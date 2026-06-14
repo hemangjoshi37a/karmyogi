@@ -337,3 +337,23 @@ textarea { min-height: auto; }
 .km-panel-loading-label { letter-spacing: 0.02em; }
 @keyframes km-panel-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .km-panel-spinner { animation-duration: 1.8s; } }
+
+/* ── Subtle, consistent motion ──────────────────────────────────────────────
+   A light hover/active feedback on interactive controls — color/border/shadow
+   only (never layout/size), so it stays sleek and never shifts content. Fully
+   disabled for users who prefer reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  button,
+  a,
+  input,
+  select,
+  summary,
+  [role='button'],
+  [class*='-btn'],
+  [class*='-ico'],
+  .cam-primary,
+  .cam-empty-action > * {
+    transition: background-color 0.12s ease, border-color 0.12s ease,
+      color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+  }
+}

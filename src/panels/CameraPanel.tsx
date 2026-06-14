@@ -18,6 +18,7 @@ import { grbl } from '../serial/controller'
 import { useT } from '../i18n'
 import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
+import { CamEmpty } from '../components/cam/CamUI'
 import { useCameraCalib, useCameraLive, useMachine, usePersistentState } from '../store'
 import { useProgram } from '../store/program'
 import { useBed } from '../store/bed'
@@ -58,6 +59,7 @@ import {
   centeredRect,
   type CapturedFrame,
 } from '../camera/bedTracking'
+import '../styles/cam.css'
 import '../styles/camera.css'
 
 /**
@@ -2230,6 +2232,7 @@ export function CameraPanel() {
       <section className="cam-card" key={`slot-${s}`}>
         <header className="cam-card-head">
           <h4>
+            <Icon name="camera" size={14} className="cam-card-ico" />{' '}
             {s === 0
               ? t('cam.slot.primary', 'Camera 1 · primary')
               : t('cam.slot.secondary', 'Camera 2 · secondary')}
@@ -2284,10 +2287,24 @@ export function CameraPanel() {
             onClick={isCalibFrame ? onCalibFrameClick : undefined}
           />
           {!isLive && (
-            <div className="cam-empty" role="status">
-              <strong>{empty.title}</strong>
-              <span>{empty.body}</span>
-            </div>
+            <CamEmpty
+              icon={<Icon name="camera" size={22} />}
+              title={empty.title}
+              hint={empty.body}
+              action={
+                supported && st.kind !== 'starting' ? (
+                  <button
+                    type="button"
+                    className="cam-btn cam-power"
+                    onClick={() => toggleLive(s)}
+                    title={t('cam.power.startTip', 'Start the camera')}
+                  >
+                    <span className="cam-power-dot" aria-hidden="true" />
+                    {t('cam.power.start', 'Start')}
+                  </button>
+                ) : undefined
+              }
+            />
           )}
           {isLive && s === 0 && recording && (
             <span className="cam-rec cam-rec-overlay" title={t('cam.feed.recTip', 'Recording in progress')}>
@@ -2439,7 +2456,7 @@ export function CameraPanel() {
         {/* ---- calibration sheet (printable QR fiducials) ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
-            <h4>{t('cam.calib.title', 'Calibration sheet')}</h4>
+            <h4><Icon name="frame" size={14} className="cam-card-ico" /> {t('cam.calib.title', 'Calibration sheet')}</h4>
             <span className="cam-raw">{t('cam.calib.badge', 'A4 · QR')}</span>
           </header>
           <p className="cam-hint">
@@ -2477,7 +2494,7 @@ export function CameraPanel() {
         {/* ---- secondary camera slot toggle + slot ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
-            <h4>{t('cam.slot2.title', 'Second camera')}</h4>
+            <h4><Icon name="camera" size={14} className="cam-card-ico" /> {t('cam.slot2.title', 'Second camera')}</h4>
             <label className="cam-switch">
               <input
                 type="checkbox"
@@ -2500,7 +2517,7 @@ export function CameraPanel() {
         {/* ---- auto-record while streaming (slot 0 / Camera 1 only) ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
-            <h4>{t('cam.auto.title', 'Auto-record runs')}</h4>
+            <h4><Icon name="play" size={14} className="cam-card-ico" /> {t('cam.auto.title', 'Auto-record runs')}</h4>
             {autoRecActive ? (
               <span className="cam-rec" title={t('cam.auto.recTip', 'Recording the current run')}>
                 <span className="cam-rec-dot" aria-hidden="true" />

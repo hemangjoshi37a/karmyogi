@@ -27,7 +27,9 @@ import {
   type ScrewDrivePoint,
   type ScrewDrivingParams,
 } from '../core/screwDriving'
+import { CamEmpty } from '../components/cam/CamUI'
 import '../styles/screwdriving.css'
+import '../styles/cam.css'
 
 /** Clamp decimals to the range toFixed() accepts (0..6) — guards the render-phase
  * useMemo from a RangeError that would white-screen the panel. */
@@ -557,7 +559,10 @@ export function ScrewFittingPanel() {
         <section className="swd-settings">
           <div className="swd-card">
             <div className="swd-card-head">
-              <h4>{t('screw.loader.title', 'Screw loader')}</h4>
+              <h4>
+                <Magnet className="cam-card-ico" size={14} strokeWidth={1.9} aria-hidden />
+                {t('screw.loader.title', 'Screw loader')}
+              </h4>
               <InfoTip
                 topic="screwLoader"
                 title={t('screw.loader.title', 'Screw loader')}
@@ -626,7 +631,10 @@ export function ScrewFittingPanel() {
 
           <div className="swd-card">
             <div className="swd-card-head">
-              <h4>{t('screw.driver.title', 'Screwdriver')}</h4>
+              <h4>
+                <Gauge className="cam-card-ico" size={14} strokeWidth={1.9} aria-hidden />
+                {t('screw.driver.title', 'Screwdriver')}
+              </h4>
               <InfoTip
                 topic="screwDriver"
                 title={t('screw.driver.title', 'Screwdriver')}
@@ -695,7 +703,10 @@ export function ScrewFittingPanel() {
 
           <div className="swd-card">
             <div className="swd-card-head">
-              <h4>{t('screw.motion.title', 'Depth & motion')}</h4>
+              <h4>
+                <ArrowUpToLine className="cam-card-ico" size={14} strokeWidth={1.9} aria-hidden />
+                {t('screw.motion.title', 'Depth & motion')}
+              </h4>
               <InfoTip
                 topic="screwMotion"
                 title={t('screw.motion.title', 'Depth & motion')}
@@ -767,7 +778,10 @@ export function ScrewFittingPanel() {
       {/* Points — compact editable table (reflows to stacked cards when narrow). */}
       <div className="swd-card swd-points">
         <div className="swd-card-head">
-          <h4>{t('screw.points.title', 'Screw points')}</h4>
+          <h4>
+            <Drill className="cam-card-ico" size={14} strokeWidth={1.9} aria-hidden />
+            {t('screw.points.title', 'Screw points')}
+          </h4>
           <span className="swd-card-count">{points.length}</span>
         </div>
         <div className="swd-table-wrap">
@@ -785,10 +799,19 @@ export function ScrewFittingPanel() {
               {points.length === 0 && (
                 <tr>
                   <td colSpan={5} className="swd-empty">
-                    {t(
-                      'screw.table.empty',
-                      'No screws yet. Press + to add one, or ⌖ to record the machine position.',
-                    )}
+                    <CamEmpty
+                      icon={<Icon name="add" size={22} />}
+                      title={t('screw.empty.title', 'No screw points yet')}
+                      hint={t(
+                        'screw.empty.hint',
+                        'Add a point, or jog the machine and record its position.',
+                      )}
+                      action={
+                        <button type="button" className="cam-primary" onClick={addRow}>
+                          <Icon name="add" size={15} /> {t('screw.toolbar.add', 'Add point')}
+                        </button>
+                      }
+                    />
                   </td>
                 </tr>
               )}
@@ -872,12 +895,19 @@ export function ScrewFittingPanel() {
         {/* Narrow PANEL: each point becomes a compact card. */}
         <div className="swd-cards">
           {points.length === 0 && (
-            <p className="swd-empty">
-              {t(
-                'screw.table.empty',
-                'No screws yet. Press + to add one, or ⌖ to record the machine position.',
+            <CamEmpty
+              icon={<Icon name="add" size={22} />}
+              title={t('screw.empty.title', 'No screw points yet')}
+              hint={t(
+                'screw.empty.hint',
+                'Add a point, or jog the machine and record its position.',
               )}
-            </p>
+              action={
+                <button type="button" className="cam-primary" onClick={addRow}>
+                  <Icon name="add" size={15} /> {t('screw.toolbar.add', 'Add point')}
+                </button>
+              }
+            />
           )}
           {points.map((pt, i) => (
             <div

@@ -33,7 +33,9 @@ import {
   type PnpOp,
   type PnpParams,
 } from '../core/pickPlace'
+import { CamEmpty } from '../components/cam/CamUI'
 import '../styles/pickplace.css'
+import '../styles/cam.css'
 
 /** Split G-code into non-empty lines for streaming to the controller. */
 function gcodeLines(gcode: string): string[] {
@@ -630,7 +632,12 @@ export function PickPlacePanel() {
 
         {/* --- Head + operations --------------------------------------- */}
         <section className="pp-card pp-card-wide">
-          <h3>{t('pnp.ops.title', 'Operations')}</h3>
+          <h3>
+            <span className="cam-card-ico" aria-hidden="true">
+              <Crosshair size={15} />
+            </span>
+            {t('pnp.ops.title', 'Operations')}
+          </h3>
           <div className="pp-card-body">
             <div className="pp-headrow">
               <span className="pp-headsel-lbl">{t('pnp.head.label', 'Head')}</span>
@@ -679,15 +686,19 @@ export function PickPlacePanel() {
                   {ops.length === 0 && (
                     <tr>
                       <td colSpan={tableCols} className="pp-empty">
-                        <p>
-                          {t(
-                            'pnp.ops.empty',
-                            'No operations yet. Press + to add one, or ⌖ to set pick/place from the machine position.',
+                        <CamEmpty
+                          icon={<MapPin size={20} />}
+                          title={t('pnp.ops.empty.title', 'No operations yet')}
+                          hint={t(
+                            'pnp.ops.empty.hint',
+                            'Add a pick→place operation, or use ⌖ to set pick/place from the live machine position.',
                           )}
-                        </p>
-                        <button className="primary pp-empty-add" onClick={addRow}>
-                          <Icon name="add" size={14} /> {t('pnp.addOp', 'Add op')}
-                        </button>
+                          action={
+                            <button className="cam-primary pp-empty-add" onClick={addRow}>
+                              <Icon name="add" size={14} /> {t('pnp.addOp', 'Add op')}
+                            </button>
+                          }
+                        />
                       </td>
                     </tr>
                   )}
@@ -819,7 +830,12 @@ export function PickPlacePanel() {
         {/* --- 2D bed preview ------------------------------------------ */}
         {ops.length > 0 && (
           <section className="pp-card pp-card-wide">
-            <h3>{t('pnp.preview.title', 'Bed preview')}</h3>
+            <h3>
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name="frame" size={15} />
+              </span>
+              {t('pnp.preview.title', 'Bed preview')}
+            </h3>
             <div className="pp-card-body pp-preview2d-body">
               <svg
                 className="pp-preview2d"

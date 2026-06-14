@@ -24,6 +24,160 @@ import { getActiveTab, subscribeActiveTab } from '../track/activity'
 import { Icon } from '../components/Icons'
 
 /**
+ * Tiny inline-SVG wrapper for the viewport toolbar/menu glyphs. Replaces the
+ * per-OS-inconsistent emoji/Unicode glyphs with crisp 24×24 line icons that
+ * inherit `currentColor` (so they recolor with the theme + active states for
+ * free). Decorative — the parent button carries the title/aria-label.
+ */
+function VIcon({
+  children,
+  size = 16,
+  fill = false,
+}: {
+  children: React.ReactNode
+  size?: number
+  fill?: boolean
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={fill ? 'currentColor' : 'none'}
+      stroke={fill ? 'none' : 'currentColor'}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {children}
+    </svg>
+  )
+}
+
+// --- Viewport toolbar / menu glyphs (inline SVG, theme-recoloring) -----------
+// Fit-to-view: arrows pulling toward a centered frame (4 corner brackets +
+// inward chevrons).
+const IconFit = (
+  <VIcon>
+    <path d="M4 9V5a1 1 0 0 1 1-1h4" />
+    <path d="M20 9V5a1 1 0 0 0-1-1h-4" />
+    <path d="M4 15v4a1 1 0 0 0 1 1h4" />
+    <path d="M20 15v4a1 1 0 0 1-1 1h-4" />
+    <path d="M9.5 9.5l-3-3M14.5 9.5l3-3M9.5 14.5l-3 3M14.5 14.5l3 3" />
+  </VIcon>
+)
+// Isometric view: a 3D cube drawn in iso projection.
+const IconIso = (
+  <VIcon>
+    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
+    <path d="M12 3v9M12 12l8-4.5M12 12l-8-4.5" />
+  </VIcon>
+)
+// Bed size: a ruler / measure frame.
+const IconBed = (
+  <VIcon>
+    <rect x="3" y="8" width="18" height="8" rx="1" />
+    <path d="M7 8v3M11 8v4M15 8v3M19 8v4" />
+  </VIcon>
+)
+// More / overflow: horizontal ellipsis.
+const IconMore = (
+  <VIcon fill>
+    <circle cx="5" cy="12" r="1.6" />
+    <circle cx="12" cy="12" r="1.6" />
+    <circle cx="19" cy="12" r="1.6" />
+  </VIcon>
+)
+// Place job: a 4-way move cross with a centre node (move/rotate/scale gizmo).
+const IconPlace = (
+  <VIcon>
+    <path d="M12 3v18M3 12h18" />
+    <path d="M12 3l-2 2.5M12 3l2 2.5M12 21l-2-2.5M12 21l2-2.5" />
+    <path d="M3 12l2.5-2M3 12l2.5 2M21 12l-2.5-2M21 12l-2.5 2" />
+    <circle cx="12" cy="12" r="2.2" />
+  </VIcon>
+)
+// Reset placement: a circular refresh arrow.
+const IconReset = (
+  <VIcon>
+    <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+    <path d="M20 4v4h-4" />
+  </VIcon>
+)
+// Lasso delete: scissors.
+const IconLasso = (
+  <VIcon>
+    <circle cx="6" cy="6" r="2.5" />
+    <circle cx="6" cy="18" r="2.5" />
+    <path d="M8 8l12 8M8 16L20 8" />
+  </VIcon>
+)
+// Pick delete: a pointer/cursor selecting a node.
+const IconPick = (
+  <VIcon>
+    <path d="M5 4l6 16 2.2-6.2L19 11.5z" />
+  </VIcon>
+)
+// --- Overflow-menu glyphs (add shape + display toggles) ---
+const IconLine = (
+  <VIcon>
+    <path d="M5 19L19 5" />
+  </VIcon>
+)
+const IconCircle = (
+  <VIcon>
+    <circle cx="12" cy="12" r="8" />
+  </VIcon>
+)
+const IconRect = (
+  <VIcon>
+    <rect x="4" y="6" width="16" height="12" rx="1" />
+  </VIcon>
+)
+const IconTriangle = (
+  <VIcon>
+    <path d="M12 4l9 16H3z" />
+  </VIcon>
+)
+const IconDimensions = (
+  <VIcon>
+    <path d="M4 18V6M4 12h16M20 6v12" />
+    <path d="M4 6l2 2M4 6l-2 2M20 6l2 2M20 6l-2 2" />
+  </VIcon>
+)
+const IconJobBox = (
+  <VIcon>
+    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
+  </VIcon>
+)
+const IconStock = (
+  <VIcon>
+    <path d="M3 8l9-4 9 4-9 4z" />
+    <path d="M3 8v8l9 4 9-4V8" />
+    <path d="M12 12v8" />
+  </VIcon>
+)
+const IconCarve = (
+  <VIcon>
+    <path d="M3 16h18" />
+    <path d="M7 16l3-9 2 5 2-3 3 7" />
+  </VIcon>
+)
+const IconCone = (
+  <VIcon fill>
+    <path d="M12 18L7 7h10z" />
+  </VIcon>
+)
+const IconCamera = (
+  <VIcon>
+    <path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L18 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z" />
+    <circle cx="12" cy="13" r="3.5" />
+  </VIcon>
+)
+
+/**
  * Visualizer panel: hosts the 3D viewport and feeds it the loaded G-code program
  * (from the program store) and the live tool position (from the machine store).
  * A small toolbar exposes W3's imperative fit/iso/top/front view controls plus a
@@ -420,7 +574,7 @@ export function VisualizerPanel() {
             title={t('vz.fit', 'Fit to toolpath')}
             aria-label={t('vz.fit', 'Fit to toolpath')}
           >
-            ⤢
+            {IconFit}
           </button>
           <button
             className="vz-toolbar-btn"
@@ -428,7 +582,7 @@ export function VisualizerPanel() {
             title={t('vz.iso', 'Isometric view')}
             aria-label={t('vz.iso', 'Isometric view')}
           >
-            ⧉
+            {IconIso}
           </button>
           {/* Top/front view buttons removed — the orientation cube (upper-right)
               now covers all named views (faces/edges/corners). */}
@@ -464,7 +618,7 @@ export function VisualizerPanel() {
             aria-label={t('vz.place', 'Place job')}
             aria-pressed={gizmoOn}
           >
-            ✛
+            {IconPlace}
           </button>
           {gizmoOn && selectedSectionId && (
             <button
@@ -475,7 +629,7 @@ export function VisualizerPanel() {
               title={t('vz.resetPlacement', 'Reset placement')}
               aria-label={t('vz.resetPlacement', 'Reset placement')}
             >
-              ⟳
+              {IconReset}
             </button>
           )}
           <button
@@ -486,7 +640,7 @@ export function VisualizerPanel() {
             aria-label={t('vz.lasso', 'Lasso delete')}
             aria-pressed={lassoMode}
           >
-            ✂
+            {IconLasso}
           </button>
           <button
             className={pickMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
@@ -499,7 +653,7 @@ export function VisualizerPanel() {
             aria-label={t('vz.pick', 'Pick delete')}
             aria-pressed={pickMode}
           >
-            ⇲
+            {IconPick}
           </button>
         </div>
         <Viewer
@@ -713,7 +867,7 @@ function OverflowMenu({
         aria-label={t('vz.more', 'More tools')}
         aria-expanded={open}
       >
-        ⋯
+        {IconMore}
       </button>
       {open &&
         createPortal(
@@ -731,57 +885,57 @@ function OverflowMenu({
           <div className="vz-menu-group">
             {t('vz.menu.add', 'Add shape')}
           </div>
-          {item('╱', t('vp.add.line', 'Add line'), () => onAddShape('line'))}
-          {item('◯', t('vp.add.circle', 'Add circle'), () =>
+          {item(IconLine, t('vp.add.line', 'Add line'), () => onAddShape('line'))}
+          {item(IconCircle, t('vp.add.circle', 'Add circle'), () =>
             onAddShape('circle'),
           )}
-          {item('▭', t('vp.add.rectangle', 'Add rectangle'), () =>
+          {item(IconRect, t('vp.add.rectangle', 'Add rectangle'), () =>
             onAddShape('rectangle'),
           )}
-          {item('△', t('vp.add.triangle', 'Add triangle'), () =>
+          {item(IconTriangle, t('vp.add.triangle', 'Add triangle'), () =>
             onAddShape('triangle'),
           )}
           <div className="vz-menu-group">
             {t('vz.menu.display', 'Display')}
           </div>
           {item(
-            '⊢',
+            IconDimensions,
             t('vz.dimensions', 'Show toolpath dimensions (X/Y/Z)'),
             () => setShowDimensions((s) => !s),
             showDimensions,
           )}
           {item(
-            '⬚',
+            IconJobBox,
             t('vz.jobBoxes', 'Show toolpath cubes (colored boxes)'),
             () => setShowJobBoxes((s) => !s),
             showJobBoxes,
           )}
           {item(
-            '📦',
+            IconStock,
             t('vz.showStock', 'Show stock'),
             () => setShowStock((s) => !s),
             showStock,
           )}
           {item(
-            '🪵',
+            IconCarve,
             t('vz.carveSim', 'Material removal simulation'),
             () => setCarveSim((s) => !s),
             carveSim,
           )}
           {item(
-            <span style={{ color: ACTUAL_TOOL_COLOR }}>▼</span>,
+            <span style={{ color: ACTUAL_TOOL_COLOR }}>{IconCone}</span>,
             t('vz.showActualTool', 'Show actual machine tool (live)'),
             () => setShowActualTool((s) => !s),
             showActualTool,
           )}
           {item(
-            <span style={{ color: SIM_TOOL_COLOR }}>▼</span>,
+            <span style={{ color: SIM_TOOL_COLOR }}>{IconCone}</span>,
             t('vz.showSimTool', 'Show simulation tool'),
             () => setShowSimTool((s) => !s),
             showSimTool,
           )}
           {item(
-            '📷',
+            IconCamera,
             t('vz.cameraOverlay', 'Show live camera 3D'),
             toggleCamOverlay,
             camOverlay,
@@ -888,7 +1042,15 @@ function LegendPanel({
         aria-expanded={open}
       >
         <span className="vz-layers-glyph" aria-hidden="true">
-          {open ? '▾' : '＋'}
+          {open ? (
+            <VIcon size={14}>
+              <path d="M6 9l6 6 6-6" />
+            </VIcon>
+          ) : (
+            <VIcon size={14}>
+              <path d="M12 5v14M5 12h14" />
+            </VIcon>
+          )}
         </span>
         <span className="vz-layers-btn-label">{t('vz.layers.label', 'Layers')}</span>
       </button>
@@ -953,7 +1115,7 @@ function ToolConeLegend({
             style={{ color: ACTUAL_TOOL_COLOR }}
             aria-hidden="true"
           >
-            ▼
+            {IconCone}
           </span>
           {t('vz.legend.actual', 'Machine (live)')}
         </span>
@@ -965,7 +1127,7 @@ function ToolConeLegend({
             style={{ color: SIM_TOOL_COLOR }}
             aria-hidden="true"
           >
-            ▼
+            {IconCone}
           </span>
           {t('vz.legend.sim', 'Simulation')}
         </span>
@@ -1019,7 +1181,7 @@ function BedSizeControl() {
         aria-label={t('vz.bedSize.aria', 'Bed size')}
         aria-expanded={open}
       >
-        📐
+        {IconBed}
       </button>
       {open && (
         <div
@@ -1361,7 +1523,8 @@ const OVERLAY_CSS = `
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px;
+  align-items: center;
+  gap: 3px;
   /* Cap the width so the row WRAPS instead of overlapping the scene; leave a
      left gutter so it never collides with the placement readout (top-left). */
   max-width: calc(100% - 16px);
@@ -1371,8 +1534,8 @@ const OVERLAY_CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -1383,6 +1546,7 @@ const OVERLAY_CSS = `
   line-height: 1;
   cursor: pointer;
 }
+.vz-toolbar-btn svg { display: block; }
 .vz-toolbar-btn:hover {
   background: color-mix(in srgb, var(--bg-elev) 95%, transparent);
   border-color: var(--accent, var(--fg-muted));
@@ -1392,9 +1556,10 @@ const OVERLAY_CSS = `
 }
 .vz-toolbar-btn[aria-expanded='true'],
 .vz-toolbar-btn--on {
-  border-color: var(--accent, var(--fg-muted));
-  background: color-mix(in srgb, var(--accent, var(--bg-elev)) 28%, var(--bg-elev));
-  color: var(--accent-fg, var(--fg));
+  /* Active toggle: bright accent on a subtle tint (readable in both themes). */
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
 }
 .vz-toolbar-btn:disabled {
   opacity: 0.4;
@@ -1403,7 +1568,7 @@ const OVERLAY_CSS = `
 .vz-toolbar-sep {
   width: 1px;
   align-self: stretch;
-  margin: 2px 2px;
+  margin: 3px 1px;
   background: var(--border);
   flex: 0 0 auto;
 }
@@ -1554,17 +1719,26 @@ const OVERLAY_CSS = `
 }
 .vz-menu-item:hover { background: color-mix(in srgb, var(--accent, var(--fg)) 14%, transparent); }
 .vz-menu-item--on {
-  border-color: var(--accent, var(--fg-muted));
-  background: color-mix(in srgb, var(--accent, var(--bg-elev)) 24%, transparent);
-  color: var(--accent-fg, var(--fg));
+  /* Selected/on: bright ACCENT text on a subtle accent tint — readable in both
+     themes. (Was the near-black on-solid-accent text over a dark translucent
+     tint, so text almost matched the background — unreadable.) */
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 600;
 }
 .vz-menu-glyph {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 18px;
-  text-align: center;
   font-size: 14px;
   line-height: 1;
 }
+.vz-menu-glyph svg { display: block; }
+.vz-layers-glyph { display: inline-flex; align-items: center; justify-content: center; }
+.vz-legend-cone svg { display: block; }
 .vz-menu-label { flex: 1 1 auto; min-width: 0; }
 /* --- layers / legend overlay (top-left, collapsible) --- */
 .vz-layers {

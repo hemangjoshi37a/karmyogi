@@ -356,6 +356,9 @@
 }
 .gp-card-title {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-section);
   font-weight: 600;
   text-transform: uppercase;

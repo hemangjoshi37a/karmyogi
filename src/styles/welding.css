@@ -193,6 +193,9 @@
 }
 .wp-card-head h4 {
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-section);
   font-weight: 600;
   color: var(--fg-muted);

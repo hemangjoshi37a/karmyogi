@@ -7,6 +7,8 @@ import { Icon } from '../components/Icons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
+import { CamEmpty } from '../components/cam/CamUI'
+import '../styles/cam.css'
 import {
   WeavePattern,
   defaultWeldLine,
@@ -687,7 +689,7 @@ export function WeldingPanel() {
         <section className="wp-settings">
           <div className="wp-card">
             <div className="wp-card-head">
-              <h4>{t('weld.motion.title', 'Travel & motion')}</h4>
+              <h4><Icon name="jog" size={14} className="cam-card-ico" /> {t('weld.motion.title', 'Travel & motion')}</h4>
               <InfoTip
                 topic="weldMotion"
                 title={t('weld.motion.title', 'Travel & motion')}
@@ -753,7 +755,7 @@ export function WeldingPanel() {
 
           <div className="wp-card">
             <div className="wp-card-head">
-              <h4>{t('weld.arc.title', 'Arc & gas')}</h4>
+              <h4><Icon name="spindle" size={14} className="cam-card-ico" /> {t('weld.arc.title', 'Arc & gas')}</h4>
               <InfoTip
                 topic="weldArc"
                 title={t('weld.arc.title', 'Arc & gas')}
@@ -836,14 +838,21 @@ export function WeldingPanel() {
       {/* Weld objects — one editable card each (line or circle). */}
       <div className="wp-card wp-objects">
         <div className="wp-card-head">
-          <h4>{t('weld.objects.title', 'Weld objects')}</h4>
+          <h4><Icon name="frame" size={14} className="cam-card-ico" /> {t('weld.objects.title', 'Weld objects')}</h4>
           <span className="wp-card-count">{objects.length}</span>
         </div>
         <div className="wp-obj-list">
           {objects.length === 0 && (
-            <p className="wp-empty">
-              {t('weld.empty', 'No objects yet. Press ╱ for a 3D line or ◯ for a circle, then ⇤ / ⇥ / ⊙ to record machine positions.')}
-            </p>
+            <CamEmpty
+              icon={<Icon name="frame" size={22} />}
+              title={t('weld.empty.title', 'No weld objects yet')}
+              hint={t('weld.empty.hint', 'Add a 3D line or a circle, then record machine positions with ⇤ / ⇥ / ⊙.')}
+              action={
+                <button type="button" className="cam-primary" onClick={addLine}>
+                  <Icon name="add" size={14} /> {t('weld.empty.add', 'Add weld line')}
+                </button>
+              }
+            />
           )}
           {objects.map((obj, i) => (
             <ObjectCard

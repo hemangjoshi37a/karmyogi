@@ -25,7 +25,9 @@ import {
   type LaserContour,
   type PlacedContour,
 } from '../core/laser'
+import { CamEmpty } from '../components/cam/CamUI'
 import '../styles/laser.css'
+import '../styles/cam.css'
 
 /** Hard cap on the Quantity field — keeps the O(n²) nest hill-climb bounded. */
 const MAX_QUANTITY = 200
@@ -621,13 +623,18 @@ export function LaserPanel() {
       {/* DXF import. */}
       <section className="lp-card">
         <div className="lp-card-head">
-          <h4>{t('laser.dxf.title', 'Drawing (DXF)')}</h4>
+          <h4>
+            <span className="cam-card-ico" aria-hidden="true">
+              <Icon name="frame" size={14} />
+            </span>
+            {t('laser.dxf.title', 'Drawing (DXF)')}
+          </h4>
           {fileName && <span className="lp-card-count">{fileName}</span>}
         </div>
         <div className="lp-import-row">
           <button
             type="button"
-            className="lp-btn lp-btn-primary"
+            className="cam-primary"
             onClick={() => fileInputRef.current?.click()}
           >
             <Icon name="upload" size={15} /> {t('laser.dxf.import', 'Import DXF…')}
@@ -662,16 +669,23 @@ export function LaserPanel() {
           </ul>
         )}
         {contours.length === 0 && !importError && (
-          <p className="lp-hint">
-            {t('laser.dxf.hint', 'Import a DXF: closed contours become cut loops, open paths become cut lines.')}
-          </p>
+          <CamEmpty
+            icon={<Icon name="laser" size={20} />}
+            title={t('laser.dxf.empty.title', 'No drawing loaded')}
+            hint={t('laser.dxf.empty.hint', 'Import a DXF — closed contours become cut loops, open paths become cut lines.')}
+          />
         )}
       </section>
 
       {/* Nesting / sheet. */}
       <section className="lp-card">
         <div className="lp-card-head">
-          <h4>{t('laser.sheet.title', 'Sheet & nesting')}</h4>
+          <h4>
+            <span className="cam-card-ico" aria-hidden="true">
+              <Icon name="duplicate" size={14} />
+            </span>
+            {t('laser.sheet.title', 'Sheet & nesting')}
+          </h4>
           <label className="lp-toggle">
             <input
               type="checkbox"
@@ -763,7 +777,12 @@ export function LaserPanel() {
       {/* Common cut parameters. */}
       <section className="lp-card">
         <div className="lp-card-head">
-          <h4>{t('laser.cut.title', 'Cut parameters')}</h4>
+          <h4>
+            <span className="cam-card-ico" aria-hidden="true">
+              <Icon name="laser" size={14} />
+            </span>
+            {t('laser.cut.title', 'Cut parameters')}
+          </h4>
         </div>
         <div className="lp-sliders">
           <SliderField

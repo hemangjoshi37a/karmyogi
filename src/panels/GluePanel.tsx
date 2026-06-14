@@ -15,7 +15,9 @@ import {
   type GlueParams,
   type GlueShape,
 } from '../core/glue'
+import { CamEmpty } from '../components/cam/CamUI'
 import '../styles/glue.css'
+import '../styles/cam.css'
 
 /** Split G-code into non-empty lines for streaming to the controller. */
 function gcodeLines(gcode: string): string[] {
@@ -993,9 +995,18 @@ export function GluePanel() {
           <div className="gp-cards">
           {/* Shape list */}
           <section className="gp-card gp-card-wide">
-            <h3 className="gp-card-title">{t('glue.shapes.title', 'Shapes')}</h3>
+            <h3 className="gp-card-title">
+              <span className="cam-card-ico" aria-hidden="true">
+                <ToolGlyph tool="rect" />
+              </span>
+              {t('glue.shapes.title', 'Shapes')}
+            </h3>
             {shapes.length === 0 ? (
-              <p className="gp-empty">{t('glue.shapes.empty', 'No shapes yet — draw one on the bed.')}</p>
+              <CamEmpty
+                icon={<ToolGlyph tool="rect" />}
+                title={t('glue.shapes.empty.title', 'No shapes yet')}
+                hint={t('glue.shapes.empty.hint', 'Pick a tool above and drag on the bed to draw a glue bead.')}
+              />
             ) : (
               <ul className="gp-list">
                 {shapes.map(({ id, shape }) => (
@@ -1062,7 +1073,12 @@ export function GluePanel() {
 
           {/* Dispenser & motion (essentials) */}
           <section className="gp-card">
-            <h3 className="gp-card-title">{t('glue.motion.title', 'Dispenser & motion')}</h3>
+            <h3 className="gp-card-title">
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name="probe" size={14} />
+              </span>
+              {t('glue.motion.title', 'Dispenser & motion')}
+            </h3>
             <div className="glue-sfields">
               <SliderField
                 icon={<Icon name="probe" size={14} />}

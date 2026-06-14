@@ -9,12 +9,78 @@
  */
 
 import { useEffect, useRef } from 'react'
+import type { ReactNode } from 'react'
 import { IconButton } from './IconButton'
 import { usePlayback } from '../store/playback'
 import { useT } from '../i18n'
 import '../styles/timeline.css'
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4] as const
+
+/**
+ * Tiny inline-SVG wrapper for the transport glyphs that have no entry in the
+ * shared Icon set (jump-to-start/end, step-segment, loop). Crisp 24×24 line
+ * icons inheriting `currentColor` instead of per-OS-inconsistent media emoji.
+ */
+function TIcon({ children, fill = false }: { children: ReactNode; fill?: boolean }) {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill={fill ? 'currentColor' : 'none'}
+      stroke={fill ? 'none' : 'currentColor'}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {children}
+    </svg>
+  )
+}
+
+// ⏮ jump to start: a play-triangle pointing left against a bar.
+const IconJumpStart = (
+  <TIcon fill>
+    <rect x="5" y="5" width="2.4" height="14" rx="0.5" />
+    <path d="M20 5L9 12l11 7z" />
+  </TIcon>
+)
+// ⏪ previous segment: a DOUBLE left triangle (rewind) — distinct from the single
+// play triangle and from the bar-flanked jump-to-start.
+const IconPrevSeg = (
+  <TIcon fill>
+    <path d="M12 5 4 12l8 7z" />
+    <path d="M20 5l-8 7 8 7z" />
+  </TIcon>
+)
+// ⏩ next segment: a DOUBLE right triangle (fast-forward) — clearly different
+// from the single play triangle (the two looked identical before) and from the
+// bar-flanked jump-to-end.
+const IconNextSeg = (
+  <TIcon fill>
+    <path d="M4 5l8 7-8 7z" />
+    <path d="M12 5l8 7-8 7z" />
+  </TIcon>
+)
+// ⏭ jump to end: a play-triangle pointing right against a bar.
+const IconJumpEnd = (
+  <TIcon fill>
+    <path d="M4 5l11 7L4 19z" />
+    <rect x="16.6" y="5" width="2.4" height="14" rx="0.5" />
+  </TIcon>
+)
+// 🔁 loop: two circular arrows.
+const IconLoop = (
+  <TIcon>
+    <path d="M4 9a6 6 0 0 1 6-6h7" />
+    <path d="M14 0.5L17.5 3 14 5.5" />
+    <path d="M20 15a6 6 0 0 1-6 6H7" />
+    <path d="M10 18.5L6.5 21 10 23.5" />
+  </TIcon>
+)
 
 /** Format seconds as `m:ss`. */
 function fmt(sec: number): string {
@@ -86,37 +152,37 @@ export function PlaybackTimeline() {
     <div className="pt-bar">
       <div className="pt-transport">
         <IconButton
-          icon="⏮"
+          icon={IconJumpStart}
           label={t('transport.jumpStart', 'Jump to start')}
           className="pt-btn"
           onClick={() => seek(0)}
         />
         <IconButton
-          icon="◀"
+          icon={IconPrevSeg}
           label={t('transport.prevSeg', 'Previous segment')}
           className="pt-btn"
           onClick={() => stepSeg(-1)}
         />
         <IconButton
-          icon={isPlaying ? '⏸' : '▶'}
+          iconName={isPlaying ? 'pause' : 'play'}
           label={isPlaying ? t('transport.pause', 'Pause') : t('transport.play', 'Play')}
           className="pt-btn pt-btn--play"
           onClick={() => toggle()}
         />
         <IconButton
-          icon="▶▌"
+          icon={IconNextSeg}
           label={t('transport.nextSeg', 'Next segment')}
           className="pt-btn"
           onClick={() => stepSeg(1)}
         />
         <IconButton
-          icon="⏭"
+          icon={IconJumpEnd}
           label={t('transport.jumpEnd', 'Jump to end')}
           className="pt-btn"
           onClick={() => seek(duration)}
         />
         <IconButton
-          icon="🔁"
+          icon={IconLoop}
           label={loop ? t('transport.looping', 'Looping (on)') : t('transport.loop', 'Loop')}
           className={loop ? 'pt-btn pt-btn--active' : 'pt-btn'}
           aria-pressed={loop}

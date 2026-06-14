@@ -87,6 +87,18 @@
   justify-content: space-between;
   gap: var(--sp-1);
 }
+/* P1: small leading accent glyph before a section title (shared `cam-card-ico`). */
+.wr-card > h3 .cam-card-ico {
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+.wr-card > h3.wr-card-head > span:first-child {
+  display: inline-flex;
+  align-items: center;
+}
+.wr-card > h3.wr-card-head .cam-card-ico {
+  vertical-align: baseline;
+}
 .wr-card-body {
   padding: var(--pad-card-y) var(--pad-card-x);
   display: flex;

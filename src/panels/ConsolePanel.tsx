@@ -8,6 +8,7 @@ import {
   type ConsoleEntry,
 } from '../store'
 import { useT } from '../i18n'
+import { Icon } from '../components/Icons'
 import '../styles/console.css'
 
 /** A user-editable quick-send macro: a label + the raw GRBL command. */
@@ -220,7 +221,20 @@ export function ConsolePanel() {
       {/* ---- search bar (pinned top) ---- */}
       <div className="chat-search" role="search">
         <span className="chat-search-icon" aria-hidden="true">
-          ⌕
+          <svg
+            width={16}
+            height={16}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.3-4.3" />
+          </svg>
         </span>
         <input
           className="chat-search-input"
@@ -262,7 +276,7 @@ export function ConsolePanel() {
           title={t('console.copy.title', 'Copy transcript to clipboard')}
           aria-label={t('console.copy.aria', 'Copy transcript')}
         >
-          ⧉
+          <Icon name="copy" size={16} />
         </button>
         <button
           type="button"
@@ -276,7 +290,19 @@ export function ConsolePanel() {
           aria-label={t('console.macros.toggle', 'Toggle quick commands')}
           aria-pressed={showMacros}
         >
-          ⚡
+          <svg
+            width={16}
+            height={16}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M13 2L4 14h7l-1 8 9-12h-7z" />
+          </svg>
         </button>
         <button
           type="button"
@@ -286,7 +312,7 @@ export function ConsolePanel() {
           title={t('console.clear.title', 'Clear the console log')}
           aria-label={t('console.clear.aria', 'Clear console')}
         >
-          🗑
+          <Icon name="trash" size={16} />
         </button>
       </div>
 
@@ -391,7 +417,7 @@ export function ConsolePanel() {
                     title={t('console.macro.remove', 'Remove macro')}
                     aria-label={t('console.macro.remove', 'Remove macro')}
                   >
-                    🗑
+                    <Icon name="trash" size={14} />
                   </button>
                 </span>
               ))
@@ -433,7 +459,36 @@ export function ConsolePanel() {
             aria-label={t('console.macro.editAria', 'Edit macros')}
             aria-pressed={editMacros}
           >
-            {editMacros ? '✓' : '✎'}
+            {editMacros ? (
+              <svg
+                width={16}
+                height={16}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg
+                width={16}
+                height={16}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17z" />
+                <path d="M13.5 6.5l3 3" />
+              </svg>
+            )}
           </button>
         </div>
       )}
@@ -469,7 +524,20 @@ export function ConsolePanel() {
           }
           aria-label={t('console.send.aria', 'Send command')}
         >
-          <span aria-hidden="true">➤</span>
+          <svg
+            width={18}
+            height={18}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M4 12l16-8-6 16-3.5-6.5z" />
+            <path d="M10.5 13.5L20 4" />
+          </svg>
         </button>
       </div>
     </div>

@@ -29,7 +29,9 @@ import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
+import { CamEmpty } from '../components/cam/CamUI'
 import '../styles/pcb.css'
+import '../styles/cam.css'
 
 /** Single canonical program section for ALL PCB output (preview / play / generate).
  *  Using ONE name means each push REPLACES the previous one — the operator never
@@ -1084,7 +1086,12 @@ export function PcbPanel() {
       <div className="pcb-scroll">
         {/* ---- 1. Upload package (primary action) ---- */}
         <section className="pcb-section pcb-section-wide">
-          <h3>{t('pcb.upload.title', '1 · Upload Gerber ZIP')}</h3>
+          <h3>
+            <span className="cam-card-ico" aria-hidden="true">
+              <Icon name="upload" size={15} />
+            </span>
+            {t('pcb.upload.title', '1 · Upload Gerber ZIP')}
+          </h3>
           <div className="pcb-section-body">
             <div
               className={'pcb-drop pcb-drop-primary' + (dragZip ? ' pcb-dragover' : '')}
@@ -1100,11 +1107,30 @@ export function PcbPanel() {
                 if (f) void loadZip(f)
               }}
             >
-              <button className="pcb-load-btn primary pcb-load-zip" onClick={() => zipRef.current?.click()}>
-                <Icon name="upload" size={16} className="pcb-btn-icon" />
-                {t('pcb.upload.button', 'Upload Gerber ZIP…')}
-              </button>
-              <span className="pcb-drop-hint">{t('pcb.upload.dropHint', 'or drop a .zip export here')}</span>
+              {!layers.length && !pkgError ? (
+                <CamEmpty
+                  icon={<Icon name="upload" size={20} />}
+                  title={t('pcb.upload.empty.title', 'Drop your board export here')}
+                  hint={t(
+                    'pcb.upload.empty.hint',
+                    'Upload a Gerber/Excellon ZIP — layers are detected automatically, then press play on a layer to run it.',
+                  )}
+                  action={
+                    <button className="cam-primary pcb-load-zip" onClick={() => zipRef.current?.click()}>
+                      <Icon name="upload" size={16} className="pcb-btn-icon" />
+                      {t('pcb.upload.button', 'Upload Gerber ZIP…')}
+                    </button>
+                  }
+                />
+              ) : (
+                <>
+                  <button className="cam-primary pcb-load-zip" onClick={() => zipRef.current?.click()}>
+                    <Icon name="upload" size={16} className="pcb-btn-icon" />
+                    {t('pcb.upload.button', 'Upload Gerber ZIP…')}
+                  </button>
+                  <span className="pcb-drop-hint">{t('pcb.upload.dropHint', 'or drop a .zip export here')}</span>
+                </>
+              )}
               <input
                 ref={zipRef}
                 className="pcb-load-input"
@@ -1113,19 +1139,6 @@ export function PcbPanel() {
                 onChange={onZipInput}
               />
             </div>
-
-            {!layers.length && !pkgError && (
-              <p className="pcb-intro">
-                {t(
-                  'pcb.intro.lead',
-                  "Drop your board's Gerber/Excellon export ZIP here. Layers are detected automatically — then press ",
-                )}
-                <span className="pcb-kbd">
-                  <Icon name="play" size={11} />
-                </span>
-                {t('pcb.intro.rest', ' on a layer to run it.')}
-              </p>
-            )}
 
             {pkgError && <div className="pcb-error">{pkgError}</div>}
 
@@ -1228,7 +1241,12 @@ export function PcbPanel() {
         {layers.length > 0 && (
           <section className="pcb-section pcb-section-wide">
             <h3 className="pcb-h3-row">
-              <span>{t('pcb.layers.title', '2 · Layers')}</span>
+              <span>
+                <span className="cam-card-ico" aria-hidden="true">
+                  <Icon name="copy" size={15} />
+                </span>
+                {t('pcb.layers.title', '2 · Layers')}
+              </span>
               <IconButton
                 className="pcb-clear-btn"
                 iconName="trash"
@@ -1459,7 +1477,12 @@ export function PcbPanel() {
         {/* ---- 3. Toolpath operations (one machining task per layer) ---- */}
         {layers.length > 0 && (
           <section className="pcb-section pcb-section-wide">
-            <h3>{t('pcb.ops.title', '3 · Toolpath operations')}</h3>
+            <h3>
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name="settings" size={15} />
+              </span>
+              {t('pcb.ops.title', '3 · Toolpath operations')}
+            </h3>
             <div className="pcb-section-body">
               <p className="pcb-hint">
                 {t(
@@ -1725,7 +1748,12 @@ export function PcbPanel() {
         {/* ---- 4. Essentials (always handy) ---- */}
         <section className="pcb-section">
           <h3 className="pcb-h3-row">
-            <span>{t('pcb.essentials.title', '4 · Essentials')}</span>
+            <span>
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name="settings" size={15} />
+              </span>
+              {t('pcb.essentials.title', '4 · Essentials')}
+            </span>
             <SaveLoadButtons
               value={pcbDoc}
               onLoad={loadPcbDoc}
@@ -1890,7 +1918,12 @@ export function PcbPanel() {
         {/* ---- Output: status + collapsed raw G-code ---- */}
         {(status || lastGcode) && (
           <section className="pcb-section pcb-section-wide">
-            <h3>{t('pcb.output.title', 'Output')}</h3>
+            <h3>
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name="download" size={15} />
+              </span>
+              {t('pcb.output.title', 'Output')}
+            </h3>
             <div className="pcb-section-body">
               {status && (
                 <div className={statusError ? 'pcb-error' : 'pcb-status'} role={statusError ? 'alert' : undefined}>

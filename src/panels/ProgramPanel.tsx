@@ -293,7 +293,20 @@ export function ProgramPanel() {
               )}
               aria-label={t('prog.resetStartLineAria', 'Reset start line to 1')}
             >
-              ↺
+              <svg
+                width={16}
+                height={16}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                <path d="M3 4v4h4" />
+              </svg>
             </button>
             <input
               className={
@@ -340,7 +353,7 @@ export function ProgramPanel() {
                       )
               }
             >
-              ▶ {t('prog.stream', 'Stream')}
+              <Icon name="play" size={14} /> {t('prog.stream', 'Stream')}
             </button>
             {/* Merged Pause/Resume toggle: feed-hold while running, resume when held. */}
             <button
@@ -359,7 +372,7 @@ export function ProgramPanel() {
                   : t('prog.pauseAria', 'Pause')
               }
             >
-              {held ? '⏵' : '⏸'}
+              {held ? <Icon name="play" size={16} /> : <Icon name="pause" size={16} />}
             </button>
             <button
               className="pp-icon-btn pp-btn-abort"
@@ -368,7 +381,7 @@ export function ProgramPanel() {
               title={t('prog.abort', 'Abort (soft reset)')}
               aria-label={t('prog.abortAria', 'Abort')}
             >
-              ⏹
+              <Icon name="stop" size={16} />
             </button>
           </div>
 
@@ -453,7 +466,7 @@ export function ProgramPanel() {
                 title={t('prog.uploadSection', 'Upload a G-code file as a new section (or drag & drop)')}
                 aria-label={t('prog.uploadSection', 'Upload a G-code file as a new section')}
               >
-                ⬆
+                <Icon name="upload" size={16} />
               </button>
             </div>
           </div>
@@ -558,7 +571,7 @@ export function ProgramPanel() {
                         { name: sec.name },
                       )}
                     >
-                      🗑
+                      <Icon name="trash" size={14} />
                     </button>
                   </div>
                   {open &&

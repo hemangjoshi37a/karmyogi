@@ -1,0 +1,111 @@
+/* Shared CAM-panel polish layer — ONE consistent look for every workbench tab.
+   Built from the patterns already proven in the Spring/Soldering panels and
+   generalized so all panels (Carving, Writing, PCB, Drilling, Glue, PnP, Laser,
+   Welding, Signature, Print, Screw Fitting, …) share the same status strip,
+   empty state, primary action, and section-header rhythm. Theme-token driven. */
+
+/* ---- Live status strip (turns / lines / est / → Program) ---- */
+.cam-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+.cam-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.cam-status-pill b {
+  color: var(--fg);
+  font-weight: 600;
+}
+.cam-status-sep {
+  color: var(--border);
+}
+.cam-status-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* ---- Friendly empty state (COMPACT — never waste vertical space) ---- */
+.cam-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--sp-1);
+  padding: var(--sp-4) var(--sp-3);
+  color: var(--fg-muted);
+}
+.cam-empty-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+  color: var(--accent);
+}
+.cam-empty-title {
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  color: var(--fg);
+}
+.cam-empty-hint {
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  max-width: 32ch;
+}
+.cam-empty-action {
+  margin-top: var(--sp-1);
+}
+
+/* ---- Primary action: the one accent-filled CTA per panel ---- */
+.cam-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--ctl-h-lg);
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.12s ease, opacity 0.12s ease;
+}
+.cam-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.cam-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- Section glyph: a small accent icon before a card title ---- */
+.cam-card-ico {
+  color: var(--accent);
+  flex-shrink: 0;
+}

@@ -63,12 +63,21 @@
 }
 .pcb-section > h3 {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: var(--sp-1) var(--pad-card-x);
   font-size: var(--fs-section);
   color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
+}
+/* A title that itself wraps an icon + text (the pcb-h3-row variant) keeps them inline. */
+.pcb-section > h3 > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .pcb-section > h3.pcb-h3-row {
   display: flex;
