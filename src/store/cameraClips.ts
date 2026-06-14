@@ -12,6 +12,21 @@ const DB_NAME = 'karmyogi-camera'
 const DB_VERSION = 1
 const STORE = 'clips'
 
+// ── OOM caps (cyclic, drop-oldest) ───────────────────────────────────────────
+// Auto-recorded clips are large video blobs that accumulate every time a program
+// streams. Left unbounded they fill IndexedDB and (when listed/loaded) bloat
+// memory → Chrome OOM. We bound the stored set by BOTH total bytes and count,
+// evicting the OLDEST clips first (lowest createdAt) when saving a new one and
+// pruning on every list() so an already-bloated DB self-heals without the user
+// clearing cache.
+//
+// 128 MB ≈ many minutes of webm at typical bitrates while staying modest on disk
+// and memory; the count cap is a coarse backstop for many tiny clips.
+/** Max total stored clip bytes — evict oldest until under this. */
+const MAX_TOTAL_CLIP_BYTES = 128 * 1024 * 1024 // 128 MB
+/** Max stored clip count — coarse backstop alongside the byte cap. */
+const MAX_CLIPS = 20
+
 /** Persisted clip record. The blob is stored alongside its metadata. */
 export interface StoredClip {
   /** Auto-increment primary key. */
@@ -71,6 +86,43 @@ function reqAsPromise<T>(req: IDBRequest<T>): Promise<T> {
   })
 }
 
+/**
+ * Cyclic prune: delete the OLDEST clips (lowest createdAt) until the stored set
+ * is within BOTH the byte and count caps. Reads only lightweight metadata to
+ * decide, then deletes the heavy records. Best-effort — any failure is swallowed
+ * so it never blocks save/list. Returns silently when already within caps.
+ */
+async function pruneClips(): Promise<void> {
+  try {
+    const db = await openDb()
+    const tx = db.transaction(STORE, 'readonly')
+    const all = (await reqAsPromise(tx.objectStore(STORE).getAll())) as StoredClip[]
+    // Oldest first so we evict from the front.
+    all.sort((a, b) => a.createdAt - b.createdAt)
+    let total = all.reduce((sum, c) => sum + (c.bytes || 0), 0)
+    let count = all.length
+    const toDelete: number[] = []
+    let i = 0
+    while (i < all.length && (count > MAX_CLIPS || total > MAX_TOTAL_CLIP_BYTES)) {
+      toDelete.push(all[i].id)
+      total -= all[i].bytes || 0
+      count -= 1
+      i += 1
+    }
+    if (toDelete.length === 0) return
+    const wtx = db.transaction(STORE, 'readwrite')
+    const store = wtx.objectStore(STORE)
+    for (const id of toDelete) store.delete(id)
+    await new Promise<void>((resolve) => {
+      wtx.oncomplete = () => resolve()
+      wtx.onerror = () => resolve()
+      wtx.onabort = () => resolve()
+    })
+  } catch {
+    /* pruning is best-effort; never block save/list or surface */
+  }
+}
+
 /** Save a recorded clip; resolves to the full stored record (with its new id). */
 export async function saveClip(input: {
   name: string
@@ -90,11 +142,16 @@ export async function saveClip(input: {
   }
   const tx = db.transaction(STORE, 'readwrite')
   const id = await reqAsPromise(tx.objectStore(STORE).add(record as StoredClip))
+  // Cyclic eviction: trim the OLDEST clips so the store stays within caps.
+  await pruneClips()
   return { ...record, id: id as number }
 }
 
 /** List all clips' metadata (newest first), without loading their blobs. */
 export async function listClips(): Promise<ClipMeta[]> {
+  // Prune-on-load: an already-bloated DB (grown before caps existed) self-heals
+  // here so the user never has to clear cache. Best-effort; never blocks listing.
+  await pruneClips()
   const db = await openDb()
   const tx = db.transaction(STORE, 'readonly')
   const all = await reqAsPromise(tx.objectStore(STORE).getAll())

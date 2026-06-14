@@ -89,6 +89,21 @@ textarea { min-height: auto; }
   flex: 0 0 auto;
 }
 .topbar .brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: 0.5px; }
+/* Brand is now a button that opens the About modal — reset the native chrome. */
+.topbar .brand-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 2px 6px;
+  margin-left: -4px;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+.topbar .brand-btn:hover { background: var(--bg-elev); border-color: var(--border); }
+.topbar .brand-btn:active { transform: translateY(0.5px); }
 .topbar .brand .accent { color: var(--accent); }
 .topbar .brand .brand-mark {
   width: 22px;

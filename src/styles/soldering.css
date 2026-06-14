@@ -203,6 +203,44 @@
   border-radius: 999px;
 }
 
+/* Auto-optimize button in the Solder-points section header. Count stays beside
+   the title; the button is pushed to the far right. */
+.sp-points .sp-card-count {
+  margin-left: 0;
+}
+.sp-optimize-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-height: var(--ctl-h);
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.sp-optimize-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-input));
+  border-color: var(--accent);
+}
+.sp-optimize-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.sp-optimize-travel {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ─────────────────────── Gerber / drill layer picker ───────────────────────
    Shown after a multi-layer ZIP is imported: a list of detected layers tagged
    with a friendly solder-role, the best candidate (paste › copper › drill)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getActiveTab, subscribeActiveTab } from '../track/activity'
+import { focusTab, openTabs } from '../track/tabNav'
 import { tabActionFor } from './gamepadTabActions'
 
 /**
@@ -128,6 +129,13 @@ export interface GamepadState {
    */
   activeTab: string | undefined
   /**
+   * TAB-NAVIGATION mode: toggled by clicking the LEFT STICK (L3). While on, the
+   * D-pad ←/→ (and LB/RB) switch the active dock tab instead of jogging, so the
+   * operator can move between workbench tabs from the pad; A/B (or L3 again)
+   * exits. Exposed so the UI can show a "switch tab" overlay.
+   */
+  tabNavMode: boolean
+  /**
    * Play a haptic feedback pattern on the active pad (feature-detected; a no-op
    * when unsupported or disabled). Call this from the caller on machine-state
    * TRANSITIONS — not every frame.
@@ -211,6 +219,10 @@ export function useGamepad(
   const [id, setId] = useState<string | null>(null)
   const [buttonsPressed, setButtonsPressed] = useState<boolean[]>([])
   const [axes, setAxes] = useState<number[]>([])
+  // Tab-navigation mode (L3 toggles): while on, the D-pad/bumpers switch dock
+  // tabs and jog/actions are suspended. Ref drives the rAF loop; state the UI.
+  const [tabNavMode, setTabNavMode] = useState(false)
+  const tabNavRef = useRef(false)
 
   // Keep handlers in a ref so the rAF loop always calls the latest closures
   // without restarting the loop (which would reset edge/jog tracking).
@@ -353,6 +365,10 @@ export function useGamepad(
       prevPressed.current = []
       setButtonsPressed([])
       setAxes([])
+      if (tabNavRef.current) {
+        tabNavRef.current = false
+        setTabNavMode(false)
+      }
       return
     }
 
@@ -385,6 +401,52 @@ export function useGamepad(
         prevPressed.current = pressedNow
         rafId.current = requestAnimationFrame(tick)
         return
+      }
+
+      // --- TAB NAVIGATION mode (L3 toggles) ---
+      // A rising edge on L3 (left-stick click) flips tab-nav mode. While ON, the
+      // D-pad ←/→ and LB/RB step through the OPEN dock tabs (wrapping), A/B (or
+      // L3 again) exits, and ALL jog + discrete machine actions are suspended so
+      // the pad can't move the machine while the operator is picking a tab.
+      {
+        const prevN = prevPressed.current
+        const edge = (b: number) => (pressedNow[b] ?? false) && !(prevN[b] ?? false)
+        if (edge(Btn.L3)) {
+          tabNavRef.current = !tabNavRef.current
+          setTabNavMode(tabNavRef.current)
+          if (tabNavRef.current && jogActive.current) {
+            handlersRef.current.cancelJog()
+            jogActive.current = false
+            lastJog.current = { x: 0, y: 0, z: 0, feedXY: 0, feedZ: 0 }
+          }
+        }
+        if (tabNavRef.current) {
+          // Make sure no jog survives entering the mode mid-move.
+          if (jogActive.current) {
+            handlersRef.current.cancelJog()
+            jogActive.current = false
+            lastJog.current = { x: 0, y: 0, z: 0, feedXY: 0, feedZ: 0 }
+          }
+          const tabs = openTabs()
+          if (tabs.length > 0) {
+            let dir = 0
+            if (edge(Btn.DRight) || edge(Btn.RB)) dir = 1
+            else if (edge(Btn.DLeft) || edge(Btn.LB)) dir = -1
+            if (dir !== 0) {
+              let idx = tabs.indexOf(activeTabRef.current ?? '')
+              if (idx < 0) idx = 0
+              const next = (idx + dir + tabs.length) % tabs.length
+              focusTab(tabs[next])
+            }
+          }
+          if (edge(Btn.A) || edge(Btn.B)) {
+            tabNavRef.current = false
+            setTabNavMode(false)
+          }
+          prevPressed.current = pressedNow
+          rafId.current = requestAnimationFrame(tick)
+          return
+        }
       }
 
       // --- Analog proportional jog from sticks / triggers ---
@@ -523,6 +585,7 @@ export function useGamepad(
     enabled,
     setEnabled,
     activeTab,
+    tabNavMode,
     rumble,
   }
 }

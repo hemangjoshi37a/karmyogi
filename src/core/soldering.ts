@@ -144,6 +144,129 @@ export function estimateSolderingSeconds(
 }
 
 /**
+ * Total XY (free-travel) path length over `points` in their current order. When
+ * `start` is given it's the machine's pre-travel position (work origin), so the
+ * first leg start→points[0] is counted; otherwise the path starts at points[0].
+ * Z moves are ignored — this measures only the rapid XY travel between points,
+ * which is exactly what the ordering optimizer minimizes.
+ */
+export function solderTravelDistance(
+  points: { x: number; y: number }[],
+  start?: { x: number; y: number },
+): number {
+  if (points.length === 0) return 0;
+  let total = 0;
+  let prev = start ?? points[0];
+  for (let i = start ? 0 : 1; i < points.length; i++) {
+    total += Math.hypot(points[i].x - prev.x, points[i].y - prev.y);
+    prev = points[i];
+  }
+  return total;
+}
+
+/** Index of the nearest still-unused point to `ref` (squared distance). −1 if none. */
+function nearestUnused(
+  points: { x: number; y: number }[],
+  ref: { x: number; y: number },
+  used: boolean[],
+): number {
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    if (used[i]) continue;
+    const dx = points[i].x - ref.x;
+    const dy = points[i].y - ref.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * 2-opt refinement of an OPEN path (anchored at `start`): repeatedly reverse a
+ * sub-segment whenever doing so shortens the total path, until no improvement or
+ * a pass cap is hit. Mutates `order` in place. O(passes·n²) — the caller gates it
+ * on n so it stays snappy.
+ */
+function twoOptImprove(
+  order: number[],
+  points: { x: number; y: number }[],
+  start: { x: number; y: number },
+): void {
+  const n = order.length;
+  const D = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y);
+  const at = (idx: number) => points[order[idx]];
+  let improved = true;
+  let passes = 0;
+  const MAX_PASSES = 30;
+  while (improved && passes++ < MAX_PASSES) {
+    improved = false;
+    for (let i = 0; i < n - 1; i++) {
+      const aPrev = i === 0 ? start : at(i - 1);
+      const a = at(i);
+      for (let j = i + 1; j < n; j++) {
+        const b = at(j);
+        const bNext = j === n - 1 ? null : at(j + 1);
+        // Reversing order[i..j] swaps edges (aPrev→a)+(b→bNext) for (aPrev→b)+(a→bNext).
+        const before = D(aPrev, a) + (bNext ? D(b, bNext) : 0);
+        const after = D(aPrev, b) + (bNext ? D(a, bNext) : 0);
+        if (after + 1e-9 < before) {
+          let lo = i;
+          let hi = j;
+          while (lo < hi) {
+            const tmp = order[lo];
+            order[lo] = order[hi];
+            order[hi] = tmp;
+            lo++;
+            hi--;
+          }
+          improved = true;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Reorder soldering points to MINIMIZE the free (XY) travel between them — so the
+ * iron visits neighbouring pads in sequence instead of darting across the board
+ * and back. A greedy nearest-neighbour tour (seeded from the point closest to the
+ * machine start / work origin) gives a good route; a 2-opt pass then untangles
+ * the long crossings nearest-neighbour leaves behind. Optimizes XY only and
+ * preserves every point's data (Free-Z / Touch-Z / feed / approach …); returns a
+ * NEW array (pure). For very large lists the 2-opt pass is skipped to stay fast.
+ */
+export function orderSolderPointsForTravel<T extends { x: number; y: number }>(
+  points: T[],
+  opts: { start?: { x: number; y: number }; twoOpt?: boolean } = {},
+): T[] {
+  const n = points.length;
+  if (n <= 2) return points.slice();
+  const start = opts.start ?? { x: 0, y: 0 };
+  const used = new Array<boolean>(n).fill(false);
+  const order: number[] = [];
+  // Greedy nearest-neighbour from the point closest to the machine start.
+  let cur = nearestUnused(points, start, used);
+  if (cur < 0) return points.slice();
+  used[cur] = true;
+  order.push(cur);
+  for (let k = 1; k < n; k++) {
+    const next = nearestUnused(points, points[cur], used);
+    if (next < 0) break;
+    used[next] = true;
+    order.push(next);
+    cur = next;
+  }
+  // 2-opt untangles crossings; gate on size so big boards stay interactive.
+  if (opts.twoOpt ?? n <= 800) twoOptImprove(order, points, start);
+  return order.map((i) => points[i]);
+}
+
+/**
  * Produce a complete, safe G-code program for the given soldering points.
  * Faithful port of cadcam::SolderingGenerator::generate.
  */

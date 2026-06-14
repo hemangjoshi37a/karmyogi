@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Shell } from './shell'
 import { grbl } from '../serial/controller'
-import { usePersistentState } from '../store'
+import { usePersistentState, useMachines } from '../store'
 import { useMachineBridge } from '../machine/machineBridge'
 import { AuthGate } from '../auth/AuthGate'
 import { useActivityTracking } from '../track/useActivityTracking'
@@ -99,9 +99,28 @@ function usePathname(): string {
 
 export function App() {
   // Silently reconnect to a previously-authorized GRBL device on load
-  // (Web Serial remembers granted ports — no user gesture needed).
+  // (Web Serial remembers granted ports — no user gesture needed). When the
+  // Machine Farm has a last-active machine, prefer reconnecting to EXACTLY that
+  // saved machine (by USB vendor/product) and carry its id/label so the link
+  // re-binds to the same farm entry. The farm store is persisted + rehydrated at
+  // import time, so its activeId is available synchronously here. We never show
+  // the USB chooser — if nothing already-granted matches, autoConnect is a no-op.
   useEffect(() => {
-    grbl.autoConnect().catch(() => {})
+    const { activeId, machines } = useMachines.getState()
+    const active = activeId ? machines.find((m) => m.id === activeId) : undefined
+    // Only serial farm entries are silently reconnectable by USB ids. (Mock isn't
+    // a real device; WebSocket reconnect is handled by the farm/bridge; BLE needs
+    // a fresh gesture.) For anything else, fall back to the plain auto-connect.
+    const hint =
+      active && active.kind === 'serial' && active.usbVendorId != null
+        ? {
+            usbVendorId: active.usbVendorId,
+            usbProductId: active.usbProductId,
+            machineId: active.id,
+            label: active.label,
+          }
+        : undefined
+    grbl.autoConnect(hint).catch(() => {})
   }, [])
 
   // Server bridge: opt-in (persisted, default OFF). Mounted at the shell level so

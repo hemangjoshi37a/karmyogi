@@ -26,6 +26,7 @@
 import { grbl } from '../serial/controller'
 import { useProgram } from '../store/program'
 import { useCarveJobs } from '../store/carveJobs'
+import { usePlayback } from '../store/playback'
 
 /** Standard-mapping button index (mirrors `Btn` in useGamepad.ts). */
 export type ButtonIndex = number
@@ -46,6 +47,7 @@ export type TabBindings = Partial<Record<ButtonIndex, TabAction>>
 const A = 0
 const B = 1
 const X = 2
+const Y = 3
 const LB = 4
 const RB = 5
 
@@ -123,6 +125,83 @@ const cadcamBindings: TabBindings = {
   },
 }
 
+// ─── spring coiling tab ─────────────────────────────────────────────────────
+// Drive the automatic coiler from the pad. The spring program auto-syncs to the
+// program store, so streaming mirrors the program tab; Y previews the wind in 3D:
+//   A = Stream the coil program (start from the top) / Resume a feed-hold
+//   X = Pause (feed-hold)
+//   B = Abort (soft-reset / stop)
+//   Y = Play/pause the 3D coiling SIMULATION (no machine needed)
+const springCoilingBindings: TabBindings = {
+  [A]: {
+    label: 'Wind / Resume',
+    run: () => {
+      if (!grbl.isConnected) return
+      const prog = useProgram.getState()
+      if (prog.streaming) {
+        grbl.resume()
+        return
+      }
+      const lines = prog.lines
+      if (!lines.length) return
+      grbl.startProgram(lines)
+    },
+  },
+  [X]: {
+    label: 'Pause',
+    run: () => {
+      if (!grbl.isConnected) return
+      grbl.feedHold()
+    },
+  },
+  [B]: {
+    label: 'Abort',
+    run: () => {
+      if (!grbl.isConnected) return
+      grbl.abortProgram()
+    },
+  },
+  [Y]: {
+    label: 'Play/pause sim',
+    run: () => {
+      // No machine needed — toggles the visualizer playhead if a timeline exists.
+      if (usePlayback.getState().timeline) usePlayback.getState().toggle()
+    },
+  },
+}
+
+// ─── visualizer tab ─────────────────────────────────────────────────────────
+// Drive the 3D simulation/playhead (no machine needed):
+//   A  = Play / pause the simulation
+//   X  = Jump to start
+//   LB = Previous segment   RB = Next segment
+const visualizerBindings: TabBindings = {
+  [A]: {
+    label: 'Play / pause sim',
+    run: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().toggle()
+    },
+  },
+  [X]: {
+    label: 'Jump to start',
+    run: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().seek(0)
+    },
+  },
+  [LB]: {
+    label: 'Prev segment',
+    run: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().stepSeg(-1)
+    },
+  },
+  [RB]: {
+    label: 'Next segment',
+    run: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().stepSeg(1)
+    },
+  },
+}
+
 /**
  * The full registry: dock-panel id → button bindings. Add a tab by appending an
  * entry here (and import any store it needs). Order is irrelevant.
@@ -138,6 +217,8 @@ const cadcamBindings: TabBindings = {
 export const GAMEPAD_TAB_ACTIONS: Record<string, TabBindings> = {
   program: programBindings,
   cadcam: cadcamBindings,
+  springcoiling: springCoilingBindings,
+  visualizer: visualizerBindings,
 }
 
 /** The bindings for a tab id, or undefined when it falls back to global. */

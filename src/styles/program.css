@@ -22,6 +22,20 @@
 .pp-cols {
   columns: 230px;
   column-gap: 6px;
+  /* Pin the Run card (the only thing in here) to the top of the scrolling panel
+     so the Stream / Pause / Stop transport stays reachable while the section list
+     below auto-scrolls to follow the live line during a stream. Sticky on this
+     multicol CONTAINER is fine — only sticky ITEMS *inside* multicol are
+     unsupported. Negative margins + padding reclaim the panel's 6px padding so
+     the run-card background spans edge-to-edge and scrolled rows can't peek above
+     it. */
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-panel);
+  margin: -6px -6px 6px;
+  padding: 6px 6px 0;
+  box-shadow: 0 5px 8px -6px rgba(0, 0, 0, 0.5);
 }
 
 /* --- card --- */

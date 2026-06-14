@@ -696,3 +696,145 @@
 }
 .gp-launch-dot.on { background: var(--success); box-shadow: 0 0 6px var(--success); }
 @media (max-width: 480px) { .gp-launch { min-height: var(--ctl-h-touch, 44px); } }
+
+/* ───────────── gamepad tab-navigation overlay ───────────── */
+.gp-tabnav {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: none;
+  padding-top: 12vh;
+}
+.gp-tabnav-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92vw, 760px);
+  padding: 16px 20px;
+  background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+}
+.gp-tabnav-title {
+  /* Enlarged ~150% (was 12px) so it reads from across the bench. */
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.gp-tabnav-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+.gp-tabnav-item {
+  /* Enlarged ~150% (was 13px / 5px 12px). */
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.gp-tabnav-item.is-active {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.06);
+}
+.gp-tabnav-hint {
+  /* Enlarged ~150% (was 12px). */
+  font-size: 18px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ───────────── gamepad + keyboard legend HUD (corner overlays) ───────────── */
+/* Two fixed, click-through legend panels: gamepad (active-tab map) upper-left,
+   keyboard shortcuts upper-right. Same translucent/blurred vibe as .gp-tabnav,
+   but ~150% larger text than the old tiny chips so it reads at a glance. */
+.gp-hud {
+  position: fixed;
+  top: 0;
+  z-index: 1150;
+  pointer-events: none;
+  max-width: min(40vw, 360px);
+  padding: 10px;
+}
+.gp-hud-left { left: 0; }
+.gp-hud-right { right: 0; }
+.gp-hud-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--bg-panel) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+}
+.gp-hud-right .gp-hud-card { align-items: flex-end; }
+.gp-hud-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.gp-hud-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.gp-hud-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.gp-hud-right .gp-hud-row { flex-direction: row-reverse; }
+/* Key-cap / control chip: rounded, bordered, monospace, tabular. ~150% bigger
+   than the old .kbd-hint chips (target ~16–18px). */
+.gp-hud-key {
+  flex: 0 0 auto;
+  min-width: 28px;
+  padding: 3px 9px;
+  text-align: center;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+}
+.gp-hud-action {
+  font-size: 16px;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.gp-hud-right .gp-hud-action { text-align: right; }
+
+/* On phones the two corner panels would collide / cover the UI — shrink them and
+   cap the width so they stay out of the way (still click-through). */
+@media (max-width: 640px) {
+  .gp-hud { max-width: 46vw; padding: 6px; }
+  .gp-hud-card { padding: 8px 10px; gap: 4px; }
+  .gp-hud-title { font-size: 14px; }
+  .gp-hud-key { font-size: 14px; min-width: 24px; padding: 2px 7px; }
+  .gp-hud-action { font-size: 14px; }
+}

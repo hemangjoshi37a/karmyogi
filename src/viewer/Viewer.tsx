@@ -20,6 +20,10 @@ import { CameraBedPlane } from './CameraBedPlane'
 import { JobBox } from './JobBox'
 import { ViewportShapes } from './ViewportShapes'
 import { Dimensions, type PerFileDimension } from './Dimensions'
+import { SpringScene } from './SpringScene'
+import { useSpringViz } from '../store/springViz'
+import { SolderScene } from './SolderScene'
+import { useSolderViz } from '../store/solderViz'
 import { ToolpathStartMarker } from './ToolpathStartMarker'
 import { CameraQuatReporter, AxisOverlay } from './AxisOverlay'
 import { useViewportShapes } from '../store/viewportShapes'
@@ -240,6 +244,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   const t = useT()
   const bg = theme === 'dark' ? '#15181c' : '#e7ecf1'
 
+  // Spring-coiling preview channel: when the Spring panel owns the program (its
+  // 3D-coil-preview output mode), it publishes the spring dimensions here. We then
+  // swap the generic Δx/Δy/Δz dimension overlay for the spring-specialized scene.
+  // Gated additionally on the active program actually being a "Spring coil"
+  // section so the spring annotations can never bleed over a non-spring program.
+  const springActive = useSpringViz((s) => s.active)
+  const programSummaryName = useProgram((s) => s.name)
+  const isSpringProgram =
+    springActive && !!programSummaryName && programSummaryName.includes('Spring coil')
+  // Soldering: a 3D PCB stand-in (board + pads/holes) + selected-point highlight,
+  // shown alongside the streamed toolpath whenever the Soldering panel publishes.
+  const solderActive = useSolderViz((s) => s.active)
+
   // The global UI zoom (CSS `zoom` on <html>) changes the panel's rendered size
   // without firing a ResizeObserver entry on some Chromium versions. r3f's
   // measure hook always listens to window 'resize', so nudge it after each zoom
@@ -271,9 +288,23 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   }, [gcode, segmentsProp])
 
   const bedSize: [number, number, number] = [width, depth, height]
-  const controlBounds: Bounds3 | null = parsed.bounds
-    ? { min: parsed.bounds.min, max: parsed.bounds.max }
-    : null
+  const springParams = useSpringViz((s) => s.params)
+  // For a spring program, the parsed program's Y axis carries the chuck angle in
+  // DEGREES (cumulative, up to turns×360) — so `parsed.bounds` is a giant, mostly
+  // empty box and framing/fit would lose the little coil. Frame the actual COIL
+  // geometry instead (axis +X 0→freeLength, radius R lifted to rest on the bed),
+  // with a little room for the chuck/annotations.
+  const controlBounds: Bounds3 | null = useMemo(() => {
+    if (isSpringProgram && springParams) {
+      const R = Math.max(0.5, springParams.coilDiameter / 2)
+      const L = Math.max(R, springParams.freeLength)
+      return {
+        min: [-R * 1.8, -R * 1.4, 0] as [number, number, number],
+        max: [L + R * 0.6, R * 1.4, 2 * R * 1.1] as [number, number, number],
+      }
+    }
+    return parsed.bounds ? { min: parsed.bounds.min, max: parsed.bounds.max } : null
+  }, [isSpringProgram, springParams, parsed.bounds])
 
   // ---- Dimension extents -----------------------------------------------------
   // The dimension overlay measures the toolpath's ACTUAL size (Δx, Δy, Δz). We
@@ -308,6 +339,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     fit: () => apiRef.current.fit(),
     setView: (v) => apiRef.current.setView(v),
   }))
+
 
   // Orbit controls ref so the placement gizmo can disable orbiting while it
   // drags (drei's TransformControls and OrbitControls otherwise fight).
@@ -521,7 +553,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         <group visible={showShapes}>
           <ViewportShapes onDraggingChanged={onGizmoDragging} />
         </group>
-        <StockBlock visible={showStock} />
+        <StockBlock visible={showStock && !isSpringProgram} />
       {carveSim && revealIndex !== undefined && revealIndex >= 0 && (
         <CarvedStock
           segments={parsed.segments}
@@ -536,8 +568,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           gizmo can live-drag ONLY the selected section's group (matrixAutoUpdate
           off on that one; the gizmo writes its matrix imperatively at 60fps and
           resets to identity once the new placement is baked). */}
-      {/* Layers overlay master toggle: hide ALL toolpath geometry at once. */}
-      <group visible={showToolpaths}>
+      {/* Layers overlay master toggle: hide ALL toolpath geometry at once. For a
+          Spring-coiling program the streamed G-code is the 2-axis rotary+linear
+          program (NOT a 3D path) — drawing it as a polyline would be a meaningless
+          flat line, so the generic toolpath is hidden and only <SpringScene> draws
+          the wound coil. */}
+      <group visible={showToolpaths && !isSpringProgram}>
         {revealing ? (
           parsed.segments.length > 0 && (
             <Toolpath
@@ -566,23 +602,40 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           parsed.segments.length > 0 && <Toolpath segments={parsed.segments} />
         )}
       </group>
-      {parsed.bounds && <BoundsBox bounds={parsed.bounds} dark={theme === 'dark'} />}
-      {/* Engineering-style 3D dimension annotations (toggleable from the toolbar).
-          Measures the toolpath's actual EXTENT (Δx, Δy, Δz from segment endpoints),
-          NOT the origin→extent distance: `gcodeToPolylines` seeds its bounds with
-          the work origin (0,0,0), which would otherwise inflate the size of any
-          job not starting at zero — so we recompute from the moves themselves. */}
-      {showDimensions && dimExtent && (
-        <Dimensions bounds={dimExtent} dark={theme === 'dark'} />
+      {/* Soldering: the 3D PCB stand-in (board + pads/holes + selected-point
+          highlight cone) drawn alongside the streamed toolpath. */}
+      {solderActive && <SolderScene dark={theme === 'dark'} />}
+      {/* For a Spring-coiling preview we render the spring-specialized scene
+          (wire ⌀ / coil ⌀ / pitch / free length / turns + chuck + carriage) and
+          SKIP the generic bounding box + Δx/Δy/Δz dimension overlay. */}
+      {isSpringProgram ? (
+        <SpringScene dark={theme === 'dark'} simPosition={simPosition} />
+      ) : (
+        <>
+          {parsed.bounds && <BoundsBox bounds={parsed.bounds} dark={theme === 'dark'} />}
+          {/* Engineering-style 3D dimension annotations (toggleable from the toolbar).
+              Measures the toolpath's actual EXTENT (Δx, Δy, Δz from segment endpoints),
+              NOT the origin→extent distance: `gcodeToPolylines` seeds its bounds with
+              the work origin (0,0,0), which would otherwise inflate the size of any
+              job not starting at zero — so we recompute from the moves themselves. */}
+          {showDimensions && dimExtent && (
+            <Dimensions bounds={dimExtent} dark={theme === 'dark'} />
+          )}
+        </>
       )}
-      {/* Red sphere marking the toolpath START (where work-zero / "Zero all" sits). */}
-      {parsed.segments.length > 0 && (
+      {/* Red sphere marking the toolpath START (where work-zero / "Zero all" sits).
+          Hidden for a spring program — its 2-axis start point isn't a 3D location. */}
+      {!isSpringProgram && parsed.segments.length > 0 && (
         <ToolpathStartMarker start={parsed.segments[0].from} dark={theme === 'dark'} />
       )}
+      {/* Spindle cones are hidden for a spring program: its position is (X linear,
+          Y=chuck-degrees, 0), so a generic cone would fly off along Y. The
+          SpringScene's carriage (which tracks the X/linear position) is the tool
+          indicator instead. */}
       {/* Actual (live machine) spindle cone — amber. */}
-      {showActualTool && toolPosition && <ToolMarker position={toolPosition} />}
+      {showActualTool && toolPosition && !isSpringProgram && <ToolMarker position={toolPosition} />}
       {/* Simulation spindle cone — cyan, so it reads distinct from the live one. */}
-      {showSimTool && simPosition && (
+      {showSimTool && simPosition && !isSpringProgram && (
         <ToolMarker position={simPosition} color={theme === 'dark' ? '#22d3ee' : '#0891b2'} />
       )}
       {gizmo && (
@@ -603,6 +656,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
            (their stopPropagation wins the raycast), so suppress them while
            picking individual toolpath lines. */
         !pick &&
+        /* For a Spring-coiling program the section bounds are computed from the
+           raw 2-axis G-code, whose rotary axis holds cumulative DEGREES (e.g.
+           ~3960 for 11 turns). A job box around that spans the whole spring length
+           in X but ~4000 mm in Y — the faint "white strip running off to infinity
+           in Y" the operator sees. The coil isn't a selectable 3D job anyway, so
+           suppress the job boxes entirely for spring programs. */
+        !isSpringProgram &&
         sectionBoxes?.map((sb) => {
           const isSelected = sb.id === selectedSectionId
           return (

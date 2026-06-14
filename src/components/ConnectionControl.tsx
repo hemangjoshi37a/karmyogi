@@ -114,16 +114,20 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
     unknown: 'Serial',
   }
 
-  const runScan = useRef(async () => {})
-  runScan.current = async () => {
+  const runScan = useRef(async (_autoConnect?: boolean) => {})
+  runScan.current = async (autoConnect = false) => {
     if (!serialScan) return
     setScanning(true)
     try {
       const found = await scanGrantedPorts()
+      // Best auto-connect target: the first port whose firmware was actually
+      // identified (a real GRBL/grblHAL/FluidNC/Marlin handshake), so we don't
+      // auto-open a random unknown serial device.
+      let bestId: string | null = null
       for (const p of found) {
         // The active connection's port is skipped inside scanGrantedPorts, so any
         // entry here is safe to upsert without disturbing a live link.
-        upsertDetected({
+        const id = upsertDetected({
           label: p.label,
           usbVendorId: p.info.vendorId,
           usbProductId: p.info.productId,
@@ -131,6 +135,13 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
           firmware: p.firmware,
           firmwareVersion: p.version,
         })
+        if (!bestId && p.firmware !== 'unknown') bestId = id
+      }
+      // Auto-connect when asked (a user-initiated Scan / Add-port) and nothing is
+      // already connected — so detecting a machine also brings it online without a
+      // second click. Opening an already-granted port needs no extra gesture.
+      if (autoConnect && bestId && !grbl.isConnected) {
+        await connectMachine(bestId)
       }
     } finally {
       setScanning(false)
@@ -138,17 +149,20 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
   }
 
   // One automatic, prompt-free scan on mount/load to self-populate the farm from
-  // already-granted ports. Guarded so it never throws into render.
+  // already-granted ports. Does NOT auto-connect here — App-level grbl.autoConnect()
+  // already handles silent reconnect to the preferred device on load, so connecting
+  // from here too would race it. Guarded so it never throws into render.
   useEffect(() => {
-    void runScan.current()
+    void runScan.current(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const addPort = async () => {
     const port = await requestPort()
     if (!port) return // chooser dismissed
-    // Granting registers the port with the browser; the scan then probes it.
-    await runScan.current()
+    // Granting registers the port with the browser; probe it AND auto-connect —
+    // the user just picked this device specifically to use it.
+    await runScan.current(true)
   }
 
   const profile = profileFor(controllerKind)

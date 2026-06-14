@@ -232,9 +232,36 @@ export const useMachines = create<MachinesState>()(
         set({ activeId: id })
         get()._setStatus(id, 'connecting', undefined)
         try {
-          const port = buildPort(entry)
+          let port = buildPort(entry)
+          // Detected serial machine: open its ALREADY-GRANTED port directly by
+          // matching the USB vendor:product via navigator.serial.getPorts() — so
+          // connecting needs NO Web Serial chooser. Only falls back to the picker
+          // (buildPort's undefined) when the granted port can't be found.
+          if (
+            entry.kind === 'serial' &&
+            entry.usbVendorId != null &&
+            typeof navigator !== 'undefined' &&
+            navigator.serial
+          ) {
+            try {
+              const ports = await navigator.serial.getPorts()
+              const match = ports.find((p) => {
+                const i = p.getInfo()
+                return i.usbVendorId === entry.usbVendorId && i.usbProductId === entry.usbProductId
+              })
+              if (match) port = match as unknown as PortLike
+            } catch {
+              /* fall back to the picker */
+            }
+          }
           await grbl.connect(port, {
-            meta: { machineId: id, label: entry.label, kind: entry.kind },
+            meta: {
+              machineId: id,
+              label: entry.label,
+              kind: entry.kind,
+              usbVendorId: entry.usbVendorId,
+              usbProductId: entry.usbProductId,
+            },
           })
           get()._setStatus(id, 'connected')
         } catch (err) {
@@ -263,9 +290,22 @@ export const useMachines = create<MachinesState>()(
         // (legacy Connect/Mock buttons), auto-register it so the appbar shows it.
         let id = info.machineId ?? null
         if (info.connected && !id) {
-          const existing = get().machines.find(
-            (m) => m.kind === (info.kind ?? 'serial') && m.label === (info.label ?? ''),
-          )
+          // Prefer matching an existing entry by USB vendor:product — the SAME
+          // stable id an auto-scan dedupes on — so a live device merges into its
+          // scanned "GRBL …" entry instead of spawning a duplicate "USB …" row.
+          // Fall back to kind+label for transports without USB ids (mock/ws/BLE).
+          const existing =
+            (info.usbVendorId != null
+              ? get().machines.find(
+                  (m) =>
+                    m.kind === (info.kind ?? 'serial') &&
+                    m.usbVendorId === info.usbVendorId &&
+                    m.usbProductId === info.usbProductId,
+                )
+              : undefined) ??
+            get().machines.find(
+              (m) => m.kind === (info.kind ?? 'serial') && m.label === (info.label ?? ''),
+            )
           if (existing) {
             id = existing.id
           } else {
@@ -275,6 +315,9 @@ export const useMachines = create<MachinesState>()(
               label: info.label ?? (info.kind === 'mock' ? 'Mock' : 'Serial'),
               kind: info.kind ?? 'serial',
               status: 'disconnected',
+              // Stamp the USB ids so a later scan dedupes onto THIS entry.
+              usbVendorId: info.usbVendorId,
+              usbProductId: info.usbProductId,
             }
             set((s) => ({ machines: [...s.machines, entry] }))
           }

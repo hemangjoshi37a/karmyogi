@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMachine, useProgram, useNotifications, usePersistentState } from '../store'
+import { useSolderViz } from '../store/solderViz'
+import { useProgramOwner } from '../store/programOwner'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
@@ -13,6 +15,8 @@ import {
   defaultSolderingParams,
   estimateSolderingSeconds,
   generateSoldering,
+  orderSolderPointsForTravel,
+  solderTravelDistance,
   type SolderApproach,
   type SolderPoint,
   type SolderingParams,
@@ -312,6 +316,14 @@ export function SolderingPanel() {
   const setProgram = useProgram((s) => s.setProgram)
   const removeSection = useProgram((s) => s.removeSection)
   const notify = useNotifications((s) => s.notify)
+  const setSolderViz = useSolderViz((s) => s.set)
+  const selectSolderViz = useSolderViz((s) => s.select)
+  const clearSolderViz = useSolderViz((s) => s.clear)
+  // Shared-program ownership (last writer wins): we claim it whenever we have
+  // points, and yield (drop our section + 3D board) when another CAM panel claims.
+  const programOwner = useProgramOwner((s) => s.owner)
+  const claimOwner = useProgramOwner((s) => s.claim)
+  const releaseOwner = useProgramOwner((s) => s.release)
 
   const [defaults, setDefaults] = useState<RowDefaults>({
     freeZ: 5.0,
@@ -323,6 +335,9 @@ export function SolderingPanel() {
 
   const [points, setPoints] = useState<SolderPoint[]>([])
   const [selected, setSelected] = useState(-1)
+  // True when the current points came from a DRILL file (the 3D PCB stand-in then
+  // renders holes instead of surface pads). Set on import; manual edits keep it.
+  const [fromDrill, setFromDrill] = useState(false)
   const [showSettings, setShowSettings] = usePersistentState<boolean>(
     'karmyogi.soldering.showSettings',
     false,
@@ -467,6 +482,7 @@ export function SolderingPanel() {
         return
       }
       setPoints(parsed)
+      setFromDrill(false)
       setSelected(-1)
       notify('success', t('solder.csv.loaded', 'Loaded {n} solder point(s) from CSV.', { n: parsed.length }))
     }
@@ -507,11 +523,18 @@ export function SolderingPanel() {
         ),
       )
     }
-    setPoints((p) => (replace ? imported : [...p, ...imported]))
+    // Order the resulting list for least free travel (the iron visits adjacent
+    // pads in sequence instead of darting across the board and back). Imported
+    // pad/hole order follows the Gerber/Excellon file, which is rarely
+    // travel-efficient; optimizing here means a freshly imported board streams an
+    // efficient path immediately.
+    setPoints((p) => orderSolderPointsForTravel(replace ? imported : [...p, ...imported]))
+    // Render holes (vs surface pads) in the 3D stand-in when this came from drill.
+    setFromDrill(kind === 'drill')
     setSelected(-1)
     notify(
       'success',
-      t('solder.gerber.imported', 'Imported {n} point(s) from {layer}.', {
+      t('solder.gerber.imported', 'Imported {n} point(s) from {layer} (travel-optimized).', {
         n: imported.length,
         layer: layerName,
       }),
@@ -585,6 +608,27 @@ export function SolderingPanel() {
     }
   }
 
+  // Reorder the current points for least free (XY) travel — nearest-neighbour +
+  // 2-opt (see orderSolderPointsForTravel). Lets the operator re-optimize after
+  // adding/editing points manually (imports are auto-optimized on load).
+  function optimizeOrder() {
+    if (points.length < 3) return
+    const before = solderTravelDistance(points, { x: 0, y: 0 })
+    const ordered = orderSolderPointsForTravel(points)
+    const after = solderTravelDistance(ordered, { x: 0, y: 0 })
+    setPoints(ordered)
+    setSelected(-1)
+    const saved = Math.max(0, before - after)
+    notify(
+      'success',
+      t('solder.optimized', 'Reordered {n} points — travel {after} mm (saved {saved} mm).', {
+        n: points.length,
+        after: after.toFixed(0),
+        saved: saved.toFixed(0),
+      }),
+    )
+  }
+
   // Clear all points (confirm first when non-empty), and drop the synced section
   // so the Visualizer / Program tab don't keep showing a stale toolpath.
   function clearAll() {
@@ -635,6 +679,10 @@ export function SolderingPanel() {
     () => estimateSolderingSeconds(safePoints, safeParams),
     [safePoints, safeParams],
   )
+  // Live free-travel distance over the current order (from the work origin) —
+  // the figure the Optimize button shrinks. Shown so the operator can see the
+  // effect of reordering at a glance.
+  const travelMm = useMemo(() => solderTravelDistance(points, { x: 0, y: 0 }), [points])
 
   // Warn when a point's Touch-Z is at or above its Free-Z: the tip would never
   // descend to make contact (an inverted/degenerate move). Lists the 1-based
@@ -651,11 +699,43 @@ export function SolderingPanel() {
   useEffect(() => {
     if (points.length === 0) {
       removeSection('soldering')
+      releaseOwner('soldering')
       return
     }
+    // We have points → CLAIM ownership (last writer wins) and publish the program.
+    claimOwner('soldering')
     const id = window.setTimeout(() => setProgram('soldering', gcode), 300)
     return () => window.clearTimeout(id)
-  }, [gcode, points.length, setProgram, removeSection])
+  }, [gcode, points.length, setProgram, removeSection, claimOwner, releaseOwner])
+
+  // Publish the points to the 3D PCB stand-in (board + pads/holes). The yield
+  // effect below clears it when another panel takes over; this re-publishes when
+  // our points change. Cleared on unmount.
+  useEffect(() => {
+    if (points.length === 0) {
+      clearSolderViz()
+      return
+    }
+    setSolderViz(
+      points.map((p) => ({ x: p.x, y: p.y, freeZ: p.freeZ, touchZ: p.touchZ })),
+      fromDrill,
+    )
+    return () => clearSolderViz()
+  }, [points, fromDrill, setSolderViz, clearSolderViz])
+
+  // Yield: when ANOTHER CAM panel claims the program, drop our section + board so
+  // they never bleed over its job. (No-op while we're the owner.)
+  useEffect(() => {
+    if (programOwner && programOwner !== 'soldering') {
+      removeSection('soldering')
+      clearSolderViz()
+    }
+  }, [programOwner, removeSection, clearSolderViz])
+
+  // Mirror the selected row to the Viewer so the highlight cone parks over it.
+  useEffect(() => {
+    selectSolderViz(selected)
+  }, [selected, selectSolderViz])
 
   return (
     <div className="cc-presets-host">
@@ -700,6 +780,20 @@ export function SolderingPanel() {
                   : t('solder.toolbar.record.body.append', 'Appends a point at the current machine position.')
                 : t('solder.toolbar.record.body.connect', 'Connect to a machine to capture its live position.')
             }
+          />
+          <ToolButton
+            glyph={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="5" cy="6" r="2" />
+                <circle cx="19" cy="9" r="2" />
+                <circle cx="8" cy="18" r="2" />
+                <path d="M7 6h6a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6" />
+              </svg>
+            }
+            onClick={optimizeOrder}
+            disabled={points.length < 3}
+            title={t('solder.toolbar.optimize', 'Optimize travel order')}
+            body={t('solder.toolbar.optimize.body', 'Reorder the points to minimize free travel between pads (nearest-neighbour + 2-opt) so the iron does not dart across the board and back.')}
           />
           <ToolButton
             className="sp-ico-danger"
@@ -831,6 +925,13 @@ export function SolderingPanel() {
         <span className="sp-status-sep" aria-hidden="true">·</span>
         <span className="sp-status-pill">
           <b>{lineCount}</b> {t('solder.status.lines', 'G-code lines')}
+        </span>
+        <span className="sp-status-sep" aria-hidden="true">·</span>
+        <span
+          className="sp-status-pill"
+          title={t('solder.status.travel.title', 'Total free (XY) travel between points in the current order, from the work origin. Use Optimize travel order to shrink it.')}
+        >
+          <b>{travelMm.toFixed(0)}</b> {t('solder.status.travel', 'mm travel')}
         </span>
         <span className="sp-status-sep" aria-hidden="true">·</span>
         <span
@@ -1032,6 +1133,30 @@ export function SolderingPanel() {
         <div className="sp-card-head">
           <h4>{t('solder.points.title', 'Solder points')}</h4>
           <span className="sp-card-count">{points.length}</span>
+          {/* Auto-optimize: reorder the rows (moves points up/down) to minimize the
+              free travel between them — for points added/edited manually. Shows the
+              current travel so the operator sees it shrink. */}
+          <button
+            type="button"
+            className="sp-optimize-btn"
+            onClick={optimizeOrder}
+            disabled={points.length < 3}
+            title={t(
+              'solder.points.optimize.title',
+              'Reorder the points to minimize free travel between pads (nearest-neighbour + 2-opt). Use after adding points manually.',
+            )}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="5" cy="6" r="2" />
+              <circle cx="19" cy="9" r="2" />
+              <circle cx="8" cy="18" r="2" />
+              <path d="M7 6h6a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6" />
+            </svg>
+            <span>{t('solder.points.optimize', 'Optimize order')}</span>
+            {points.length >= 2 && (
+              <span className="sp-optimize-travel">{travelMm.toFixed(0)} mm</span>
+            )}
+          </button>
         </div>
         <div className="sp-table-wrap">
           <table className="sp-table">

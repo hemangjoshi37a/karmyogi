@@ -58,6 +58,14 @@ export interface ConnectMeta {
    * is the USB product name (see the UsbPort detection in defaultPortLabel).
    */
   kind?: 'serial' | 'mock' | 'websocket'
+  /**
+   * USB vendor/product id of the connected serial port (when available). Lets the
+   * farm store DEDUPE a freshly-connected device against an auto-scan-detected
+   * entry with the same ids — so a machine never shows up twice (once as the
+   * scanned "GRBL …" entry and again as a generic "USB …" entry).
+   */
+  usbVendorId?: number
+  usbProductId?: number
 }
 
 /** Snapshot of what the controller is currently (or was last) connected to. */
@@ -84,6 +92,29 @@ const PARSER_STATE_POLL_MS = 2000 // ~0.5 Hz
 
 // Remembered device (by USB vendor/product) so we can auto-reconnect on reload.
 const PREF_KEY = 'karmyogi.serial.preferred'
+
+// User preference: silently auto-reconnect on load to a previously-granted
+// device. Default TRUE — a single-machine user expects the app to "just work"
+// after granting the port once. There is intentionally NO UI for this (per the
+// task); it's an escape hatch a power user can flip via the key directly. Read
+// straight from localStorage so the (pure, store-free) controller doesn't need a
+// React hook. Stored as JSON by usePersistentState, but we tolerate a bare
+// "true"/"false" too. Only an explicit `false` disables it.
+const AUTOCONNECT_PREF_KEY = 'karmyogi.autoConnect'
+function autoConnectEnabled(): boolean {
+  try {
+    const raw = localStorage.getItem(AUTOCONNECT_PREF_KEY)
+    if (raw == null) return true // default ON
+    try {
+      return JSON.parse(raw) !== false
+    } catch {
+      // Non-JSON legacy value (e.g. bare "false"): treat the literal string.
+      return raw.trim().toLowerCase() !== 'false'
+    }
+  } catch {
+    return true // storage unavailable — fall back to the default
+  }
+}
 interface PortPref {
   usbVendorId?: number
   usbProductId?: number
@@ -336,7 +367,20 @@ class GrblController {
       const meta = opts?.meta
       const kind = meta?.kind ?? (isMock ? 'mock' : 'serial')
       const label = meta?.label ?? defaultPortLabel(kind, chosen as PortLike)
-      this.setActive({ connected: true, machineId: meta?.machineId, kind, label })
+      // USB ids of the connected port (serial only) so the farm can dedupe this
+      // live device against a scan-detected entry instead of adding a duplicate.
+      let usbVendorId: number | undefined
+      let usbProductId: number | undefined
+      if (kind === 'serial') {
+        try {
+          const gi = (chosen as unknown as { getInfo?: () => { usbVendorId?: number; usbProductId?: number } }).getInfo?.()
+          usbVendorId = gi?.usbVendorId
+          usbProductId = gi?.usbProductId
+        } catch {
+          /* getInfo unavailable (BLE/WebUSB/mock) — leave undefined */
+        }
+      }
+      this.setActive({ connected: true, machineId: meta?.machineId, kind, label, usbVendorId, usbProductId })
       useConsole.getState().push('info', `Connected (${profile.label}).`)
       // Fire the Google Ads "Serial Connected" activation conversion (best-effort,
       // once per session, off-on-localhost). Only for a REAL serial port — not the
@@ -563,12 +607,30 @@ class GrblController {
   /**
    * Attempt to silently reconnect to a previously-authorized device on load.
    * Web Serial remembers granted ports (`navigator.serial.getPorts()`), so no
-   * user gesture is needed. Prefers the last-used device (by USB vendor/product
-   * saved in localStorage), else the first granted port. Returns true if it
-   * connected. Safe to call when nothing was ever authorized (returns false).
+   * user gesture is needed — we NEVER call requestPort() here (no gesture on
+   * load). If nothing already-granted matches we do nothing silently; the user
+   * grants the port once (chooser or Machine Farm) and thereafter it reconnects
+   * with zero prompts.
+   *
+   * Match priority:
+   *   1. `hint` — the Machine Farm's last-active machine's USB vendor/product
+   *      (passed by the caller, so the farm's chosen device wins) + its label /
+   *      machineId so the reconnect registers against the SAME farm entry.
+   *   2. the last-used device saved in localStorage (readPreferredPort).
+   *   3. the single granted port, only if there is exactly one (an unambiguous
+   *      single-machine user) — we don't guess among several.
+   *
+   * Returns true if it connected. Honors the `karmyogi.autoConnect` preference
+   * (default ON); guards all errors.
    */
-  async autoConnect(): Promise<boolean> {
+  async autoConnect(hint?: {
+    usbVendorId?: number
+    usbProductId?: number
+    machineId?: string
+    label?: string
+  }): Promise<boolean> {
     if (this.conn || this.connecting) return !!this.conn
+    if (!autoConnectEnabled()) return false
     if (typeof navigator === 'undefined') return false
     // No Web Serial (Android Chromium): fall back to WebUSB, whose permission
     // grants Chrome also persists per origin — same silent-reconnect pattern.
@@ -581,21 +643,35 @@ class GrblController {
     }
     if (ports.length === 0) return false
     const pref = readPreferredPort()
-    let chosen = ports[0]
-    if (pref) {
-      // Restore the last-used controller so the selector reflects it and the
-      // connection (re)opens at that firmware's baud / capability set.
-      if (pref.controllerKind) {
-        useMachineProfile.getState().setControllerKind(pref.controllerKind)
-      }
-      const match = ports.find((p) => {
-        const i = p.getInfo()
-        return i.usbVendorId === pref.usbVendorId && i.usbProductId === pref.usbProductId
-      })
-      if (match) chosen = match
+    // Restore the last-used controller so the selector reflects it and the
+    // connection (re)opens at that firmware's baud / capability set.
+    if (pref?.controllerKind) {
+      useMachineProfile.getState().setControllerKind(pref.controllerKind)
     }
+    const matchIds = (ids?: { usbVendorId?: number; usbProductId?: number } | null) => {
+      if (ids?.usbVendorId == null) return undefined
+      return ports.find((p) => {
+        const i = p.getInfo()
+        return i.usbVendorId === ids.usbVendorId && i.usbProductId === ids.usbProductId
+      })
+    }
+    // 1) farm's last-active device, 2) last-used saved device. Either one is a
+    // deliberate prior choice, so it beats falling back to a lone port.
+    const chosen = matchIds(hint) ?? matchIds(pref)
+    // 3) Exactly one granted port and no specific match: an unambiguous
+    // single-machine user — reconnect to it. With several granted ports we stay
+    // silent rather than picking the wrong machine.
+    const target = chosen ?? (ports.length === 1 ? ports[0] : undefined)
+    if (!target) return false
     try {
-      await this.connect(chosen as unknown as PortLike)
+      // Carry the farm's machineId/label through so the reconnect re-binds to the
+      // SAME Machine Farm entry (activeId) instead of being re-derived. Falls back
+      // to the controller's default label inference when no hint is supplied.
+      const meta =
+        hint?.machineId != null || hint?.label != null
+          ? { kind: 'serial' as const, machineId: hint?.machineId, label: hint?.label }
+          : undefined
+      await this.connect(target as unknown as PortLike, meta ? { meta } : undefined)
       return true
     } catch {
       return false
@@ -610,6 +686,7 @@ class GrblController {
    * Web Serial path. Returns true if it connected.
    */
   private async autoConnectWebUsb(): Promise<boolean> {
+    if (!autoConnectEnabled()) return false
     if (!UsbPort.isSupported()) return false
     const pref = readPreferredPort()
     const port = await UsbPort.findAuthorized(pref ?? undefined)

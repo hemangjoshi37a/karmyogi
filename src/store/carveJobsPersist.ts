@@ -56,6 +56,50 @@ export interface CarveJobsSnapshot {
 
 const SNAPSHOT_VERSION = 1
 
+// ── OOM caps (cyclic, drop-oldest) ───────────────────────────────────────────
+// Carve jobs hold full mesh triangle Float32Arrays (often several MB each). The
+// persisted snapshot is loaded WHOLE into memory on mount, so an unbounded job
+// list grown over many sessions is the primary Chrome-OOM culprit. We bound the
+// persisted set on BOTH save and load, evicting the OLDEST jobs first so the most
+// recent work is always kept. Jobs at the END of the array are the newest (the
+// store appends), so we keep the tail and drop from the head.
+//
+// 64 MB of mesh is generous (≈ a handful of detailed models) while staying well
+// under Chrome's per-tab heap pressure point; the count cap is a coarse backstop.
+/** Max total persisted mesh bytes — drop oldest jobs until under this. */
+const MAX_TOTAL_MESH_BYTES = 64 * 1024 * 1024 // 64 MB
+/** Max persisted job count — coarse backstop alongside the byte cap. */
+const MAX_JOBS = 8
+
+/** Byte size of a persisted mesh's triangle data (the heavy part). */
+function meshBytes(m: PersistedMesh): number {
+  const t = m.triangles as unknown
+  if (t instanceof Float32Array) return t.byteLength
+  if (t instanceof ArrayBuffer) return t.byteLength
+  return 0
+}
+
+/**
+ * Enforce the cyclic caps on an array of persisted jobs, dropping the OLDEST
+ * (front of the array) first until both the count and total-mesh-bytes limits
+ * are satisfied. A single job over the byte cap is still kept (we never drop the
+ * sole/newest job — better one big job than an empty workbench). Pure + total;
+ * the kept selection is preserved by the caller.
+ */
+function capJobs(jobs: PersistedJob[]): PersistedJob[] {
+  if (jobs.length === 0) return jobs
+  let kept = jobs.slice()
+  // Count cap first (cheap), keeping the newest tail.
+  if (kept.length > MAX_JOBS) kept = kept.slice(kept.length - MAX_JOBS)
+  // Byte cap: evict from the front while over budget and >1 job remains.
+  let total = kept.reduce((sum, j) => sum + meshBytes(j.mesh), 0)
+  while (kept.length > 1 && total > MAX_TOTAL_MESH_BYTES) {
+    total -= meshBytes(kept[0].mesh)
+    kept.shift()
+  }
+  return kept
+}
+
 /** True only in a browser that exposes a usable IndexedDB. */
 function idbAvailable(): boolean {
   try {
@@ -166,10 +210,23 @@ function flush(): void {
   const state = pending
   pending = null
   if (!state) return
+  const packed = state.jobs.map((j) => ({ ...j, mesh: packMesh(j.mesh) }))
+  // Cyclic cap: drop oldest jobs so the PERSISTED snapshot stays bounded. (The
+  // live in-memory store is untouched — only what we write to IndexedDB is
+  // trimmed, so the current session keeps everything; the bound applies to what
+  // survives to the next load and is read back into memory on mount.)
+  const cappedJobs = capJobs(packed)
+  // Keep the selection only if it survived eviction; else fall back to newest.
+  const selectedId =
+    state.selectedId && cappedJobs.some((j) => j.id === state.selectedId)
+      ? state.selectedId
+      : cappedJobs.length
+        ? cappedJobs[cappedJobs.length - 1].id
+        : null
   const snapshot: CarveJobsSnapshot = {
     v: SNAPSHOT_VERSION,
-    jobs: state.jobs.map((j) => ({ ...j, mesh: packMesh(j.mesh) })),
-    selectedId: state.selectedId,
+    jobs: cappedJobs,
+    selectedId,
     defaults: state.defaults,
     global: state.global,
   }
@@ -209,8 +266,17 @@ export async function hydrateCarveJobs(): Promise<CarveJobsHydrated | null> {
   if (!snapshot || snapshot.v !== SNAPSHOT_VERSION || !Array.isArray(snapshot.jobs)) {
     return null
   }
+  // Prune-on-load: an already-bloated DB (grown before caps existed, or across
+  // many sessions) gets trimmed to the cyclic caps HERE, before any heavy mesh
+  // is unpacked into memory — this is the self-healing "safe mode" so users
+  // never have to clear browser cache. If we dropped anything, rewrite the
+  // trimmed snapshot so the DB shrinks permanently (best-effort, never blocking).
+  const cappedPersisted = capJobs(snapshot.jobs)
+  if (cappedPersisted.length !== snapshot.jobs.length) {
+    void rewriteSnapshot(db, { ...snapshot, jobs: cappedPersisted })
+  }
   const jobs: CarveJob[] = []
-  for (const pj of snapshot.jobs) {
+  for (const pj of cappedPersisted) {
     const mesh = unpackMesh(pj.mesh)
     if (!mesh) continue // skip corrupted entries rather than crash hydration
     const { mesh: _drop, ...rest } = pj
@@ -229,6 +295,22 @@ export async function hydrateCarveJobs(): Promise<CarveJobsHydrated | null> {
     selectedId,
     defaults: snapshot.defaults,
     global: snapshot.global,
+  }
+}
+
+/**
+ * Best-effort overwrite of the stored snapshot with a (pruned) copy. Used by the
+ * prune-on-load path to shrink an oversized DB permanently. Never throws; a
+ * failure here must not block hydration.
+ */
+function rewriteSnapshot(db: IDBDatabase, snapshot: CarveJobsSnapshot): void {
+  try {
+    const tx = db.transaction(STORE, 'readwrite')
+    tx.objectStore(STORE).put(snapshot, KEY)
+    tx.onerror = () => {}
+    tx.onabort = () => {}
+  } catch {
+    /* ignore — pruning is best-effort */
   }
 }
 

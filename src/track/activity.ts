@@ -84,10 +84,14 @@ const EVENTS_PER_DOC = 480
  *  hourly OR sooner for a busy session). Anonymous explorers don't flush — they
  *  accumulate locally until sign-in (see ensureRestored / migrate-on-sign-in). */
 const FLUSH_AT = 480
-/** Safety ceiling so a pathological runaway can't OOM the tab — effectively
- *  UNCAPPED for real use (~tens of thousands of interactions). At the ceiling we
- *  drop the OLDEST events so the most recent interactions are always kept. */
-const MAX_BUFFER = 50000
+/** Safety ceiling so a runaway can't OOM the tab. The buffer is held in memory
+ *  AND mirrored to localStorage as one JSON.stringify, so a huge ceiling (the old
+ *  50 000) meant multiple MB persisted + reloaded into memory every startup — a
+ *  real OOM contributor. 3 000 events keeps the localStorage mirror to a few
+ *  hundred KB while still covering a long busy session between hourly flushes
+ *  (which usually drain well before this). At the ceiling we drop the OLDEST
+ *  events so the most recent interactions are always kept. */
+const MAX_BUFFER = 3000
 /** Presence heartbeat cadence — refreshes the profile's `lastSeen` while visible.
  *  5 min: "online" is polled every ~5 minutes (admin ONLINE_WINDOW_MS widened to match). */
 const HEARTBEAT_MS = 300_000

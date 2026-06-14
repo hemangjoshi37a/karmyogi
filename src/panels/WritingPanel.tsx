@@ -18,6 +18,7 @@ import {
   type LoadedFont,
 } from '../core/fontLibrary'
 import { useProgram, usePersistentState } from '../store'
+import { useProgramOwner } from '../store/programOwner'
 import { useT } from '../i18n'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { IconButton } from '../components/IconButton'
@@ -236,6 +237,13 @@ function strokesToGcode(
 export function WritingPanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
+  const removeSection = useProgram((s) => s.removeSection)
+  // Shared-program ownership (last writer wins). Writing CLAIMS only on a real
+  // text edit (not on the default mount text, and not on incidental re-renders
+  // like an async font load) so it never steals the program back from another
+  // job; it yields its "text — pen" section when someone else owns.
+  const programOwner = useProgramOwner((s) => s.owner)
+  const prevTextRef = useRef<string | null>(null)
 
   const [text, setText] = usePersistentState('karmyogi.writing.text', 'Hello\nWorld 123')
   const [charHeight, setCharHeight] = usePersistentState('karmyogi.writing.charHeight', 10)
@@ -461,20 +469,37 @@ export function WritingPanel() {
   // the text is empty, clear the section right away (no debounce) so stale
   // output doesn't linger — but never reset an active stream.
   useEffect(() => {
+    const textChanged = prevTextRef.current !== null && prevTextRef.current !== text
+    prevTextRef.current = text
+    const owner = useProgramOwner.getState().owner
     if (text.trim().length === 0) {
       if (liveTimer.current) clearTimeout(liveTimer.current)
       if (!useProgram.getState().streaming) {
         setProgram('text — pen', '')
         setInfo(t('writing.info.enterText', 'Enter some text first.'))
       }
+      useProgramOwner.getState().release('writing')
       return
     }
+    // Publish/own only when WE already own, OR the user just edited the text here.
+    // (Dropping the `owner === null` case means the default text is NOT auto-loaded
+    // into the program on page load — nothing loads until the operator types.)
+    if (!(owner === 'writing' || textChanged)) return
+    useProgramOwner.getState().claim('writing')
     if (liveTimer.current) clearTimeout(liveTimer.current)
     liveTimer.current = setTimeout(() => generate(), 300)
     return () => {
       if (liveTimer.current) clearTimeout(liveTimer.current)
     }
   }, [generate, text, setProgram, t])
+
+  // Yield: when another CAM panel claims the program, drop our "text — pen"
+  // section (unless a stream is running) so it never lingers over another job.
+  useEffect(() => {
+    if (programOwner && programOwner !== 'writing') {
+      if (!useProgram.getState().streaming) removeSection('text — pen')
+    }
+  }, [programOwner, removeSection])
 
   // Upload a custom font file: JSON single-stroke, or TTF/OTF outline.
   const loadUpload = useCallback(

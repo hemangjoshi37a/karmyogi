@@ -1,0 +1,692 @@
+/* Spring-coiling panel (#112). Co-located styles; uses theme CSS variables only.
+   This is a DIFFERENT machine type (a 2-axis automatic spring coiler) but reuses
+   the shared panel chrome: a slim header + icon toolbar, a live status strip,
+   parameter cards that tile into a responsive grid, and the themed slider rows
+   (label · range · number · unit) mirrored from the Carving/Drilling `.dr-*` /
+   `.cc-slider` controls. Density uses the shared tokens in theme.css; the panel
+   is the only scroll container (vertical only), reflowing on its OWN width via a
+   container query so it works in a narrow docked column on a wide window. */
+
+.spr-panel {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  container-type: inline-size;
+  container-name: springpanel;
+}
+.spr-panel > * {
+  flex-shrink: 0;
+}
+
+/* Left gutter so the floating preset rail never overlaps the panel content. */
+.cc-presets-host > .spr-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  padding-left: calc(var(--sp-3) + 44px);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cc-presets-host > .spr-panel {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
+}
+
+/* ───────────────────────── header ───────────────────────── */
+.spr-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  min-height: var(--ctl-h-lg);
+}
+.spr-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1 1 auto;
+  min-height: var(--ctl-h);
+}
+.spr-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.spr-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+}
+.spr-tools-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--sp-1) 2px;
+  background: var(--border);
+}
+
+/* square icon buttons */
+.spr-ico {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.spr-ico > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.spr-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.spr-ico:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.spr-ico.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
+}
+
+/* ───────────────────────── status strip ───────────────────────── */
+.spr-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+.spr-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.spr-status-pill b {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.spr-status-sep {
+  color: var(--border);
+}
+.spr-status-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* ---- Production counter ---- */
+.spr-counter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: var(--radius);
+}
+.spr-counter-main {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.spr-counter-val {
+  font-size: clamp(1.6rem, 6vw, 2.2rem);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.spr-counter-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.spr-counter-btns {
+  display: inline-flex;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+.spr-counter-btn {
+  min-height: 36px;
+  min-width: 44px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-weight: 600;
+  cursor: pointer;
+}
+.spr-counter-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.spr-counter-btn.is-reset {
+  color: var(--fg-muted);
+}
+.spr-counter-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spr-warn {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+/* ───────────────────── segmented controls (type / direction / output) ───────── */
+.spr-seg {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 2px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.spr-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-height: var(--ctl-h);
+  padding: 0 10px;
+  font-size: var(--fs-ctl);
+  font-weight: 500;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.spr-seg-btn:hover:not(.is-on) {
+  color: var(--fg);
+}
+.spr-seg-btn.is-on {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ───────────────────────── cards ───────────────────────── */
+.spr-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+.spr-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.spr-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.spr-card-head h4 {
+  margin: 0;
+  font-size: var(--fs-section);
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ───────────────────────── field grids ───────────────────────── */
+.spr-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3);
+  align-items: end;
+}
+.spr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+.spr-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* a small read-only chip summarising derived facts */
+.spr-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  line-height: 1.5;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.spr-note b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* raw G-code preview */
+.spr-raw-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.spr-raw-toggle:hover:not(:disabled) {
+  color: var(--accent);
+}
+.spr-raw-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.spr-preview {
+  margin: 0 var(--sp-3) var(--sp-3);
+  padding: var(--sp-2);
+  max-height: 220px;
+  overflow: auto;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: pre;
+}
+
+/* --- Themed slider rows (label · range · number · unit) — mirrors `.dr-*`. --- */
+.spr-sfield {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 1px 0;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+.spr-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.spr-sfield.is-disabled { opacity: 0.45; pointer-events: none; }
+.spr-sfield-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  width: 104px;
+  min-width: 40px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.spr-sfield:focus-within .spr-sfield-lbl { color: var(--fg); }
+.spr-sfield-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.spr-sfield-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  width: 84px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.spr-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.spr-sfield-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.spr-sfield-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+.spr-slider {
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.spr-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--spr-pct, 0%),
+    var(--bg-elev) var(--spr-pct, 0%) 100%
+  );
+}
+.spr-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.spr-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.spr-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.spr-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.spr-slider:hover::-webkit-slider-thumb { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+.spr-slider:hover::-moz-range-thumb { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+.spr-slider:focus-visible { outline: none; }
+.spr-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.spr-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.spr-slider-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.spr-slider-num:focus { outline: none; box-shadow: none; }
+.spr-slider-num::-webkit-outer-spin-button,
+.spr-slider-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+@media (pointer: coarse) {
+  .spr-slider { height: 24px; }
+  .spr-slider::-webkit-slider-runnable-track,
+  .spr-slider::-moz-range-track,
+  .spr-slider::-moz-range-progress { height: 6px; }
+  .spr-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
+  .spr-slider::-moz-range-thumb { width: 17px; height: 17px; }
+}
+
+/* ───────── narrow PANEL reflow ───────── */
+@container springpanel (max-width: 430px) {
+  .spr-settings { grid-template-columns: 1fr; }
+  .spr-ico { width: var(--ctl-h-touch); height: var(--ctl-h-touch); }
+  .spr-seg-btn { min-height: var(--ctl-h-touch); }
+}
+@supports not (container-type: inline-size) {
+  @media (max-width: 768px) {
+    .spr-settings { grid-template-columns: 1fr; }
+    .spr-ico { width: var(--ctl-h-touch); height: var(--ctl-h-touch); }
+    .spr-seg-btn { min-height: var(--ctl-h-touch); }
+  }
+}
+
+/* ───────────────── header (bare — no redundant title) ───────────────── */
+.spr-head-bare {
+  justify-content: flex-end;
+}
+.spr-head-info {
+  display: inline-flex;
+  align-items: center;
+  margin-right: auto;
+}
+
+/* ───────────────── section glyphs ───────────────── */
+.spr-card-ico {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+/* ───────────────── segmented: tile variant (icon over label) ───────────────── */
+.spr-seg-tiles {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: 100%;
+}
+.spr-seg-tiles .spr-seg-btn {
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 6px;
+  min-height: 0;
+}
+.spr-seg-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.85;
+}
+.spr-seg-btn.is-on .spr-seg-ico {
+  opacity: 1;
+}
+.spr-seg-lbl {
+  line-height: 1;
+}
+.spr-seg-tiles .spr-seg-lbl {
+  font-size: 11px;
+}
+
+/* ───────────────── editable production counter ───────────────── */
+.spr-counter-val {
+  font: inherit;
+  font-size: clamp(1.6rem, 6vw, 2.2rem);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+  border: 1px dashed transparent;
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  margin: -1px -2px;
+  cursor: text;
+}
+.spr-counter-val:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.spr-counter-input {
+  width: 4ch;
+  font-size: clamp(1.6rem, 6vw, 2.2rem);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+
+/* ───────────────── hardware-config modal ───────────────── */
+.spr-hw-intro {
+  margin: 0 0 var(--sp-3);
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
+  line-height: 1.5;
+}
+.spr-hw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
+}
+.spr-hw-h {
+  grid-column: 1 / -1;
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-section);
+  font-weight: 600;
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.spr-hw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.spr-hw-field input {
+  min-height: var(--ctl-h);
+  padding: 0 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.spr-hw-derived {
+  grid-column: 1 / -1;
+  margin: 0 0 var(--sp-1);
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
+}
+.spr-hw-derived b {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.spr-hw-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.spr-hw-reset,
+.spr-hw-done {
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-weight: 600;
+  cursor: pointer;
+}
+.spr-hw-done {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.spr-hw-reset:hover { border-color: var(--accent); color: var(--accent); }

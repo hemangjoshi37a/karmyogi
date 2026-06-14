@@ -98,6 +98,11 @@ const lazyPanels: Record<string, LazyExoticComponent<ComponentType<IDockviewPane
   camera: lazy(() =>
     import('../panels/CameraPanel').then((m) => ({ default: pick(m, 'CameraPanel') })),
   ),
+  springcoiling: lazy(() =>
+    import('../panels/SpringCoilingPanel').then((m) => ({
+      default: pick(m, 'SpringCoilingPanel'),
+    })),
+  ),
 }
 
 /** Pick a named export from a module, asserting it exists (dev safety). */
@@ -143,6 +148,7 @@ const PANEL_SCOPE: Record<string, string> = {
   laser: 'Laser Cutting',
   welding: 'Welding',
   camera: 'Camera',
+  springcoiling: 'Spring Coiling',
 }
 
 /**
@@ -197,4 +203,5 @@ export const availablePanels: PanelSpec[] = [
   { id: 'laser', component: 'laser', title: 'Laser Cutting' },
   { id: 'welding', component: 'welding', title: 'Welding' },
   { id: 'camera', component: 'camera', title: 'Camera' },
+  { id: 'springcoiling', component: 'springcoiling', title: 'Spring Coiling' },
 ]

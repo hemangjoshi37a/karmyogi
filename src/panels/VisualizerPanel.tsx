@@ -19,6 +19,8 @@ import {
 
 import { sectionColor } from '../viewer/sectionColors'
 import { useViewportShapes, type ShapeKind } from '../store/viewportShapes'
+import { useSpringViz } from '../store/springViz'
+import { getActiveTab, subscribeActiveTab } from '../track/activity'
 import { Icon } from '../components/Icons'
 
 /**
@@ -45,6 +47,24 @@ export function VisualizerPanel() {
   const bedW = useBed((s) => s.width)
   const bedD = useBed((s) => s.depth)
   const bedH = useBed((s) => s.height)
+  // For a spring program the in-scene SpringScene shows spring-specialized
+  // dimensions (wire ⌀, coil ⌀, pitch, free length, turns), so suppress the
+  // generic width×depth / "fits bed" readout here — it's meaningless for a coil.
+  const springActive = useSpringViz((s) => s.active)
+  // Auto-frame the coil whenever the user opens the Spring Coiling tab — its tiny
+  // coil is otherwise lost on the full bed, and the spring program's degree-valued
+  // bounds can't be framed (the Viewer overrides controlBounds to the coil box for
+  // spring programs). Triggering on tab-activation is reliable; the delay lets the
+  // panel publish the program + spring params so the coil box is ready at fit time.
+  useEffect(() => {
+    const fitIfSpring = (tab: string | undefined) => {
+      if (tab === 'springcoiling') {
+        window.setTimeout(() => ref.current?.fit(), 380)
+      }
+    }
+    fitIfSpring(getActiveTab())
+    return subscribeActiveTab(fitIfSpring)
+  }, [])
 
   const [showStock, setShowStock] = useState(true)
   // Independent show/hide for the two spindle cones (actual machine vs simulation).
@@ -238,7 +258,19 @@ export function VisualizerPanel() {
     applyKeptSegments(kept)
   }
 
-  const gcode = useMemo(() => lines.join('\n'), [lines])
+  // The gcode the VISUALIZER simulates/draws. Normally the full combined program.
+  // BUT for a spring program, simulate ONLY the spring section: a spring is a
+  // 2-axis machine and its playhead must not be polluted by any OTHER section
+  // (e.g. a stray "text — pen" from the Writing tab), whose back-and-forth X moves
+  // would otherwise drive the coil's carriage forward/back — the "coiling then
+  // de-coiling" artifact. (Streaming still uses the full program via the store.)
+  const gcode = useMemo(() => {
+    if (springActive) {
+      const spring = sections.find((s) => s.name.includes('Spring coil'))
+      if (spring) return spring.rawLines.join('\n')
+    }
+    return lines.join('\n')
+  }, [lines, springActive, sections])
 
   // Cutter radius for the material-removal sim. Read live from the carve store's
   // GLOBAL tool diameter (the single bit that cuts all jobs, set in the 3D
@@ -281,6 +313,31 @@ export function VisualizerPanel() {
 
   const simActive = !!pbTimeline && pbTimeline.duration > 0
   const simulating = simActive && (isPlaying || time > 0)
+
+  // SPACEBAR toggles the simulation play/pause (like a media player). Ignored when
+  // the user is typing in a field or focused on a button (Space activates buttons),
+  // and only acts when a timeline is loaded — so it never hijacks Space elsewhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' && e.key !== ' ') return
+      const el = e.target as HTMLElement | null
+      const tag = el?.tagName
+      if (
+        el?.isContentEditable ||
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        tag === 'BUTTON' ||
+        tag === 'A'
+      )
+        return
+      if (!usePlayback.getState().timeline) return
+      e.preventDefault()
+      usePlayback.getState().toggle()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Actual (live machine) cone — ALWAYS follows the controller when connected,
   // independent of the simulation, so streaming a program shows real motion in
@@ -503,7 +560,7 @@ export function VisualizerPanel() {
             t={t}
           />
         )}
-        <DimensionsOverlay dims={dims} bedW={bedW} bedD={bedD} />
+        {!springActive && <DimensionsOverlay dims={dims} bedW={bedW} bedD={bedD} />}
         <ToolConeLegend
           showActualTool={showActualTool}
           showSimTool={showSimTool}

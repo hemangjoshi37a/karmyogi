@@ -9,7 +9,10 @@ import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, Sp
 import { InfoTip } from '../components/InfoTip'
 import { Gamepad2 } from 'lucide-react'
 import { GamepadModal } from '../components/GamepadModal'
+import { GamepadHud } from '../components/GamepadHud'
 import { useGamepad, type GamepadAction, type GamepadHandlers } from '../machine/useGamepad'
+import { openTabs } from '../track/tabNav'
+import { availablePanels } from '../app/panelRegistry'
 import { useT } from '../i18n'
 import '../styles/controller.css'
 
@@ -1131,6 +1134,47 @@ export function ControllerPanel() {
         hapticIntensity={gamepadHapticIntensity}
         setHapticIntensity={setGamepadHapticIntensity}
       />
+
+      {/* On-screen legend HUD: gamepad map (active tab) upper-left, keyboard
+          shortcuts upper-right. Shown only while armed + a pad is connected, and
+          suppressed while tab-nav mode is on (the tab-switch overlay below owns
+          the screen then) to avoid clutter. ControllerPanel stays mounted across
+          tab switches, so this is visible on every tab. */}
+      {!gp.tabNavMode && (
+        <GamepadHud
+          connected={gp.connected}
+          type={gp.type}
+          activeTab={gp.activeTab}
+          armed={gamepadEnabled}
+        />
+      )}
+
+      {gp.tabNavMode && (
+        <div className="gp-tabnav" role="status" aria-live="polite">
+          <div className="gp-tabnav-card">
+            <span className="gp-tabnav-title">
+              {t('gp.tabnav.title', 'Switch tab')}
+            </span>
+            <div className="gp-tabnav-list">
+              {openTabs().map((id) => {
+                const spec = availablePanels.find((p) => p.id === id)
+                const label = t('tab.' + id, spec?.title ?? id)
+                return (
+                  <span
+                    key={id}
+                    className={`gp-tabnav-item${id === gp.activeTab ? ' is-active' : ''}`}
+                  >
+                    {label}
+                  </span>
+                )
+              })}
+            </div>
+            <span className="gp-tabnav-hint">
+              {t('gp.tabnav.hint', '◀ ▶ / LB RB switch · A select · L3 close')}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

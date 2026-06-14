@@ -19,6 +19,7 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher'
 import { ConnectionControl } from '../components/ConnectionControl'
 import { UserChip } from '../auth/UserChip'
 import { setActiveTab } from '../track/activity'
+import { registerTabNav } from '../track/tabNav'
 import { AboutModal } from '../components/AboutModal'
 import { Icon } from '../components/Icons'
 import { useMachine } from '../store'
@@ -48,6 +49,7 @@ const LEFT_TABS = [
   { id: 'laser', title: 'Laser Cutting' },
   { id: 'welding', title: 'Welding' },
   { id: 'camera', title: 'Camera' },
+  { id: 'springcoiling', title: 'Spring Coiling' },
 ]
 
 // Per-tab hover tooltips shown on the dock TAB name. The 2D/3D Carving tab
@@ -105,7 +107,7 @@ const DEFAULT_LAYOUT: SerializedDockview = {
         {
           type: 'leaf',
           data: {
-            views: ['cadcam', 'writing', 'soldering', 'screwfitting', 'drilling', 'pcb', 'glue', 'pnp', 'signature', 'print', 'laser', 'welding', 'camera'],
+            views: ['cadcam', 'writing', 'soldering', 'screwfitting', 'drilling', 'pcb', 'glue', 'pnp', 'signature', 'print', 'laser', 'welding', 'camera', 'springcoiling'],
             activeView: 'cadcam',
             id: '1',
           },
@@ -271,6 +273,14 @@ export function Shell() {
       // (No-ops unless tracking is live.)
       setActiveTab(event.api.activePanel?.id)
       event.api.onDidActivePanelChange((panel) => setActiveTab(panel?.id))
+      // Expose programmatic tab navigation (used by the gamepad's tab-switch
+      // mode): focus a panel by id, and list the OPEN tabs in registry order so
+      // cycling is stable regardless of the docked arrangement.
+      registerTabNav({
+        focus: (id) => event.api.getPanel(id)?.api.setActive(),
+        list: () =>
+          availablePanels.map((p) => p.id).filter((id) => !!event.api.getPanel(id)),
+      })
       // Persist the reconciled layout so the add/remove sticks immediately.
       if (restored) scheduleSave()
     },
@@ -316,10 +326,16 @@ export function Shell() {
   return (
     <div className="app-shell">
       <header className="topbar" data-mobile={isMobile ? 'true' : undefined}>
-        {/* Brand. The "by hjLabs.in · MIT License" credit (previously a separate
-            app-bar element) is now a hover tooltip on the title to free up bar
-            space; the clickable hjLabs.in + MIT links live in the About modal. */}
-        <span className="brand" title="by hjLabs.in · MIT License">
+        {/* Brand — clicking the logo/title opens the About modal (this replaces a
+            separate ⓘ button, freeing app-bar space). The "by hjLabs.in · MIT
+            License" credit is the hover tooltip; the clickable links live inside. */}
+        <button
+          type="button"
+          className="brand brand-btn"
+          title="About karmyogi — by hjLabs.in · MIT License"
+          aria-label="About karmyogi (source, license, report a bug)"
+          onClick={() => setShowAbout(true)}
+        >
           <img
             className="brand-mark"
             src="/icon-mark.png"
@@ -328,13 +344,7 @@ export function Shell() {
             alt="karmyogi — meditating yogi mark"
           />
           <span className="brand-word">karm<span className="accent">yogi</span></span>
-        </span>
-        {/* About ⓘ — first action, right next to the title. */}
-        <IconButton
-          icon="ⓘ"
-          label="About karmyogi (source, license, report a bug)"
-          onClick={() => setShowAbout(true)}
-        />
+        </button>
         <span className="spacer" />
         {isMobile ? (
           /* Mobile: a tight, single-row action strip — notifications, one compact

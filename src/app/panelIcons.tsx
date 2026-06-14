@@ -16,6 +16,7 @@ import {
   Crosshair,
   Flame,
   Camera,
+  IterationCw,
   Sparkles,
   PanelsTopLeft,
   type LucideIcon,
@@ -47,6 +48,7 @@ const PANEL_ICONS: Record<string, LucideIcon> = {
   laser: Crosshair,
   welding: Flame,
   camera: Camera,
+  springcoiling: IterationCw,
   aigcode: Sparkles,
 }
 
