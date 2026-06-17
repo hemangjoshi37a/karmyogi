@@ -1,0 +1,275 @@
+/* ============================================================
+   About karmyogi — modern single-sheet dialog.
+   All colors come from the theme CSS variables so it renders
+   correctly in both dark and light themes.
+   ============================================================ */
+
+.km-about2 {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ---- Hero ---- */
+.km-about2-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.km-about2-mark {
+  flex: none;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.km-about2-heroText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.km-about2-nameRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.km-about2-name {
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--fg);
+}
+.km-about2-name .accent {
+  color: var(--accent);
+}
+.km-about2-vchip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.km-about2-tag {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+
+/* ---- Description ---- */
+.km-about2-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg);
+}
+
+/* ---- Capability chips ---- */
+.km-about2-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.km-about2-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* ---- Primary actions ---- */
+.km-about2-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.km-about2-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.06s ease;
+}
+.km-about2-btn:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
+}
+.km-about2-btn:active {
+  transform: translateY(1px);
+}
+.km-about2-btn svg {
+  flex: none;
+}
+.km-about2-btn-primary {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.km-about2-btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+  border-color: color-mix(in srgb, var(--accent) 88%, #000);
+}
+
+/* ---- Build card ---- */
+.km-about2-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.km-about2-build {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+.km-about2-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.km-about2-kv dt {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.km-about2-kv dd {
+  margin: 0;
+  font-size: 12.5px;
+  font-family: var(--fs-mono, monospace);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Check-for-update row ---- */
+.km-about2-update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.km-about2-update-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  min-width: 0;
+}
+.km-about2-update-status.is-latest {
+  color: var(--ok);
+}
+.km-about2-update-status.is-available {
+  color: var(--accent);
+}
+.km-about2-update-status svg {
+  flex: none;
+}
+.km-about2-update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.km-about2-update-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
+}
+.km-about2-update-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.km-about2-update-note {
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+/* Spinner used during the checking state. */
+.km-about2-spin {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--fg-muted) 40%, transparent);
+  border-top-color: var(--accent);
+  animation: km-about2-spin 0.7s linear infinite;
+}
+@keyframes km-about2-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- Footer credit ---- */
+.km-about2-footer {
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+.km-about2-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.km-about2-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Responsive: stack actions on narrow widths ---- */
+@media (max-width: 460px) {
+  .km-about2-actions {
+    grid-template-columns: 1fr;
+  }
+  .km-about2-hero {
+    gap: 12px;
+  }
+  .km-about2-update {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .km-about2-update-btn {
+    justify-content: center;
+  }
+}

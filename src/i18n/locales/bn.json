@@ -128,7 +128,6 @@
   "about.desc": "শখ/ডেস্কটপ CNC মেশিনের (GRBL, grblHAL, FluidNC, Marlin ও আরও) জন্য একটি ব্রাউজার-ভিত্তিক বহুমুখী কন্ট্রোল + CAD/CAM ওয়ার্কবেঞ্চ — CNC খোদাই, এনগ্রেভিং, পেন-প্লটিং, অটো-সোল্ডারিং, PCB আইসোলেশন রাউটিং, লেজার কাটিং ও ওয়েল্ডিং।",
   "about.by": "তৈরি করেছেন",
   "about.license": "MIT লাইসেন্স",
-  "about.source": "GitHub-এ সোর্স দেখুন",
   "about.report": "একটি বাগ রিপোর্ট করুন",
   "about.version": "সংস্করণ",
   "about.built": "নির্মিত",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "স্বয়ংক্রিয়ভাবে রেকর্ড করা ক্যামেরা ক্লিপ এবং বেনামী ব্যবহারের ডেটা মুছে ফেলে। আপনার সেটিংস, প্রিসেট, লেআউট এবং সংরক্ষিত কাজ রাখা হয়।",
   "storage.clear.done": "{amount} খালি হয়েছে",
   "storage.clear.busy": "খালি করা হচ্ছে…",
-  "storage.clear.cta": "এখনই জায়গা খালি করুন"
+  "storage.clear.cta": "এখনই জায়গা খালি করুন",
+  "about.chip.languages": "53টি ভাষা",
+  "about.chip.modes": "14+ মোড",
+  "about.chip.pwa": "PWA · অফলাইন",
+  "about.chip.license": "MIT",
+  "about.live": "লাইভ অ্যাপ খুলুন",
+  "about.source.short": "উৎস দেখুন",
+  "update.label": "karmyogi আপডেট রাখুন",
+  "update.check": "আপডেট পরীক্ষা করুন",
+  "update.checking": "পরীক্ষা করা হচ্ছে…",
+  "update.latest": "আপনি সর্বশেষ সংস্করণে আছেন",
+  "update.available": "আপডেট উপলব্ধ — ইনস্টল হচ্ছে…",
+  "update.auto": "আপডেট স্বয়ংক্রিয়ভাবে প্রযোজ্য হয়"
 }

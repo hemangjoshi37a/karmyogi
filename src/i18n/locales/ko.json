@@ -128,7 +128,6 @@
   "about.desc": "취미용/데스크톱 CNC 기계(GRBL, grblHAL, FluidNC, Marlin 등)를 위한 브라우저 기반 다목적 제어 + CAD/CAM 워크벤치 — CNC 조각, 각인, 펜 플로팅, 자동 납땜, PCB 절연 라우팅, 레이저 절단 및 용접.",
   "about.by": "제작",
   "about.license": "MIT 라이선스",
-  "about.source": "GitHub에서 소스 보기",
   "about.report": "버그 신고",
   "about.version": "버전",
   "about.built": "빌드",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "자동으로 녹화된 카메라 클립과 익명 사용 데이터를 지웁니다. 설정, 프리셋, 레이아웃 및 저장된 작업은 유지됩니다.",
   "storage.clear.done": "{amount} 확보됨",
   "storage.clear.busy": "확보 중…",
-  "storage.clear.cta": "지금 공간 확보"
+  "storage.clear.cta": "지금 공간 확보",
+  "about.chip.languages": "53개 언어",
+  "about.chip.modes": "14+ 모드",
+  "about.chip.pwa": "PWA · 오프라인",
+  "about.chip.license": "MIT",
+  "about.live": "라이브 앱 열기",
+  "about.source.short": "소스 보기",
+  "update.label": "karmyogi를 최신 상태로 유지",
+  "update.check": "업데이트 확인",
+  "update.checking": "확인 중…",
+  "update.latest": "최신 버전입니다",
+  "update.available": "업데이트 가능 — 설치 중…",
+  "update.auto": "업데이트가 자동으로 적용됩니다"
 }

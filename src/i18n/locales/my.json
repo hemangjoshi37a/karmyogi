@@ -128,7 +128,6 @@
   "about.desc": "ဝါသနာအိုး/စားပွဲတင် CNC စက်များ (GRBL၊ grblHAL၊ FluidNC၊ Marlin စသည်) အတွက် ဘရောက်ဇာအခြေပြု စွယ်စုံ ထိန်းချုပ်မှု + CAD/CAM workbench တစ်ခု — CNC ထွင်းခြင်း၊ စာထွင်းခြင်း၊ ဘောပင်ဆွဲခြင်း၊ အလိုအလျောက် ဂဟေဆော်ခြင်း၊ PCB isolation routing၊ လေဆာဖြတ်တောက်ခြင်းနှင့် ဂဟေဆက်ခြင်း။",
   "about.by": "ပြုလုပ်သူ",
   "about.license": "MIT လိုင်စင်",
-  "about.source": "GitHub တွင် source ကို ကြည့်မည်",
   "about.report": "ချို့ယွင်းချက် တင်ပြမည်",
   "about.version": "ဗားရှင်း",
   "about.built": "တည်ဆောက်ထားသည်",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "အလိုအလျောက် ရိုက်ကူးထားသော ကင်မရာ ကလစ်များနှင့် အမည်မဖော် အသုံးပြုမှု ဒေတာကို ရှင်းလင်းသည်။ သင့်ဆက်တင်များ၊ ကြိုတင်သတ်မှတ်ချက်များ၊ အပြင်အဆင်နှင့် သိမ်းဆည်းထားသော အလုပ်များကို ထိန်းသိမ်းထားသည်။",
   "storage.clear.done": "{amount} လွတ်သွားပြီ",
   "storage.clear.busy": "ရှင်းလင်းနေသည်…",
-  "storage.clear.cta": "ယခု နေရာလွတ်ပါ"
+  "storage.clear.cta": "ယခု နေရာလွတ်ပါ",
+  "about.chip.languages": "ဘာသာစကား 53 ခု",
+  "about.chip.modes": "မုဒ် 14+",
+  "about.chip.pwa": "PWA · အော့ဖ်လိုင်း",
+  "about.chip.license": "MIT",
+  "about.live": "တိုက်ရိုက်အက်ပ်ဖွင့်ရန်",
+  "about.source.short": "အရင်းအမြစ်ကြည့်ရန်",
+  "update.label": "karmyogi ကို နောက်ဆုံးပေါ်ထားပါ",
+  "update.check": "အပ်ဒိတ်စစ်ဆေးရန်",
+  "update.checking": "စစ်ဆေးနေသည်…",
+  "update.latest": "သင်သည် နောက်ဆုံးဗားရှင်းတွင်ရှိသည်",
+  "update.available": "အပ်ဒိတ်ရရှိနိုင် — ထည့်သွင်းနေသည်…",
+  "update.auto": "အပ်ဒိတ်များ အလိုအလျောက်အသုံးပြုသည်"
 }

@@ -285,46 +285,6 @@
   min-height: 320px;
 }
 
-/* ---- About modal ---- */
-.km-about { display: flex; flex-direction: column; gap: 14px; }
-.km-about-brand { display: flex; align-items: center; gap: 12px; }
-.km-about-mark { border-radius: 8px; }
-.km-about-name { font-size: 20px; font-weight: 700; }
-.km-about-name .accent { color: var(--accent); }
-.km-about-tag { font-size: 12px; color: var(--fg-muted); }
-.km-about-desc { font-size: 13px; line-height: 1.5; color: var(--fg); margin: 0; }
-.km-about-by { font-size: 13px; margin: 0; }
-.km-about-by a { color: var(--accent); }
-.km-about-build {
-  margin: 14px 0 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-  display: grid;
-  gap: 4px;
-}
-.km-about-build-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
-}
-.km-about-build-row dt { color: var(--fg-muted); margin: 0; }
-.km-about-build-row dd { margin: 0; font-family: var(--fs-mono, monospace); color: var(--fg); }
-.km-about-links { display: flex; flex-direction: column; gap: 8px; }
-.km-about-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  font-size: 13px;
-  color: var(--fg);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  text-decoration: none;
-}
-.km-about-link:hover { border-color: var(--accent); }
-
 /* ============================================================
    MOBILE TOP BAR — a clean single row that never wraps:
        [brand]  ·spacer·  [🔔]  [● status ▾]  [⋯]

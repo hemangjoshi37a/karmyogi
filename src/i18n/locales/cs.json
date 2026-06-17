@@ -128,7 +128,6 @@
   "about.desc": "Univerzální pracovní prostředí pro řízení + CAD/CAM v prohlížeči pro hobby/stolní CNC stroje (GRBL, grblHAL, FluidNC, Marlin a další) — CNC frézování, gravírování, kreslení perem, automatické pájení, izolační frézování DPS, řezání a svařování laserem.",
   "about.by": "Vytvořil",
   "about.license": "Licence MIT",
-  "about.source": "Zobrazit zdrojový kód na GitHubu",
   "about.report": "Nahlásit chybu",
   "about.version": "Verze",
   "about.built": "Sestaveno",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Vymaže automaticky zaznamenané záběry z kamery a anonymní data o používání. Vaše nastavení, předvolby, rozvržení a uložené úlohy zůstanou zachovány.",
   "storage.clear.done": "Uvolněno {amount}",
   "storage.clear.busy": "Uvolňování…",
-  "storage.clear.cta": "Uvolnit místo nyní"
+  "storage.clear.cta": "Uvolnit místo nyní",
+  "about.chip.languages": "53 jazyků",
+  "about.chip.modes": "14+ režimů",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Otevřít živou aplikaci",
+  "about.source.short": "Zobrazit zdroj",
+  "update.label": "Udržujte karmyogi aktuální",
+  "update.check": "Zkontrolovat aktualizaci",
+  "update.checking": "Kontrola…",
+  "update.latest": "Máte nejnovější verzi",
+  "update.available": "Aktualizace dostupná — instaluji…",
+  "update.auto": "Aktualizace se použijí automaticky"
 }

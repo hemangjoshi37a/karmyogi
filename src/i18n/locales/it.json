@@ -128,7 +128,6 @@
   "about.desc": "Un banco di lavoro multiuso di controllo + CAD/CAM basato su browser per macchine CNC hobbistiche/desktop (GRBL, grblHAL, FluidNC, Marlin e altre) — intaglio CNC, incisione, plottaggio a penna, saldatura automatica, fresatura di isolamento PCB, taglio e saldatura laser.",
   "about.by": "Realizzato da",
   "about.license": "Licenza MIT",
-  "about.source": "Visualizza il sorgente su GitHub",
   "about.report": "Segnala un bug",
   "about.version": "Versione",
   "about.built": "Compilato",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Cancella le clip della fotocamera registrate automaticamente e i dati di utilizzo anonimi. Le tue impostazioni, i preset, il layout e i lavori salvati vengono mantenuti.",
   "storage.clear.done": "Liberati {amount}",
   "storage.clear.busy": "Liberazione…",
-  "storage.clear.cta": "Libera spazio ora"
+  "storage.clear.cta": "Libera spazio ora",
+  "about.chip.languages": "53 lingue",
+  "about.chip.modes": "14+ modalità",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Apri l'app live",
+  "about.source.short": "Vedi sorgente",
+  "update.label": "Mantieni karmyogi aggiornato",
+  "update.check": "Cerca aggiornamenti",
+  "update.checking": "Controllo…",
+  "update.latest": "Hai la versione più recente",
+  "update.available": "Aggiornamento disponibile — installazione…",
+  "update.auto": "Gli aggiornamenti si applicano automaticamente"
 }

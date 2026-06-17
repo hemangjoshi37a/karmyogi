@@ -128,7 +128,6 @@
   "about.desc": "Un atelier de contrôle + CAO/FAO polyvalent basé sur navigateur pour machines CNC amateur/de bureau (GRBL, grblHAL, FluidNC, Marlin et plus) : usinage CNC, gravure, traçage au stylo, brasage automatique, routage d'isolation de PCB, découpe laser et soudage.",
   "about.by": "Réalisé par",
   "about.license": "Licence MIT",
-  "about.source": "Voir le code source sur GitHub",
   "about.report": "Signaler un bogue",
   "about.version": "Version",
   "about.built": "Compilé le",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Efface les clips de caméra enregistrés automatiquement et les données d’utilisation anonymes. Vos réglages, préréglages, disposition et travaux enregistrés sont conservés.",
   "storage.clear.done": "{amount} libérés",
   "storage.clear.busy": "Libération…",
-  "storage.clear.cta": "Libérer de l’espace maintenant"
+  "storage.clear.cta": "Libérer de l’espace maintenant",
+  "about.chip.languages": "53 langues",
+  "about.chip.modes": "14+ modes",
+  "about.chip.pwa": "PWA · hors ligne",
+  "about.chip.license": "MIT",
+  "about.live": "Ouvrir l'application en ligne",
+  "about.source.short": "Voir le code source",
+  "update.label": "Gardez karmyogi à jour",
+  "update.check": "Rechercher une mise à jour",
+  "update.checking": "Vérification…",
+  "update.latest": "Vous avez la dernière version",
+  "update.available": "Mise à jour disponible — installation…",
+  "update.auto": "Les mises à jour s’appliquent automatiquement"
 }

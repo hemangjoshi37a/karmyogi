@@ -128,7 +128,6 @@
   "about.desc": "基于浏览器的多用途控制 + CAD/CAM 工作台，面向爱好者/桌面级 CNC 机器（GRBL、grblHAL、FluidNC、Marlin 等）——CNC 雕刻、镌刻、笔式绘图、自动焊锡、PCB 隔离布线、激光切割与焊接。",
   "about.by": "制作者",
   "about.license": "MIT 许可证",
-  "about.source": "在 GitHub 上查看源码",
   "about.report": "报告缺陷",
   "about.version": "版本",
   "about.built": "构建时间",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "清除自动录制的摄像头片段和匿名使用数据。您的设置、预设、布局和已保存的作业将保留。",
   "storage.clear.done": "已释放 {amount}",
   "storage.clear.busy": "正在释放…",
-  "storage.clear.cta": "立即释放空间"
+  "storage.clear.cta": "立即释放空间",
+  "about.chip.languages": "53 种语言",
+  "about.chip.modes": "14+ 模式",
+  "about.chip.pwa": "PWA · 离线",
+  "about.chip.license": "MIT",
+  "about.live": "打开在线应用",
+  "about.source.short": "查看源码",
+  "update.label": "保持 karmyogi 最新",
+  "update.check": "检查更新",
+  "update.checking": "检查中…",
+  "update.latest": "你已是最新版本",
+  "update.available": "有可用更新 — 正在安装…",
+  "update.auto": "更新将自动应用"
 }

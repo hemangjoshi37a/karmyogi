@@ -128,7 +128,6 @@
   "about.desc": "हॉबी/डेस्कटॉप CNC यंत्रांखातीर (GRBL, grblHAL, FluidNC, Marlin आनी चड) ब्रावजर-आधारीत बहुपयोगी नियंत्रण + CAD/CAM वर्कबेंच — CNC कोरीवकाम, खोदकाम, पेन-प्लॉटिंग, ऑटो-सोल्डरिंग, PCB आयसोलेशन राउटिंग, लेझर कटिंग आनी वेल्डिंग.",
   "about.by": "तयार केल्ले",
   "about.license": "MIT लायसन्स",
-  "about.source": "GitHub-ार सोर्स पळयात",
   "about.report": "बग कळयात",
   "about.version": "आवृत्ती",
   "about.built": "तयार केल्लें",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "आपशींच रेकॉर्ड जाल्ले कॅमेरा क्लिप्स आनी निनांवी वापर डेटा पुसता. तुमचीं सेटिंग्स, प्रीसेट्स, लेआउट आनी जतनाय केल्लीं कामां उरतात.",
   "storage.clear.done": "{amount} मेकळो जालो",
   "storage.clear.busy": "मेकळो करता…",
-  "storage.clear.cta": "आतांच जागो मेकळो करात"
+  "storage.clear.cta": "आतांच जागो मेकळो करात",
+  "about.chip.languages": "53 भास",
+  "about.chip.modes": "14+ मोड",
+  "about.chip.pwa": "PWA · ऑफलायन",
+  "about.chip.license": "MIT",
+  "about.live": "लायव्ह ऐप उगडात",
+  "about.source.short": "स्रोत पळयात",
+  "update.label": "karmyogi अद्ययावत दवरात",
+  "update.check": "अपडेट तपासात",
+  "update.checking": "तपासतात…",
+  "update.latest": "तुमी नवीन आवृत्तेर आसात",
+  "update.available": "अपडेट उपलब्ध — इंस्टॉल जाता…",
+  "update.auto": "अपडेट आपशेच लागू जातात"
 }

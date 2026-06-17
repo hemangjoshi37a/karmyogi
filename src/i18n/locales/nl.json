@@ -128,7 +128,6 @@
   "about.desc": "Een browsergebaseerde multifunctionele besturings- + CAD/CAM-werkbank voor hobby-/desktop-CNC-machines (GRBL, grblHAL, FluidNC, Marlin en meer) — CNC-frezen, graveren, pen-plotten, automatisch solderen, PCB-isolatiefrezen, laser snijden en lassen.",
   "about.by": "Gemaakt door",
   "about.license": "MIT-licentie",
-  "about.source": "Broncode bekijken op GitHub",
   "about.report": "Een bug melden",
   "about.version": "Versie",
   "about.built": "Gebouwd",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Wist automatisch opgenomen cameraclips en anonieme gebruiksgegevens. Je instellingen, presets, indeling en opgeslagen taken blijven behouden.",
   "storage.clear.done": "{amount} vrijgemaakt",
   "storage.clear.busy": "Vrijmaken…",
-  "storage.clear.cta": "Nu ruimte vrijmaken"
+  "storage.clear.cta": "Nu ruimte vrijmaken",
+  "about.chip.languages": "53 talen",
+  "about.chip.modes": "14+ modi",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Live-app openen",
+  "about.source.short": "Broncode bekijken",
+  "update.label": "Houd karmyogi up-to-date",
+  "update.check": "Controleren op update",
+  "update.checking": "Controleren…",
+  "update.latest": "Je hebt de nieuwste versie",
+  "update.available": "Update beschikbaar — installeren…",
+  "update.auto": "Updates worden automatisch toegepast"
 }

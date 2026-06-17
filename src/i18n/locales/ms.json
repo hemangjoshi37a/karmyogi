@@ -128,7 +128,6 @@
   "about.desc": "Bangku kerja kawalan + CAD/CAM serba guna berasaskan pelayar untuk mesin CNC hobi/desktop (GRBL, grblHAL, FluidNC, Marlin dan banyak lagi) — ukiran CNC, engrava, plot pen, pematerian automatik, penghalaan pengasingan PCB, pemotongan laser dan kimpalan.",
   "about.by": "Dibuat oleh",
   "about.license": "Lesen MIT",
-  "about.source": "Lihat sumber di GitHub",
   "about.report": "Lapor pepijat",
   "about.version": "Versi",
   "about.built": "Dibina",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Memadamkan klip kamera yang dirakam secara automatik dan data penggunaan tanpa nama. Tetapan, pratetap, susun atur dan kerja tersimpan anda dikekalkan.",
   "storage.clear.done": "{amount} dikosongkan",
   "storage.clear.busy": "Mengosongkan…",
-  "storage.clear.cta": "Kosongkan ruang sekarang"
+  "storage.clear.cta": "Kosongkan ruang sekarang",
+  "about.chip.languages": "53 bahasa",
+  "about.chip.modes": "14+ mod",
+  "about.chip.pwa": "PWA · luar talian",
+  "about.chip.license": "MIT",
+  "about.live": "Buka apl langsung",
+  "about.source.short": "Lihat sumber",
+  "update.label": "Pastikan karmyogi terkini",
+  "update.check": "Semak kemas kini",
+  "update.checking": "Menyemak…",
+  "update.latest": "Anda pada versi terkini",
+  "update.available": "Kemas kini tersedia — memasang…",
+  "update.auto": "Kemas kini digunakan secara automatik"
 }

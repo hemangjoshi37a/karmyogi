@@ -128,7 +128,6 @@
   "about.desc": "Un atelier multifuncțional de control + CAD/CAM bazat pe browser pentru mașini CNC hobby/desktop (GRBL, grblHAL, FluidNC, Marlin și altele) — frezare CNC, gravare, plotare cu pix, lipire automată, rutare de izolație PCB, tăiere și sudare cu laser.",
   "about.by": "Realizat de",
   "about.license": "Licență MIT",
-  "about.source": "Vezi sursa pe GitHub",
   "about.report": "Raportează o eroare",
   "about.version": "Versiune",
   "about.built": "Compilat",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Șterge clipurile de cameră înregistrate automat și datele anonime de utilizare. Setările, presetările, aspectul și lucrările salvate sunt păstrate.",
   "storage.clear.done": "S-au eliberat {amount}",
   "storage.clear.busy": "Se eliberează…",
-  "storage.clear.cta": "Eliberează spațiu acum"
+  "storage.clear.cta": "Eliberează spațiu acum",
+  "about.chip.languages": "53 de limbi",
+  "about.chip.modes": "14+ moduri",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Deschide aplicația live",
+  "about.source.short": "Vezi sursa",
+  "update.label": "Menține karmyogi la zi",
+  "update.check": "Verifică actualizarea",
+  "update.checking": "Se verifică…",
+  "update.latest": "Ai cea mai recentă versiune",
+  "update.available": "Actualizare disponibilă — se instalează…",
+  "update.auto": "Actualizările se aplică automat"
 }

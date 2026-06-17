@@ -128,7 +128,6 @@
   "about.desc": "ہابی/ڈیسک ٹاپ CNC مشینن خٲطرٕ اَکھ براؤزر آدھٲرِت کثیرمقصدی کنٹرول + CAD/CAM ورک بینچ (GRBL، grblHAL، FluidNC، Marlin تہٕ بیٚیہِ) — CNC کارونگ، اینگریونگ، پین پلاٹنگ، آٹو سولڈرنگ، PCB آئسولیشن روٹنگ، لیزر کٹنگ تہٕ ویلڈنگ۔",
   "about.by": "بنایوو",
   "about.license": "MIT لائسنس",
-  "about.source": "GitHub پؠٹھ سورس وُچھیو",
   "about.report": "اَکھ بگ رپورٹ کریو",
   "about.version": "ورجن",
   "about.built": "بنایہ گو",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "خۄدکار طریقہٕ سٟتؠ ریکارڈ کرنہٕ آمٕتؠ کیمرا کلِپ تہٕ ناواں ناو استعمالُک ڈیٹا چھُ صاف کران۔ تُہنٛدؠ سیٹِنٛگ، پریسیٹ، لے آؤٹ تہٕ محفوظ کٲم چھِ برٛقرار رۄزان۔",
   "storage.clear.done": "{amount} خٲلی کۆر",
   "storage.clear.busy": "خٲلی کران…",
-  "storage.clear.cta": "وُنی جاے خٲلی کریو"
+  "storage.clear.cta": "وُنی جاے خٲلی کریو",
+  "about.chip.languages": "53 زباَن",
+  "about.chip.modes": "14+ موڈ",
+  "about.chip.pwa": "PWA · آف لائن",
+  "about.chip.license": "MIT",
+  "about.live": "لائیو ایپ کھولِو",
+  "about.source.short": "ماخذ وُچھِو",
+  "update.label": "karmyogi رَزِو اپ ٹو ڈیٹ",
+  "update.check": "اپ ڈیٹ چیک کریو",
+  "update.checking": "چیک کران…",
+  "update.latest": "توہِ چھِو تازٕ ترین ورژنس پؠٹھ",
+  "update.available": "اپ ڈیٹ دستِیاب — انسٹال کران…",
+  "update.auto": "اپ ڈیٹ چھِ خودکار طریقٕ سٟتؠ لاگو گژھان"
 }

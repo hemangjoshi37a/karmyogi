@@ -128,7 +128,6 @@
   "about.desc": "شوقیہ/ڈیسک ٹاپ CNC مشینوں (GRBL، grblHAL، FluidNC، Marlin اور مزید) کے لیے براؤزر پر مبنی کثیرالمقاصد کنٹرول + CAD/CAM ورک بینچ — CNC کارونگ، اینگریونگ، پین پلاٹنگ، آٹو سولڈرنگ، PCB آئسولیشن روٹنگ، لیزر کٹنگ اور ویلڈنگ۔",
   "about.by": "تیار کردہ",
   "about.license": "MIT لائسنس",
-  "about.source": "GitHub پر سورس دیکھیں",
   "about.report": "بگ رپورٹ کریں",
   "about.version": "ورژن",
   "about.built": "تیار شدہ",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "خودکار طور پر ریکارڈ کی گئی کیمرا کلپس اور گمنام استعمال کا ڈیٹا صاف کرتا ہے۔ آپ کی ترتیبات، پری سیٹس، خاکہ اور محفوظ کام برقرار رہتے ہیں۔",
   "storage.clear.done": "{amount} خالی ہو گئی",
   "storage.clear.busy": "خالی کی جا رہی ہے…",
-  "storage.clear.cta": "ابھی جگہ خالی کریں"
+  "storage.clear.cta": "ابھی جگہ خالی کریں",
+  "about.chip.languages": "53 زبانیں",
+  "about.chip.modes": "14+ موڈ",
+  "about.chip.pwa": "PWA · آف لائن",
+  "about.chip.license": "MIT",
+  "about.live": "لائیو ایپ کھولیں",
+  "about.source.short": "ماخذ دیکھیں",
+  "update.label": "karmyogi کو اپ ڈیٹ رکھیں",
+  "update.check": "اپ ڈیٹ چیک کریں",
+  "update.checking": "چیک ہو رہا ہے…",
+  "update.latest": "آپ تازہ ترین ورژن پر ہیں",
+  "update.available": "اپ ڈیٹ دستیاب — انسٹال ہو رہا ہے…",
+  "update.auto": "اپ ڈیٹس خودکار طور پر لاگو ہوتے ہیں"
 }

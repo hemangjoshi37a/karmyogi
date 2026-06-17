@@ -128,7 +128,6 @@
   "about.desc": "میز کار چندمنظوره کنترل + CAD/CAM مبتنی بر مرورگر برای دستگاه‌های CNC آماتوری/رومیزی (GRBL، grblHAL، FluidNC، Marlin و بیشتر) — تراش CNC، حکاکی، رسم با قلم، لحیم‌کاری خودکار، مسیریابی جداسازی PCB، برش و جوشکاری لیزری.",
   "about.by": "ساخته‌شده توسط",
   "about.license": "مجوز MIT",
-  "about.source": "مشاهده کد منبع در GitHub",
   "about.report": "گزارش یک باگ",
   "about.version": "نسخه",
   "about.built": "ساخته‌شده",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "کلیپ‌های دوربین که خودکار ضبط شده‌اند و داده‌های استفادهٔ ناشناس را پاک می‌کند. تنظیمات، پیش‌تنظیم‌ها، چیدمان و کارهای ذخیره‌شدهٔ شما حفظ می‌شوند.",
   "storage.clear.done": "{amount} آزاد شد",
   "storage.clear.busy": "در حال آزادسازی…",
-  "storage.clear.cta": "اکنون فضا آزاد کنید"
+  "storage.clear.cta": "اکنون فضا آزاد کنید",
+  "about.chip.languages": "53 زبان",
+  "about.chip.modes": "14+ حالت",
+  "about.chip.pwa": "PWA · آفلاین",
+  "about.chip.license": "MIT",
+  "about.live": "باز کردن برنامه زنده",
+  "about.source.short": "مشاهده منبع",
+  "update.label": "karmyogi را به‌روز نگه دارید",
+  "update.check": "بررسی به‌روزرسانی",
+  "update.checking": "در حال بررسی…",
+  "update.latest": "شما آخرین نسخه را دارید",
+  "update.available": "به‌روزرسانی موجود است — در حال نصب…",
+  "update.auto": "به‌روزرسانی‌ها به‌طور خودکار اعمال می‌شوند"
 }

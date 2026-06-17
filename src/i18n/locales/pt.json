@@ -128,7 +128,6 @@
   "about.desc": "Uma bancada de controle + CAD/CAM multipropósito baseada em navegador para máquinas CNC de hobby/mesa (GRBL, grblHAL, FluidNC, Marlin e mais) — entalhe CNC, gravação, plotagem com caneta, soldagem automática, roteamento de isolamento de PCB, corte a laser e soldagem.",
   "about.by": "Feito por",
   "about.license": "Licença MIT",
-  "about.source": "Ver código-fonte no GitHub",
   "about.report": "Relatar um bug",
   "about.version": "Versão",
   "about.built": "Compilado em",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Apaga os clipes de câmera gravados automaticamente e os dados de uso anônimos. Suas configurações, predefinições, layout e trabalhos salvos são mantidos.",
   "storage.clear.done": "{amount} liberado",
   "storage.clear.busy": "Liberando…",
-  "storage.clear.cta": "Liberar espaço agora"
+  "storage.clear.cta": "Liberar espaço agora",
+  "about.chip.languages": "53 idiomas",
+  "about.chip.modes": "14+ modos",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Abrir o app ao vivo",
+  "about.source.short": "Ver código-fonte",
+  "update.label": "Mantenha o karmyogi atualizado",
+  "update.check": "Verificar atualização",
+  "update.checking": "Verificando…",
+  "update.latest": "Você está na versão mais recente",
+  "update.available": "Atualização disponível — instalando…",
+  "update.auto": "As atualizações são aplicadas automaticamente"
 }

@@ -4,6 +4,7 @@ import { useProgram } from '../store'
 import { useT } from '../i18n'
 import { Icon } from '../components/Icons'
 import { fetchBuildInfo, formatBytes, type BuildInfo } from './buildInfo'
+import { setRegistration, setUpdater } from './updateController'
 import '../styles/pwa.css'
 
 /** The non-standard `beforeinstallprompt` event (Chromium only). */
@@ -111,6 +112,7 @@ export function PwaManager() {
   const { updateServiceWorker } = useRegisterSW({
     onRegisteredSW(_swUrl, reg) {
       if (!reg) return
+      setRegistration(reg)
       reg.update().catch(() => {})
       // Slow poll + a check whenever the tab is refocused, so a long-lived tab
       // still picks up new deploys. (The tab reloads on update, so these
@@ -125,6 +127,7 @@ export function PwaManager() {
     },
   })
   updateFnRef.current = updateServiceWorker
+  setUpdater(updateServiceWorker)
 
   // Apply (skipWaiting + reload) as soon as the download is ready AND the machine
   // is idle. While a job streams we sit in 'waiting' and re-check when it ends.

@@ -128,7 +128,6 @@
   "about.desc": "हबि/डेस्कटप CNC मेसिन (GRBL, grblHAL, FluidNC, Marlin आरो गोबां)नि थाखाय ब्राउजार-आधारित गोबां-खामानिनि कन्ट्रोल + CAD/CAM वार्कबेन्च — CNC कार्भिं, एनग्रेभिं, खलम-प्लटिं, गावनो-गाव सल्डारिं, PCB आइसुलेसन राउटिं, लेजार काटिं आरो वेल्डिं।",
   "about.by": "बानायग्रा",
   "about.license": "MIT लाइसेन्स",
-  "about.source": "GitHub आव सर्स नाय",
   "about.report": "बग रिपर्ट खालाम",
   "about.version": "भार्सन",
   "about.built": "बानायनाय",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "गावनो रेकर्ड जाबाय कैमेरा क्लिप आरो मुं गैयै बाहायनाय डेटा सिगांखार होयो। नोंथांनि सेटिं, प्रिसेट, लेआउट आरो थिनाय खामानि दोनथायो।",
   "storage.clear.done": "{amount} सोलायबाय",
   "storage.clear.busy": "सोलायगासिनो दं…",
-  "storage.clear.cta": "दानो जायगा सोलायनाय खालाम"
+  "storage.clear.cta": "दानो जायगा सोलायनाय खालाम",
+  "about.chip.languages": "53 राव",
+  "about.chip.modes": "14+ मोड",
+  "about.chip.pwa": "PWA · अफलाइन",
+  "about.chip.license": "MIT",
+  "about.live": "लाइव एप खेव",
+  "about.source.short": "सोर्स नाय",
+  "update.label": "karmyogi खौ आपडेट दिनाय",
+  "update.check": "आपडेट नाय",
+  "update.checking": "नाजावनाय दं…",
+  "update.latest": "नोंथां जौगाखां बिसान आव दं",
+  "update.available": "आपडेट मोनो — इनस्टल जादों…",
+  "update.auto": "आपडेटखौ गावनोबा होयो"
 }

@@ -128,7 +128,6 @@
   "about.desc": "Eneo-kazi la kudhibiti + CAD/CAM la kusudi nyingi linaloendeshwa kwenye kivinjari kwa mashine za CNC za hobby/desktop (GRBL, grblHAL, FluidNC, Marlin na zaidi) — uchongaji wa CNC, nakshi, uchoraji wa kalamu, uunganishaji wa lehemu kiotomatiki, uelekezaji wa kutenga PCB, ukataji wa leza na ulehemu.",
   "about.by": "Imetengenezwa na",
   "about.license": "Leseni ya MIT",
-  "about.source": "Tazama msimbo kwenye GitHub",
   "about.report": "Ripoti hitilafu",
   "about.version": "Toleo",
   "about.built": "Imejengwa",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Hufuta klipu za kamera zilizorekodiwa kiotomatiki na data za matumizi zisizo na utambulisho. Mipangilio yako, mipangilio ya awali, mpangilio na kazi zilizohifadhiwa zinabaki.",
   "storage.clear.done": "Imetolewa {amount}",
   "storage.clear.busy": "Inatoa nafasi…",
-  "storage.clear.cta": "Toa nafasi sasa"
+  "storage.clear.cta": "Toa nafasi sasa",
+  "about.chip.languages": "Lugha 53",
+  "about.chip.modes": "Modi 14+",
+  "about.chip.pwa": "PWA · nje ya mtandao",
+  "about.chip.license": "MIT",
+  "about.live": "Fungua programu moja kwa moja",
+  "about.source.short": "Tazama chanzo",
+  "update.label": "Weka karmyogi sasa",
+  "update.check": "Angalia sasisho",
+  "update.checking": "Inakagua…",
+  "update.latest": "Una toleo jipya zaidi",
+  "update.available": "Sasisho linapatikana — inasakinisha…",
+  "update.auto": "Masasisho hutekelezwa kiotomatiki"
 }

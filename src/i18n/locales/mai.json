@@ -128,7 +128,6 @@
   "about.desc": "हॉबी/डेस्कटॉप CNC मशीन (GRBL, grblHAL, FluidNC, Marlin आ आओर) लेल ब्राउज़र-आधारित बहुउद्देशीय कंट्रोल + CAD/CAM वर्कबेंच — CNC कार्विंग, एनग्रेविंग, पेन-प्लॉटिंग, ऑटो-सोल्डरिंग, PCB आइसोलेशन राउटिंग, लेज़र कटिंग आ वेल्डिंग।",
   "about.by": "द्वारा बनाओल गेल",
   "about.license": "MIT लाइसेंस",
-  "about.source": "GitHub पर सोर्स देखू",
   "about.report": "बग रिपोर्ट करू",
   "about.version": "संस्करण",
   "about.built": "बनाओल गेल",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "स्वतः रिकॉर्ड कैमरा क्लिप आ बेनाम उपयोग डेटा मेटाबैत अछि। अहाँक सेटिंग, प्रीसेट, लेआउट आ सहेजल काज बनल रहैत अछि।",
   "storage.clear.done": "{amount} खाली भेल",
   "storage.clear.busy": "खाली कएल जा रहल अछि…",
-  "storage.clear.cta": "आब जगह खाली करू"
+  "storage.clear.cta": "आब जगह खाली करू",
+  "about.chip.languages": "53 भाषा",
+  "about.chip.modes": "14+ मोड",
+  "about.chip.pwa": "PWA · ऑफलाइन",
+  "about.chip.license": "MIT",
+  "about.live": "लाइव ऐप खोलू",
+  "about.source.short": "स्रोत देखू",
+  "update.label": "karmyogi केँ अपडेट राखू",
+  "update.check": "अपडेट देखू",
+  "update.checking": "जाँच भ रहल अछि…",
+  "update.latest": "अहाँ नवीनतम संस्करण पर छी",
+  "update.available": "अपडेट उपलब्ध — इंस्टॉल भ रहल अछि…",
+  "update.auto": "अपडेट स्वतः लागू होइत अछि"
 }

@@ -128,7 +128,6 @@
   "about.desc": "เวิร์กเบนช์ควบคุม + CAD/CAM อเนกประสงค์บนเบราว์เซอร์สำหรับเครื่อง CNC ระดับงานอดิเรก/เดสก์ท็อป (GRBL, grblHAL, FluidNC, Marlin และอื่น ๆ) — การแกะสลัก CNC, การสลัก, การวาดด้วยปากกา, การบัดกรีอัตโนมัติ, การกัดแยกลายวงจร PCB, การตัดและเชื่อมด้วยเลเซอร์",
   "about.by": "จัดทำโดย",
   "about.license": "สัญญาอนุญาต MIT",
-  "about.source": "ดูซอร์สโค้ดบน GitHub",
   "about.report": "รายงานข้อบกพร่อง",
   "about.version": "เวอร์ชัน",
   "about.built": "สร้างเมื่อ",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "ล้างคลิปกล้องที่บันทึกอัตโนมัติและข้อมูลการใช้งานแบบไม่ระบุตัวตน การตั้งค่า พรีเซ็ต เลย์เอาต์ และงานที่บันทึกไว้ของคุณจะยังคงอยู่",
   "storage.clear.done": "เพิ่มพื้นที่ว่างได้ {amount}",
   "storage.clear.busy": "กำลังเพิ่มพื้นที่ว่าง…",
-  "storage.clear.cta": "เพิ่มพื้นที่ว่างตอนนี้"
+  "storage.clear.cta": "เพิ่มพื้นที่ว่างตอนนี้",
+  "about.chip.languages": "53 ภาษา",
+  "about.chip.modes": "14+ โหมด",
+  "about.chip.pwa": "PWA · ออฟไลน์",
+  "about.chip.license": "MIT",
+  "about.live": "เปิดแอปสด",
+  "about.source.short": "ดูซอร์สโค้ด",
+  "update.label": "อัปเดต karmyogi อยู่เสมอ",
+  "update.check": "ตรวจหาการอัปเดต",
+  "update.checking": "กำลังตรวจสอบ…",
+  "update.latest": "คุณใช้เวอร์ชันล่าสุดแล้ว",
+  "update.available": "มีการอัปเดต — กำลังติดตั้ง…",
+  "update.auto": "การอัปเดตจะใช้งานโดยอัตโนมัติ"
 }

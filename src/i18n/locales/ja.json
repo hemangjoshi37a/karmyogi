@@ -128,7 +128,6 @@
   "about.desc": "GRBL、grblHAL、FluidNC、Marlin などのホビー/デスクトップ CNC マシン向けの、ブラウザベースの多目的コントロール + CAD/CAM ワークベンチ — CNC 切削、彫刻、ペンプロット、自動はんだ付け、PCB アイソレーションルーティング、レーザー切断と溶接。",
   "about.by": "制作",
   "about.license": "MIT ライセンス",
-  "about.source": "GitHub でソースを表示",
   "about.report": "バグを報告",
   "about.version": "バージョン",
   "about.built": "ビルド日時",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "自動記録されたカメラのクリップと匿名の使用状況データを消去します。設定、プリセット、レイアウト、保存したジョブは保持されます。",
   "storage.clear.done": "{amount} を解放しました",
   "storage.clear.busy": "解放中…",
-  "storage.clear.cta": "今すぐ空き容量を確保"
+  "storage.clear.cta": "今すぐ空き容量を確保",
+  "about.chip.languages": "53言語",
+  "about.chip.modes": "14+ モード",
+  "about.chip.pwa": "PWA · オフライン",
+  "about.chip.license": "MIT",
+  "about.live": "ライブアプリを開く",
+  "about.source.short": "ソースを表示",
+  "update.label": "karmyogi を最新に保つ",
+  "update.check": "更新を確認",
+  "update.checking": "確認中…",
+  "update.latest": "最新バージョンです",
+  "update.available": "更新あり — インストール中…",
+  "update.auto": "更新は自動的に適用されます"
 }

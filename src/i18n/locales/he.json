@@ -128,7 +128,6 @@
   "about.desc": "סביבת עבודה מבוססת-דפדפן רב-תכליתית לבקרה + CAD/CAM למכונות CNC חובבניות/שולחניות (GRBL, grblHAL, FluidNC, Marlin ועוד) — חריטת CNC, חריטה, שרטוט בעט, הלחמה אוטומטית, ניתוב בידוד של מעגלים מודפסים, חיתוך וריתוך בלייזר.",
   "about.by": "נוצר על ידי",
   "about.license": "רישיון MIT",
-  "about.source": "צפה בקוד המקור ב-GitHub",
   "about.report": "דווח על באג",
   "about.version": "גרסה",
   "about.built": "נבנה",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "מנקה קטעי מצלמה שהוקלטו אוטומטית ונתוני שימוש אנונימיים. ההגדרות, הקבועים מראש, הפריסה והעבודות השמורות שלכם נשמרים.",
   "storage.clear.done": "פונו {amount}",
   "storage.clear.busy": "מפנה…",
-  "storage.clear.cta": "פנו מקום עכשיו"
+  "storage.clear.cta": "פנו מקום עכשיו",
+  "about.chip.languages": "53 שפות",
+  "about.chip.modes": "14+ מצבים",
+  "about.chip.pwa": "PWA · לא מקוון",
+  "about.chip.license": "MIT",
+  "about.live": "פתח אפליקציה חיה",
+  "about.source.short": "הצג מקור",
+  "update.label": "שמרו על karmyogi מעודכן",
+  "update.check": "בדיקת עדכון",
+  "update.checking": "בודק…",
+  "update.latest": "אתה בגרסה האחרונה",
+  "update.available": "עדכון זמין — מתקין…",
+  "update.auto": "העדכונים מוחלים אוטומטית"
 }

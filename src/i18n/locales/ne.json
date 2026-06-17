@@ -128,7 +128,6 @@
   "about.desc": "शौक/डेस्कटप CNC मेसिनहरू (GRBL, grblHAL, FluidNC, Marlin र थप) का लागि ब्राउजर-आधारित बहुउद्देश्यीय नियन्त्रण + CAD/CAM वर्कबेन्च — CNC कार्भिङ, इनग्रेभिङ, पेन-प्लटिङ, अटो-सोल्डरिङ, PCB आइसोलेसन राउटिङ, लेजर कटिङ र वेल्डिङ।",
   "about.by": "निर्माता",
   "about.license": "MIT इजाजतपत्र",
-  "about.source": "GitHub मा स्रोत हेर्नुहोस्",
   "about.report": "बग रिपोर्ट गर्नुहोस्",
   "about.version": "संस्करण",
   "about.built": "बनाइएको",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "स्वतः रेकर्ड भएका क्यामेरा क्लिप र अज्ञात प्रयोग डेटा मेटाउँछ। तपाईंका सेटिङ, प्रिसेट, लेआउट र सुरक्षित गरिएका कामहरू राखिन्छन्।",
   "storage.clear.done": "{amount} खाली भयो",
   "storage.clear.busy": "खाली गर्दै…",
-  "storage.clear.cta": "अहिले ठाउँ खाली गर्नुहोस्"
+  "storage.clear.cta": "अहिले ठाउँ खाली गर्नुहोस्",
+  "about.chip.languages": "53 भाषा",
+  "about.chip.modes": "14+ मोड",
+  "about.chip.pwa": "PWA · अफलाइन",
+  "about.chip.license": "MIT",
+  "about.live": "लाइभ एप खोल्नुहोस्",
+  "about.source.short": "स्रोत हेर्नुहोस्",
+  "update.label": "karmyogi अद्यावधिक राख्नुहोस्",
+  "update.check": "अपडेट जाँच गर्नुहोस्",
+  "update.checking": "जाँच गर्दै…",
+  "update.latest": "तपाईं नवीनतम संस्करणमा हुनुहुन्छ",
+  "update.available": "अपडेट उपलब्ध — स्थापना हुँदै…",
+  "update.auto": "अपडेटहरू स्वतः लागू हुन्छन्"
 }

@@ -128,7 +128,6 @@
   "about.desc": "Wurin aiki na CAD/CAM da iko mai amfani da yawa wanda ke aiki a cikin birawsa don injunan CNC na sha'awa/tebur (GRBL, grblHAL, FluidNC, Marlin da sauransu) — sassaka CNC, zane-zane, zanen alkalami, sayar da kai, hanyar warewar PCB, yankan laser da walda.",
   "about.by": "An yi shi da",
   "about.license": "Lasisin MIT",
-  "about.source": "Duba lambar tushe a GitHub",
   "about.report": "Bayar da rahoton kwaro",
   "about.version": "Sigar",
   "about.built": "An gina",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Yana share faifan kyamara da aka yi rikodin kai tsaye da bayanan amfani da ba a san su ba. Saitunanka, abubuwan da aka riga aka shirya, tsari da ayyukan da aka ajiye sun ci gaba da kasancewa.",
   "storage.clear.done": "An ’yantar da {amount}",
   "storage.clear.busy": "Ana ’yantarwa…",
-  "storage.clear.cta": "’Yantar da sarari yanzu"
+  "storage.clear.cta": "’Yantar da sarari yanzu",
+  "about.chip.languages": "Harsuna 53",
+  "about.chip.modes": "Yanaye 14+",
+  "about.chip.pwa": "PWA · layi waje",
+  "about.chip.license": "MIT",
+  "about.live": "Buɗe manhaja kai tsaye",
+  "about.source.short": "Duba tushen",
+  "update.label": "Ci gaba da sabunta karmyogi",
+  "update.check": "Duba sabuntawa",
+  "update.checking": "Ana dubawa…",
+  "update.latest": "Kana kan sabon sigar",
+  "update.available": "Akwai sabuntawa — ana shigarwa…",
+  "update.auto": "Ana amfani da sabuntawa kai tsaye"
 }

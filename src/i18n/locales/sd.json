@@ -128,7 +128,6 @@
   "about.desc": "هٻي/ڊيسڪ ٽاپ CNC مشينن (GRBL، grblHAL، FluidNC، Marlin ۽ ٻيون) لاءِ هڪ برائوزر تي ٻڌل گهڻ مقصدي ڪنٽرول + CAD/CAM ورڪ بينچ — CNC ڪارونگ، اينگريونگ، پين-پلاٽنگ، آٽو-سولڊرنگ، PCB آئسوليشن روٽنگ، ليزر ڪٽنگ ۽ ويلڊنگ.",
   "about.by": "ٺاهيندڙ",
   "about.license": "MIT لائسنس",
-  "about.source": "GitHub تي ماخذ ڏسو",
   "about.report": "هڪ بگ رپورٽ ڪريو",
   "about.version": "ورزن",
   "about.built": "ٺاهيو ويو",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "پاڻمرادو رڪارڊ ٿيل ڪيمرا ڪلپ ۽ بي نام استعمال جو ڊيٽا صاف ڪري ٿو. توهان جون سيٽنگون، پريسيٽ، ليآئوٽ ۽ محفوظ ڪيل ڪم برقرار رهن ٿا.",
   "storage.clear.done": "{amount} خالي ٿي ويئي",
   "storage.clear.busy": "خالي ڪري رهيو آهي…",
-  "storage.clear.cta": "هاڻي جاءِ خالي ڪريو"
+  "storage.clear.cta": "هاڻي جاءِ خالي ڪريو",
+  "about.chip.languages": "53 ٻوليون",
+  "about.chip.modes": "14+ موڊ",
+  "about.chip.pwa": "PWA · آف لائين",
+  "about.chip.license": "MIT",
+  "about.live": "لائيو ايپ کوليو",
+  "about.source.short": "ماخذ ڏسو",
+  "update.label": "karmyogi کي اپ ڊيٽ رکو",
+  "update.check": "اپ ڊيٽ چيڪ ڪريو",
+  "update.checking": "چيڪ ٿي رهيو آهي…",
+  "update.latest": "توهان جديد ترين ورزن تي آهيو",
+  "update.available": "اپ ڊيٽ موجود آهي — انسٽال ٿي رهيو آهي…",
+  "update.auto": "اپ ڊيٽ پاڻمرادو لاڳو ٿين ٿا"
 }

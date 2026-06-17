@@ -128,7 +128,6 @@
   "about.desc": "Wielofunkcyjny warsztat sterowania + CAD/CAM działający w przeglądarce dla amatorskich/domowych maszyn CNC (GRBL, grblHAL, FluidNC, Marlin i więcej) — frezowanie CNC, grawerowanie, kreślenie pisakiem, automatyczne lutowanie, trasowanie izolacyjne PCB, cięcie i spawanie laserowe.",
   "about.by": "Wykonane przez",
   "about.license": "Licencja MIT",
-  "about.source": "Zobacz źródło na GitHubie",
   "about.report": "Zgłoś błąd",
   "about.version": "Wersja",
   "about.built": "Zbudowano",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Usuwa automatycznie nagrane klipy z kamery i anonimowe dane o użytkowaniu. Twoje ustawienia, ustawienia wstępne, układ i zapisane zadania zostają zachowane.",
   "storage.clear.done": "Zwolniono {amount}",
   "storage.clear.busy": "Zwalnianie…",
-  "storage.clear.cta": "Zwolnij miejsce teraz"
+  "storage.clear.cta": "Zwolnij miejsce teraz",
+  "about.chip.languages": "53 języki",
+  "about.chip.modes": "14+ trybów",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Otwórz aplikację na żywo",
+  "about.source.short": "Zobacz źródło",
+  "update.label": "Utrzymuj karmyogi aktualnym",
+  "update.check": "Sprawdź aktualizację",
+  "update.checking": "Sprawdzanie…",
+  "update.latest": "Masz najnowszą wersję",
+  "update.available": "Dostępna aktualizacja — instalowanie…",
+  "update.auto": "Aktualizacje są stosowane automatycznie"
 }

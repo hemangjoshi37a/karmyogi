@@ -128,7 +128,6 @@
   "about.desc": "Wọ́ọ̀kíbẹ́nṣì ìṣàkóso onílọ́pọ̀-ìdí + CAD/CAM tí ó dá lórí abọ́rọ̀wé fún àwọn ẹ̀rọ CNC eré-ìnàjú/tábìlì (GRBL, grblHAL, FluidNC, Marlin àti bẹ́ẹ̀ bẹ́ẹ̀ lọ) — gbígbẹ́ CNC, ìfínyàn, ìkọ̀wé-pẹ́nà, ìfìdìpọ̀-ọ̀tọ̀, ìṣíṣẹ́ ìpínyà PCB, gígé léṣà àti ìfìdìpọ̀.",
   "about.by": "Tí a ṣe láti ọwọ́",
   "about.license": "Ìwé-àṣẹ MIT",
-  "about.source": "Wo orísun lórí GitHub",
   "about.report": "Ròyìn àṣìṣe kan",
   "about.version": "Ẹ̀dà",
   "about.built": "Tí a kọ́",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Ó ń pa àwọn àgékúrú kámẹ́rà tí a gbàsílẹ̀ fúnra rẹ̀ àti dátà ìlò aláìlórúkọ rẹ́. Àwọn ètò rẹ, àwọn ìṣàtò tẹ́lẹ̀, ìṣètò àti àwọn iṣẹ́ tí a fipamọ́ yóò dúró.",
   "storage.clear.done": "A gba {amount} sílẹ̀",
   "storage.clear.busy": "Ń gba àyè sílẹ̀…",
-  "storage.clear.cta": "Gba àyè sílẹ̀ báyìí"
+  "storage.clear.cta": "Gba àyè sílẹ̀ báyìí",
+  "about.chip.languages": "Èdè 53",
+  "about.chip.modes": "Ìpòsí 14+",
+  "about.chip.pwa": "PWA · àìlórí ayélujára",
+  "about.chip.license": "MIT",
+  "about.live": "Ṣí áàpù tààrà",
+  "about.source.short": "Wo orísun",
+  "update.label": "Jẹ́ kí karmyogi wà ní ìmúdójúìwọ̀n",
+  "update.check": "Ṣàyẹ̀wò ìmúdójúìwọ̀n",
+  "update.checking": "Ń ṣàyẹ̀wò…",
+  "update.latest": "O wà lórí ẹ̀yà tuntun jùlọ",
+  "update.available": "Ìmúdójúìwọ̀n wà — ń fi sórí ẹrọ…",
+  "update.auto": "Àwọn ìmúdójúìwọ̀n ń ṣiṣẹ́ fúnra wọn"
 }

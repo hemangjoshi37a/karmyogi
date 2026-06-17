@@ -128,7 +128,6 @@
   "about.desc": "Eine browserbasierte Mehrzweck-Steuerung + CAD/CAM-Werkbank für Hobby-/Desktop-CNC-Maschinen (GRBL, grblHAL, FluidNC, Marlin und mehr) — CNC-Fräsen, Gravieren, Stiftplotten, Auto-Löten, PCB-Isolationsfräsen, Laserschneiden und Schweißen.",
   "about.by": "Erstellt von",
   "about.license": "MIT-Lizenz",
-  "about.source": "Quellcode auf GitHub ansehen",
   "about.report": "Fehler melden",
   "about.version": "Version",
   "about.built": "Erstellt",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Löscht automatisch aufgezeichnete Kameraclips und anonyme Nutzungsdaten. Ihre Einstellungen, Voreinstellungen, das Layout und gespeicherte Aufträge bleiben erhalten.",
   "storage.clear.done": "{amount} freigegeben",
   "storage.clear.busy": "Wird freigegeben…",
-  "storage.clear.cta": "Jetzt Speicher freigeben"
+  "storage.clear.cta": "Jetzt Speicher freigeben",
+  "about.chip.languages": "53 Sprachen",
+  "about.chip.modes": "14+ Modi",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Live-App öffnen",
+  "about.source.short": "Quellcode ansehen",
+  "update.label": "Halte karmyogi aktuell",
+  "update.check": "Nach Update suchen",
+  "update.checking": "Wird geprüft…",
+  "update.latest": "Du hast die neueste Version",
+  "update.available": "Update verfügbar – wird installiert…",
+  "update.auto": "Updates werden automatisch angewendet"
 }

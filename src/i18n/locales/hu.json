@@ -128,7 +128,6 @@
   "about.desc": "Böngészőalapú többcélú vezérlő- + CAD/CAM-munkapad hobbi/asztali CNC-gépekhez (GRBL, grblHAL, FluidNC, Marlin és továbbiak) — CNC-faragás, gravírozás, tollrajzolás, automata forrasztás, NYÁK-izolációs marás, lézervágás és -hegesztés.",
   "about.by": "Készítette",
   "about.license": "MIT-licenc",
-  "about.source": "Forráskód megtekintése a GitHubon",
   "about.report": "Hiba bejelentése",
   "about.version": "Verzió",
   "about.built": "Build dátuma",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Törli az automatikusan rögzített kameraklippeket és a névtelen használati adatokat. A beállításai, az előbeállítások, az elrendezés és a mentett munkák megmaradnak.",
   "storage.clear.done": "{amount} felszabadítva",
   "storage.clear.busy": "Felszabadítás…",
-  "storage.clear.cta": "Hely felszabadítása most"
+  "storage.clear.cta": "Hely felszabadítása most",
+  "about.chip.languages": "53 nyelv",
+  "about.chip.modes": "14+ mód",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Élő alkalmazás megnyitása",
+  "about.source.short": "Forrás megtekintése",
+  "update.label": "Tartsa naprakészen a karmyogit",
+  "update.check": "Frissítés keresése",
+  "update.checking": "Ellenőrzés…",
+  "update.latest": "A legújabb verziót használja",
+  "update.available": "Elérhető frissítés – telepítés…",
+  "update.auto": "A frissítések automatikusan települnek"
 }

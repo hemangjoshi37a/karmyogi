@@ -128,7 +128,6 @@
   "about.desc": "শখ/ডেস্কটপ CNC যন্ত্ৰৰ (GRBL, grblHAL, FluidNC, Marlin আৰু অধিক) বাবে ব্ৰাউজাৰ-ভিত্তিক বহুমুখী নিয়ন্ত্ৰণ + CAD/CAM ৱৰ্কবেঞ্চ — CNC কাৰ্ভিং, এনগ্ৰেভিং, পেন-প্লটিং, অটো-চোল্ডাৰিং, PCB আইছোলেচন ৰাউটিং, লেজাৰ কাটিং আৰু ৱেল্ডিং।",
   "about.by": "নিৰ্মাতা",
   "about.license": "MIT লাইচেন্স",
-  "about.source": "GitHub-ত উৎস চাওক",
   "about.report": "এটা বাগ ৰিপৰ্ট কৰক",
   "about.version": "সংস্কৰণ",
   "about.built": "নিৰ্মিত",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "স্বয়ংক্ৰিয়ভাৱে ৰেকৰ্ড কৰা কেমেৰা ক্লিপ আৰু অজ্ঞাত ব্যৱহাৰৰ তথ্য মচি পেলায়। আপোনাৰ ছেটিং, প্ৰিছেট, লেআউট আৰু সংৰক্ষিত কাম ৰাখি থোৱা হয়।",
   "storage.clear.done": "{amount} মুকলি কৰা হ’ল",
   "storage.clear.busy": "মুকলি কৰি আছে…",
-  "storage.clear.cta": "এতিয়া স্থান মুকলি কৰক"
+  "storage.clear.cta": "এতিয়া স্থান মুকলি কৰক",
+  "about.chip.languages": "53 ভাষা",
+  "about.chip.modes": "14+ ম’ড",
+  "about.chip.pwa": "PWA · অফলাইন",
+  "about.chip.license": "MIT",
+  "about.live": "লাইভ এপ খোলক",
+  "about.source.short": "উৎস চাওক",
+  "update.label": "karmyogi আপডেট ৰাখক",
+  "update.check": "আপডেট পৰীক্ষা কৰক",
+  "update.checking": "পৰীক্ষা কৰি আছে…",
+  "update.latest": "আপুনি শেহতীয়া সংস্কৰণত আছে",
+  "update.available": "আপডেট উপলব্ধ — ইনষ্টল হৈ আছে…",
+  "update.auto": "আপডেট স্বয়ংক্ৰিয়ভাৱে প্ৰযোজ্য হয়"
 }

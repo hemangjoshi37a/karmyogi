@@ -128,7 +128,6 @@
   "about.desc": "ᱦᱚᱵᱤ/ᱰᱮᱥᱠᱴᱚᱯ CNC ᱢᱮᱥᱤᱱ (GRBL, grblHAL, FluidNC, Marlin ᱟᱨ ᱰᱷᱮᱨ) ᱞᱟᱹᱜᱤᱫ ᱢᱤᱫ ᱵᱽᱨᱟᱣᱡᱚᱨ-ᱟᱫᱷᱟᱨ ᱵᱟᱦᱩᱫᱮᱥᱤᱭᱚ ᱠᱚᱱᱴᱨᱚᱞ + CAD/CAM ᱣᱚᱨᱠᱵᱮᱸᱪ — CNC ᱠᱟᱨᱣᱤᱝ, ᱮᱱᱜᱽᱨᱮᱣᱤᱝ, ᱯᱮᱱ-ᱯᱞᱚᱴᱤᱝ, ᱟᱴᱳ-ᱥᱳᱞᱰᱟᱨᱤᱝ, PCB ᱟᱭᱥᱳᱞᱮᱥᱚᱱ ᱨᱟᱣᱴᱤᱝ, ᱞᱮᱡᱚᱨ ᱠᱟᱴᱤᱝ ᱟᱨ ᱣᱮᱞᱰᱤᱝ ᱾",
   "about.by": "ᱛᱮᱭᱟᱨ",
   "about.license": "MIT License",
-  "about.source": "GitHub ᱨᱮ ᱥᱳᱨᱥ ᱧᱮᱞ ᱢᱮ",
   "about.report": "ᱢᱤᱫ ᱵᱟᱜ ᱨᱤᱯᱚᱨᱴ ᱢᱮ",
   "about.version": "ᱵᱷᱟᱨᱥᱚᱱ",
   "about.built": "ᱛᱮᱭᱟᱨ",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "ᱟᱡ ᱛᱮ ᱨᱮᱠᱨᱰ ᱦᱩᱭ ᱠᱮᱢᱮᱨᱟ ᱠᱞᱤᱯ ᱟᱨ ᱧᱩᱛᱩᱢ ᱵᱟᱝ ᱵᱮᱵᱷᱟᱨ ᱰᱟᱴᱟ ᱯᱷᱟᱨᱪᱟᱣᱟᱜ-ᱟ। ᱟᱢᱟᱜ ᱥᱮᱴᱤᱝ, ᱯᱨᱤᱥᱮᱴ, ᱞᱮᱟᱣᱴ ᱟᱨ ᱥᱟᱸᱪᱟᱣ ᱠᱟᱹᱢᱤ ᱫᱚᱦᱚ ᱦᱩᱭᱩᱜ-ᱟ।",
   "storage.clear.done": "{amount} ᱮᱴᱠᱮᱴ ᱦᱩᱭᱮᱱᱟ",
   "storage.clear.busy": "ᱮᱴᱠᱮᱴ ᱮᱫᱟ…",
-  "storage.clear.cta": "ᱱᱤᱛᱚᱜ ᱡᱟᱭᱜᱟ ᱮᱴᱠᱮᱴ ᱢᱮ"
+  "storage.clear.cta": "ᱱᱤᱛᱚᱜ ᱡᱟᱭᱜᱟ ᱮᱴᱠᱮᱴ ᱢᱮ",
+  "about.chip.languages": "ᱵᱷᱟᱥᱟ 53",
+  "about.chip.modes": "ᱢᱳᱰ 14+",
+  "about.chip.pwa": "PWA · ᱚᱯᱷᱞᱟᱭᱤᱱ",
+  "about.chip.license": "MIT",
+  "about.live": "ᱞᱟᱭᱣ ᱮᱯ ᱡᱷᱤᱡᱽ ᱢᱮ",
+  "about.source.short": "ᱥᱨᱳᱛ ᱧᱮᱞ ᱢᱮ",
+  "update.label": "karmyogi ᱟᱯᱰᱮᱴ ᱫᱚᱦᱚ ᱢᱮ",
+  "update.check": "ᱟᱯᱰᱮᱴ ᱧᱮᱞ ᱢᱮ",
+  "update.checking": "ᱧᱮᱞᱚᱜ ᱠᱟᱱᱟ…",
+  "update.latest": "ᱟᱢ ᱱᱟᱶᱟ ᱵᱷᱟᱨᱥᱚᱱ ᱨᱮ ᱢᱮᱱᱟᱢᱟ",
+  "update.available": "ᱟᱯᱰᱮᱴ ᱢᱮᱱᱟᱜ — ᱤᱱᱥᱴᱚᱞ ᱦᱩᱭ ᱠᱟᱱᱟ…",
+  "update.auto": "ᱟᱯᱰᱮᱴ ᱟᱡ ᱛᱮ ᱞᱟᱜᱩ ᱦᱩᱭᱚᱜᱼᱟ"
 }

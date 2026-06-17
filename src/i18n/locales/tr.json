@@ -128,7 +128,6 @@
   "about.desc": "Hobi/masaüstü CNC makineleri (GRBL, grblHAL, FluidNC, Marlin ve daha fazlası) için tarayıcı tabanlı çok amaçlı kontrol + CAD/CAM tezgahı — CNC oyma, gravür, kalemle çizim, otomatik lehimleme, PCB izolasyon yönlendirme, lazer kesim ve kaynak.",
   "about.by": "Yapan",
   "about.license": "MIT Lisansı",
-  "about.source": "Kaynağı GitHub'da görüntüle",
   "about.report": "Hata bildir",
   "about.version": "Sürüm",
   "about.built": "Derlendi",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Otomatik kaydedilen kamera kliplerini ve anonim kullanım verilerini siler. Ayarlarınız, ön ayarlarınız, düzeniniz ve kaydedilen işleriniz korunur.",
   "storage.clear.done": "{amount} boşaltıldı",
   "storage.clear.busy": "Boşaltılıyor…",
-  "storage.clear.cta": "Şimdi yer aç"
+  "storage.clear.cta": "Şimdi yer aç",
+  "about.chip.languages": "53 dil",
+  "about.chip.modes": "14+ mod",
+  "about.chip.pwa": "PWA · çevrimdışı",
+  "about.chip.license": "MIT",
+  "about.live": "Canlı uygulamayı aç",
+  "about.source.short": "Kaynağı görüntüle",
+  "update.label": "karmyogi'yi güncel tutun",
+  "update.check": "Güncelleme denetle",
+  "update.checking": "Denetleniyor…",
+  "update.latest": "En son sürümü kullanıyorsunuz",
+  "update.available": "Güncelleme var — yükleniyor…",
+  "update.auto": "Güncellemeler otomatik uygulanır"
 }

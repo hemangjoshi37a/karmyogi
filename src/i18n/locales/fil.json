@@ -128,7 +128,6 @@
   "about.desc": "Isang browser-based na multipurpose control + CAD/CAM workbench para sa hobby/desktop CNC machine (GRBL, grblHAL, FluidNC, Marlin at iba pa) — CNC carving, engraving, pen-plotting, auto-soldering, PCB isolation routing, laser cutting at welding.",
   "about.by": "Ginawa ni",
   "about.license": "MIT License",
-  "about.source": "Tingnan ang source sa GitHub",
   "about.report": "Mag-report ng bug",
   "about.version": "Bersyon",
   "about.built": "Binuo",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Binubura ang awtomatikong na-record na mga clip ng camera at hindi kilalang data ng paggamit. Nananatili ang iyong mga setting, preset, layout at mga naka-save na trabaho.",
   "storage.clear.done": "Nabakante ang {amount}",
   "storage.clear.busy": "Nagbabakante…",
-  "storage.clear.cta": "Magbakante ng espasyo ngayon"
+  "storage.clear.cta": "Magbakante ng espasyo ngayon",
+  "about.chip.languages": "53 wika",
+  "about.chip.modes": "14+ mode",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Buksan ang live na app",
+  "about.source.short": "Tingnan ang source",
+  "update.label": "Panatilihing napapanahon ang karmyogi",
+  "update.check": "Tingnan ang update",
+  "update.checking": "Sinusuri…",
+  "update.latest": "Nasa pinakabagong bersyon ka",
+  "update.available": "May update — ini-install…",
+  "update.auto": "Awtomatikong nilalapat ang mga update"
 }

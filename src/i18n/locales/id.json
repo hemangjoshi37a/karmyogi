@@ -128,7 +128,6 @@
   "about.desc": "Workbench kontrol + CAD/CAM serbaguna berbasis peramban untuk mesin CNC hobi/desktop (GRBL, grblHAL, FluidNC, Marlin dan lainnya) — ukir CNC, gravir, plotting pena, penyolderan otomatis, isolation routing PCB, pemotongan laser dan pengelasan.",
   "about.by": "Dibuat oleh",
   "about.license": "Lisensi MIT",
-  "about.source": "Lihat sumber di GitHub",
   "about.report": "Laporkan bug",
   "about.version": "Versi",
   "about.built": "Dibuat",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Menghapus klip kamera yang direkam otomatis dan data penggunaan anonim. Pengaturan, prasetel, tata letak, dan pekerjaan tersimpan Anda tetap dipertahankan.",
   "storage.clear.done": "{amount} dikosongkan",
   "storage.clear.busy": "Mengosongkan…",
-  "storage.clear.cta": "Kosongkan ruang sekarang"
+  "storage.clear.cta": "Kosongkan ruang sekarang",
+  "about.chip.languages": "53 bahasa",
+  "about.chip.modes": "14+ mode",
+  "about.chip.pwa": "PWA · offline",
+  "about.chip.license": "MIT",
+  "about.live": "Buka aplikasi langsung",
+  "about.source.short": "Lihat sumber",
+  "update.label": "Selalu perbarui karmyogi",
+  "update.check": "Periksa pembaruan",
+  "update.checking": "Memeriksa…",
+  "update.latest": "Anda di versi terbaru",
+  "update.available": "Pembaruan tersedia — memasang…",
+  "update.auto": "Pembaruan diterapkan otomatis"
 }

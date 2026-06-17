@@ -128,7 +128,6 @@
   "about.desc": "ହବି/ଡେସ୍କଟପ CNC ମେସିନ (GRBL, grblHAL, FluidNC, Marlin ଓ ଆହୁରି ଅନେକ) ପାଇଁ ଗୋଟିଏ ବ୍ରାଉଜର-ଆଧାରିତ ବହୁମୁଖୀ କଣ୍ଟ୍ରୋଲ + CAD/CAM ୱାର୍କବେଞ୍ଚ — CNC କାର୍ଭିଂ, ଖୋଦନ, ପେନ-ପ୍ଲଟିଂ, ଅଟୋ-ସୋଲ୍ଡରିଂ, PCB ଆଇସୋଲେସନ ରାଉଟିଂ, ଲେଜର କଟିଂ ଓ ୱେଲ୍ଡିଂ।",
   "about.by": "ତିଆରି କରିଛନ୍ତି",
   "about.license": "MIT ଲାଇସେନ୍ସ",
-  "about.source": "GitHub ରେ ସୋର୍ସ ଦେଖନ୍ତୁ",
   "about.report": "ଗୋଟିଏ ବଗ ରିପୋର୍ଟ କରନ୍ତୁ",
   "about.version": "ସଂସ୍କରଣ",
   "about.built": "ବିଲ୍ଡ",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "ସ୍ୱଚାଳିତ ଭାବେ ରେକର୍ଡ ହୋଇଥିବା କ୍ୟାମେରା କ୍ଲିପ୍ ଏବଂ ଅଜ୍ଞାତ ବ୍ୟବହାର ଡାଟା ସଫା କରେ। ଆପଣଙ୍କ ସେଟିଂସ୍, ପ୍ରିସେଟ୍, ଲେଆଉଟ୍ ଏବଂ ସେଭ୍ କରାଯାଇଥିବା କାର୍ଯ୍ୟ ରଖାଯାଏ।",
   "storage.clear.done": "{amount} ଖାଲି ହେଲା",
   "storage.clear.busy": "ଖାଲି କରୁଛି…",
-  "storage.clear.cta": "ବର୍ତ୍ତମାନ ସ୍ଥାନ ଖାଲି କରନ୍ତୁ"
+  "storage.clear.cta": "ବର୍ତ୍ତମାନ ସ୍ଥାନ ଖାଲି କରନ୍ତୁ",
+  "about.chip.languages": "53ଟି ଭାଷା",
+  "about.chip.modes": "14+ ମୋଡ୍",
+  "about.chip.pwa": "PWA · ଅଫଲାଇନ୍",
+  "about.chip.license": "MIT",
+  "about.live": "ଲାଇଭ୍ ଆପ୍ ଖୋଲନ୍ତୁ",
+  "about.source.short": "ଉତ୍ସ ଦେଖନ୍ତୁ",
+  "update.label": "karmyogi ଅପଡେଟ୍ ରଖନ୍ତୁ",
+  "update.check": "ଅପଡେଟ୍ ଯାଞ୍ଚ କରନ୍ତୁ",
+  "update.checking": "ଯାଞ୍ଚ କରୁଛି…",
+  "update.latest": "ଆପଣ ସର୍ବଶେଷ ସଂସ୍କରଣରେ ଅଛନ୍ତି",
+  "update.available": "ଅପଡେଟ୍ ଉପଲବ୍ଧ — ସ୍ଥାପନ କରୁଛି…",
+  "update.auto": "ଅପଡେଟ୍ ସ୍ୱୟଂଚାଳିତ ଭାବେ ପ୍ରଯୁଜ୍ୟ ହୁଏ"
 }

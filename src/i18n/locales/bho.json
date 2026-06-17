@@ -128,7 +128,6 @@
   "about.desc": "हॉबी/डेस्कटॉप CNC मशीन (GRBL, grblHAL, FluidNC, Marlin आ अउरी) खातिर एगो ब्राउज़र-आधारित बहुउद्देशीय कंट्रोल + CAD/CAM वर्कबेंच — CNC कार्विंग, उकेरना, पेन-प्लॉटिंग, ऑटो-सोल्डरिंग, PCB आइसोलेशन रूटिंग, लेज़र कटिंग आ वेल्डिंग।",
   "about.by": "बनवले बानी",
   "about.license": "MIT लाइसेंस",
-  "about.source": "GitHub पर सोर्स देखीं",
   "about.report": "बग के रिपोर्ट करीं",
   "about.version": "संस्करण",
   "about.built": "बनल",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "अपने आप रिकॉर्ड भइल कैमरा क्लिप आ बेनाम उपयोग डेटा के मिटा देला। राउर सेटिंग, प्रीसेट, लेआउट आ सेव कइल काम बनल रहेला।",
   "storage.clear.done": "{amount} खाली भइल",
   "storage.clear.busy": "खाली कइल जा रहल बा…",
-  "storage.clear.cta": "अबहीं जगह खाली करीं"
+  "storage.clear.cta": "अबहीं जगह खाली करीं",
+  "about.chip.languages": "53 भाषा",
+  "about.chip.modes": "14+ मोड",
+  "about.chip.pwa": "PWA · ऑफलाइन",
+  "about.chip.license": "MIT",
+  "about.live": "लाइव ऐप खोलीं",
+  "about.source.short": "सोर्स देखीं",
+  "update.label": "karmyogi के अपडेट राखीं",
+  "update.check": "अपडेट देखीं",
+  "update.checking": "जाँच हो रहल बा…",
+  "update.latest": "रउआ नवीनतम संस्करण पर बानी",
+  "update.available": "अपडेट उपलब्ध बा — इंस्टॉल हो रहल बा…",
+  "update.auto": "अपडेट अपने आप लागू होला"
 }

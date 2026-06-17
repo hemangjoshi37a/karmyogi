@@ -185,49 +185,253 @@
     <!-- Pre-app splash styling: shown only until the SPA mounts (React replaces
          #root), and doubles as crawlable above-the-fold content for search. -->
     <style>
+      /* ---- Pre-app branded loading splash ----------------------------------
+         Self-contained, pure inline CSS (no external font/CSS/JS), echoing the
+         app's dark sign-in landing: drifting CNC-bed grid, soft teal glow blobs,
+         a brand lockup + eyebrow pill, a gradient headline, a readable lede,
+         feature cards with icon tiles + hairline borders, and a refined
+         spinner. Paints instantly before the JS bundle; React clears #root. */
       #app-splash {
         position: fixed;
         inset: 0;
         z-index: 1;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 16px;
-        padding: 24px;
-        text-align: center;
-        background: #16191d;
-        color: #e7ecef;
+        overflow: auto;
+        padding: clamp(20px, 4vw, 48px);
+        background:
+          radial-gradient(ellipse 120% 90% at 50% -10%, #20262e 0%, transparent 60%),
+          #16191d;
+        color: #e6e9ee;
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
-      #app-splash img { width: 60px; height: 60px; }
+      /* Background layers (decorative; behind content) */
+      #app-splash .ky-bg {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 0;
+      }
+      #app-splash .ky-grid {
+        position: absolute;
+        inset: -40%;
+        background-image:
+          linear-gradient(to right, rgba(58, 66, 80, 0.55) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(58, 66, 80, 0.55) 1px, transparent 1px);
+        background-size: 46px 46px;
+        -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 42%, #000 28%, transparent 78%);
+        mask-image: radial-gradient(ellipse 70% 70% at 50% 42%, #000 28%, transparent 78%);
+        opacity: 0.5;
+        animation: ky-grid-pan 60s linear infinite;
+      }
+      @keyframes ky-grid-pan {
+        from { transform: translate3d(0, 0, 0); }
+        to { transform: translate3d(46px, 46px, 0); }
+      }
+      #app-splash .ky-blob {
+        position: absolute;
+        width: 60vmax;
+        height: 60vmax;
+        border-radius: 50%;
+        filter: blur(70px);
+        opacity: 0.22;
+      }
+      #app-splash .ky-blob-1 {
+        top: -24vmax;
+        left: -16vmax;
+        background: radial-gradient(circle at 30% 30%, #2dd4bf, transparent 62%);
+        animation: ky-blob-1 22s ease-in-out infinite alternate;
+      }
+      #app-splash .ky-blob-2 {
+        bottom: -28vmax;
+        right: -20vmax;
+        background: radial-gradient(circle at 60% 40%, #1f9d97, transparent 62%);
+        animation: ky-blob-2 27s ease-in-out infinite alternate;
+      }
+      @keyframes ky-blob-1 {
+        from { transform: translate3d(0, 0, 0) scale(1); }
+        to { transform: translate3d(6vmax, 4vmax, 0) scale(1.12); }
+      }
+      @keyframes ky-blob-2 {
+        from { transform: translate3d(0, 0, 0) scale(1.05); }
+        to { transform: translate3d(-5vmax, -4vmax, 0) scale(0.95); }
+      }
+      #app-splash .ky-vignette {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse 90% 80% at 50% 28%, transparent 42%, rgba(22, 25, 29, 0.82) 100%);
+      }
+
+      /* Content */
+      #app-splash .ky-inner {
+        position: relative;
+        z-index: 1;
+        width: min(760px, 100%);
+        margin: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: clamp(16px, 2.2vw, 22px);
+        animation: ky-rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+      }
+      @keyframes ky-rise {
+        from { opacity: 0; transform: translateY(14px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      #app-splash .ky-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 11px;
+        font-size: clamp(22px, 2.6vw, 28px);
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        line-height: 1;
+      }
+      #app-splash .ky-brand img {
+        width: clamp(38px, 5vw, 44px);
+        height: clamp(38px, 5vw, 44px);
+        border-radius: 10px;
+        display: block;
+      }
+      #app-splash .ky-brand .ky-word b { color: #2dd4bf; font-weight: 700; }
+      #app-splash .ky-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin: 0;
+        padding: 5px 13px 5px 11px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #5fe0d2;
+        background: rgba(45, 212, 191, 0.12);
+        border: 1px solid rgba(45, 212, 191, 0.32);
+        border-radius: 999px;
+      }
+      #app-splash .ky-eyebrow .ky-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #2dd4bf;
+        box-shadow: 0 0 8px rgba(45, 212, 191, 0.7);
+        flex: 0 0 auto;
+        animation: ky-pulse 2.2s ease-in-out infinite;
+      }
+      @keyframes ky-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.35; }
+      }
       #app-splash h1 {
         margin: 0;
-        font-size: clamp(21px, 3.6vw, 32px);
+        font-size: clamp(26px, 4.4vw, 42px);
         font-weight: 800;
-        letter-spacing: -0.02em;
-        max-width: 24ch;
+        line-height: 1.08;
+        letter-spacing: -0.025em;
+        max-width: 18ch;
+        background: linear-gradient(180deg, #eef1f5, #b6c0c9);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
       }
-      #app-splash h1 b { color: #14b8a6; }
-      #app-splash p {
+      #app-splash h1 b { color: #2dd4bf; -webkit-text-fill-color: #2dd4bf; }
+      #app-splash .ky-lede {
         margin: 0;
-        max-width: 680px;
-        font-size: clamp(13px, 1.7vw, 15.5px);
-        line-height: 1.55;
-        color: #aab4ba;
+        max-width: 60ch;
+        font-size: clamp(13px, 1.6vw, 15.5px);
+        line-height: 1.6;
+        color: #9aa3af;
       }
+      #app-splash .ky-lede code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92em;
+        color: #c3ccd4;
+      }
+      #app-splash .ky-lede strong { color: #cfd6dd; font-weight: 600; }
       #app-splash ul {
-        display: flex; flex-wrap: wrap; gap: 7px 13px; justify-content: center;
-        list-style: none; padding: 0; margin: 2px 0 0; max-width: 760px;
+        list-style: none;
+        padding: 0;
+        margin: 4px 0 0;
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
       }
-      #app-splash li { font-size: 12px; color: #8b969c; }
+      #app-splash li {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 11px 13px;
+        font-size: 12.5px;
+        font-weight: 500;
+        text-align: left;
+        line-height: 1.3;
+        color: #c3ccd4;
+        background: rgba(230, 233, 238, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 11px;
+      }
+      #app-splash li svg {
+        flex: 0 0 auto;
+        width: 30px;
+        height: 30px;
+        padding: 6px;
+        box-sizing: border-box;
+        border-radius: 8px;
+        color: #2dd4bf;
+        background: rgba(45, 212, 191, 0.12);
+        border: 1px solid rgba(45, 212, 191, 0.26);
+      }
+      #app-splash .ky-loading {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 4px;
+        font-size: 13px;
+        color: #9aa3af;
+      }
       #app-splash .spin {
-        width: 24px; height: 24px; margin-top: 4px;
-        border: 3px solid #2a3036; border-top-color: #14b8a6;
-        border-radius: 50%; animation: kysp 0.9s linear infinite;
+        width: 18px;
+        height: 18px;
+        border: 2px solid rgba(45, 212, 191, 0.3);
+        border-top-color: #2dd4bf;
+        border-radius: 50%;
+        animation: kysp 0.8s linear infinite;
+        flex: 0 0 auto;
       }
       @keyframes kysp { to { transform: rotate(360deg); } }
-      #app-splash a { color: #14b8a6; }
+      #app-splash .ky-fine {
+        margin: 0;
+        max-width: 56ch;
+        font-size: 12px;
+        line-height: 1.55;
+        color: #7f8a92;
+      }
+      #app-splash a {
+        color: #2dd4bf;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(45, 212, 191, 0.4);
+      }
+      #app-splash a:hover { border-bottom-color: #2dd4bf; }
+
+      @media (max-width: 640px) {
+        #app-splash ul { grid-template-columns: 1fr; gap: 8px; }
+        #app-splash li { padding: 10px 12px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #app-splash .ky-grid,
+        #app-splash .ky-blob-1,
+        #app-splash .ky-blob-2,
+        #app-splash .ky-eyebrow .ky-dot,
+        #app-splash .ky-inner,
+        #app-splash .spin {
+          animation: none !important;
+        }
+      }
     </style>
   </head>
   <body>
@@ -236,30 +440,66 @@
            replaces #root on mount, so this is shown only while the app loads
            and is what non-rendering crawlers / the fast HTML pass index. -->
       <div id="app-splash">
-        <img src="/icon-mark.png" alt="karmyogi logo" width="60" height="60" />
-        <h1>karm<b>yogi</b> — browser-based GRBL CNC controller &amp; CAD/CAM workbench</h1>
-        <p>
-          Run your 3-axis GRBL machine straight from your browser over the Web Serial API —
-          CNC carving &amp; engraving, laser cutting, pen plotting, PCB isolation routing &amp;
-          drilling, auto-soldering, glue dispensing, pick &amp; place, welding, spring coiling
-          and 3D printing — with a live 3D toolpath visualizer, jog/DRO controller, GRBL
-          <code>$</code>-settings manager and console. A free, modern, open
-          <strong>Candle alternative</strong>. No installs, no drivers, no server.
-        </p>
-        <ul>
-          <li>GRBL · FluidNC · grblHAL · Marlin</li>
-          <li>DXF / STL / STEP / OBJ → G-code</li>
-          <li>Gerber + Excellon → PCB</li>
-          <li>53 languages</li>
-          <li>Works offline (PWA)</li>
-          <li>Desktop &amp; mobile</li>
-        </ul>
-        <div class="spin" role="status" aria-label="Loading karmyogi"></div>
-        <p style="font-size: 12px">
-          Loading the workbench… if it doesn't appear, open
-          <a href="https://karmyogi.hjlabs.in/">karmyogi.hjlabs.in</a> in Chrome, Edge, Brave
-          or Opera. Source on <a href="https://github.com/hemangjoshi37a/karmyogi">GitHub</a>.
-        </p>
+        <div class="ky-bg" aria-hidden="true">
+          <div class="ky-grid"></div>
+          <div class="ky-blob ky-blob-1"></div>
+          <div class="ky-blob ky-blob-2"></div>
+          <div class="ky-vignette"></div>
+        </div>
+        <div class="ky-inner">
+          <div class="ky-brand">
+            <img src="/icon-mark.png" alt="karmyogi logo" width="44" height="44" />
+            <span class="ky-word">karm<b>yogi</b></span>
+          </div>
+          <p class="ky-eyebrow">
+            <span class="ky-dot" aria-hidden="true"></span>
+            Browser-native CNC + CAD/CAM workbench
+          </p>
+          <h1>karm<b>yogi</b> — browser-based GRBL CNC controller &amp; CAD/CAM workbench</h1>
+          <p class="ky-lede">
+            Run your 3-axis GRBL machine straight from your browser over the Web Serial API —
+            CNC carving &amp; engraving, laser cutting, pen plotting, PCB isolation routing &amp;
+            drilling, auto-soldering, glue dispensing, pick &amp; place, welding, spring coiling
+            and 3D printing — with a live 3D toolpath visualizer, jog/DRO controller, GRBL
+            <code>$</code>-settings manager and console. A free, modern, open
+            <strong>Candle alternative</strong>. No installs, no drivers, no server.
+          </p>
+          <ul>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 7h4l1.5-2h9L18 7h4M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7"/><circle cx="12" cy="13" r="3"/></svg>
+              GRBL · FluidNC · grblHAL · Marlin
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 21 8v8l-9 5-9-5V8z"/><path d="M12 21V12M21 8l-9 4L3 8"/></svg>
+              DXF / STL / STEP / OBJ → G-code
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 4v4M15 16v4M4 9h4M16 15h4"/><circle cx="9" cy="15" r="1.4"/><circle cx="15" cy="9" r="1.4"/></svg>
+              Gerber + Excellon → PCB
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18M3 12h18"/></svg>
+              53 languages
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17a4 4 0 0 1-1-7.9A5.5 5.5 0 0 1 15 7a4.5 4.5 0 0 1 3 8"/><path d="M12 12v9M9 18l3 3 3-3"/></svg>
+              Works offline (PWA)
+            </li>
+            <li>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="1.5"/><rect x="16" y="9" width="6" height="11" rx="1.5"/><path d="M6 18h6M9 14v4"/></svg>
+              Desktop &amp; mobile
+            </li>
+          </ul>
+          <p class="ky-loading">
+            <span class="spin" role="status" aria-label="Loading karmyogi"></span>
+            Loading the workbench…
+          </p>
+          <p class="ky-fine">
+            If it doesn't appear, open
+            <a href="https://karmyogi.hjlabs.in/">karmyogi.hjlabs.in</a> in Chrome, Edge, Brave
+            or Opera. Source on <a href="https://github.com/hemangjoshi37a/karmyogi">GitHub</a>.
+          </p>
+        </div>
       </div>
     </div>
     <noscript>

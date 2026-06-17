@@ -128,7 +128,6 @@
   "about.desc": "શોખ/ડેસ્કટૉપ CNC મશીનો (GRBL, grblHAL, FluidNC, Marlin અને વધુ) માટે બ્રાઉઝર-આધારિત બહુહેતુક કંટ્રોલ + CAD/CAM વર્કબેન્ચ — CNC કાર્વિંગ, એન્ગ્રેવિંગ, પેન-પ્લોટિંગ, ઑટો-સોલ્ડરિંગ, PCB આઇસોલેશન રાઉટિંગ, લેઝર કટિંગ અને વેલ્ડિંગ.",
   "about.by": "દ્વારા બનાવેલ",
   "about.license": "MIT લાઇસન્સ",
-  "about.source": "GitHub પર સોર્સ જુઓ",
   "about.report": "બગની જાણ કરો",
   "about.version": "આવૃત્તિ",
   "about.built": "બનાવ્યું",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "આપમેળે રેકોર્ડ થયેલા કેમેરા ક્લિપ્સ અને અનામી ઉપયોગ ડેટા સાફ કરે છે. તમારી સેટિંગ્સ, પ્રીસેટ્સ, લેઆઉટ અને સાચવેલ કાર્યો જળવાઈ રહે છે.",
   "storage.clear.done": "{amount} ખાલી થયું",
   "storage.clear.busy": "ખાલી કરી રહ્યું છે…",
-  "storage.clear.cta": "હમણાં જગ્યા ખાલી કરો"
+  "storage.clear.cta": "હમણાં જગ્યા ખાલી કરો",
+  "about.chip.languages": "53 ભાષાઓ",
+  "about.chip.modes": "14+ મોડ",
+  "about.chip.pwa": "PWA · ઑફલાઇન",
+  "about.chip.license": "MIT",
+  "about.live": "લાઇવ એપ ખોલો",
+  "about.source.short": "સ્રોત જુઓ",
+  "update.label": "karmyogi અપડેટ રાખો",
+  "update.check": "અપડેટ તપાસો",
+  "update.checking": "તપાસી રહ્યું છે…",
+  "update.latest": "તમે નવીનતમ સંસ્કરણ પર છો",
+  "update.available": "અપડેટ ઉપલબ્ધ — ઇન્સ્ટોલ થઈ રહ્યું છે…",
+  "update.auto": "અપડેટ આપમેળે લાગુ થાય છે"
 }

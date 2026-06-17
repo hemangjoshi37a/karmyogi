@@ -128,7 +128,6 @@
   "about.desc": "ꯍꯣꯕꯤ/ꯗꯦꯁ꯭ꯀꯇꯣꯞ CNC ꯃꯁꯤꯟꯒꯤꯗꯃꯛ ꯕ꯭ꯔꯥꯎꯖꯔ-ꯕꯦꯁ꯭ꯗ ꯃꯜꯇꯤꯄꯔꯄꯁ ꯀꯟꯇ꯭ꯔꯣꯜ + CAD/CAM ꯋꯥꯔꯛꯕꯦꯟꯆ (GRBL, grblHAL, FluidNC, Marlin ꯑꯃꯁꯨꯡ ꯑꯇꯩ) — CNC ꯀꯥꯔꯚꯤꯡ, ꯏꯟꯒ꯭ꯔꯦꯚꯤꯡ, ꯄꯦꯟ-ꯄ꯭ꯂꯣꯇꯤꯡ, ꯑꯣꯇꯣ-ꯁꯣꯜꯗꯔꯤꯡ, PCB ꯑꯥꯏꯁꯣꯂꯦꯁꯟ ꯔꯥꯎꯇꯤꯡ, ꯂꯦꯖꯔ ꯀꯇꯤꯡ ꯑꯃꯁꯨꯡ ꯋꯦꯜꯗꯤꯡ꯫",
   "about.by": "ꯁꯦꯝꯒꯠꯄ",
   "about.license": "MIT ꯂꯥꯏꯁꯦꯟꯁ",
-  "about.source": "GitHub ꯗ ꯁꯣꯔ꯭ꯁ ꯌꯦꯡꯕ",
   "about.report": "ꯕꯒ ꯑꯃ ꯔꯤꯄꯣꯔꯠ ꯇꯧꯕ",
   "about.version": "ꯚꯔꯖꯟ",
   "about.built": "ꯁꯦꯝꯈ꯭ꯔꯕ",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "অসুম রেকর্ড তৌখ্রবা কেমেরা ক্লিপ অমসুং মমিং নাইদবা শীজিন্নবগী ডাটা মুথৎহল্লি। অদোমগী সেটিংস, প্রিসেট, লেআউট অমসুং থম্লবা থবকশিং অদুম লৈরি।",
   "storage.clear.done": "{amount} থাদোকখ্রে",
   "storage.clear.busy": "থাদোক্লি…",
-  "storage.clear.cta": "হৌজিক মফম থাদোকউ"
+  "storage.clear.cta": "হৌজিক মফম থাদোকউ",
+  "about.chip.languages": "ꯂꯣꯟ 53",
+  "about.chip.modes": "ꯃꯣꯗ 14+",
+  "about.chip.pwa": "PWA · ꯑꯣꯐꯂꯥꯏꯟ",
+  "about.chip.license": "MIT",
+  "about.live": "ꯂꯥꯏꯚ ꯑꯦꯞ ꯍꯥꯡꯗꯣꯛꯎ",
+  "about.source.short": "ꯁꯣꯔꯁ ꯌꯦꯡꯎ",
+  "update.label": "karmyogi ꯑꯄꯗꯦꯠ ꯊꯝꯃꯨ",
+  "update.check": "ꯑꯄꯗꯦꯠ ꯌꯦꯡꯎ",
+  "update.checking": "ꯌꯦꯡꯂꯤ…",
+  "update.latest": "ꯑꯗꯣꯝ ꯑꯔꯣꯏꯕ ꯚꯔꯁꯟꯗ ꯂꯩ",
+  "update.available": "ꯑꯄꯗꯦꯠ ꯂꯩ — ꯏꯟꯁꯇꯣꯜ ꯇꯧꯔꯤ…",
+  "update.auto": "ꯑꯄꯗꯦꯠꯁꯤꯡ ꯃꯊꯟꯇꯅ ꯂꯥꯛꯏ"
 }

@@ -128,7 +128,6 @@
   "about.desc": "Một bàn làm việc điều khiển + CAD/CAM đa năng chạy trên trình duyệt cho máy CNC sở thích/để bàn (GRBL, grblHAL, FluidNC, Marlin và nhiều hơn nữa) — khắc CNC, chạm khắc, vẽ bút, hàn tự động, định tuyến cách ly PCB, cắt và hàn laser.",
   "about.by": "Được tạo bởi",
   "about.license": "Giấy phép MIT",
-  "about.source": "Xem mã nguồn trên GitHub",
   "about.report": "Báo lỗi",
   "about.version": "Phiên bản",
   "about.built": "Dựng lúc",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "Xóa các đoạn video camera được ghi tự động và dữ liệu sử dụng ẩn danh. Cài đặt, cấu hình sẵn, bố cục và công việc đã lưu của bạn được giữ nguyên.",
   "storage.clear.done": "Đã giải phóng {amount}",
   "storage.clear.busy": "Đang giải phóng…",
-  "storage.clear.cta": "Giải phóng dung lượng ngay"
+  "storage.clear.cta": "Giải phóng dung lượng ngay",
+  "about.chip.languages": "53 ngôn ngữ",
+  "about.chip.modes": "14+ chế độ",
+  "about.chip.pwa": "PWA · ngoại tuyến",
+  "about.chip.license": "MIT",
+  "about.live": "Mở ứng dụng trực tiếp",
+  "about.source.short": "Xem mã nguồn",
+  "update.label": "Luôn cập nhật karmyogi",
+  "update.check": "Kiểm tra cập nhật",
+  "update.checking": "Đang kiểm tra…",
+  "update.latest": "Bạn đang dùng phiên bản mới nhất",
+  "update.available": "Có bản cập nhật — đang cài đặt…",
+  "update.auto": "Cập nhật được áp dụng tự động"
 }

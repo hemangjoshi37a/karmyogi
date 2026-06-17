@@ -128,7 +128,6 @@
   "about.desc": "ورشة عمل متعددة الأغراض قائمة على المتصفح للتحكم + CAD/CAM لآلات CNC الهوايات/المكتبية (GRBL، grblHAL، FluidNC، Marlin وغيرها) — نحت CNC، نقش، رسم بالقلم، لحام تلقائي، توجيه عزل لوحات PCB، قطع ولحام بالليزر.",
   "about.by": "صُنع بواسطة",
   "about.license": "رخصة MIT",
-  "about.source": "عرض المصدر على GitHub",
   "about.report": "الإبلاغ عن خلل",
   "about.version": "الإصدار",
   "about.built": "البناء",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "يمسح مقاطع الكاميرا المسجَّلة تلقائيًا وبيانات الاستخدام المجهولة. تبقى إعداداتك والإعدادات المسبقة والتخطيط والمهام المحفوظة كما هي.",
   "storage.clear.done": "تم تحرير {amount}",
   "storage.clear.busy": "جارٍ التحرير…",
-  "storage.clear.cta": "حرّر مساحة الآن"
+  "storage.clear.cta": "حرّر مساحة الآن",
+  "about.chip.languages": "53 لغة",
+  "about.chip.modes": "14+ وضعًا",
+  "about.chip.pwa": "PWA · دون اتصال",
+  "about.chip.license": "MIT",
+  "about.live": "فتح التطبيق المباشر",
+  "about.source.short": "عرض المصدر",
+  "update.label": "حافظ على تحديث karmyogi",
+  "update.check": "التحقق من التحديث",
+  "update.checking": "جارٍ التحقق…",
+  "update.latest": "أنت على أحدث إصدار",
+  "update.available": "يتوفر تحديث — جارٍ التثبيت…",
+  "update.auto": "تُطبَّق التحديثات تلقائيًا"
 }

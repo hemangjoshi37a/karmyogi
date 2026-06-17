@@ -128,7 +128,6 @@
   "about.desc": "शौकिया/डेस्कटॉप CNC मशीनों (GRBL, grblHAL, FluidNC, Marlin आदि) के लिए ब्राउज़र-आधारित बहुउद्देश्यीय नियंत्रण + CAD/CAM वर्कबेंच — CNC कार्विंग, उत्कीर्णन, पेन-प्लॉटिंग, ऑटो-सोल्डरिंग, PCB आइसोलेशन रूटिंग, लेज़र कटिंग और वेल्डिंग।",
   "about.by": "द्वारा निर्मित",
   "about.license": "MIT लाइसेंस",
-  "about.source": "GitHub पर सोर्स देखें",
   "about.report": "बग रिपोर्ट करें",
   "about.version": "संस्करण",
   "about.built": "बिल्ड किया गया",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "स्वतः रिकॉर्ड किए गए कैमरा क्लिप और अनाम उपयोग डेटा हटाता है। आपकी सेटिंग्स, प्रीसेट, लेआउट और सहेजे गए कार्य बने रहते हैं।",
   "storage.clear.done": "{amount} खाली हुआ",
   "storage.clear.busy": "खाली किया जा रहा है…",
-  "storage.clear.cta": "अभी जगह खाली करें"
+  "storage.clear.cta": "अभी जगह खाली करें",
+  "about.chip.languages": "53 भाषाएँ",
+  "about.chip.modes": "14+ मोड",
+  "about.chip.pwa": "PWA · ऑफ़लाइन",
+  "about.chip.license": "MIT",
+  "about.live": "लाइव ऐप खोलें",
+  "about.source.short": "स्रोत देखें",
+  "update.label": "karmyogi को अपडेट रखें",
+  "update.check": "अपडेट जाँचें",
+  "update.checking": "जाँच हो रही है…",
+  "update.latest": "आप नवीनतम संस्करण पर हैं",
+  "update.available": "अपडेट उपलब्ध — इंस्टॉल हो रहा है…",
+  "update.auto": "अपडेट स्वचालित रूप से लागू होते हैं"
 }

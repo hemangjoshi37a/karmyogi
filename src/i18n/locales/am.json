@@ -128,7 +128,6 @@
   "about.desc": "ለትርፍ ጊዜ/ዴስክቶፕ CNC ማሽኖች (GRBL፣ grblHAL፣ FluidNC፣ Marlin እና ሌሎች) የተዘጋጀ በአሳሽ ላይ የሚሰራ ባለብዙ ዓላማ መቆጣጠሪያ + CAD/CAM የስራ ጠረጴዛ — CNC ቅረጻ፣ ቅርጽ ማውጣት፣ በብዕር መሳል፣ ራስ-ሰር መበየድ፣ የPCB ማግለል መንገድ ማውጣት፣ ሌዘር መቁረጥ እና መበየድ።",
   "about.by": "የተሰራው በ",
   "about.license": "MIT ፍቃድ",
-  "about.source": "ምንጩን በGitHub ላይ ይመልከቱ",
   "about.report": "ስህተት ሪፖርት አድርግ",
   "about.version": "ስሪት",
   "about.built": "የተገነባ",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "በራስ-ሰር የተቀዱ የካሜራ ቅንጥቦችን እና ስም-አልባ የአጠቃቀም ውሂብን ያጸዳል። ቅንብሮችዎ፣ ቅድመ-ቅንብሮችዎ፣ አቀማመጥዎ እና የተቀመጡ ስራዎችዎ ይቆያሉ።",
   "storage.clear.done": "{amount} ነፃ ወጥቷል",
   "storage.clear.busy": "ነፃ በማድረግ ላይ…",
-  "storage.clear.cta": "አሁን ቦታ ነፃ ያድርጉ"
+  "storage.clear.cta": "አሁን ቦታ ነፃ ያድርጉ",
+  "about.chip.languages": "53 ቋንቋዎች",
+  "about.chip.modes": "14+ ሁነታዎች",
+  "about.chip.pwa": "PWA · ከመስመር ውጭ",
+  "about.chip.license": "MIT",
+  "about.live": "ቀጥታ መተግበሪያ ክፈት",
+  "about.source.short": "ምንጭ ይመልከቱ",
+  "update.label": "karmyogi ወቅታዊ ያድርጉ",
+  "update.check": "ዝማኔ ያረጋግጡ",
+  "update.checking": "በማረጋገጥ ላይ…",
+  "update.latest": "በቅርብ ጊዜ ስሪት ላይ ነዎት",
+  "update.available": "ዝማኔ አለ — በመጫን ላይ…",
+  "update.auto": "ዝማኔዎች በራስ-ሰር ይተገበራሉ"
 }

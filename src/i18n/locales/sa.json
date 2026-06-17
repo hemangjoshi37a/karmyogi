@@ -128,7 +128,6 @@
   "about.desc": "शौक/डेस्कटॉप CNC यन्त्राणां (GRBL, grblHAL, FluidNC, Marlin इत्यादीनां) कृते ब्राउजर-आधारितं बहूद्देशीयं नियन्त्रणं + CAD/CAM कार्यपीठम् — CNC तक्षणम्, उत्कीर्णनम्, लेखनी-आलेखनम्, स्वयं-सोल्डरिङ्, PCB पृथक्करण-मार्गनिर्धारणम्, लेजर-छेदनं वेल्डिङ् च।",
   "about.by": "निर्मातृ",
   "about.license": "MIT अनुज्ञापत्रम्",
-  "about.source": "GitHub मध्ये स्रोतं पश्यतु",
   "about.report": "दोषं निवेदयतु",
   "about.version": "संस्करणम्",
   "about.built": "निर्मितम्",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "स्वयमेव अभिलिखितानि कैमरा-क्लिप्-तथा अज्ञात-उपयोग-दत्तांशान् मार्जयति। भवतः सेटिङ्गाः, प्रीसेट्-समूहाः, विन्यासः, रक्षितकार्याणि च तिष्ठन्ति।",
   "storage.clear.done": "{amount} रिक्तं जातम्",
   "storage.clear.busy": "रिक्तं क्रियते…",
-  "storage.clear.cta": "इदानीं स्थानं रिक्तं कुरुत"
+  "storage.clear.cta": "इदानीं स्थानं रिक्तं कुरुत",
+  "about.chip.languages": "53 भाषाः",
+  "about.chip.modes": "14+ रीतयः",
+  "about.chip.pwa": "PWA · ऑफलाइन",
+  "about.chip.license": "MIT",
+  "about.live": "सजीवं अनुप्रयोगं उद्घाटयतु",
+  "about.source.short": "स्रोतं पश्यतु",
+  "update.label": "karmyogi नूतनीकृतं स्थापयतु",
+  "update.check": "नवीनीकरणं परीक्षयतु",
+  "update.checking": "परीक्ष्यते…",
+  "update.latest": "भवान् नवीनतमे संस्करणे अस्ति",
+  "update.available": "नवीनीकरणं उपलब्धम् — संस्थाप्यते…",
+  "update.auto": "नवीनीकरणानि स्वयमेव प्रवर्तन्ते"
 }

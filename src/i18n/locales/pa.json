@@ -128,7 +128,6 @@
   "about.desc": "ਸ਼ੌਕੀਆ/ਡੈਸਕਟਾਪ CNC ਮਸ਼ੀਨਾਂ (GRBL, grblHAL, FluidNC, Marlin ਅਤੇ ਹੋਰ) ਲਈ ਬ੍ਰਾਊਜ਼ਰ-ਅਧਾਰਿਤ ਬਹੁਮੰਤਵੀ ਕੰਟਰੋਲ + CAD/CAM ਵਰਕਬੈਂਚ — CNC ਕਾਰਵਿੰਗ, ਐਨਗ੍ਰੇਵਿੰਗ, ਪੈੱਨ-ਪਲਾਟਿੰਗ, ਆਟੋ-ਸੋਲਡਰਿੰਗ, PCB ਆਈਸੋਲੇਸ਼ਨ ਰੂਟਿੰਗ, ਲੇਜ਼ਰ ਕਟਿੰਗ ਅਤੇ ਵੈਲਡਿੰਗ।",
   "about.by": "ਦੁਆਰਾ ਬਣਾਇਆ",
   "about.license": "MIT ਲਾਇਸੰਸ",
-  "about.source": "GitHub 'ਤੇ ਸੋਰਸ ਵੇਖੋ",
   "about.report": "ਬੱਗ ਦੀ ਰਿਪੋਰਟ ਕਰੋ",
   "about.version": "ਵਰਜਨ",
   "about.built": "ਬਣਾਇਆ",
@@ -2674,5 +2673,17 @@
   "storage.clear.desc": "ਆਪਣੇ-ਆਪ ਰਿਕਾਰਡ ਕੀਤੀਆਂ ਕੈਮਰਾ ਕਲਿੱਪਾਂ ਅਤੇ ਅਗਿਆਤ ਵਰਤੋਂ ਡਾਟਾ ਸਾਫ਼ ਕਰਦਾ ਹੈ। ਤੁਹਾਡੀਆਂ ਸੈਟਿੰਗਾਂ, ਪ੍ਰੀਸੈੱਟ, ਲੇਆਉਟ ਅਤੇ ਸੰਭਾਲੇ ਕੰਮ ਰਹਿੰਦੇ ਹਨ।",
   "storage.clear.done": "{amount} ਖਾਲੀ ਹੋਈ",
   "storage.clear.busy": "ਖਾਲੀ ਕਰ ਰਿਹਾ ਹੈ…",
-  "storage.clear.cta": "ਹੁਣ ਜਗ੍ਹਾ ਖਾਲੀ ਕਰੋ"
+  "storage.clear.cta": "ਹੁਣ ਜਗ੍ਹਾ ਖਾਲੀ ਕਰੋ",
+  "about.chip.languages": "53 ਭਾਸ਼ਾਵਾਂ",
+  "about.chip.modes": "14+ ਮੋਡ",
+  "about.chip.pwa": "PWA · ਆਫਲਾਈਨ",
+  "about.chip.license": "MIT",
+  "about.live": "ਲਾਈਵ ਐਪ ਖੋਲ੍ਹੋ",
+  "about.source.short": "ਸਰੋਤ ਵੇਖੋ",
+  "update.label": "karmyogi ਨੂੰ ਅੱਪਡੇਟ ਰੱਖੋ",
+  "update.check": "ਅੱਪਡੇਟ ਜਾਂਚੋ",
+  "update.checking": "ਜਾਂਚ ਰਿਹਾ ਹੈ…",
+  "update.latest": "ਤੁਸੀਂ ਨਵੀਨਤਮ ਵਰਜਨ ਉੱਤੇ ਹੋ",
+  "update.available": "ਅੱਪਡੇਟ ਉਪਲਬਧ — ਇੰਸਟਾਲ ਹੋ ਰਿਹਾ ਹੈ…",
+  "update.auto": "ਅੱਪਡੇਟ ਆਪਣੇ ਆਪ ਲਾਗੂ ਹੁੰਦੇ ਹਨ"
 }
