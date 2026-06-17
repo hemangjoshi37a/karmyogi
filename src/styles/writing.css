@@ -438,6 +438,62 @@
   opacity: 0.8;
 }
 
+/* ---- 4-way G-code mode segmented control (own row, full width) ---- */
+.wr-modebar {
+  display: flex;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-input);
+}
+.wr-modeseg {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: var(--ctl-h);
+  min-height: 36px;
+  padding: 0 var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wr-modeseg:last-child {
+  border-right: none;
+}
+.wr-modeseg svg {
+  flex: 0 0 auto;
+}
+.wr-modeseg:hover:not(:disabled):not(.is-active) {
+  color: var(--fg);
+  background: var(--bg-hover, rgba(127, 127, 127, 0.08));
+}
+.wr-modeseg.is-active {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+.wr-modeseg:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.wr-modeseg-lbl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* On narrow widths, drop the label text and keep just the icon to stay compact. */
+@media (max-width: 420px) {
+  .wr-modeseg-lbl {
+    display: none;
+  }
+}
+
 /* ---- line 2: Style (B/I/U) + Align packed on ONE tight row, thin divider ---- */
 .wr-styleline {
   display: flex;

@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Polyline } from '../core/geometry'
-import { Toolpath } from '../core/toolpath'
+import { MoveType, Toolpath } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
 import { StrokeFont, TextAlign, type LayoutOptions } from '../core/strokeFont'
 import { OutlineFont } from '../core/outlineFont'
 import { applyTextStyle } from '../core/textStyle'
+import {
+  bufferStrokesToContours,
+  boundsRect,
+  pocketContoursToToolpath,
+  unionContours,
+} from '../core/textPocket'
+import { outlineContoursToCenterlines } from '../core/centerline'
 import {
   BUILTIN_ENTRY,
   detectKindByName,
@@ -69,6 +76,54 @@ function AlignGlyph({ align }: { align: 'left' | 'center' | 'right' }) {
       <path d="M3 18h18" />
     </svg>
   )
+}
+
+/**
+ * Tiny inline glyph for each G-code mode (stroke / outline / carve-in / relief).
+ * Pure SVG so it recolors with the theme (currentColor) and stays crisp.
+ */
+function ModeIcon({ mode }: { mode: GenMode }) {
+  const common = {
+    width: 15,
+    height: 15,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+    focusable: false as const,
+  }
+  switch (mode) {
+    case 'stroke': // a single pen squiggle
+      return (
+        <svg {...common}>
+          <path d="M4 14c3-7 5 7 8 0s4-7 8 0" />
+        </svg>
+      )
+    case 'outline': // a hollow 'A' outline
+      return (
+        <svg {...common}>
+          <path d="M5 19 12 5l7 14" />
+          <path d="M8 13h8" />
+        </svg>
+      )
+    case 'carveIn': // letter with hatched (recessed) interior
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <path d="M7 9h10M7 12h10M7 15h10" strokeWidth={1.1} />
+        </svg>
+      )
+    case 'relief': // raised letter — hatched background, clear letter
+      return (
+        <svg {...common}>
+          <path d="M4 7h16M4 11h3M17 11h3M4 15h3M17 15h3M4 19h16" strokeWidth={1.1} />
+          <path d="M9 19 12 8l3 11" />
+        </svg>
+      )
+  }
 }
 
 /**
@@ -160,8 +215,19 @@ function noteText(t: TFunc, note: StatusNote): string {
   }
 }
 
-/** G-code generation mode. Stroke = centerlines; Outline = glyph contours. */
-type GenMode = 'stroke' | 'outline'
+/**
+ * G-code generation mode.
+ *   stroke  — follow font centerlines (pen mode).
+ *   outline — trace glyph contours (pen mode).
+ *   carveIn — area-clear (pocket) INSIDE the letters → recessed text (mill).
+ *   relief  — area-clear (pocket) OUTSIDE the letters → raised text (mill).
+ */
+type GenMode = 'stroke' | 'outline' | 'carveIn' | 'relief'
+
+/** Whether a mode is a milling pocket (Spindle Z) vs a pen-plot (Pen Z). */
+function isPocketMode(m: GenMode): boolean {
+  return m === 'carveIn' || m === 'relief'
+}
 
 /**
  * The serializable Writing document saved to / loaded from a `.kwrite` file
@@ -186,6 +252,14 @@ interface WritingDoc {
   fontId: string
   genMode: GenMode
 }
+
+/**
+ * The single program-section label for ALL Writing output. Using ONE label for
+ * every mode means switching modes REPLACES the section (setProgram overwrites a
+ * same-named section) and never duplicates — there is only ever one Writing
+ * section in the Program tab.
+ */
+const WRITING_SECTION = 'Writing'
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
@@ -229,6 +303,71 @@ function strokesToGcode(
   return emitter.emitProgram(tp)
 }
 
+/** Carve / Relief milling parameters (mm; feeds mm/min; rpm). */
+interface CarveParams {
+  toolDiameter: number
+  cutDepth: number
+  stepdown: number
+  stepoverPct: number // % of tool diameter
+  feedXY: number
+  feedZ: number
+  spindleRPM: number
+  safeZ: number
+  strokeWidth: number
+  margin: number
+}
+
+/**
+ * Build MILLING (Spindle Z) pocket G-code for Carve-in / Relief. `fillContours`
+ * are the CLOSED glyph fill contours (origin-offset already applied). Carve-in
+ * pockets the glyph fill itself; Relief pockets a bordered rectangle MINUS the
+ * letters (the letters + their counters are left as uncut islands via even-odd).
+ * Returns the emitted G-code and the toolpath count for the status line.
+ */
+function pocketToGcode(
+  mode: 'carveIn' | 'relief',
+  fillContours: Polyline[],
+  cp: CarveParams,
+): { gcode: string; paths: number } {
+  // ROBUSTNESS: union the glyph fill into clean, non-overlapping, correctly-wound
+  // rings BEFORE pocketing. Outline fonts (esp. script / calligraphic ones) emit
+  // OVERLAPPING contours; a raw even-odd scanline would treat the overlap as a
+  // hole. Unioning first makes the even-odd fill exactly correct for any font.
+  // Fall back to the raw contours if the union collapses everything.
+  const cleanFill = unionContours(fillContours)
+  const fill = cleanFill.length > 0 ? cleanFill : fillContours
+
+  const region =
+    mode === 'relief'
+      ? [boundsRect(fill, cp.margin), ...fill]
+      : fill
+
+  const tp = pocketContoursToToolpath(fill, region, {
+    toolDiameterMm: cp.toolDiameter,
+    stepoverFrac: cp.stepoverPct / 100,
+    stepdownMm: cp.stepdown,
+    cutDepthMm: cp.cutDepth,
+    safeZ: cp.safeZ,
+    surfaceZ: 0,
+    feedXY: cp.feedXY,
+  })
+  if (tp.isEmpty()) return { gcode: '', paths: 0 }
+
+  const emitter = new GcodeEmitter({
+    programName: 'Writing',
+    zMode: ZMode.Spindle,
+    safeZ: cp.safeZ,
+    feedXY: cp.feedXY,
+    feedZ: cp.feedZ,
+    useSpindle: true,
+    spindleRPM: cp.spindleRPM,
+    comments: true,
+  })
+  // Count discrete plunges as a proxy for "pass count" in the status line.
+  const paths = tp.moves.filter((m) => m.type === MoveType.Plunge).length
+  return { gcode: emitter.emitProgram(tp), paths }
+}
+
 /**
  * Writing / Pen-plotter panel. Type text, pick a font (built-in Hershey,
  * bundled library fonts, or an uploaded JSON / TTF / OTF), style it (bold /
@@ -242,7 +381,7 @@ export function WritingPanel() {
   // Shared-program ownership (last writer wins). Writing CLAIMS only on a real
   // text edit (not on the default mount text, and not on incidental re-renders
   // like an async font load) so it never steals the program back from another
-  // job; it yields its "text — pen" section when someone else owns.
+  // job; it yields its Writing section when someone else owns.
   const programOwner = useProgramOwner((s) => s.owner)
   const prevTextRef = useRef<string | null>(null)
 
@@ -256,6 +395,18 @@ export function WritingPanel() {
   const [penUpZ, setPenUpZ] = usePersistentState('karmyogi.writing.penUpZ', 5)
   const [penDownZ, setPenDownZ] = usePersistentState('karmyogi.writing.penDownZ', 0)
   const [feed, setFeed] = usePersistentState('karmyogi.writing.feed', 1500)
+
+  // Carve-in / Relief milling params (persisted). Only used for the pocket modes.
+  const [carveTool, setCarveTool] = usePersistentState('karmyogi.writing.carveTool', 3)
+  const [carveDepth, setCarveDepth] = usePersistentState('karmyogi.writing.carveDepth', 1)
+  const [carveStepdown, setCarveStepdown] = usePersistentState('karmyogi.writing.carveStepdown', 0.5)
+  const [carveStepover, setCarveStepover] = usePersistentState('karmyogi.writing.carveStepover', 40)
+  const [carveFeed, setCarveFeed] = usePersistentState('karmyogi.writing.carveFeed', 600)
+  const [carvePlunge, setCarvePlunge] = usePersistentState('karmyogi.writing.carvePlunge', 200)
+  const [carveRpm, setCarveRpm] = usePersistentState('karmyogi.writing.carveRpm', 10000)
+  const [carveSafeZ, setCarveSafeZ] = usePersistentState('karmyogi.writing.carveSafeZ', 5)
+  const [carveStrokeWidth, setCarveStrokeWidth] = usePersistentState('karmyogi.writing.strokeWidth', 1.5)
+  const [carveMargin, setCarveMargin] = usePersistentState('karmyogi.writing.margin', 4)
 
   // Styling (persisted).
   const [bold, setBold] = usePersistentState('karmyogi.writing.bold', false)
@@ -350,9 +501,17 @@ export function WritingPanel() {
         setFontKind(lf.kind)
         // Set the natural default mode ONLY when the FONT actually changed — not
         // when the catalog merely finished loading (which would reset the user's
-        // chosen mode and flicker the status line).
+        // chosen mode and flicker the status line). Pocket modes (carveIn/relief)
+        // work for BOTH font kinds, so PRESERVE them across a font change; only
+        // pen modes need snapping to the font's natural default.
         if (lastModeFontIdRef.current !== fontId) {
-          setGenMode(lf.kind === 'outline' ? 'outline' : 'stroke')
+          setGenMode((prev) =>
+            prev === 'carveIn' || prev === 'relief'
+              ? prev
+              : lf.kind === 'outline'
+                ? 'outline'
+                : 'stroke',
+          )
           lastModeFontIdRef.current = fontId
         }
       } catch (e) {
@@ -381,10 +540,10 @@ export function WritingPanel() {
 
   const generate = useCallback((): string => {
     if (text.trim().length === 0) {
-      // Nothing to draw — REMOVE the stale 'text — pen' section (pushing '' to a
-      // name removes it) so the Program tab / Visualizer don't keep showing the
-      // last text after the field is cleared.
-      setProgram('text — pen', '')
+      // Nothing to draw — REMOVE the stale Writing section (pushing '' to a name
+      // removes it) so the Program tab / Visualizer don't keep showing the last
+      // text after the field is cleared.
+      setProgram(WRITING_SECTION, '')
       setInfo(t('writing.info.enterText', 'Enter some text first.'))
       return ''
     }
@@ -394,11 +553,98 @@ export function WritingPanel() {
       letterSpacingMm: letterSpacing,
       align,
     }
-    // Stroke mode always uses a stroke font (the built-in if the active font is
-    // an outline font, which has no centerlines). Outline mode requires an
-    // outline font; if the active font is a stroke font we fall back to stroke.
+
+    const lineCount = text.split('\n').length
+
+    // ---- Pocket modes (Carve in / Relief) — MILLING area-clear -------------
+    if (isPocketMode(genMode)) {
+      let gcode = ''
+      let paths = 0
+      try {
+        // Build the CLOSED glyph FILL contours. Outline fonts already return
+        // closed contours; stroke fonts return open centerlines we thicken.
+        const rawFill =
+          loaded.kind === 'outline'
+            ? loaded.font.layout(text, layoutOpts)
+            : bufferStrokesToContours(loaded.font.layout(text, layoutOpts), carveStrokeWidth)
+
+        if (rawFill.length === 0) {
+          setProgram(WRITING_SECTION, '')
+          setInfo(t('writing.info.nothingToDraw', 'Nothing to draw (no renderable glyphs).'))
+          return ''
+        }
+
+        // Apply the SAME styling + origin offset as the pen modes. Style first
+        // (operates on the closed contours), then offset by origin.
+        const styled = applyTextStyle(
+          rawFill,
+          { bold, italic, underline, charHeightMm: charHeight },
+          charHeight * (lineSpacing > 0 ? lineSpacing : 1.5),
+        )
+        const fillContours = styled.map((pl) => {
+          const c = pl.clone()
+          c.closed = true
+          for (const p of c.points) {
+            p.x += originX
+            p.y += originY
+          }
+          return c
+        })
+
+        const cp: CarveParams = {
+          toolDiameter: carveTool,
+          cutDepth: carveDepth,
+          stepdown: carveStepdown,
+          stepoverPct: carveStepover,
+          feedXY: carveFeed,
+          feedZ: carvePlunge,
+          spindleRPM: carveRpm,
+          safeZ: carveSafeZ,
+          strokeWidth: carveStrokeWidth,
+          margin: carveMargin,
+        }
+        const pocketMode = genMode === 'relief' ? 'relief' : 'carveIn'
+        const res = pocketToGcode(pocketMode, fillContours, cp)
+        gcode = res.gcode
+        paths = res.paths
+      } catch {
+        setProgram(WRITING_SECTION, '')
+        setInfo(t('writing.info.pocketEmpty', 'Pocket produced no cuts — try a smaller tool ⌀ or larger text.'))
+        return ''
+      }
+      if (!gcode) {
+        setProgram(WRITING_SECTION, '')
+        setInfo(t('writing.info.pocketEmpty', 'Pocket produced no cuts — try a smaller tool ⌀ or larger text.'))
+        return ''
+      }
+      setProgram(WRITING_SECTION, gcode)
+      const modeLabel =
+        genMode === 'relief'
+          ? t('writing.mode.relief', 'Relief')
+          : t('writing.mode.carveIn', 'Carve in')
+      let msg = t(
+        'writing.info.generatedMode',
+        '{mode}: {strokes} path(s), {lines} line(s) → Visualizer.',
+        { mode: modeLabel, strokes: paths, lines: lineCount },
+      )
+      if (missing.length > 0)
+        msg += ' ' + t('writing.info.missingChars', '{count} character(s) missing from "{font}".', {
+          count: missing.length,
+          font: fontName,
+        })
+      setInfo(msg)
+      return gcode
+    }
+
+    // ---- Pen modes (Stroke / Outline) — unchanged --------------------------
+    // Stroke mode draws single-stroke centerlines. For a stroke font those are
+    // the font's own centerlines; for an OUTLINE font (no centerlines) we DERIVE
+    // them from the glyph fill via medial-axis skeletonization, so Stroke mode
+    // follows the SELECTED font's real shapes (not the built-in Hershey font).
+    // Outline mode requires an outline font; a stroke font falls back to stroke.
     let strokes: Polyline[]
     let effectiveMode: GenMode = genMode
+    let centerlineFromOutline = false
     if (genMode === 'outline' && loaded.kind === 'outline') {
       strokes = loaded.font.layout(text, layoutOpts)
     } else if (genMode === 'outline' && loaded.kind === 'stroke') {
@@ -406,9 +652,17 @@ export function WritingPanel() {
       effectiveMode = 'stroke'
       strokes = loaded.font.layout(text, layoutOpts)
     } else if (genMode === 'stroke' && loaded.kind === 'outline') {
-      // Outline font has no centerlines — render with the built-in stroke font.
-      effectiveMode = 'stroke'
-      strokes = builtinStroke.layout(text, layoutOpts)
+      // Outline font: skeletonize its filled glyph contours into centerlines so
+      // the chosen font is drawn as single strokes (stroke width averaged out).
+      const contours = loaded.font.layout(text, layoutOpts)
+      const center = outlineContoursToCenterlines(contours, { charHeightMm: charHeight })
+      if (center.length > 0) {
+        strokes = center
+        centerlineFromOutline = true
+      } else {
+        // Skeleton failed (degenerate) — fall back to the built-in stroke font.
+        strokes = builtinStroke.layout(text, layoutOpts)
+      }
     } else {
       strokes = loaded.font.layout(text, layoutOpts)
     }
@@ -430,9 +684,8 @@ export function WritingPanel() {
       { x: originX, y: originY },
       { penUpZ, penDownZ, feedXY: feed },
     )
-    setProgram('text — pen', gcode)
+    setProgram(WRITING_SECTION, gcode)
 
-    const lineCount = text.split('\n').length
     const modeLabel =
       effectiveMode === 'outline'
         ? t('writing.mode.outline', 'Outline')
@@ -442,6 +695,8 @@ export function WritingPanel() {
       '{mode}: {strokes} path(s), {lines} line(s) → Visualizer.',
       { mode: modeLabel, strokes: styled.length, lines: lineCount },
     )
+    if (centerlineFromOutline)
+      msg += ' ' + t('writing.info.centerline', '(centerline derived from the font outline)')
     if (effectiveMode !== genMode)
       msg += ' ' + t('writing.info.modeFallback', '(font has no {wanted} data — fell back)', {
         // Localize the inserted token too (it previously leaked English).
@@ -463,6 +718,8 @@ export function WritingPanel() {
     t, text, loaded, genMode, charHeight, lineSpacing, letterSpacing, align,
     bold, italic, underline, originX, originY, penUpZ, penDownZ, feed, missing,
     fontName, setProgram, builtinStroke,
+    carveTool, carveDepth, carveStepdown, carveStepover, carveFeed, carvePlunge,
+    carveRpm, carveSafeZ, carveStrokeWidth, carveMargin,
   ])
 
   // Live G-code: always regenerate ~300ms after the last change and push to the
@@ -476,7 +733,7 @@ export function WritingPanel() {
     if (text.trim().length === 0) {
       if (liveTimer.current) clearTimeout(liveTimer.current)
       if (!useProgram.getState().streaming) {
-        setProgram('text — pen', '')
+        setProgram(WRITING_SECTION, '')
         setInfo(t('writing.info.enterText', 'Enter some text first.'))
       }
       useProgramOwner.getState().release('writing')
@@ -494,11 +751,11 @@ export function WritingPanel() {
     }
   }, [generate, text, setProgram, t])
 
-  // Yield: when another CAM panel claims the program, drop our "text — pen"
-  // section (unless a stream is running) so it never lingers over another job.
+  // Yield: when another CAM panel claims the program, drop our Writing section
+  // (unless a stream is running) so it never lingers over another job.
   useEffect(() => {
     if (programOwner && programOwner !== 'writing') {
-      if (!useProgram.getState().streaming) removeSection('text — pen')
+      if (!useProgram.getState().streaming) removeSection(WRITING_SECTION)
     }
   }, [programOwner, removeSection])
 
@@ -590,7 +847,7 @@ export function WritingPanel() {
 
   // Whether the active font supports each mode (for disabling/coloring toggles).
   const canOutline = fontKind === 'outline'
-  const canStroke = fontKind === 'stroke' // outline fonts fall back to built-in stroke
+  const canStroke = fontKind === 'stroke' // outline fonts derive a centerline (skeleton)
 
   // The current state as a save document (.kwrite).
   const doc: WritingDoc = {
@@ -621,7 +878,13 @@ export function WritingPanel() {
       if (typeof data.bold === 'boolean') setBold(data.bold)
       if (typeof data.italic === 'boolean') setItalic(data.italic)
       if (typeof data.underline === 'boolean') setUnderline(data.underline)
-      if (data.genMode === 'stroke' || data.genMode === 'outline') setGenMode(data.genMode)
+      if (
+        data.genMode === 'stroke' ||
+        data.genMode === 'outline' ||
+        data.genMode === 'carveIn' ||
+        data.genMode === 'relief'
+      )
+        setGenMode(data.genMode)
       // An uploaded or local system font cannot be embedded in the saved doc —
       // fall back to the built-in font for those ids.
       if (typeof data.fontId === 'string')
@@ -762,33 +1025,6 @@ export function WritingPanel() {
                   onClick={() => void loadSystem()}
                 />
               </div>
-              {/* Stroke / Outline segmented mode toggle — sits inline on the font row */}
-              <div className="wr-mode" role="group" aria-label={t('writing.mode.label', 'G-code mode')}>
-                <button
-                  type="button"
-                  className={'wr-seg' + (genMode === 'stroke' ? ' is-active' : '')}
-                  aria-pressed={genMode === 'stroke'}
-                  onClick={() => setGenMode('stroke')}
-                  title={t('writing.mode.strokeTip', 'Follow the font centerlines (single-stroke). Best for Hershey/JSON fonts; outline fonts use the built-in stroke font.')}
-                >
-                  {t('writing.mode.stroke', 'Stroke')}
-                  {!canStroke && <span className="wr-seg-note">·{t('writing.mode.builtin', 'built-in')}</span>}
-                </button>
-                <button
-                  type="button"
-                  className={'wr-seg' + (genMode === 'outline' ? ' is-active' : '')}
-                  aria-pressed={genMode === 'outline'}
-                  onClick={() => setGenMode('outline')}
-                  disabled={!canOutline}
-                  title={
-                    canOutline
-                      ? t('writing.mode.outlineTip', 'Engrave around each glyph contour. Best for TTF/OTF fonts.')
-                      : t('writing.mode.outlineNa', 'Outline mode needs a TTF/OTF font. Pick or upload one.')
-                  }
-                >
-                  {t('writing.mode.outline', 'Outline')}
-                </button>
-              </div>
               <input
                 ref={fileRef}
                 type="file"
@@ -800,6 +1036,56 @@ export function WritingPanel() {
                   if (fileRef.current) fileRef.current.value = ''
                 }}
               />
+            </div>
+
+            {/* row 1b: G-code mode — compact 4-way segmented control */}
+            <div className="wr-modebar" role="group" aria-label={t('writing.mode.label', 'G-code mode')}>
+              <button
+                type="button"
+                className={'wr-modeseg' + (genMode === 'stroke' ? ' is-active' : '')}
+                aria-pressed={genMode === 'stroke'}
+                onClick={() => setGenMode('stroke')}
+                title={t('writing.mode.strokeTip', 'Draw single strokes (centerlines). Stroke/JSON fonts use their own centerlines; outline (TTF/OTF) fonts are skeletonized into centerlines that follow the chosen font.')}
+              >
+                <ModeIcon mode="stroke" />
+                <span className="wr-modeseg-lbl">{t('writing.mode.stroke', 'Stroke')}</span>
+                {!canStroke && <span className="wr-seg-note">·{t('writing.mode.skeleton', 'auto')}</span>}
+              </button>
+              <button
+                type="button"
+                className={'wr-modeseg' + (genMode === 'outline' ? ' is-active' : '')}
+                aria-pressed={genMode === 'outline'}
+                onClick={() => setGenMode('outline')}
+                disabled={!canOutline}
+                title={
+                  canOutline
+                    ? t('writing.mode.outlineTip', 'Trace each glyph contour. Best for TTF/OTF fonts.')
+                    : t('writing.mode.outlineNa', 'Outline mode needs a TTF/OTF font. Pick or upload one.')
+                }
+              >
+                <ModeIcon mode="outline" />
+                <span className="wr-modeseg-lbl">{t('writing.mode.outline', 'Outline')}</span>
+              </button>
+              <button
+                type="button"
+                className={'wr-modeseg' + (genMode === 'carveIn' ? ' is-active' : '')}
+                aria-pressed={genMode === 'carveIn'}
+                onClick={() => setGenMode('carveIn')}
+                title={t('writing.mode.carveInTip', 'Mill a pocket INSIDE each letter → recessed/engraved text. Uses spindle Z.')}
+              >
+                <ModeIcon mode="carveIn" />
+                <span className="wr-modeseg-lbl">{t('writing.mode.carveIn', 'Carve in')}</span>
+              </button>
+              <button
+                type="button"
+                className={'wr-modeseg' + (genMode === 'relief' ? ' is-active' : '')}
+                aria-pressed={genMode === 'relief'}
+                onClick={() => setGenMode('relief')}
+                title={t('writing.mode.reliefTip', 'Mill a pocket AROUND the letters → raised (relief) text; letters left standing. Uses spindle Z.')}
+              >
+                <ModeIcon mode="relief" />
+                <span className="wr-modeseg-lbl">{t('writing.mode.relief', 'Relief')}</span>
+              </button>
             </div>
 
             {/* row 2: Style (B/I/U) + Align (left/center/right) packed on ONE tight row */}
@@ -903,6 +1189,142 @@ export function WritingPanel() {
             />
           </div>
         </section>
+
+        {/* ---- Carve (Carve-in / Relief milling params) — shown only for pocket modes ---- */}
+        {isPocketMode(genMode) && (
+        <section className="wr-card wr-span">
+          <h3>
+            <span className="cam-card-ico" aria-hidden><ModeIcon mode={genMode} /></span>
+            {t('writing.carve.title', 'Carve (milling)')}
+          </h3>
+          <div className="wr-card-body wr-sliders wr-carve">
+            <WrSlider
+              icon={<span className="wr-glyph">⌀</span>}
+              label={t('writing.carve.tool', 'Tool ⌀')}
+              htmlFor="wr-carve-tool"
+              unit="mm"
+              min={0.1}
+              max={12}
+              step={0.1}
+              value={carveTool}
+              onChange={setCarveTool}
+              title={t('writing.carve.tool.tip', 'Cutter diameter (mm). Drives stepover pitch and the edge inset so the tool stays inside the region.')}
+            />
+            <WrSlider
+              icon={<Icon name="download" size={14} />}
+              label={t('writing.carve.depth', 'Cut depth')}
+              htmlFor="wr-carve-depth"
+              unit="mm"
+              min={0.1}
+              max={20}
+              step={0.1}
+              value={carveDepth}
+              onChange={setCarveDepth}
+              title={t('writing.carve.depth.tip', 'Total depth to remove below the surface (mm).')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">↓</span>}
+              label={t('writing.carve.stepdown', 'Step-down')}
+              htmlFor="wr-carve-stepdown"
+              unit="mm"
+              min={0.05}
+              max={10}
+              step={0.05}
+              value={carveStepdown}
+              onChange={setCarveStepdown}
+              title={t('writing.carve.stepdown.tip', 'Depth removed per pass (mm). Smaller = more passes, gentler cut.')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">↔</span>}
+              label={t('writing.carve.stepover', 'Step-over')}
+              htmlFor="wr-carve-stepover"
+              unit="%"
+              min={5}
+              max={90}
+              step={1}
+              value={carveStepover}
+              onChange={setCarveStepover}
+              title={t('writing.carve.stepover.tip', 'Sideways pitch between fill passes, as a percent of tool ⌀.')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">F</span>}
+              label={t('writing.carve.feed', 'Feed')}
+              htmlFor="wr-carve-feed"
+              unit="mm/min"
+              min={1}
+              max={6000}
+              step={50}
+              value={carveFeed}
+              onChange={setCarveFeed}
+              title={t('writing.carve.feed.tip', 'Cutting feed rate in XY (mm/min).')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">↧</span>}
+              label={t('writing.carve.plunge', 'Plunge feed')}
+              htmlFor="wr-carve-plunge"
+              unit="mm/min"
+              min={1}
+              max={3000}
+              step={25}
+              value={carvePlunge}
+              onChange={setCarvePlunge}
+              title={t('writing.carve.plunge.tip', 'Vertical plunge feed rate when entering the material (mm/min).')}
+            />
+            <WrSlider
+              icon={<span className="wr-glyph">◎</span>}
+              label={t('writing.carve.rpm', 'Spindle RPM')}
+              htmlFor="wr-carve-rpm"
+              unit="rpm"
+              min={0}
+              max={30000}
+              step={500}
+              value={carveRpm}
+              onChange={setCarveRpm}
+              title={t('writing.carve.rpm.tip', 'Spindle speed emitted as M3 S… (rpm).')}
+            />
+            <WrSlider
+              icon={<Icon name="upload" size={14} />}
+              label={t('writing.carve.safeZ', 'Safe-Z')}
+              htmlFor="wr-carve-safez"
+              unit="mm"
+              min={0.5}
+              max={50}
+              step={0.5}
+              value={carveSafeZ}
+              onChange={setCarveSafeZ}
+              title={t('writing.carve.safeZ.tip', 'Retract height above the surface for rapid travel (mm).')}
+            />
+            {fontKind === 'stroke' && (
+              <WrSlider
+                icon={<span className="wr-glyph">≣</span>}
+                label={t('writing.carve.strokeWidth', 'Stroke width')}
+                htmlFor="wr-carve-strokew"
+                unit="mm"
+                min={0.2}
+                max={20}
+                step={0.1}
+                value={carveStrokeWidth}
+                onChange={setCarveStrokeWidth}
+                title={t('writing.carve.strokeWidth.tip', 'Thickness given to single-stroke font centerlines before pocketing (mm).')}
+              />
+            )}
+            {genMode === 'relief' && (
+              <WrSlider
+                icon={<span className="wr-glyph">▣</span>}
+                label={t('writing.carve.margin', 'Margin')}
+                htmlFor="wr-carve-margin"
+                unit="mm"
+                min={0}
+                max={50}
+                step={0.5}
+                value={carveMargin}
+                onChange={setCarveMargin}
+                title={t('writing.carve.margin.tip', 'Border around the text for the relief pocket rectangle (mm).')}
+              />
+            )}
+          </div>
+        </section>
+        )}
 
         {/* ---- Pen Z & feed — slider rows ---- */}
         <section className="wr-card">
