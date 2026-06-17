@@ -160,6 +160,33 @@ function applyDocumentLang(lang: string): void {
   el.setAttribute('dir', info?.dir === 'rtl' ? 'rtl' : 'ltr')
 }
 
+/**
+ * The language pinned by the URL path, e.g. `/hi/` → `'hi'`. These per-locale
+ * URLs are the international-SEO landing pages (generated at build by
+ * vite-i18n-seo.mjs). English lives at the root, so `/en/` is treated as “no
+ * pin”. Returns null when the first path segment isn't a shipped locale.
+ */
+function langFromPath(): Lang | null {
+  if (typeof location === 'undefined') return null
+  const seg = decodeURIComponent(location.pathname.split('/')[1] ?? '').toLowerCase()
+  return seg && seg !== 'en' && KNOWN_CODES.has(seg) ? (seg as Lang) : null
+}
+
+/**
+ * Keep the address bar in sync with the active language so a shared link is
+ * self-describing and matches the static per-locale page on reload: English →
+ * `/`, every other locale → `/<code>/`. The app is a single page, so the path
+ * is only ever the root or a locale prefix; assets load from an absolute base,
+ * so rewriting the path is safe. Uses replaceState (no history spam, no reload).
+ */
+function syncUrlLang(lang: string): void {
+  if (typeof history === 'undefined' || typeof location === 'undefined') return
+  const path = lang === 'en' ? '/' : `/${lang}/`
+  if (location.pathname !== path) {
+    history.replaceState(null, '', path + location.search + location.hash)
+  }
+}
+
 interface LocaleState {
   lang: Lang
   /**
@@ -184,6 +211,7 @@ export const useLocale = create<LocaleState>()(
       version: 0,
       setLang: (lang) => {
         applyDocumentLang(lang)
+        syncUrlLang(lang)
         ensureLocale(lang)
         set({ lang })
       },
@@ -204,8 +232,15 @@ export const useLocale = create<LocaleState>()(
   ),
 )
 
-// Apply the (possibly restored) language at module load, and start loading its
-// locale chunk (no-op for English).
+// A per-locale URL (e.g. /hi/) pins the language and WINS over the persisted
+// preference, so a shared localized link always opens in that language. Falls
+// back to the restored/default language when the path has no locale prefix.
+const urlLang = langFromPath()
+if (urlLang && urlLang !== useLocale.getState().lang) {
+  useLocale.getState().setLang(urlLang)
+}
+// Apply the (URL-pinned, restored, or default) language at module load, and
+// start loading its locale chunk (no-op for English).
 applyDocumentLang(useLocale.getState().lang)
 ensureLocale(useLocale.getState().lang)
 

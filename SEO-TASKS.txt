@@ -1,0 +1,144 @@
+==============================================================================
+ karmyogi — SEO TASK BRIEF  (for the SEO / coding agent)
+ Last updated: 2026-06-17
+==============================================================================
+
+GOAL
+----
+Get https://karmyogi.hjlabs.in indexed and ranking on Google (and Bing) so more
+people discover the app and sign up. Primary search intents to win:
+  - "web GRBL controller" / "browser GRBL controller"
+  - "online G-code sender" / "web G-code sender"
+  - "Candle alternative" (Candle = the popular desktop GRBL sender)
+  - "browser CNC control / Web Serial CNC"
+  - "DXF to G-code", "Gerber to G-code", "PCB isolation routing online"
+  - long-tail: laser cutting / pen plotter / auto-soldering / CAD-CAM in browser
+
+WHAT THE PRODUCT IS (context the agent needs)
+---------------------------------------------
+- A static single-page web app (Vite + React 19 + TypeScript), NO backend.
+- Talks to CNC machines via the Web Serial API => Chromium-only (Chrome, Edge,
+  Opera, Brave). Firefox/Safari can't connect (but can still view the site).
+- Hosted on Cloudflare Pages, project name "karmyogi", domain karmyogi.hjlabs.in.
+- Deploy is a MANUAL wrangler upload of the built dist/ folder (NOT auto from
+  GitHub). Credentials live in repo file secrets.cloudflare.env (gitignored).
+  Deploy command (run from repo root, needs network egress):
+      npm run build && set -a && . ./secrets.cloudflare.env && set +a && \
+        npx wrangler pages deploy dist --project-name karmyogi --commit-dirty=true
+- The app is auth-gated (Google sign-in) but first-time visitors get a multi-day
+  free-explore grace window, so crawlers reach the app, not a hard login wall.
+- GitHub repo: https://github.com/hemangjoshi37a/karmyogi  (README is rich/updated)
+
+WHAT IS ALREADY DONE (do NOT redo — verify only)
+-------------------------------------------------
+[x] <title>, meta description, meta keywords, author, robots=index,follow.
+[x] Canonical link -> https://karmyogi.hjlabs.in/
+[x] Open Graph + Twitter card tags + og-image.png (1200x630).
+[x] JSON-LD structured data graph: SoftwareApplication, Organization, WebSite,
+    and FAQPage (6 Q&As). Valid JSON, in index.html <head>.
+[x] robots.txt (allows all, references sitemap).
+[x] sitemap.xml at /sitemap.xml (single URL, lastmod 2026-06-17).
+[x] PWA manifest (installable, categories set).
+[x] Crawlable above-the-fold content: a static <h1> + keyword paragraph +
+    feature list inside #root (React replaces it on mount; it doubles as the
+    loading splash) AND a <noscript> About+FAQ fallback. This fixes the classic
+    "empty <body> SPA" problem so non-rendering crawlers index real content.
+[x] GA4 analytics is wired in the app (fires only on the real domain).
+
+OPEN TASKS  (priority order)
+============================
+
+P0 — MAKE IT LIVE + GET INTO THE INDEX
+--------------------------------------
+1. DEPLOY the latest build to Cloudflare (command above) so all the SEO markup
+   above is live on karmyogi.hjlabs.in. Confirm by viewing page source.
+2. GOOGLE SEARCH CONSOLE  (https://search.google.com/search-console):
+   - Add a Domain property for karmyogi.hjlabs.in (DNS TXT verification via
+     Cloudflare DNS is easiest), OR a URL-prefix property for the https URL.
+   - Submit the sitemap: https://karmyogi.hjlabs.in/sitemap.xml
+   - Use URL Inspection -> "Request indexing" on https://karmyogi.hjlabs.in/ to
+     jump the queue. Re-check Coverage/Pages after a few days.
+3. BING WEBMASTER TOOLS (https://www.bing.com/webmasters): add the site (can
+   "Import from Google Search Console"), submit the same sitemap. (Also feeds
+   ChatGPT/Copilot search.)
+4. VALIDATE structured data after deploy:
+   - https://search.google.com/test/rich-results  (expect SoftwareApplication +
+     FAQ eligible)
+   - https://validator.schema.org/
+   Fix any warnings it reports.
+
+P1 — RENDERING & CRAWLABILITY HARDENING
+---------------------------------------
+5. Confirm Googlebot sees real content: use GSC URL Inspection -> "View crawled
+   page" / "Live test" and check the rendered HTML has the <h1> and copy (not a
+   blank app). If the gated app hides content from the bot, consider:
+     - serving the marketing/landing hero to all visitors before the gate, and/or
+     - prerendering the landing route to static HTML at build time
+       (e.g. vite-plugin-prerender / a prebuilt index variant).
+6. Core Web Vitals / performance (ranking factor):
+   - Run PageSpeed Insights on the live URL; the main JS bundle is large (~10 MB
+     precache). Look at code-splitting / lazy-loading heavy panels & three.js so
+     first paint is fast. Target good LCP/CLS/INP on mobile.
+   - Ensure the loading splash paints instantly (it's inline in index.html now).
+
+P2 — INTERNATIONAL SEO  [DONE — implemented 2026-06-17, verify after deploy]
+-----------------------------------------------------------------------------
+Implemented (vite-i18n-seo.mjs + src/i18n + src/app/App.tsx):
+   - Build now emits a crawlable page per locale: / (English, x-default) and
+     /<code>/ for all 53 locales (e.g. /hi/, /ar/, /zh/).
+   - Every page carries the SAME reciprocal hreflang cluster (en + 53 +
+     x-default) and a self-referential canonical + og:url; RTL locales get
+     <html dir="rtl">.
+   - dist/sitemap.xml regenerated with all 54 URLs + per-URL xhtml:link hreflang
+     alternates.
+   - The app reads the locale from the URL path on load (/hi/ renders Hindi) and
+     the in-app language switcher updates the URL; the client router strips the
+     locale prefix so /<code>/ and /<code>/admin resolve correctly.
+   Verified locally: /hi/ renders the full workbench in Hindi (was a 404 before
+   the router fix); /ar/ is RTL; hreflang/canonical correct on every page.
+7. REMAINING for the SEO agent (after deploy):
+   - Deploy, then in Google Search Console submit the new sitemap and watch the
+     "International Targeting" / hreflang report for errors (some Indic codes
+     like mni/sat/bho/doi are ISO 639-2/3 — Google may flag a few as unknown;
+     that's harmless, the rendered content still ranks).
+   - Spot-check a few /<code>/ URLs with the URL Inspection live test to confirm
+     Googlebot renders the localized UI.
+   - OPTIONAL upgrade: localize each page's <title>/<meta description> (currently
+     English in the static head; the localized UI renders via JS). Needs 53
+     translated title/description strings.
+
+P3 — OFF-PAGE / AUTHORITY (backlinks & reach)
+---------------------------------------------
+8. Backlinks (highest off-page lever). Submit / post to:
+     - Product Hunt launch
+     - Reddit: r/hobbycnc, r/CNC, r/engraving, r/diyelectronics (show-and-tell)
+     - CNCzone forum, Hackaday.io project, Hacker News "Show HN"
+     - GitHub: add repo "topics" (grbl, cnc, gcode, cam, web-serial, candle,
+       pcb, laser), pin the repo, encourage stars.
+     - Awesome-lists (awesome-cnc / awesome-grbl) PRs.
+   LinkedIn launch article already published (linked in README) — reuse it.
+9. Keep the GitHub README keyword-rich (already updated) and link to the live app
+   — repo pages rank and pass authority.
+
+P4 — CONTENT (long-tail traffic)
+--------------------------------
+10. Add indexable content pages/blog (static HTML or prerendered): e.g.
+      - "Candle alternative for the browser"
+      - "How to send G-code from your browser"
+      - "DXF to G-code online", "Gerber to G-code online"
+      - per-mode guides (laser, PCB, pen plotter, auto-solder).
+    Each targets a specific query, internally links to the app, and feeds the
+    sitemap. This is the main source of compounding organic traffic.
+
+NOTES / GUARDRAILS
+------------------
+- Do NOT put fake AggregateRating/Review structured data (Google penalizes it).
+- Keep robots.txt allowing JS/CSS (needed for rendering) — already correct.
+- Don't break the existing meta/JSON-LD in index.html; extend, don't replace.
+- After any change: rebuild, redeploy, then re-request indexing in GSC.
+- Verify, don't assume: check live page source + Rich Results Test each round.
+
+CONTACT
+-------
+Owner: Hemang Joshi (hjLabs.in) — hemangjoshi37a@gmail.com
+==============================================================================

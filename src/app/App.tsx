@@ -9,13 +9,29 @@ import { useAuth } from '../auth/authStore'
 import { initDevLogs, setDevLogsContext } from '../integrations/devlogs'
 import { AdminPage } from '../admin/AdminPage'
 import { useLiveSync } from '../machine/liveSync'
-import { useT } from '../i18n'
+import { useT, LANGUAGES } from '../i18n'
 import { UndoRedoHotkeys } from '../components/UndoRedoHotkeys'
 import { AiBubble } from '../components/AiBubble'
 
+/** Shipped locale codes (English lives at the root, not under a prefix). */
+const LOCALE_CODES = new Set(LANGUAGES.map((l) => l.code).filter((c) => c !== 'en'))
+
+/**
+ * Strip a leading per-locale URL prefix so route checks are language-agnostic:
+ * `/hi/` → `/`, `/ar/admin` → `/admin`. These `/<code>/` prefixes are the
+ * international-SEO landing URLs generated at build (see vite-i18n-seo.mjs);
+ * the app renders the SAME workbench/admin at them, just in that language.
+ */
+function stripLocalePrefix(pathname: string): string {
+  const m = /^\/([a-z]{2,4})(\/.*|)$/i.exec(pathname)
+  if (m && LOCALE_CODES.has(m[1].toLowerCase())) return m[2] || '/'
+  return pathname
+}
+
 /** True when the current path is the admin console (`/admin` or `/admin/...`). */
 function isAdminPath(pathname: string): boolean {
-  return pathname === '/admin' || pathname.startsWith('/admin/')
+  const p = stripLocalePrefix(pathname)
+  return p === '/admin' || p.startsWith('/admin/')
 }
 
 /**
@@ -28,7 +44,8 @@ function isAdminPath(pathname: string): boolean {
  * else that isn't an `/admin` path.
  */
 function isAppRoot(pathname: string): boolean {
-  return pathname === '/' || pathname === '' || pathname === '/index.html'
+  const p = stripLocalePrefix(pathname)
+  return p === '/' || p === '' || p === '/index.html'
 }
 
 /** Localized "page not found" with a link back to the app. */

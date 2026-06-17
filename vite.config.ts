@@ -11,6 +11,10 @@ import { cameraFrameReceiver } from './vite-camera-plugin.mjs'
 // kept out of the app tsconfig like the camera plugin above.
 // @ts-ignore - JS module, not typechecked by the app tsconfig
 import { machineBridgeReceiver } from './vite-machine-plugin.mjs'
+// Build-only international-SEO generator: emits a crawlable /<code>/ page per
+// locale with hreflang + a multilingual sitemap. Plain .mjs (Node fs APIs).
+// @ts-ignore - JS module, not typechecked by the app tsconfig
+import { i18nSeoGenerator } from './vite-i18n-seo.mjs'
 
 // `process` is provided by Node when Vite loads this config; declare it locally
 // (the app tsconfig deliberately omits @types/node so browser globals stay clean).
@@ -183,6 +187,8 @@ export default defineConfig({
         ],
       },
     }),
+    // Last: post-process dist/ into per-locale pages + hreflang + sitemap.
+    i18nSeoGenerator(),
   ],
   build: {
     // Vendor code-splitting: keep heavy, independently-loaded libraries in their
