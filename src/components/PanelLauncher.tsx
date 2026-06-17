@@ -72,6 +72,7 @@ export function PanelLauncher({ onOpenPanel, isPanelOpen }: PanelLauncherProps) 
           <div className="launcher-list">
             {availablePanels.map((p) => {
               const isOpen = isPanelOpen(p.id)
+              const title = t('tab.' + p.id, p.title)
               return (
                 <button
                   key={p.id}
@@ -83,12 +84,12 @@ export function PanelLauncher({ onOpenPanel, isPanelOpen }: PanelLauncherProps) 
                   }}
                   title={
                     isOpen
-                      ? t('launch.focus', 'Focus {title}', { title: p.title })
-                      : t('launch.open', 'Open {title}', { title: p.title })
+                      ? t('launch.focus', 'Focus {title}', { title })
+                      : t('launch.open', 'Open {title}', { title })
                   }
                 >
                   <PanelIcon id={p.id} size={15} className="launcher-item-ico" />
-                  <span className="launcher-item-title">{p.title}</span>
+                  <span className="launcher-item-title">{title}</span>
                   <span className={isOpen ? 'launcher-dot open' : 'launcher-dot'} aria-hidden="true" />
                 </button>
               )

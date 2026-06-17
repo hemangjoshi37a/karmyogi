@@ -68,6 +68,27 @@ export async function uploadUserFile(file: FileInput, context: string): Promise<
     const db = await getDb()
     if (!db) return
 
+    // DEDUP: if this user already vaulted a file with the SAME name AND size,
+    // keep that previous one — do NOT create a duplicate Storage object or
+    // Firestore doc. Same (name,size) is treated as the same file. The query is
+    // permitted by firestore.rules (owner read) and needs no composite index
+    // (equality-only filters). Best-effort: if the lookup fails we fall through
+    // and upload, so a transient read error never silently drops a real import.
+    try {
+      const { collection, query, where, getDocs, limit } = await import('firebase/firestore')
+      const dup = await getDocs(
+        query(
+          collection(db, 'users', uid, 'files'),
+          where('name', '==', name),
+          where('size', '==', size),
+          limit(1),
+        ),
+      )
+      if (!dup.empty) return // already in the vault — skip the re-upload
+    } catch {
+      /* dedup check is best-effort — fall through and upload on failure */
+    }
+
     const fileId = makeFileId()
     const safeName = safeFileName(name)
     const storagePath = `userfiles/${uid}/${fileId}/${safeName}`
@@ -77,6 +98,9 @@ export async function uploadUserFile(file: FileInput, context: string): Promise<
     await uploadBytes(ref(storage, storagePath), bytes, {
       contentType: type || 'application/octet-stream',
     })
+    // Release the (up to 25 MB) byte buffer the moment it's recorded on Firebase
+    // — on low-RAM machines holding it through the metadata write is wasteful.
+    bytes = new Uint8Array(0)
 
     const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
     await setDoc(doc(db, 'users', uid, 'files', fileId), {

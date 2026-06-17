@@ -183,3 +183,28 @@ export async function deleteClip(id: number): Promise<void> {
   const tx = db.transaction(STORE, 'readwrite')
   await reqAsPromise(tx.objectStore(STORE).delete(id))
 }
+
+/**
+ * Delete ALL stored clips at once — used by the "free space" cache cleanup when
+ * local storage is near-full. Auto-recorded video is the biggest disk/RAM hog
+ * and is purely local (never uploaded), so it's safe disposable cache. Returns
+ * the total bytes freed (0 on failure). Best-effort — never throws.
+ */
+export async function clearAllClips(): Promise<number> {
+  try {
+    const db = await openDb()
+    const rtx = db.transaction(STORE, 'readonly')
+    const all = (await reqAsPromise(rtx.objectStore(STORE).getAll())) as StoredClip[]
+    const freed = all.reduce((sum, c) => sum + (c.bytes || 0), 0)
+    const wtx = db.transaction(STORE, 'readwrite')
+    wtx.objectStore(STORE).clear()
+    await new Promise<void>((resolve) => {
+      wtx.oncomplete = () => resolve()
+      wtx.onerror = () => resolve()
+      wtx.onabort = () => resolve()
+    })
+    return freed
+  } catch {
+    return 0
+  }
+}

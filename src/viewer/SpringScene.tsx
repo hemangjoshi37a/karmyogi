@@ -3,6 +3,7 @@ import { Line, Text, Billboard, Tube } from '@react-three/drei'
 import * as THREE from 'three'
 import { useSpringViz } from '../store/springViz'
 import { springHelixPoints } from '../core/springCoiling'
+import { useT } from '../i18n'
 
 /**
  * Spring-coiling 3D scene: visualizes the 2-AXIS MACHINE (a rotary chuck winding
@@ -48,6 +49,7 @@ function fmtMm(v: number): string {
 
 export function SpringScene({ dark, simPosition }: SpringSceneProps) {
   const params = useSpringViz((s) => s.params)
+  const t = useT()
 
   const lineColor = dark ? '#9fb3c8' : '#475569'
   const textColor = dark ? '#e2e8f0' : '#1e293b'
@@ -59,7 +61,7 @@ export function SpringScene({ dark, simPosition }: SpringSceneProps) {
   // working point (it replaces the generic sim-tool cone that is hidden for springs).
   const feedColor = dark ? '#22d3ee' : '#0891b2'
 
-  const geom = useMemo(() => (params ? buildSpringDims(params) : null), [params])
+  const geom = useMemo(() => (params ? buildSpringDims(params, t) : null), [params, t])
 
   const L = Math.max(0, params?.freeLength ?? 0)
 
@@ -385,7 +387,7 @@ function buildSpringDims(p: {
   pitch: number
   freeLength: number
   totalTurns: number
-}): SpringGeom | null {
+}, t: (key: string, en: string) => string): SpringGeom | null {
   const R = p.coilDiameter / 2
   const L = Math.max(0, p.freeLength)
   if (!(R > 1e-6)) return null
@@ -405,7 +407,7 @@ function buildSpringDims(p: {
     const yd = -R - off
     dims.push({
       key: 'free',
-      label: `free L ${fmtMm(L)}`,
+      label: `${t('spring.dim.freeL', 'free L')} ${fmtMm(L)}`,
       extensions: [
         [[0, -R, 0], [0, yd - ext, 0]],
         [[L, -R, 0], [L, yd - ext, 0]],
@@ -425,7 +427,7 @@ function buildSpringDims(p: {
     const yd = -R - off * 1.7
     dims.push({
       key: 'coil',
-      label: `coil ⌀ ${fmtMm(p.coilDiameter)}`,
+      label: `${t('spring.dim.coilDia', 'coil ⌀')} ${fmtMm(p.coilDiameter)}`,
       extensions: [
         [[0, yd + ext, 0], [0, yd, 0]],
         [[0, yd + ext, zc * 2], [0, yd, zc * 2]],
@@ -447,7 +449,7 @@ function buildSpringDims(p: {
     const zTop = zc * 2
     dims.push({
       key: 'wire',
-      label: `wire ⌀ ${fmtMm(p.wireDiameter)}`,
+      label: `${t('spring.dim.wireDia', 'wire ⌀')} ${fmtMm(p.wireDiameter)}`,
       extensions: [
         [[xw, R, zTop - wr], [xw, R + off * 0.6, zTop - wr]],
         [[xw, R, zTop + wr], [xw, R + off * 0.6, zTop + wr]],
@@ -470,7 +472,7 @@ function buildSpringDims(p: {
     const zd = zc * 2 + off * 0.9
     dims.push({
       key: 'pitch',
-      label: `pitch ${fmtMm(p.pitch)}`,
+      label: `${t('spring.dim.pitch', 'pitch')} ${fmtMm(p.pitch)}`,
       extensions: [
         [[x0, 0, zc * 2], [x0, 0, zd + ext]],
         [[x1, 0, zc * 2], [x1, 0, zd + ext]],
@@ -488,7 +490,7 @@ function buildSpringDims(p: {
   // ---- Turn count: a billboard label above the coil mid-span. ----
   dims.push({
     key: 'turns',
-    label: `${(Math.round(p.totalTurns * 100) / 100).toString()} turns`,
+    label: `${(Math.round(p.totalTurns * 100) / 100).toString()} ${t('spring.dim.turns', 'turns')}`,
     extensions: [],
     dimLine: [],
     arrows: [],

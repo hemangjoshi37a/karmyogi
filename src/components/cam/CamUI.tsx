@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useT } from '../../i18n'
 import '../../styles/cam.css'
 
 /**
@@ -24,6 +25,7 @@ export interface StatusItem {
  * optional "→ Program" synced badge. Mirrors the Spring/Soldering strip.
  */
 export function CamStatus({ items, synced = true }: { items: StatusItem[]; synced?: boolean }) {
+  const t = useT()
   return (
     <div className="cam-status">
       {items.map((it, i) => (
@@ -41,8 +43,11 @@ export function CamStatus({ items, synced = true }: { items: StatusItem[]; synce
         </span>
       ))}
       {synced && (
-        <span className="cam-status-sync" title="Auto-synced to the Program tab">
-          → Program
+        <span
+          className="cam-status-sync"
+          title={t('cam.status.syncedTip', 'Auto-synced to the Program tab')}
+        >
+          → {t('cam.status.program', 'Program')}
         </span>
       )}
     </div>

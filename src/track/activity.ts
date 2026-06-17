@@ -441,6 +441,26 @@ export async function flush(): Promise<void> {
   }
 }
 
+/**
+ * Free the locally-cached activity telemetry. Flushes whatever is buffered to
+ * Firebase FIRST (so nothing already-collected is lost), then drops the in-memory
+ * buffer and its localStorage mirror. Used by the "free space" cache cleanup.
+ * This is tracking data only — it never touches user settings/presets/jobs.
+ */
+export async function clearActivityCache(): Promise<void> {
+  try {
+    await flush()
+  } catch {
+    /* best-effort */
+  }
+  buffer = []
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(BUFFER_KEY)
+  } catch {
+    /* best-effort */
+  }
+}
+
 // Best-effort final flush when the page is hidden / unloaded. `flush()` is async
 // but the browser usually keeps the tab alive long enough for a small batch on
 // `visibilitychange:hidden`; `pagehide` is the last resort.

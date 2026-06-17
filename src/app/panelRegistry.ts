@@ -205,3 +205,77 @@ export const availablePanels: PanelSpec[] = [
   { id: 'camera', component: 'camera', title: 'Camera' },
   { id: 'springcoiling', component: 'springcoiling', title: 'Spring Coiling' },
 ]
+
+/**
+ * Canonical workbench tab id → English title, in display order. Source of truth
+ * for the `tab.*` i18n keys used by the dock shell, mobile shell and launcher.
+ */
+export const TAB_TITLES: ReadonlyArray<{ id: string; en: string }> = [
+  { id: 'controller', en: 'Controller' },
+  { id: 'console', en: 'Console' },
+  { id: 'program', en: 'Program' },
+  { id: 'visualizer', en: 'Visualizer' },
+  { id: 'cadcam', en: '2D/3D Carving' },
+  { id: 'writing', en: 'Writing' },
+  { id: 'soldering', en: 'Soldering' },
+  { id: 'screwfitting', en: 'Screw Fitting' },
+  { id: 'drilling', en: 'Bore / Drill / Hole' },
+  { id: 'pcb', en: 'PCB' },
+  { id: 'glue', en: 'Glue Dispense' },
+  { id: 'pnp', en: 'Pick & Place' },
+  { id: 'signature', en: 'Signature' },
+  { id: 'print', en: '3D Printing' },
+  { id: 'laser', en: 'Laser Cutting' },
+  { id: 'welding', en: 'Welding' },
+  { id: 'camera', en: 'Camera' },
+  { id: 'springcoiling', en: 'Spring Coiling' },
+]
+
+type Translate = (key: string, en: string) => string
+
+/**
+ * Literal `t('tab.*', 'English')` call sites — one per tab — so the static
+ * extractor in `scripts/i18n-check.mjs` picks up every `tab.*` key and its
+ * English fallback. (The extractor SKIPS the whole `src/i18n/` directory, so
+ * these literals must live here under `src/app/`, which it scans.) Wired into
+ * the real tab-render path via `localizedTabTitles` below — not dead code.
+ *
+ * Keep this list IN SYNC with `TAB_TITLES` above (same ids/English).
+ */
+export function TAB_TITLE_KEYS(t: Translate): string[] {
+  return [
+    t('tab.controller', 'Controller'),
+    t('tab.console', 'Console'),
+    t('tab.program', 'Program'),
+    t('tab.visualizer', 'Visualizer'),
+    t('tab.cadcam', '2D/3D Carving'),
+    t('tab.writing', 'Writing'),
+    t('tab.soldering', 'Soldering'),
+    t('tab.screwfitting', 'Screw Fitting'),
+    t('tab.drilling', 'Bore / Drill / Hole'),
+    t('tab.pcb', 'PCB'),
+    t('tab.glue', 'Glue Dispense'),
+    t('tab.pnp', 'Pick & Place'),
+    t('tab.signature', 'Signature'),
+    t('tab.print', '3D Printing'),
+    t('tab.laser', 'Laser Cutting'),
+    t('tab.welding', 'Welding'),
+    t('tab.camera', 'Camera'),
+    t('tab.springcoiling', 'Spring Coiling'),
+  ]
+}
+
+/** Build an id → localized title map for all workbench tabs. */
+export function localizedTabTitles(t: Translate): Record<string, string> {
+  const titles = TAB_TITLE_KEYS(t)
+  const out: Record<string, string> = {}
+  TAB_TITLES.forEach((tab, i) => {
+    out[tab.id] = titles[i]
+  })
+  return out
+}
+
+/** Translate a single tab title by id, falling back to its English title. */
+export function tabTitle(t: Translate, id: string, fallbackEn: string): string {
+  return t('tab.' + id, fallbackEn)
+}

@@ -18,12 +18,14 @@ import { PanelLauncher } from '../components/PanelLauncher'
 import { LanguageSwitcher } from '../components/LanguageSwitcher'
 import { ConnectionControl } from '../components/ConnectionControl'
 import { UserChip } from '../auth/UserChip'
+import { StorageGuard } from '../components/StorageGuard'
 import { setActiveTab } from '../track/activity'
 import { registerTabNav } from '../track/tabNav'
 import { AboutModal } from '../components/AboutModal'
 import { Icon } from '../components/Icons'
 import { useMachine } from '../store'
 import { useT } from '../i18n'
+import { localizedTabTitles } from '../i18n/tabTitles'
 import { Modal } from '../components/Modal'
 import { MotionPanel } from '../panels/MotionPanel'
 // Probe is rendered in a modal here AND still registered as a dock tab in
@@ -157,8 +159,15 @@ const TAB_TOOLTIPS: Record<string, { key: string; en: string }> = {
 /** Dock tab = the default dockview tab + a native hover tooltip (per-panel explainer). */
 function DockTab(props: IDockviewPanelHeaderProps) {
   const t = useT()
+  // The panel's own title is kept localized via `setTitle(t('tab.'+id, …))`
+  // (see the layout-ready / language-change effects below). `localizedTabTitles`
+  // is wired in here so the static `tab.*` call sites in `TAB_TITLE_KEYS` stay
+  // referenced (and thus extractable) — and it supplies the hover tooltip title
+  // when a panel has no custom explainer.
+  const titles = localizedTabTitles(t)
+  const localizedTitle = titles[props.api.id] ?? props.api.title ?? ''
   const spec = TAB_TOOLTIPS[props.api.id]
-  const tip = spec ? t(spec.key, spec.en) : props.api.title ?? ''
+  const tip = spec ? t(spec.key, spec.en) : localizedTitle
   return (
     <div className="dv-tab-tip" title={tip}>
       <PanelIcon id={props.api.id} size={13} className="dv-tab-ico" />
@@ -439,6 +448,7 @@ export function Shell() {
              connection control (opens a sheet with the full ConnectionControl), and
              a "⋯" menu for everything secondary. Nothing wraps to a second row. */
           <span className="topbar-actions topbar-actions--mobile">
+            <StorageGuard />
             <NotificationBell />
             <MobileConnectSheet
               onOpenSettings={() => setShowMotion(true)}
@@ -485,7 +495,9 @@ export function Shell() {
                 label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
                 onClick={toggleTheme}
               />
-              {/* Notification bell second-to-last, user profile last. */}
+              {/* Storage-pressure guard (only appears when near-full), then the
+                  notification bell, then the user profile last. */}
+              <StorageGuard />
               <NotificationBell />
               <UserChip />
             </span>

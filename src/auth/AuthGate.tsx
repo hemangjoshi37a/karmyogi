@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from './authStore'
-import { authRequired } from './firebase'
+import { authRequired, googleClientId } from './firebase'
+import { showOneTap } from './googleOneTap'
 import { useT } from '../i18n'
 import { AuthBackground } from './AuthBackground'
 import { POLICIES, PoliciesModal, type Policy } from '../components/policies'
@@ -105,6 +106,7 @@ function useFeatures() {
 function SignInScreen({ graceExpired }: { graceExpired?: boolean }) {
   const t = useT()
   const signIn = useAuth((s) => s.signInWithGoogle)
+  const signInWithCredential = useAuth((s) => s.signInWithGoogleCredential)
   const error = useAuth((s) => s.error)
   const features = useFeatures()
   // Policy acceptance is REQUIRED to sign in: the box is checked by default, and
@@ -113,6 +115,32 @@ function SignInScreen({ graceExpired }: { graceExpired?: boolean }) {
   // sign-in (see recordPolicyConsent in track/activity.ts) as legal evidence.
   const [accepted, setAccepted] = useState(true)
   const [openPolicy, setOpenPolicy] = useState<Policy | null>(null)
+
+  // Primary, popup-free sign-in: Google One Tap / FedCM. Only prompt ONCE the
+  // policies are accepted (the "Continue as …" card signs the user in directly,
+  // so consent must already be given). If One Tap can't be shown — no Google
+  // session, FedCM unsupported, dismissed — nothing happens here and the user
+  // uses the button below, which does a full-page redirect instead.
+  const oneTapStarted = useRef(false)
+  useEffect(() => {
+    const clientId = googleClientId()
+    if (!clientId || !accepted || oneTapStarted.current) return
+    oneTapStarted.current = true
+    let cancel = () => {}
+    void showOneTap({
+      clientId,
+      onCredential: (idToken) => void signInWithCredential(idToken),
+      onUnavailable: () => {
+        // Expected when the visitor isn't signed into any Google account; the
+        // redirect button is the fallback. Allow a later retry if they sign in.
+        oneTapStarted.current = false
+      },
+    }).then((c) => {
+      cancel = c
+    })
+    return () => cancel()
+  }, [accepted, signInWithCredential])
+
   return (
     <div className="auth-gate auth-gate--landing">
       <AuthBackground />

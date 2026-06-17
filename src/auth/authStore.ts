@@ -28,7 +28,17 @@ interface AuthState {
   error: string | null
   /** Start listening to auth changes. Idempotent; no-op when unconfigured. */
   init: () => void
+  /**
+   * Fallback sign-in: a FULL-PAGE redirect to Google (NOT a popup), so it works
+   * even when the user isn't already signed into any Google account and when
+   * One Tap / FedCM can't be shown. Returns after the navigation is kicked off.
+   */
   signInWithGoogle: () => Promise<void>
+  /**
+   * Primary sign-in: exchange a Google Identity Services (One Tap / FedCM) ID
+   * token for a Firebase session — no popup, no redirect, no page leave.
+   */
+  signInWithGoogleCredential: (idToken: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -72,6 +82,17 @@ export const useAuth = create<AuthState>((set) => ({
       } catch {
         /* persistence unsupported (rare) — fall through; onAuthStateChanged still restores */
       }
+      // Complete a pending redirect sign-in (the fallback flow): when the user
+      // comes back from Google's full-page redirect, this resolves the result.
+      // onAuthStateChanged below flips status → 'signedIn'; we only need this to
+      // surface any redirect error and to drive the resolver. Best-effort.
+      try {
+        const { getRedirectResult } = await import('firebase/auth')
+        await getRedirectResult(auth)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        set({ error: msg })
+      }
       onAuthStateChanged(auth, (fbUser) => {
         if (fbUser) {
           set({
@@ -103,9 +124,31 @@ export const useAuth = create<AuthState>((set) => ({
     try {
       const auth = await getFirebaseAuth()
       if (!auth) return
-      const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth')
+      const { GoogleAuthProvider, signInWithRedirect } = await import('firebase/auth')
       const provider = new GoogleAuthProvider()
-      await signInWithPopup(auth, provider)
+      // Always prompt account selection so a logged-out user can pick/add an
+      // account on the redirect, instead of bouncing back unresolved.
+      provider.setCustomParameters({ prompt: 'select_account' })
+      // FULL-PAGE redirect (not popup): the page navigates to Google now; on
+      // return, getRedirectResult() + onAuthStateChanged complete the sign-in.
+      await signInWithRedirect(auth, provider)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      set({ error: msg })
+    }
+  },
+
+  signInWithGoogleCredential: async (idToken: string) => {
+    if (!firebaseConfigured()) return
+    set({ error: null })
+    try {
+      const auth = await getFirebaseAuth()
+      if (!auth) return
+      const { GoogleAuthProvider, signInWithCredential } = await import('firebase/auth')
+      // The One Tap / FedCM callback hands us a Google ID token (JWT). Exchange
+      // it for a Firebase session in-place — no popup, no redirect.
+      const cred = GoogleAuthProvider.credential(idToken)
+      await signInWithCredential(auth, cred)
       // onAuthStateChanged flips status → 'signedIn'.
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -118,6 +161,9 @@ export const useAuth = create<AuthState>((set) => ({
     try {
       const auth = await getFirebaseAuth()
       if (!auth) return
+      // Stop One Tap from auto-selecting the just-removed account on next load.
+      const { disableOneTapAutoSelect } = await import('./googleOneTap')
+      disableOneTapAutoSelect()
       const { signOut } = await import('firebase/auth')
       await signOut(auth)
     } catch {

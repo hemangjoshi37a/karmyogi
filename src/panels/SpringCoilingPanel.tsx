@@ -206,6 +206,7 @@ function Segmented<T extends string>(props: {
  */
 function EditableCount(props: { value: number; onChange: (n: number) => void; ariaLabel: string }) {
   const { value, onChange, ariaLabel } = props
+  const t = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(String(value))
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -245,7 +246,7 @@ function EditableCount(props: { value: number; onChange: (n: number) => void; ar
       type="button"
       className="spr-counter-val"
       aria-live="polite"
-      title="Click to edit the count"
+      title={t('spring.count.edit', 'Click to edit the count')}
       onClick={() => setEditing(true)}
     >
       {value}

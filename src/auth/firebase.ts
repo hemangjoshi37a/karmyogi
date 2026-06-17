@@ -77,6 +77,17 @@ export function adminEmail(): string {
   return realValue(import.meta.env.VITE_ADMIN_EMAIL) ?? 'hemangjoshi37a@gmail.com'
 }
 
+/**
+ * The Google OAuth **Web client ID** (`…apps.googleusercontent.com`) used for
+ * Google Identity Services One Tap / FedCM sign-in. PUBLIC (not a secret). Must
+ * be the SAME Web client ID configured in Firebase Auth → Google provider, so
+ * the ID token's audience matches what `signInWithCredential` accepts. Returns
+ * undefined when unset — the sign-in screen then falls back to the popup flow.
+ */
+export function googleClientId(): string | undefined {
+  return realValue(import.meta.env.VITE_GOOGLE_CLIENT_ID)
+}
+
 /** Whether the given user (or email) is the super-admin. Case-insensitive. */
 export function isAdmin(user: { email?: string | null } | string | null | undefined): boolean {
   const email = typeof user === 'string' ? user : user?.email
