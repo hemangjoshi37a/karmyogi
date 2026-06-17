@@ -123,13 +123,170 @@
             "description": "Browser-based GRBL CNC controller and CAD/CAM workbench.",
             "inLanguage": "en",
             "publisher": { "@id": "https://hjlabs.in/#org" }
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://karmyogi.hjlabs.in/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Is karmyogi free?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. karmyogi is completely free to use in your browser — there is nothing to buy, install or sign up for to start jogging, designing toolpaths and sending G-code."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Is karmyogi a Candle alternative?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. karmyogi is the modern, browser-based successor to the Qt Candle GRBL controller. It runs the same kind of jog/DRO control, G-code streaming and 3D toolpath visualization, plus a full CAD/CAM workbench, with nothing to install."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Which browsers does karmyogi support?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "karmyogi connects to your machine through the Web Serial API, which works in Chromium-based browsers: Chrome, Edge, Opera and Brave. Firefox and Safari do not support Web Serial. Everything that does not need hardware also works in the built-in mock device on any browser."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Do I need to install software or drivers?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. karmyogi is a static web app that runs entirely in the browser over USB Web Serial — no installer, no drivers, no local server and no cloud round-trip. Your design files never leave your machine. It can also be installed as an offline PWA."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Which machines and firmware does karmyogi work with?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "karmyogi targets 3-axis GRBL machines and adapts to compatible firmware including FluidNC, grblHAL and Marlin, with experimental support for Smoothieware, Masso G3 Touch and Ruida laser controllers."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What can karmyogi make?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "CNC carving and engraving, laser cutting, pen plotting, PCB isolation routing and drilling (Gerber + Excellon), auto-soldering, glue dispensing, pick-and-place, welding, screw fitting, drilling, spring coiling and 3D printing — all from one dockable workbench with a live 3D preview."
+                }
+              }
+            ]
           }
         ]
       }
     </script>
+
+    <!-- Pre-app splash styling: shown only until the SPA mounts (React replaces
+         #root), and doubles as crawlable above-the-fold content for search. -->
+    <style>
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 24px;
+        text-align: center;
+        background: #16191d;
+        color: #e7ecef;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      #app-splash img { width: 60px; height: 60px; }
+      #app-splash h1 {
+        margin: 0;
+        font-size: clamp(21px, 3.6vw, 32px);
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        max-width: 24ch;
+      }
+      #app-splash h1 b { color: #14b8a6; }
+      #app-splash p {
+        margin: 0;
+        max-width: 680px;
+        font-size: clamp(13px, 1.7vw, 15.5px);
+        line-height: 1.55;
+        color: #aab4ba;
+      }
+      #app-splash ul {
+        display: flex; flex-wrap: wrap; gap: 7px 13px; justify-content: center;
+        list-style: none; padding: 0; margin: 2px 0 0; max-width: 760px;
+      }
+      #app-splash li { font-size: 12px; color: #8b969c; }
+      #app-splash .spin {
+        width: 24px; height: 24px; margin-top: 4px;
+        border: 3px solid #2a3036; border-top-color: #14b8a6;
+        border-radius: 50%; animation: kysp 0.9s linear infinite;
+      }
+      @keyframes kysp { to { transform: rotate(360deg); } }
+      #app-splash a { color: #14b8a6; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Crawlable above-the-fold content + branded loading splash. React
+           replaces #root on mount, so this is shown only while the app loads
+           and is what non-rendering crawlers / the fast HTML pass index. -->
+      <div id="app-splash">
+        <img src="/icon-mark.png" alt="karmyogi logo" width="60" height="60" />
+        <h1>karm<b>yogi</b> — browser-based GRBL CNC controller &amp; CAD/CAM workbench</h1>
+        <p>
+          Run your 3-axis GRBL machine straight from your browser over the Web Serial API —
+          CNC carving &amp; engraving, laser cutting, pen plotting, PCB isolation routing &amp;
+          drilling, auto-soldering, glue dispensing, pick &amp; place, welding, spring coiling
+          and 3D printing — with a live 3D toolpath visualizer, jog/DRO controller, GRBL
+          <code>$</code>-settings manager and console. A free, modern, open
+          <strong>Candle alternative</strong>. No installs, no drivers, no server.
+        </p>
+        <ul>
+          <li>GRBL · FluidNC · grblHAL · Marlin</li>
+          <li>DXF / STL / STEP / OBJ → G-code</li>
+          <li>Gerber + Excellon → PCB</li>
+          <li>53 languages</li>
+          <li>Works offline (PWA)</li>
+          <li>Desktop &amp; mobile</li>
+        </ul>
+        <div class="spin" role="status" aria-label="Loading karmyogi"></div>
+        <p style="font-size: 12px">
+          Loading the workbench… if it doesn't appear, open
+          <a href="https://karmyogi.hjlabs.in/">karmyogi.hjlabs.in</a> in Chrome, Edge, Brave
+          or Opera. Source on <a href="https://github.com/hemangjoshi37a/karmyogi">GitHub</a>.
+        </p>
+      </div>
+    </div>
+    <noscript>
+      <div style="max-width: 760px; margin: 40px auto; padding: 0 20px; font-family: system-ui, sans-serif; line-height: 1.6;">
+        <h2>karmyogi — browser-based GRBL CNC controller &amp; CAD/CAM workbench</h2>
+        <p>
+          karmyogi is a free, browser-based GRBL CNC controller, G-code sender and CAD/CAM
+          workbench — the modern web successor to the Qt Candle GRBL controller. It drives
+          3-axis GRBL machines over the Web Serial API for CNC carving and engraving, laser
+          cutting, pen plotting, PCB isolation routing and drilling, auto-soldering, glue
+          dispensing, pick-and-place, welding, spring coiling and 3D printing, with a live 3D
+          toolpath visualizer and a dockable panel UI.
+        </p>
+        <p>
+          karmyogi needs JavaScript and a Chromium-based browser (Chrome, Edge, Opera or
+          Brave) with the Web Serial API. Open
+          <a href="https://karmyogi.hjlabs.in/">karmyogi.hjlabs.in</a> to launch the app, or
+          view the source on
+          <a href="https://github.com/hemangjoshi37a/karmyogi">GitHub</a>.
+        </p>
+        <h3>Frequently asked questions</h3>
+        <p><b>Is karmyogi free?</b> Yes — it is completely free to use in your browser.</p>
+        <p><b>Is it a Candle alternative?</b> Yes — it is the browser-based successor to the Qt Candle GRBL controller.</p>
+        <p><b>Do I need to install anything?</b> No — it runs entirely in the browser; your files never leave your machine.</p>
+        <p><b>Which machines?</b> 3-axis GRBL and compatible firmware (FluidNC, grblHAL, Marlin, and more).</p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
