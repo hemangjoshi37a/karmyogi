@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMachine, useProgram, usePersistentState } from '../store'
+import { useTabCommands } from '../machine/tabCommands'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
@@ -534,6 +535,22 @@ export function WeldingPanel() {
     storageKey: 'karmyogi.welding.presets',
     capture: capturePreset,
     onApply: applyPreset,
+  })
+
+  // ── Gamepad command bus: navigate / delete weld objects. All guarded. ──
+  const stepSel = (dir: -1 | 1) => {
+    if (objects.length === 0) return
+    const cur = objects.findIndex((o) => o.id === selected)
+    const base = cur < 0 ? (dir === 1 ? -1 : 0) : cur
+    const next = objects[(base + dir + objects.length) % objects.length]
+    if (next) setSelected(next.id)
+  }
+  useTabCommands('welding', {
+    nextPoint: () => stepSel(1),
+    prevPoint: () => stepSel(-1),
+    deletePoint: () => {
+      if (selected) deleteObject(selected)
+    },
   })
 
   return (

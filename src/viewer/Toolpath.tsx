@@ -19,6 +19,20 @@ interface ToolpathProps {
   revealIndex?: number
   /** Point on the active segment the tool has reached, for the split. */
   revealPoint?: [number, number, number] | null
+  /**
+   * When revealing, fully HIDE the already-processed (traveled) portion instead
+   * of just dimming it — leaves only the work still to come on screen. Default
+   * false (processed lines are shown desaturated/dim).
+   */
+  hideProcessed?: boolean
+}
+
+/** Mix a hex colour toward neutral grey by `amount` (0..1) — the "spent" look. */
+function desaturate(hex: string, amount: number): THREE.Color {
+  const c = new THREE.Color(hex)
+  // Pull toward this layer's mid-grey so executed cuts read as "done/cold".
+  const grey = new THREE.Color(0.5, 0.5, 0.5)
+  return c.lerp(grey, amount)
 }
 
 /** Build a non-indexed LineSegments geometry from segments of one kind. */
@@ -52,11 +66,15 @@ export function Toolpath({
   rapidColor,
   revealIndex,
   revealPoint,
+  hideProcessed = false,
 }: ToolpathProps) {
   const theme = useSettings((s) => s.theme)
 
   const cut = cutColor ?? (theme === 'dark' ? '#38bdf8' : '#0369a1')
   const rapid = rapidColor ?? (theme === 'dark' ? '#6b7280' : '#94a3b8')
+  // Executed cuts desaturate toward grey so the REMAINING work stays the bright,
+  // saturated colour the operator tracks (V3 progress dimming).
+  const cutDone = useMemo(() => desaturate(cut, 0.72), [cut])
 
   const revealing = revealIndex !== undefined && revealIndex >= 0
 
@@ -132,23 +150,26 @@ export function Toolpath({
   if (revealing) {
     return (
       <group>
-        {/* Upcoming (dim) drawn first so traveled lines sit visually on top. */}
-        {todoCutGeom && (
-          <lineSegments geometry={todoCutGeom}>
-            <lineBasicMaterial color={cut} transparent opacity={0.22} />
+        {/* Executed / traveled cuts: desaturated + dim (the "spent" look), drawn
+            first so the bright remaining work always sits visually on top.
+            Optionally hidden entirely (hideProcessed). */}
+        {!hideProcessed && doneCutGeom && (
+          <lineSegments geometry={doneCutGeom}>
+            <lineBasicMaterial color={cutDone} transparent opacity={0.5} />
           </lineSegments>
         )}
-        {todoRapidGeom && (
-          <RapidLines geometry={todoRapidGeom} color={rapid} opacity={0.18} />
+        {!hideProcessed && doneRapidGeom && (
+          <RapidLines geometry={doneRapidGeom} color={rapid} opacity={0.18} />
         )}
-        {/* Traveled (bright). */}
-        {doneCutGeom && (
-          <lineSegments geometry={doneCutGeom}>
+        {/* Remaining work: full, bright, saturated colour — what the operator
+            watches advance toward completion. */}
+        {todoCutGeom && (
+          <lineSegments geometry={todoCutGeom}>
             <lineBasicMaterial color={cut} />
           </lineSegments>
         )}
-        {doneRapidGeom && (
-          <RapidLines geometry={doneRapidGeom} color={rapid} opacity={0.85} />
+        {todoRapidGeom && (
+          <RapidLines geometry={todoRapidGeom} color={rapid} opacity={0.7} />
         )}
       </group>
     )

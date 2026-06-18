@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -8,6 +9,8 @@ import {
 import { useProgram, useMachine } from '../store'
 import { useT } from '../i18n'
 import { grbl } from '../serial/controller'
+import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
+import { useTabCommands } from '../machine/tabCommands'
 import { importGerber, GerberData } from '../core/gerber'
 import { importExcellon, ExcellonData } from '../core/excellon'
 import { isolationRoutes, drillHits, boardCutout, boardOutlinePolygon } from '../core/pcbCam'
@@ -25,13 +28,32 @@ import {
 } from '../core/gerberPackage'
 import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
+import { InfoTip } from '../components/InfoTip'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
 import { CamEmpty } from '../components/cam/CamUI'
+import { useHeightmap, type ApplyMode } from '../store/heightmap'
+import { useConsole } from '../store/console'
+import {
+  probeGrid,
+  snakeOrder,
+  gridForSpacing,
+  defaultSpacing,
+  expandArea,
+  warpGcode,
+  isComplete,
+  probedCount,
+  zExtent,
+  sampleHeight,
+  type HeightMap,
+  type ProbeArea,
+  type ProbePoint,
+} from '../core/heightmap'
 import '../styles/pcb.css'
 import '../styles/cam.css'
+import '../styles/pcbLevel.css'
 
 /** Single canonical program section for ALL PCB output (preview / play / generate).
  *  Using ONE name means each push REPLACES the previous one — the operator never
@@ -364,6 +386,28 @@ export function PcbPanel() {
   // every Play / streamed-generate affordance below.
   const machineBusy = streaming || machineState === 'Run' || machineState === 'Hold'
 
+  // ---- Auto-leveling (heightmap) ----
+  // The warp is applied EXACTLY ONCE, governed by the heightmap store's
+  // `applyMode`: 'baked' warps the generated text BEFORE it is pushed (so the
+  // Visualizer shows the warped surface-following path), while 'onfly' keeps the
+  // program flat and warps only the lines handed to the streamer. The two are
+  // mutually exclusive (one selector), so Z is never double-offset.
+  const levelMap = useHeightmap((s) => s.map)
+  const levelMode = useHeightmap((s) => s.applyMode)
+  const levelMaxSeg = useHeightmap((s) => s.maxSegment)
+  // The warp only fires when a COMPLETE map exists and the mode isn't 'off'.
+  const levelActive = !!levelMap && isComplete(levelMap) && levelMode !== 'off'
+  /** Warp G-code text for the 'baked' path (no-op unless baked + complete map). */
+  const bakeLevel = (gcode: string): string =>
+    levelActive && levelMode === 'baked' && levelMap
+      ? warpGcode(gcode, levelMap, { maxSegment: levelMaxSeg, cutCeiling: 0 })
+      : gcode
+  /** Warp baked program lines for the 'onfly' path (just before streaming). */
+  const levelLines = (lines: string[]): string[] =>
+    levelActive && levelMode === 'onfly' && levelMap
+      ? warpGcode(lines.join('\n'), levelMap, { maxSegment: levelMaxSeg, cutCeiling: 0 }).split('\n')
+      : lines
+
   const zipRef = useRef<HTMLInputElement>(null)
   const gerberRef = useRef<HTMLInputElement>(null)
   const excellonRef = useRef<HTMLInputElement>(null)
@@ -679,6 +723,11 @@ export function PcbPanel() {
   // the same placed program, never a divergent raw split. `label` is the
   // human-readable program name shown in the G-code preview header.
   function pushProgram(gcode: string, label: string): string[] {
+    // In 'baked' apply-mode the warp is folded into the program TEXT here, so the
+    // Visualizer + the streamed lines are one and the same warped path. In
+    // 'onfly' / 'off' mode this is a no-op and the program stays flat (the warp,
+    // if any, is applied to the streamed lines only — see confirmRun*).
+    gcode = bakeLevel(gcode)
     setProgram(PCB_SECTION, gcode)
     // After setProgram, the store has re-baked `lines` (placement applied). Read
     // them back so the preview text and the streamed lines are the SAME source.
@@ -770,7 +819,7 @@ export function PcbPanel() {
       return
     }
     const lines = pushProgram(res.gcode, `pcb-${stage}.nc`)
-    grbl.startProgram(lines)
+    grbl.startProgram(levelLines(lines))
     ok(
       t('pcb.status.streaming', 'Streaming {verb} for {name} — {lines} lines.', {
         verb: stageVerb(t, stage),
@@ -867,7 +916,7 @@ export function PcbPanel() {
       return
     }
     const lines = pushProgram(res.gcode, res.name)
-    grbl.startProgram(lines)
+    grbl.startProgram(levelLines(lines))
     ok(
       t('pcb.status.streaming', 'Streaming {verb} for {name} — {lines} lines.', {
         verb: stageVerb(t, res.stage),
@@ -891,6 +940,16 @@ export function PcbPanel() {
   }, [resolved])
   const drillTools = resolved.drillData ? resolved.drillData.toolDiameters().length : 0
   const drillHitsCount = resolved.drillData ? resolved.drillData.hits.length : 0
+
+  // Raw probe area (work coords) auto-derived from the board's isolation/outline
+  // extents — the auto-level section adds its configurable margin on top.
+  const levelBounds: ProbeArea | null = useMemo(() => {
+    const src = resolved.outline ?? resolved.copper
+    if (!src) return null
+    const b = src.bounds()
+    if (!b.isValid()) return null
+    return { minX: b.min.x, minY: b.min.y, maxX: b.max.x, maxY: b.max.y }
+  }, [resolved])
 
   // Names of the layer file(s) feeding each operation card, so the operator can
   // see exactly which layers a task uses (or that it's falling back to copper /
@@ -985,7 +1044,7 @@ export function PcbPanel() {
       return
     }
     const lines = pushProgram(res.gcode, 'pcb-all.nc')
-    grbl.startProgram(lines)
+    grbl.startProgram(levelLines(lines))
     ok(
       t('pcb.status.streamingAll', 'Streaming all {n} stages — {lines} lines. Pauses (M0) between stages for tool changes.', {
         n: res.stages.length,
@@ -1071,6 +1130,22 @@ export function PcbPanel() {
     storageKey: 'karmyogi.pcb.presets',
     capture: () => ({ ...params }),
     onApply: applyPcbParams,
+  })
+
+  // ── Gamepad command bus: preview (generate) / run all stages / frame. ──
+  // generate previews all stages into the program store; runAll streams them;
+  // frame traces the current program's XY bounds (tool OFF). The height-map probe
+  // is registered separately by the leveling sub-component below. All guarded.
+  useTabCommands('pcb', {
+    generate: () => previewAllStages(),
+    runAll: () => runAllStages(),
+    frame: () => {
+      const lines = useProgram.getState().lines
+      if (!grbl.isConnected || lines.length === 0) return
+      const bounds = frameBoundsOfGcode(lines)
+      if (!bounds || !bounds.isValid()) return
+      for (const ln of buildFrameProgram(bounds, { safeZ: 5 })) void grbl.send(ln)
+    },
   })
 
   return (
@@ -1745,6 +1820,17 @@ export function PcbPanel() {
           </section>
         )}
 
+        {/* ---- Auto-leveling / heightmap (O1/P1) ---- */}
+        {levelBounds && (
+          <AutoLevelSection
+            t={t}
+            bounds={levelBounds}
+            connected={connected}
+            machineBusy={machineBusy}
+            machineState={machineState}
+          />
+        )}
+
         {/* ---- 4. Essentials (always handy) ---- */}
         <section className="pcb-section">
           <h3 className="pcb-h3-row">
@@ -2061,5 +2147,610 @@ function OpActions({
         {t('pcb.op.run', 'Run')}
       </button>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Auto-leveling (heightmap) section — O1/P1
+// ---------------------------------------------------------------------------
+
+/** Parse a GRBL `[PRB:x,y,z:s]` probe-result line; undefined if it isn't one. */
+function parsePrb(line: string): { x: number; y: number; z: number; ok: boolean } | undefined {
+  const m = /^\[PRB:(-?\d+\.?\d*),(-?\d+\.?\d*),(-?\d+\.?\d*):([01])\]$/.exec(line.trim())
+  if (!m) return undefined
+  return { x: parseFloat(m[1]), y: parseFloat(m[2]), z: parseFloat(m[3]), ok: m[4] === '1' }
+}
+
+/** A small numeric field with label + InfoTip, mirroring the panel vocabulary. */
+function LvlField({
+  label,
+  tip,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  unit,
+  disabled,
+}: {
+  label: string
+  tip?: string
+  value: number
+  onChange: (n: number) => void
+  min?: number
+  max?: number
+  step?: number
+  unit?: string
+  disabled?: boolean
+}) {
+  return (
+    <label className="lvl-field">
+      <span className="lvl-field-lbl">
+        {label}
+        {unit ? ` (${unit})` : ''}
+        {tip ? <InfoTip topic="" title={label} body={tip} /> : null}
+      </span>
+      <input
+        type="number"
+        value={String(value)}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        onChange={(e) => {
+          const v = parseFloat(e.target.value)
+          if (Number.isFinite(v)) onChange(v)
+        }}
+      />
+    </label>
+  )
+}
+
+/**
+ * The 2D heat-map preview. Renders the probed surface to a small <canvas>:
+ * each grid cell is bilinearly shaded from a cool→warm scale across the probed
+ * Z range, with the probe points dotted on top. Pure render off the map (no 3D
+ * viewer touched). Cool = low (recessed), warm = high (raised).
+ */
+function HeatMap({ map, size = 168 }: { map: HeightMap; size?: number }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const ctx = cv.getContext('2d')
+    if (!ctx) return
+    const w = map.area.maxX - map.area.minX || 1
+    const h = map.area.maxY - map.area.minY || 1
+    // Keep aspect ratio inside a `size`-px box.
+    const aspect = w / h
+    const cw = aspect >= 1 ? size : Math.round(size * aspect)
+    const ch = aspect >= 1 ? Math.round(size / aspect) : size
+    cv.width = cw
+    cv.height = ch
+    const { min, max } = zExtent(map)
+    const span = max - min || 1
+    // Cool→warm gradient stops.
+    const grad = (t: number): [number, number, number] => {
+      const stops: [number, [number, number, number]][] = [
+        [0, [43, 89, 255]],
+        [0.4, [22, 194, 163]],
+        [0.7, [255, 210, 63]],
+        [1, [255, 90, 60]],
+      ]
+      for (let i = 1; i < stops.length; i++) {
+        if (t <= stops[i][0]) {
+          const [a, ca] = stops[i - 1]
+          const [b, cb] = stops[i]
+          const f = (t - a) / (b - a || 1)
+          return [
+            Math.round(ca[0] + (cb[0] - ca[0]) * f),
+            Math.round(ca[1] + (cb[1] - ca[1]) * f),
+            Math.round(ca[2] + (cb[2] - ca[2]) * f),
+          ]
+        }
+      }
+      return stops[stops.length - 1][1]
+    }
+    const img = ctx.createImageData(cw, ch)
+    for (let py = 0; py < ch; py++) {
+      for (let px = 0; px < cw; px++) {
+        // Map pixel → work XY (flip Y so +Y is up, like the bed view).
+        const x = map.area.minX + (px / (cw - 1 || 1)) * w
+        const y = map.area.maxY - (py / (ch - 1 || 1)) * h
+        const z = sampleHeight(map, x, y)
+        const [r, g, b] = grad((z - min) / span)
+        const o = (py * cw + px) * 4
+        img.data[o] = r
+        img.data[o + 1] = g
+        img.data[o + 2] = b
+        img.data[o + 3] = 255
+      }
+    }
+    ctx.putImageData(img, 0, 0)
+    // Probe-point dots.
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    for (const p of map.points) {
+      const px = ((p.x - map.area.minX) / w) * (cw - 1)
+      const py = ((map.area.maxY - p.y) / h) * (ch - 1)
+      ctx.beginPath()
+      ctx.arc(px, py, 1.6, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }, [map, size])
+  return <canvas ref={ref} className="lvl-heat" style={{ width: 'auto' }} />
+}
+
+type LvlT = (key: string, english: string, vars?: Record<string, string | number>) => string
+
+/** Probe-cycle phase. */
+type ProbePhase = 'idle' | 'running' | 'done' | 'error'
+
+/**
+ * Auto-leveling section: define the probe area, run the G38.2 grid probe, see a
+ * 2D heat-map of the surface, and choose how the warp is applied (off / on-fly /
+ * baked — mutually exclusive). The probe cycle drives the existing controller
+ * command API (grbl.send) and listens to the console for `[PRB:…]` results; it
+ * never edits the serial layer.
+ */
+function AutoLevelSection({
+  t,
+  bounds,
+  connected,
+  machineBusy,
+  machineState,
+}: {
+  t: LvlT
+  bounds: ProbeArea
+  connected: boolean
+  machineBusy: boolean
+  machineState: string
+}) {
+  const map = useHeightmap((s) => s.map)
+  const setMap = useHeightmap((s) => s.setMap)
+  const clearMap = useHeightmap((s) => s.clearMap)
+  const applyMode = useHeightmap((s) => s.applyMode)
+  const setApplyMode = useHeightmap((s) => s.setApplyMode)
+  const maxSegment = useHeightmap((s) => s.maxSegment)
+  const setMaxSegment = useHeightmap((s) => s.setMaxSegment)
+  const margin = useHeightmap((s) => s.margin)
+  const setMargin = useHeightmap((s) => s.setMargin)
+  const probeFeed = useHeightmap((s) => s.probeFeed)
+  const setProbeFeed = useHeightmap((s) => s.setProbeFeed)
+  const probeDepth = useHeightmap((s) => s.probeDepth)
+  const setProbeDepth = useHeightmap((s) => s.setProbeDepth)
+  const probeClearance = useHeightmap((s) => s.probeClearance)
+
+  const area = useMemo(() => expandArea(bounds, margin), [bounds, margin])
+  const [spacing, setSpacing] = useState<number>(() => Math.round(defaultSpacing(area)))
+  const grid = useMemo(() => gridForSpacing(area, spacing), [area, spacing])
+
+  const [phase, setPhase] = useState<ProbePhase>('idle')
+  const [status, setStatus] = useState<string>('')
+  const [statusErr, setStatusErr] = useState(false)
+  // Probe progress (points done / total) while a cycle runs.
+  const [done, setDone] = useState(0)
+
+  // The live probe-cycle state lives in a ref so the async loop isn't restarted
+  // by React re-renders.
+  const cycle = useRef<{
+    seq: ProbePoint[]
+    idx: number
+    work: HeightMap
+    abort: boolean
+  } | null>(null)
+  const lastSeen = useRef(0)
+
+  const mapComplete = !!map && isComplete(map)
+  const probedNow = map ? probedCount(map) : 0
+  const z = map ? zExtent(map) : { min: 0, max: 0 }
+  const warp = z.max - z.min
+
+  const finishCycle = (ok: boolean) => {
+    const c = cycle.current
+    cycle.current = null
+    if (!c) return
+    if (ok) {
+      setMap(c.work)
+      setPhase('done')
+      const e = zExtent(c.work)
+      setStatusErr(false)
+      setStatus(
+        t('pcb.level.status.done', 'Probed {n} points — surface warp {warp} mm (Z {min}…{max}).', {
+          n: c.seq.length,
+          warp: (e.max - e.min).toFixed(3),
+          min: e.min.toFixed(3),
+          max: e.max.toFixed(3),
+        }),
+      )
+    }
+  }
+
+  // Send the probe sequence for the next point: rapid to safe-Z, move XY, slow
+  // G38.2 plunge. The [PRB:…] reply (watched below) records Z and advances.
+  const probeNext = () => {
+    const c = cycle.current
+    if (!c || c.abort) return
+    if (c.idx >= c.seq.length) {
+      finishCycle(true)
+      return
+    }
+    const p = c.seq[c.idx]
+    setDone(c.idx)
+    grbl.send(`G0 Z${probeClearance.toFixed(3)}`).catch(() => {})
+    grbl.send(`G0 X${p.x.toFixed(3)} Y${p.y.toFixed(3)}`).catch(() => {})
+    grbl.send(`G38.2 Z${(-Math.abs(probeDepth)).toFixed(3)} F${Math.abs(probeFeed)}`).catch(() => {})
+  }
+
+  // Watch the console for [PRB:…] replies and advance the cycle.
+  useEffect(() => {
+    const entries = useConsole.getState().entries
+    lastSeen.current = entries.length ? entries[entries.length - 1].id : 0
+    const unsub = useConsole.subscribe((s) => {
+      const c = cycle.current
+      if (!c || c.abort) return
+      for (const e of s.entries) {
+        if (e.id <= lastSeen.current) continue
+        lastSeen.current = e.id
+        if (e.dir !== 'recv') continue
+        const prb = parsePrb(e.text)
+        if (!prb) continue
+        if (!prb.ok) {
+          c.abort = true
+          cycle.current = null
+          setPhase('error')
+          setStatusErr(true)
+          setStatus(
+            t('pcb.level.status.noContact', 'No probe contact at point {i} — cycle stopped. Check wiring / Z range.', {
+              i: c.idx + 1,
+            }),
+          )
+          return
+        }
+        // Record the touched Z at this grid point, CONVERTED to the WORK frame.
+        // GRBL reports [PRB:...] in MACHINE coords; the heightmap warps work-frame
+        // cut Z, so subtract the active work-coordinate offset (WPos = MPos − WCO).
+        const pt = c.seq[c.idx]
+        const node = c.work.points.find((n) => n.ix === pt.ix && n.iy === pt.iy)
+        if (node) node.z = prb.z - useMachine.getState().wco.z
+        c.idx++
+        // Retract before the next move, then probe on.
+        grbl.send(`G0 Z${probeClearance.toFixed(3)}`).catch(() => {})
+        probeNext()
+      }
+    })
+    return unsub
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // An Alarm aborts the cycle (a no-contact G38.2 alarms on real GRBL).
+  useEffect(() => {
+    if (phase === 'running' && machineState === 'Alarm' && cycle.current) {
+      cycle.current.abort = true
+      cycle.current = null
+      setPhase('error')
+      setStatusErr(true)
+      setStatus(t('pcb.level.status.alarm', 'Machine alarmed during probing — Unlock ($X) and check the probe.'))
+    }
+  }, [machineState, phase, t])
+
+  // A dropped connection aborts an in-flight cycle.
+  useEffect(() => {
+    if (!connected && cycle.current) {
+      cycle.current.abort = true
+      cycle.current = null
+      setPhase('idle')
+    }
+  }, [connected])
+
+  const startProbe = () => {
+    if (!connected || machineBusy) {
+      setStatusErr(true)
+      setStatus(t('pcb.level.status.connectFirst', 'Connect (and free the machine) before probing.'))
+      return
+    }
+    const fresh = probeGrid(area, grid)
+    const seq = snakeOrder(fresh)
+    cycle.current = { seq, idx: 0, work: fresh, abort: false }
+    setDone(0)
+    setPhase('running')
+    setStatusErr(false)
+    setStatus(t('pcb.level.status.probing', 'Probing {n} points… keep clear. Runs slow on purpose.', { n: seq.length }))
+    probeNext()
+  }
+
+  const abortProbe = () => {
+    if (cycle.current) cycle.current.abort = true
+    cycle.current = null
+    setPhase('idle')
+    setStatus(t('pcb.level.status.aborted', 'Probe cycle stopped.'))
+    grbl.send(`G0 Z${probeClearance.toFixed(3)}`).catch(() => {})
+  }
+
+  // ── Gamepad command bus: start (or stop) the height-map probe cycle. ──
+  // Registered for the SAME 'pcb' tab as the board panel; the registry merges
+  // both registrants so board + level commands coexist. Toggles: stop if running.
+  useTabCommands('pcb', {
+    levelProbe: () => {
+      if (phase === 'running') abortProbe()
+      else startProbe()
+    },
+  })
+
+  const running = phase === 'running'
+  const total = grid.nx * grid.ny
+
+  // The apply selector is locked while probing or with no complete map (a stale /
+  // partial surface must never warp a board).
+  const canApply = mapComplete && !running
+
+  const setMode = (m: ApplyMode) => {
+    if (!canApply && m !== 'off') return
+    setApplyMode(m)
+  }
+
+  return (
+    <section className="pcb-section pcb-section-wide">
+      <h3>
+        <span className="cam-card-ico" aria-hidden="true">
+          <Icon name="probe" size={15} />
+        </span>
+        {t('pcb.level.title', 'Auto-leveling (heightmap)')}
+        {applyMode !== 'off' && mapComplete && (
+          <span className="lvl-applied-badge">
+            <Icon name="zero" size={11} />
+            {applyMode === 'baked'
+              ? t('pcb.level.badge.baked', 'baked in')
+              : t('pcb.level.badge.onfly', 'on-the-fly')}
+          </span>
+        )}
+      </h3>
+      <div className="pcb-section-body">
+        <div className="lvl-body">
+          <div className="lvl-safety">
+            <Icon name="warning" size={15} />
+            <span>
+              {t(
+                'pcb.level.safety',
+                'Wire the probe clip to the tool and the plate/clip to the copper first. The cycle lowers the tool slowly at each grid point — keep clear. Sets work Z=0 as your surface datum.',
+              )}
+            </span>
+          </div>
+
+          <div className="lvl-steps">
+            {/* Step 1 — define the probe area + grid. */}
+            <div className="lvl-step">
+              <div className="lvl-step-head">
+                <span className="lvl-step-num">1</span>
+                {t('pcb.level.step1', 'Define probe area')}
+              </div>
+              <div className="lvl-area-readout">
+                {t('pcb.level.area', 'Area {w} × {h} mm (from toolpath + margin)', {
+                  w: (area.maxX - area.minX).toFixed(1),
+                  h: (area.maxY - area.minY).toFixed(1),
+                })}
+                {' · '}
+                <b>
+                  {t('pcb.level.gridSize', '{nx} × {ny} = {n} points', {
+                    nx: grid.nx,
+                    ny: grid.ny,
+                    n: grid.nx * grid.ny,
+                  })}
+                </b>
+              </div>
+              <div className="lvl-fields">
+                <LvlField
+                  label={t('pcb.level.margin', 'Margin')}
+                  unit="mm"
+                  tip={t('pcb.level.marginTip', 'Extra border probed around the toolpath extents, so edge traces still sit on interpolated surface.')}
+                  value={margin}
+                  onChange={setMargin}
+                  min={0}
+                  max={50}
+                  step={0.5}
+                  disabled={running}
+                />
+                <LvlField
+                  label={t('pcb.level.spacing', 'Point spacing')}
+                  unit="mm"
+                  tip={t('pcb.level.spacingTip', 'Target distance between probe points. Smaller spacing = more points = a finer surface map (and a slower probe cycle). ~ board/10 is a good start.')}
+                  value={spacing}
+                  onChange={(n) => setSpacing(Math.max(1, n))}
+                  min={1}
+                  max={50}
+                  step={1}
+                  disabled={running}
+                />
+                <LvlField
+                  label={t('pcb.level.probeFeed', 'Probe feed')}
+                  unit="mm/min"
+                  tip={t('pcb.level.probeFeedTip', 'How fast the tool lowers toward the copper at each point. Keep it slow for an accurate, gentle touch-off.')}
+                  value={probeFeed}
+                  onChange={setProbeFeed}
+                  min={5}
+                  max={500}
+                  step={5}
+                  disabled={running}
+                />
+                <LvlField
+                  label={t('pcb.level.probeDepth', 'Max plunge')}
+                  unit="mm"
+                  tip={t('pcb.level.probeDepthTip', 'Give up (and stop the cycle) if no contact is made within this distance below safe-Z. A guard against a mis-wired probe.')}
+                  value={probeDepth}
+                  onChange={setProbeDepth}
+                  min={0.5}
+                  max={50}
+                  step={0.5}
+                  disabled={running}
+                />
+              </div>
+            </div>
+
+            {/* Step 2 — run the probe cycle. */}
+            <div className={'lvl-step' + (mapComplete ? ' done' : '')}>
+              <div className="lvl-step-head">
+                <span className="lvl-step-num">2</span>
+                {t('pcb.level.step2', 'Probe the surface')}
+              </div>
+              <p className="lvl-hint">
+                {t(
+                  'pcb.level.step2Hint',
+                  'Rapids to safe-Z, moves over each point, then slowly G38.2-touches down — recording the board height. Needs a connected machine with the probe wired.',
+                )}
+              </p>
+              {running ? (
+                <div className="lvl-progress">
+                  <span>
+                    {t('pcb.level.probingN', 'Probing point {i} of {n}…', { i: done + 1, n: total })}
+                  </span>
+                  <div className="lvl-bar">
+                    <span style={{ width: `${(done / Math.max(1, total)) * 100}%` }} />
+                  </div>
+                </div>
+              ) : mapComplete ? (
+                <div className="lvl-progress">
+                  <span>
+                    {t('pcb.level.probedOk', '✓ {n} points probed · warp {warp} mm', {
+                      n: probedNow,
+                      warp: warp.toFixed(3),
+                    })}
+                  </span>
+                </div>
+              ) : null}
+              <div className="lvl-actions">
+                {running ? (
+                  <button className="lvl-btn danger" onClick={abortProbe}>
+                    <Icon name="stop" size={14} />
+                    {t('pcb.level.stop', 'Stop probing')}
+                  </button>
+                ) : (
+                  <button
+                    className="lvl-btn primary"
+                    onClick={startProbe}
+                    disabled={!connected || machineBusy}
+                    title={
+                      !connected
+                        ? t('pcb.level.connectFirst', 'Connect to the machine first')
+                        : machineBusy
+                        ? t('pcb.level.busy', 'Machine is busy — wait for the current job')
+                        : t('pcb.level.probeTitle', 'Run the grid probe cycle (moves the machine)')
+                    }
+                  >
+                    <Icon name="probe" size={14} />
+                    {mapComplete ? t('pcb.level.reprobe', 'Re-probe') : t('pcb.level.probe', 'Probe now')}
+                  </button>
+                )}
+                {map && !running && (
+                  <button className="lvl-btn" onClick={clearMap} title={t('pcb.level.clearTitle', 'Discard the probed surface and turn the warp off')}>
+                    <Icon name="trash" size={14} />
+                    {t('pcb.level.clear', 'Clear map')}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Step 3 — preview the heat-map. */}
+          <div className="lvl-step">
+            <div className="lvl-step-head">
+              <span className="lvl-step-num">3</span>
+              {t('pcb.level.step3', 'Surface preview')}
+            </div>
+            {map && mapComplete ? (
+              <div className="lvl-preview">
+                <HeatMap map={map} />
+                <div className="lvl-scale">
+                  <span>{t('pcb.level.scaleTitle', 'Height (mm)')}</span>
+                  <div className="lvl-scale-row">
+                    <div className="lvl-scale-bar" aria-hidden="true" />
+                    <div className="lvl-scale-vals">
+                      <b>{z.max.toFixed(3)}</b>
+                      <span>{((z.max + z.min) / 2).toFixed(3)}</span>
+                      <b>{z.min.toFixed(3)}</b>
+                    </div>
+                  </div>
+                  <span className="lvl-hint">{t('pcb.level.scaleHint', 'warm = high · cool = low')}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="lvl-empty">
+                {t('pcb.level.noMap', 'Probe the surface to see a 2D height map of the board here.')}
+              </p>
+            )}
+          </div>
+
+          {/* Step 4 — apply (mutually-exclusive selector). */}
+          <div className="lvl-step">
+            <div className="lvl-step-head">
+              <span className="lvl-step-num">4</span>
+              {t('pcb.level.step4', 'Apply to G-code')}
+              <InfoTip
+                topic=""
+                title={t('pcb.level.applyTipTitle', 'Apply exactly once')}
+                body={t(
+                  'pcb.level.applyTip',
+                  'The Z-warp must be applied ONCE. "On-the-fly" warps the lines as they stream (the saved program stays flat); "Baked in" folds the warp into the generated G-code (the Visualizer shows the surface-following path). Pick one — applying both would double-offset Z and ruin the board.',
+                )}
+              />
+            </div>
+            <div className="lvl-modes" role="group" aria-label={t('pcb.level.applyAria', 'Heightmap apply mode')}>
+              <button
+                className={applyMode === 'off' ? 'active' : ''}
+                onClick={() => setMode('off')}
+                title={t('pcb.level.modeOffTitle', 'No leveling — flat Z')}
+              >
+                {t('pcb.level.modeOff', 'Off')}
+              </button>
+              <button
+                className={applyMode === 'onfly' ? 'active' : ''}
+                onClick={() => setMode('onfly')}
+                disabled={!canApply}
+                title={t('pcb.level.modeOnflyTitle', 'Warp Z as the program streams (program stays flat)')}
+              >
+                {t('pcb.level.modeOnfly', 'On-the-fly')}
+              </button>
+              <button
+                className={applyMode === 'baked' ? 'active' : ''}
+                onClick={() => setMode('baked')}
+                disabled={!canApply}
+                title={t('pcb.level.modeBakedTitle', 'Bake the warp into the generated G-code (shown in the Visualizer)')}
+              >
+                {t('pcb.level.modeBaked', 'Baked in')}
+              </button>
+            </div>
+            <div className="lvl-fields">
+              <LvlField
+                label={t('pcb.level.maxSeg', 'Segment length')}
+                unit="mm"
+                tip={t('pcb.level.maxSegTip', 'Long cuts are split into segments this short so Z follows the surface between probe points. Arcs are linearized first. Smaller = smoother warp, more lines.')}
+                value={maxSegment}
+                onChange={setMaxSegment}
+                min={0.2}
+                max={10}
+                step={0.1}
+                disabled={running}
+              />
+            </div>
+            {!mapComplete && (
+              <p className="lvl-hint">
+                {t('pcb.level.applyNeedsMap', 'Probe a full surface (step 2) to enable on-the-fly / baked leveling.')}
+              </p>
+            )}
+            {mapComplete && applyMode !== 'off' && (
+              <p className="lvl-hint">
+                {applyMode === 'baked'
+                  ? t('pcb.level.bakedNote', 'Generated PCB G-code is warped to follow the surface — Preview/Generate/Run all use the leveled path.')
+                  : t('pcb.level.onflyNote', 'PCB programs stream with Z warped on-the-fly; the saved/previewed program stays flat.')}
+              </p>
+            )}
+          </div>
+
+          {status && (
+            <p className={'lvl-status' + (statusErr ? ' err' : phase === 'done' ? ' ok' : '')} role="status" aria-live="polite">
+              {status}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }

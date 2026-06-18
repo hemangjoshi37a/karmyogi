@@ -1,276 +1,154 @@
-// Context-aware gamepad button mappings, keyed by the active dock tab.
+// Context-aware gamepad bindings, keyed by the active dock tab.
 //
-// The base `useGamepad` hook always drives ANALOG JOG (left stick → XY, right
-// stick / triggers → Z) and a GLOBAL set of discrete face-button actions (via
-// the caller's `onAction`). THIS module layers a per-tab override on top: when
-// the currently-active dock tab has a binding for a given standard-mapping
-// button, pressing that button runs the tab's action INSTEAD of the global one,
-// so each workbench tab can be driven from the controller.
+// v3 — COMMAND BUS. This module is now a thin ADAPTER between the gamepad's
+// control-token model and the per-tab COMMAND BUS in `tabCommands.ts`:
+//   - a tab's DEFAULT bindings map gamepad control tokens → command IDs (drawn
+//     from the static catalog);
+//   - the operator's per-tab OVERRIDES (stored in `gamepadMap.ts`) map a control
+//     token → command id and win over the defaults;
+//   - `tabActionFor(tab, token, overrides)` resolves a control token to a
+//     `{ labelKey, label, run }` whose `run` invokes `runTabCommand(tab, cmdId)`.
 //
-// Design:
-//   - Pure / UI-independent (no React, no DOM). Each action is a `() => void`
-//     that reaches into the existing zustand stores (via getState()) and the
-//     `grbl` controller singleton. Everything is GUARDED — a disconnected
-//     machine or empty selection makes the action a safe no-op (never throws).
-//   - The registry is a plain object keyed by dock-panel id (the same ids the
-//     shell registers, e.g. 'program', 'cadcam'). Add a new tab by adding one
-//     entry; see the FALLBACK note at the bottom for tabs not yet covered.
-//   - Button indices follow the Gamepad API standard mapping (see `Btn` in
-//     useGamepad.ts): A=0 B=1 X=2 Y=3 LB=4 RB=5 dpad=12..15 Start=9.
+// `runTabCommand` dispatches to a mounted panel's registered handler when present
+// (so it reaches LOCAL React state), else a global store/controller fallback, so
+// every action is safe whether or not the owning panel is mounted/active.
 //
-// SAFETY: these can move / stop the machine, so the hook only invokes them while
-// the controller is armed + the machine is connected and no modal is focused —
-// exactly the same gating the global jog/actions already use. The guards here
-// are a second line of defence (each call checks `grbl.isConnected` etc.).
+// Pure / UI-independent (no React, no DOM).
 
-import { grbl } from '../serial/controller'
-import { useProgram } from '../store/program'
-import { useCarveJobs } from '../store/carveJobs'
-import { usePlayback } from '../store/playback'
+import { buttonToken, parseToken, type ControlToken } from '../store/gamepadMap'
+import {
+  TAB_COMMAND_CATALOG,
+  TABS_WITH_COMMANDS,
+  tabCommandDef,
+  runTabCommand,
+} from './tabCommands'
 
 /** Standard-mapping button index (mirrors `Btn` in useGamepad.ts). */
 export type ButtonIndex = number
 
-/** A single context action: a short label (for the modal legend) + a handler. */
+/** A resolved context action: a terse legend label + a guarded handler. */
 export interface TabAction {
-  /** Terse label shown in the modal legend, e.g. "Stream", "Pause", "Abort". */
+  /** i18n key + English fallback for the legend label, e.g. "Stream". */
+  labelKey: string
   label: string
-  /** Fire the action. MUST be self-guarding and never throw. */
+  /** Fire the action. Self-guarding; never throws. */
   run: () => void
 }
 
-/** A tab's button → action bindings (sparse; only the buttons it overrides). */
-export type TabBindings = Partial<Record<ButtonIndex, TabAction>>
+// Standard face/shoulder button tokens used by the built-in default bindings.
+const A = buttonToken(0)
+const B = buttonToken(1)
+const X = buttonToken(2)
+const Y = buttonToken(3)
+const LB = buttonToken(4)
+const RB = buttonToken(5)
 
-// Button index constants — duplicated here (rather than imported from
-// useGamepad) so this stays a leaf module with no cycle back into the hook.
-const A = 0
-const B = 1
-const X = 2
-const Y = 3
-const LB = 4
-const RB = 5
-
-// ─── program tab ────────────────────────────────────────────────────────────
-// Drive a loaded G-code program straight from the pad:
-//   A = Stream (start from the top) / Resume (release a feed-hold)
-//   X = Pause (feed-hold)
-//   B = Abort (soft-reset / stop the stream)
-const programBindings: TabBindings = {
-  [A]: {
-    label: 'Stream / Resume',
-    run: () => {
-      if (!grbl.isConnected) return
-      const prog = useProgram.getState()
-      if (prog.streaming) {
-        // Mid-stream A = resume a feed-hold (the `~` realtime byte; harmless if
-        // not currently held).
-        grbl.resume()
-        return
-      }
-      // Not streaming → start the placed program from the first line.
-      const lines = prog.lines
-      if (!lines.length) return
-      grbl.startProgram(lines)
-    },
-  },
-  [X]: {
-    label: 'Pause',
-    run: () => {
-      if (!grbl.isConnected) return
-      grbl.feedHold()
-    },
-  },
-  [B]: {
-    label: 'Abort',
-    run: () => {
-      if (!grbl.isConnected) return
-      grbl.abortProgram()
-    },
-  },
+/**
+ * Built-in DEFAULT bindings per tab: control token → command id (the command id
+ * must exist in that tab's `TAB_COMMAND_CATALOG` entry). These reproduce — and
+ * extend — the historic 4-tab behaviour:
+ *   - program / springcoiling: A=Stream/Resume, X=Pause, B=Abort (+ Y=sim on spring)
+ *   - cadcam: B=Delete job, LB/RB=Prev/Next job
+ *   - visualizer: A=sim, X=jump-to-start, LB/RB=prev/next segment
+ * Other tabs get sensible defaults from their catalog so the pad is immediately
+ * useful; the operator can rebind anything per tab in the modal.
+ */
+const DEFAULTS: Record<string, Record<ControlToken, string>> = {
+  program: { [A]: 'stream', [X]: 'pause', [B]: 'abort' },
+  springcoiling: { [A]: 'stream', [X]: 'pause', [B]: 'abort', [Y]: 'simPlayPause' },
+  cadcam: { [B]: 'deleteJob', [LB]: 'prevJob', [RB]: 'nextJob', [Y]: 'simPlayPause' },
+  visualizer: { [A]: 'simPlayPause', [X]: 'simStart', [LB]: 'simPrevSeg', [RB]: 'simNextSeg' },
+  laser: { [A]: 'stream', [Y]: 'simPlayPause', [X]: 'frame' },
+  pcb: { [A]: 'stream', [Y]: 'simPlayPause', [X]: 'runAll' },
+  writing: { [A]: 'stream', [Y]: 'simPlayPause', [X]: 'frame' },
+  signature: { [A]: 'stream', [Y]: 'simPlayPause', [X]: 'frame', [B]: 'generate' },
+  print: { [A]: 'stream', [Y]: 'simPlayPause', [B]: 'generate' },
+  soldering: { [Y]: 'addPoint', [LB]: 'prevPoint', [RB]: 'nextPoint' },
+  glue: { [LB]: 'prevPoint', [RB]: 'nextPoint' },
+  pnp: { [Y]: 'addPoint', [LB]: 'prevPoint', [RB]: 'nextPoint' },
+  screwfitting: { [Y]: 'addPoint', [LB]: 'prevPoint', [RB]: 'nextPoint' },
+  drilling: { [Y]: 'addPoint', [LB]: 'prevPoint', [RB]: 'nextPoint' },
+  welding: { [LB]: 'prevPoint', [RB]: 'nextPoint' },
+  camera: { [Y]: 'recordToggle', [X]: 'snapshot' },
 }
 
-// ─── cadcam tab (2D/3D Carving) ─────────────────────────────────────────────
-// Manage the multi-model carve job list:
-//   B  = delete the selected job
-//   LB = select the PREVIOUS job in the list
-//   RB = select the NEXT job in the list
-function cycleCarveJob(dir: -1 | 1): void {
-  const st = useCarveJobs.getState()
-  const { jobs, selectedId } = st
-  if (jobs.length === 0) return
-  const cur = jobs.findIndex((j) => j.id === selectedId)
-  // From no selection, LB picks the last and RB picks the first; otherwise wrap.
-  const start = cur < 0 ? (dir === 1 ? -1 : 0) : cur
-  const next = (start + dir + jobs.length) % jobs.length
-  const job = jobs[next]
-  if (job) st.selectJob(job.id)
-}
+/** Tabs offered in the per-tab editor's tab selector (all catalog tabs). */
+export const TABS_WITH_ACTIONS = TABS_WITH_COMMANDS
 
-const cadcamBindings: TabBindings = {
-  [B]: {
-    label: 'Delete job',
-    run: () => {
-      const st = useCarveJobs.getState()
-      if (st.selectedId) st.removeJob(st.selectedId)
-    },
-  },
-  [LB]: {
-    label: 'Prev job',
-    run: () => cycleCarveJob(-1),
-  },
-  [RB]: {
-    label: 'Next job',
-    run: () => cycleCarveJob(1),
-  },
-}
-
-// ─── spring coiling tab ─────────────────────────────────────────────────────
-// Drive the automatic coiler from the pad. The spring program auto-syncs to the
-// program store, so streaming mirrors the program tab; Y previews the wind in 3D:
-//   A = Stream the coil program (start from the top) / Resume a feed-hold
-//   X = Pause (feed-hold)
-//   B = Abort (soft-reset / stop)
-//   Y = Play/pause the 3D coiling SIMULATION (no machine needed)
-const springCoilingBindings: TabBindings = {
-  [A]: {
-    label: 'Wind / Resume',
-    run: () => {
-      if (!grbl.isConnected) return
-      const prog = useProgram.getState()
-      if (prog.streaming) {
-        grbl.resume()
-        return
-      }
-      const lines = prog.lines
-      if (!lines.length) return
-      grbl.startProgram(lines)
-    },
-  },
-  [X]: {
-    label: 'Pause',
-    run: () => {
-      if (!grbl.isConnected) return
-      grbl.feedHold()
-    },
-  },
-  [B]: {
-    label: 'Abort',
-    run: () => {
-      if (!grbl.isConnected) return
-      grbl.abortProgram()
-    },
-  },
-  [Y]: {
-    label: 'Play/pause sim',
-    run: () => {
-      // No machine needed — toggles the visualizer playhead if a timeline exists.
-      if (usePlayback.getState().timeline) usePlayback.getState().toggle()
-    },
-  },
-}
-
-// ─── visualizer tab ─────────────────────────────────────────────────────────
-// Drive the 3D simulation/playhead (no machine needed):
-//   A  = Play / pause the simulation
-//   X  = Jump to start
-//   LB = Previous segment   RB = Next segment
-const visualizerBindings: TabBindings = {
-  [A]: {
-    label: 'Play / pause sim',
-    run: () => {
-      if (usePlayback.getState().timeline) usePlayback.getState().toggle()
-    },
-  },
-  [X]: {
-    label: 'Jump to start',
-    run: () => {
-      if (usePlayback.getState().timeline) usePlayback.getState().seek(0)
-    },
-  },
-  [LB]: {
-    label: 'Prev segment',
-    run: () => {
-      if (usePlayback.getState().timeline) usePlayback.getState().stepSeg(-1)
-    },
-  },
-  [RB]: {
-    label: 'Next segment',
-    run: () => {
-      if (usePlayback.getState().timeline) usePlayback.getState().stepSeg(1)
-    },
-  },
+/** Build a TabAction that dispatches a command id on a tab via the command bus. */
+function commandAction(tab: string, cmdId: string): TabAction | undefined {
+  const def = tabCommandDef(tab, cmdId)
+  if (!def) return undefined
+  return { labelKey: def.labelKey, label: def.label, run: () => runTabCommand(tab, cmdId) }
 }
 
 /**
- * The full registry: dock-panel id → button bindings. Add a tab by appending an
- * entry here (and import any store it needs). Order is irrelevant.
+ * Resolve the context action bound to a control TOKEN on `tab`: the operator's
+ * per-tab override wins, else the built-in default. Returns undefined when
+ * neither binds that token (→ the gamepad runs the GLOBAL action instead).
  *
- * FALLBACK (intentional, follow-up work): every tab NOT listed here — including
- *   controller, writing, soldering, screwfitting, drilling, pcb, glue, pnp,
- *   signature, print, laser, welding, camera, visualizer, console
- * — has NO context bindings, so on those tabs the gamepad keeps its GLOBAL
- * behaviour (analog jog + the default face-button actions via `onAction`). In
- * particular the `controller` tab deliberately falls back so jog stays primary.
- * Wire more tabs here as their key actions are identified.
+ * `overrides` is the per-tab override map for the ACTIVE pad (token → command id).
  */
-export const GAMEPAD_TAB_ACTIONS: Record<string, TabBindings> = {
-  program: programBindings,
-  cadcam: cadcamBindings,
-  springcoiling: springCoilingBindings,
-  visualizer: visualizerBindings,
-}
-
-/** The bindings for a tab id, or undefined when it falls back to global. */
-export function tabBindings(tab: string | undefined): TabBindings | undefined {
+export function tabActionFor(
+  tab: string | undefined,
+  token: ControlToken,
+  overrides?: Record<string, string>,
+): TabAction | undefined {
   if (!tab) return undefined
-  return GAMEPAD_TAB_ACTIONS[tab]
+  const ovId = overrides?.[token]
+  if (ovId) {
+    const act = commandAction(tab, ovId)
+    if (act) return act
+  }
+  const defId = DEFAULTS[tab]?.[token]
+  if (defId) return commandAction(tab, defId)
+  return undefined
 }
 
-/**
- * Look up the context action bound to `button` on `tab`, if any. Returns
- * undefined when the tab has no override for that button (→ caller should run
- * the global action instead).
- */
-export function tabActionFor(tab: string | undefined, button: ButtonIndex): TabAction | undefined {
-  return tabBindings(tab)?.[button]
-}
-
-/** A compact legend of a tab's bindings (for the modal), in display order. */
+/** A compact legend entry of a tab's effective bindings (for the modal). */
 export interface LegendEntry {
-  /** Friendly control label, e.g. "A", "B", "LB". */
-  control: string
-  /** The action label, e.g. "Stream / Resume". */
-  action: string
-}
-
-/** Friendly control names per standard-mapping button index. */
-const BUTTON_LABEL: Record<number, string> = {
-  0: 'A',
-  1: 'B',
-  2: 'X',
-  3: 'Y',
-  4: 'LB',
-  5: 'RB',
-  9: 'Start',
-  12: 'D-pad ↑',
-  13: 'D-pad ↓',
-  14: 'D-pad ←',
-  15: 'D-pad →',
+  /** The control token (for glyph rendering). */
+  token: ControlToken
+  /** The command id this token runs. */
+  cmdId: string
+  /** i18n key + fallback for the command label. */
+  labelKey: string
+  label: string
+  /** True when this row comes from a user override (vs a built-in default). */
+  override?: boolean
 }
 
 /**
- * Build the legend rows for the active tab's context bindings, sorted by button
- * index so the order is stable. Empty when the tab falls back to global.
+ * Build the legend rows for a tab's EFFECTIVE bindings — built-in defaults
+ * overlaid with the active pad's overrides — sorted by token. Rows whose command
+ * id no longer exists in the catalog are dropped (defensive against stale saves).
  */
-export function tabLegend(tab: string | undefined): LegendEntry[] {
-  const bindings = tabBindings(tab)
-  if (!bindings) return []
-  return Object.keys(bindings)
-    .map(Number)
-    .sort((a, b) => a - b)
-    .map((i) => ({
-      control: BUTTON_LABEL[i] ?? `Btn ${i}`,
-      action: bindings[i]!.label,
-    }))
+export function tabLegend(tab: string | undefined, overrides?: Record<string, string>): LegendEntry[] {
+  if (!tab) return []
+  const out = new Map<ControlToken, LegendEntry>()
+  const defaults = DEFAULTS[tab]
+  if (defaults) {
+    for (const tok of Object.keys(defaults)) {
+      const def = tabCommandDef(tab, defaults[tok])
+      if (def) out.set(tok, { token: tok, cmdId: def.id, labelKey: def.labelKey, label: def.label })
+    }
+  }
+  if (overrides) {
+    for (const tok of Object.keys(overrides)) {
+      const def = tabCommandDef(tab, overrides[tok])
+      if (def) out.set(tok, { token: tok, cmdId: def.id, labelKey: def.labelKey, label: def.label, override: true })
+    }
+  }
+  return Array.from(out.values()).sort((a, b) => a.token.localeCompare(b.token))
+}
+
+/** The bindable command catalogue for a tab (for the per-tab editor's picker). */
+export function tabCommandCatalogue(tab: string | undefined) {
+  if (!tab) return []
+  return TAB_COMMAND_CATALOG[tab] ?? []
+}
+
+/** True when a parsed token is a plain standard button (helper for legends). */
+export function isButtonToken(tok: ControlToken): boolean {
+  return parseToken(tok)?.kind === 'button'
 }

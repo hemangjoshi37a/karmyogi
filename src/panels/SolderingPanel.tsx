@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMachine, useProgram, useNotifications, usePersistentState } from '../store'
 import { useSolderViz } from '../store/solderViz'
 import { useProgramOwner } from '../store/programOwner'
+import { useTabCommands } from '../machine/tabCommands'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
@@ -736,6 +737,24 @@ export function SolderingPanel() {
   useEffect(() => {
     selectSolderViz(selected)
   }, [selected, selectSolderViz])
+
+  // ── Gamepad command bus: teach a point, navigate / delete points, optimize. ──
+  // addPoint records the live machine position (or appends a default row); next/
+  // prev walk the list with wrap; delete removes the selected row. All guarded.
+  const stepSel = (dir: -1 | 1) => {
+    if (points.length === 0) return
+    const base = selected < 0 ? (dir === 1 ? -1 : 0) : selected
+    setSelected((base + dir + points.length) % points.length)
+  }
+  useTabCommands('soldering', {
+    addPoint: () => recordPosition(),
+    nextPoint: () => stepSel(1),
+    prevPoint: () => stepSel(-1),
+    deletePoint: () => {
+      if (selected >= 0 && selected < points.length) deleteRow(selected)
+    },
+    optimize: () => optimizeOrder(),
+  })
 
   return (
     <div className="cc-presets-host">

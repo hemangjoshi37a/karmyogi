@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useMachine, useProgram, useNotifications, usePersistentState } from '../store'
+import { useTabCommands } from '../machine/tabCommands'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
@@ -418,6 +419,21 @@ export function ScrewFittingPanel() {
     const id = window.setTimeout(() => setProgram('screwfitting', gcode), 300)
     return () => window.clearTimeout(id)
   }, [gcode, points.length, setProgram, removeSection])
+
+  // ── Gamepad command bus: teach / navigate / delete points. All guarded. ──
+  const stepSel = (dir: -1 | 1) => {
+    if (points.length === 0) return
+    const base = selected < 0 ? (dir === 1 ? -1 : 0) : selected
+    setSelected((base + dir + points.length) % points.length)
+  }
+  useTabCommands('screwfitting', {
+    addPoint: () => recordPosition(),
+    nextPoint: () => stepSel(1),
+    prevPoint: () => stepSel(-1),
+    deletePoint: () => {
+      if (selected >= 0 && selected < points.length) deleteRow(selected)
+    },
+  })
 
   return (
     <div className="cc-presets-host">

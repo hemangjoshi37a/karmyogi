@@ -7,12 +7,12 @@ import {
   useEffect,
 } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { OrbitControls, GizmoHelper, GizmoViewcube } from '@react-three/drei'
+import { OrbitControls, GizmoHelper, GizmoViewcube, Environment, Lightformer } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import * as THREE from 'three'
 import { Bed } from './Bed'
 import { Toolpath } from './Toolpath'
-import { ToolMarker } from './ToolMarker'
+import { SpindleTool } from './SpindleTool'
 import { StockBlock } from './StockBlock'
 import { CarvedStock } from './CarvedStock'
 import { PlacementGizmo } from './PlacementGizmo'
@@ -29,6 +29,7 @@ import { CameraQuatReporter, AxisOverlay } from './AxisOverlay'
 import { useViewportShapes } from '../store/viewportShapes'
 import { shapesToGcode } from '../core/viewportShapeGcode'
 import { useProgram } from '../store/program'
+import { usePlayback } from '../store/playback'
 import { useT } from '../i18n'
 import { gcodeToPolylines, type Segment, type Bounds } from './gcodeToPolylines'
 import {
@@ -107,6 +108,12 @@ export interface ViewerProps {
   /** Point on the active segment the tool has reached (for the reveal split). */
   revealPoint?: [number, number, number] | null
   /**
+   * During a reveal, fully HIDE the already-processed cut lines (leaving only the
+   * remaining work) instead of dimming them. Default false. Exposed so the panel
+   * / orchestrator can offer the "hide processed" toggle from V3.
+   */
+  hideProcessed?: boolean
+  /**
    * Material-removal simulation: when true AND a reveal is active, render the
    * stock as a heightmap surface that is progressively carved by the done cut
    * moves (the already-machined region reveals its cut surface). Default false.
@@ -114,6 +121,24 @@ export interface ViewerProps {
   carveSim?: boolean
   /** Cutter radius (mm) for the material-removal sim. Default 1.5. */
   toolRadius?: number
+  /**
+   * Cutter profile for the material-removal sim (flat endmill / ball-nose /
+   * V-bit). Shapes the carved floor (a ball mill leaves a rounded groove).
+   * Default 'flat'.
+   */
+  carveToolType?: 'flat' | 'ball' | 'vee'
+  /**
+   * Auto-derive a stock block from the toolpath for the carve sim when the stock
+   * store has no usable block — this many mm of material below the deepest cut.
+   * Lets ANY loaded program be simulated without a configured stock. Default off.
+   */
+  carveAutoThickness?: number | null
+  /**
+   * Spin the spindle/bit (job running or being scrubbed). Drives the subtle
+   * tool-mesh whirr; gated internally on the user's reduced-motion preference.
+   * Default false.
+   */
+  spinning?: boolean
   /**
    * Show the in-scene placement gizmo (move / rotate / scale the loaded job on
    * all 3 axes). The gizmo writes a placement to the program store, which bakes
@@ -216,8 +241,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     showStock = true,
     revealIndex,
     revealPoint,
+    hideProcessed = false,
     carveSim = false,
     toolRadius = 1.5,
+    carveToolType = 'flat',
+    carveAutoThickness = null,
+    spinning: spinningProp,
     gizmo = false,
     onGizmoChange,
     sectionBoxes,
@@ -243,6 +272,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   const uiScale = useSettings((s) => s.uiScale)
   const t = useT()
   const bg = theme === 'dark' ? '#15181c' : '#e7ecf1'
+
+  // Spin the spindle/bit while the simulation is playing (or whenever the caller
+  // explicitly asks). When the prop is omitted we self-derive it from the
+  // playback store so a running preview whirs without the panel wiring anything.
+  // Reading the store here is fine — we never MUTATE it (that stays the panel's
+  // job); the SpindleTool gates the actual motion on reduced-motion.
+  const isPlaying = usePlayback((s) => s.isPlaying)
+  const spinning = spinningProp ?? isPlaying
 
   // Spring-coiling preview channel: when the Spring panel owns the program (its
   // 3D-coil-preview output mode), it publishes the spring dimensions here. We then
@@ -553,8 +590,24 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           }
         }}
       >
-        <ambientLight intensity={0.8} />
-        <directionalLight position={[100, -100, 300]} intensity={0.6} />
+        {/* Lighting rig tuned for the metallic spindle: a soft ambient base, a
+            key directional from the front-top, a cooler fill from behind, and a
+            tight rim that puts a crisp specular streak on the steel body. The
+            studio Environment supplies image-based reflections so the metalwork
+            reads premium (not flat-grey) in both themes. */}
+        <ambientLight intensity={theme === 'dark' ? 0.9 : 1.05} />
+        <directionalLight position={[120, -120, 320]} intensity={0.9} />
+        <directionalLight position={[-140, 120, 180]} intensity={0.5} />
+        <directionalLight position={[0, 40, 260]} intensity={0.5} />
+        {/* Self-contained studio Environment (no remote HDR fetch — offline-safe):
+            a few Lightformer panels generate image-based reflections so the
+            metallic spindle reads premium instead of flat. */}
+        <Environment resolution={64} environmentIntensity={theme === 'dark' ? 0.7 : 0.9}>
+          <Lightformer intensity={2.2} position={[0, 0, 60]} scale={[140, 140, 1]} color="#ffffff" />
+          <Lightformer intensity={1.4} position={[80, 40, 40]} scale={[50, 90, 1]} color="#e6edf5" />
+          <Lightformer intensity={1} position={[-80, -40, 30]} scale={[50, 70, 1]} color="#c2ccd8" />
+        </Environment>
+
         <group visible={showBed}>
           <Bed width={width} depth={depth} height={height} showLabels={showBed} />
         </group>
@@ -568,6 +621,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           revealIndex={revealIndex}
           revealPoint={revealPoint}
           toolRadius={toolRadius}
+          toolType={carveToolType}
+          autoThickness={carveAutoThickness}
         />
       )}
       {/* Toolpaths. During SIMULATION (reveal) we draw the combined path with the
@@ -588,6 +643,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
               segments={parsed.segments}
               revealIndex={revealIndex}
               revealPoint={revealPoint}
+              hideProcessed={hideProcessed}
             />
           )
         ) : sectionPaths && sectionPaths.length > 0 ? (
@@ -640,11 +696,23 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           Y=chuck-degrees, 0), so a generic cone would fly off along Y. The
           SpringScene's carriage (which tracks the X/linear position) is the tool
           indicator instead. */}
-      {/* Actual (live machine) spindle cone — amber. */}
-      {showActualTool && toolPosition && !isSpringProgram && <ToolMarker position={toolPosition} />}
-      {/* Simulation spindle cone — cyan, so it reads distinct from the live one. */}
+      {/* Actual (live machine) spindle — warm steel, amber tip. */}
+      {showActualTool && toolPosition && !isSpringProgram && (
+        <SpindleTool
+          position={toolPosition}
+          toolDiameter={toolRadius * 2}
+          variant="actual"
+          spinning={spinning}
+        />
+      )}
+      {/* Simulation spindle — cool steel, cyan tip, so it reads distinct. */}
       {showSimTool && simPosition && !isSpringProgram && (
-        <ToolMarker position={simPosition} color={theme === 'dark' ? '#22d3ee' : '#0891b2'} />
+        <SpindleTool
+          position={simPosition}
+          toolDiameter={toolRadius * 2}
+          variant="sim"
+          spinning={spinning}
+        />
       )}
       {gizmo && (
         <PlacementGizmo onDraggingChanged={onGizmoDragging} liveGroupRef={liveGroupRef} />

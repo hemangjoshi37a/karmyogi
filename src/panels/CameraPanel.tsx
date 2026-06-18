@@ -21,6 +21,7 @@ import { IconButton } from '../components/IconButton'
 import { CamEmpty } from '../components/cam/CamUI'
 import { useCameraCalib, useCameraLive, useMachine, usePersistentState } from '../store'
 import { useProgram } from '../store/program'
+import { useTabCommands } from '../machine/tabCommands'
 import { useBed } from '../store/bed'
 import { startRecordingSession, type RecordingSession } from '../camera/recorder'
 import {
@@ -952,6 +953,15 @@ export function CameraPanel() {
       window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
     }, 'image/png')
   }, [])
+
+  // ── Gamepad command bus: toggle recording + grab a snapshot of the feed. ──
+  useTabCommands('camera', {
+    recordToggle: () => {
+      if (recording) stopRecording()
+      else startRecording()
+    },
+    snapshot: () => snapshot(),
+  })
 
   // ---- timelapse (slot 0) ----
   const stopTimelapse = useCallback(() => {

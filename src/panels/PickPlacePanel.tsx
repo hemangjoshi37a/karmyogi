@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useTabCommands } from '../machine/tabCommands'
 import { useT } from '../i18n'
 import { useMachine, useProgram, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
@@ -498,6 +499,21 @@ export function PickPlacePanel() {
       ? t('pnp.setPick.body.append', 'Add a new op and fill its pick X/Y from the live machine position.')
       : t('pnp.setPlace.body.append', 'Add a new op and fill its place X/Y from the live machine position.')
   }
+
+  // ── Gamepad command bus: teach (record pick pos) / navigate / delete ops. ──
+  const stepSel = (dir: -1 | 1) => {
+    if (ops.length === 0) return
+    const base = selected < 0 ? (dir === 1 ? -1 : 0) : selected
+    setSelected((base + dir + ops.length) % ops.length)
+  }
+  useTabCommands('pnp', {
+    addPoint: () => recordInto('pick'),
+    nextPoint: () => stepSel(1),
+    prevPoint: () => stepSel(-1),
+    deletePoint: () => {
+      if (selected >= 0 && selected < ops.length) deleteRow(selected)
+    },
+  })
 
   return (
     <div className="cc-presets-host">

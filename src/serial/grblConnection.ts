@@ -30,6 +30,89 @@ export interface GrblConnectionOptions {
 
 const DEFAULT_BAUD = 115200
 
+/**
+ * A SINGLE global "an open() is in flight" lock, shared across every code path
+ * that opens a Web Serial / WebUSB port (the live connect, silent auto-reconnect,
+ * AND the firmware-probe scan). A `SerialPort` can only be opened once: two
+ * near-simultaneous `open()` calls on the same handle make the browser throw
+ *   "Failed to execute 'open' on 'SerialPort': A call to open() is already in
+ *    progress."
+ * which used to kill the silent reconnect and force the user to click Connect.
+ *
+ * React 18 StrictMode double-invokes effects, and the load path fans out into
+ * several openers (App's autoConnect + ConnectionControl's probe scan), so these
+ * races are routine in a single tab with nothing actually running.
+ *
+ * Rather than coordinate every caller pairwise, we serialize ALL port opens
+ * through one promise chain: an opener appends its open to the chain and awaits
+ * the predecessor first. Opens of *different* physical ports still serialize
+ * (the browser/OS dislikes concurrent opens anyway, and probing is already
+ * sequential by design), which is acceptable — opening is fast.
+ */
+let openChain: Promise<void> = Promise.resolve()
+
+/**
+ * Run `fn` (which performs a `port.open(...)`) under the global open lock. Any
+ * other opener that arrives while one is in flight waits for it to finish before
+ * issuing its own `open()`, so the browser never sees two concurrent opens.
+ * Errors from `fn` are isolated so one failed open doesn't wedge the chain.
+ */
+export function withOpenLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = openChain.then(fn, fn)
+  // Keep the chain alive regardless of success/failure, but never reject it.
+  openChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+/**
+ * Per-port exclusion that spans a handle's WHOLE busy window (open → use →
+ * close), not just the open() call. The probe scan opens a port, reads for ~1s,
+ * then closes it; a connect to the SAME handle must not slip in during that
+ * window (it would adopt a port the probe is about to close). Keyed by the
+ * SerialPort/PortLike object identity. `withPortBusy` waits for any prior holder
+ * of the same port, runs `fn`, then releases — serializing same-port work while
+ * letting DIFFERENT ports proceed in parallel.
+ */
+const portBusy = new WeakMap<object, Promise<void>>()
+
+export async function withPortBusy<T>(port: object, fn: () => Promise<T>): Promise<T> {
+  const prev = portBusy.get(port) ?? Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>((r) => {
+    release = r
+  })
+  // Our turn completes only after the predecessor AND our own work (gate) finish,
+  // so a later caller waits for us too. Stored so we can clear it when last.
+  const mine = prev.then(() => gate)
+  portBusy.set(port, mine)
+  await prev.catch(() => {})
+  try {
+    return await fn()
+  } finally {
+    release()
+    // Clear the slot if no one chained after us, so the map doesn't grow.
+    if (portBusy.get(port) === mine) portBusy.delete(port)
+  }
+}
+
+/** Match the browser's "port is busy being opened / already open" DOMExceptions. */
+export function isAlreadyOpenError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+  return /already in progress|already open|in use|is open/i.test(msg)
+}
+
+/**
+ * True when a `PortLike` is already physically open (its streams are live), so a
+ * second `open()` must be skipped. Web Serial / WebUSB expose `readable` once
+ * open; a closed port has `readable === null`.
+ */
+export function isPortOpen(port: PortLike): boolean {
+  return port.readable != null
+}
+
 export class GrblConnection {
   private port: PortLike | null = null
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null
@@ -73,7 +156,28 @@ export class GrblConnection {
     if (this.port) throw new Error('Connection already open')
     this.closing = false
     this.rxBuffer = ''
-    await port.open({ baudRate: this.options.baudRate })
+    // Serialize against every other user of THIS handle (a probe scan opening +
+    // reading + closing it, or a racing auto-connect) so the browser never sees
+    // two concurrent open() calls on the same SerialPort (the "already in
+    // progress" error) and a connect never slips into a probe's open/close
+    // window. withPortBusy waits out any prior holder of this exact port; the
+    // extra global open lock additionally avoids two DIFFERENT ports opening at
+    // the same instant (the OS dislikes it). If the port is ALREADY open once we
+    // hold the lock, adopt it rather than re-opening.
+    await withPortBusy(port as object, () =>
+      withOpenLock(async () => {
+        if (isPortOpen(port)) return
+        try {
+          await port.open({ baudRate: this.options.baudRate })
+        } catch (err) {
+          // A concurrent opener won the race on this exact handle: don't surface
+          // the scary native error — if it ended up open, adopt it; otherwise
+          // rethrow for the caller's normal handling.
+          if (isAlreadyOpenError(err) && isPortOpen(port)) return
+          throw err
+        }
+      }),
+    )
     this.port = port
 
     if (!port.writable) throw new Error('Port is not writable')

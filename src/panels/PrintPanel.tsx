@@ -14,6 +14,8 @@ import { useT } from '../i18n'
 import { Icon, type IconName } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { useProgram, useMachine, usePersistentState } from '../store'
+import { usePlayback } from '../store/playback'
+import { useTabCommands } from '../machine/tabCommands'
 import { useBed } from '../store/bed'
 import { grbl } from '../serial/controller'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
@@ -735,6 +737,16 @@ export function PrintPanel() {
     grbl.abortProgram()
     setStatus(t('print.status.stopped', 'Print stopped.'))
   }
+
+  // ── Gamepad command bus: slice (generate) + sim play/pause. ──
+  useTabCommands('print', {
+    generate: () => {
+      if (placed && !slicing) doSlice()
+    },
+    simPlayPause: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().toggle()
+    },
+  })
 
   return (
     <div className="cc-presets-host">

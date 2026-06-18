@@ -265,6 +265,17 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
 /** Hard cap on heightmap grid cells so a huge stock can never hang the UI. */
 export const MAX_SIM_GRID_CELLS = 90_000 // ≈ 300×300
 
+/**
+ * Cutter profile used to SHAPE the per-cell material removal:
+ *  - 'flat' → a flat-bottom endmill: the swept disc removes to a constant cut Z
+ *    (the original behaviour; remains the default for backward compatibility).
+ *  - 'ball' → a ball-nose endmill: the cut bottom is a hemisphere, so cells near
+ *    the tool centre go deepest and the floor rounds up toward the cut edge —
+ *    matching how a ball mill actually leaves a scalloped groove.
+ *  - 'vee'  → a 90° V-bit / engraver: a conical bottom (linear rise with radius).
+ */
+export type SimToolType = 'flat' | 'ball' | 'vee'
+
 /** A material-removal heightmap result the renderer turns into a surface mesh. */
 export interface RemovalHeightmap {
   nx: number
@@ -280,6 +291,8 @@ export interface RemovalHeightmap {
   /** Stock top / floor Z (mm). */
   topZ: number
   floorZ: number
+  /** Cutter profile this map was built for (renderer reuses it for re-sweeps). */
+  toolType: SimToolType
 }
 
 export interface SimSegmentLike {
@@ -298,6 +311,11 @@ export interface BuildRemovalOptions {
   floorZ: number
   /** Cutter radius (mm) used to thicken each swept move. */
   toolRadius: number
+  /**
+   * Cutter profile shaping the removed-material floor. Optional; defaults to
+   * 'flat' so existing callers keep the original flat-bottom behaviour exactly.
+   */
+  toolType?: SimToolType
 }
 
 /**
@@ -331,7 +349,18 @@ export function createRemovalHeightmap(opts: BuildRemovalOptions): RemovalHeight
   const z = new Float32Array(nx * ny)
   z.fill(topZ)
 
-  return { nx, ny, x0: minX, y0: minY, dx, dy, z, topZ, floorZ }
+  return {
+    nx,
+    ny,
+    x0: minX,
+    y0: minY,
+    dx,
+    dy,
+    z,
+    topZ,
+    floorZ,
+    toolType: opts.toolType ?? 'flat',
+  }
 }
 
 /**
@@ -343,6 +372,12 @@ export function createRemovalHeightmap(opts: BuildRemovalOptions): RemovalHeight
  * This MUTATES `hm.z` in place and is INCREMENTAL — pass `from = lastAppliedCount`
  * to apply only newly-completed segments, so forward playback stays O(total
  * segments) rather than O(segments²). Returns true if any cell changed.
+ *
+ * `toolType` (optional, trailing) shapes the removed floor: a flat endmill cuts
+ * to a constant Z (the historical default), a ball-nose leaves a hemispherical
+ * groove, and a V-bit a conical one. Omit it to preserve the original flat
+ * behaviour for existing callers; pass the heightmap's stored `hm.toolType` to
+ * carve with the configured cutter shape.
  */
 export function sweepRemoval(
   hm: RemovalHeightmap,
@@ -351,6 +386,7 @@ export function sweepRemoval(
   count: number,
   toolRadius: number,
   partialTo: [number, number, number] | null,
+  toolType: SimToolType = 'flat',
 ): boolean {
   const { nx, ny, x0, y0, dx, dy, z, topZ, floorZ } = hm
   const r = Math.max(toolRadius, 1e-3)
@@ -359,9 +395,20 @@ export function sweepRemoval(
   const r2 = r * r
   let changed = false
 
+  // Per-cell floor offset above the tool TIP at radial distance `dr` from the
+  // axis, modelling the cutter's lower profile. Flat = 0 everywhere (the disc
+  // bottom is level); ball = the hemisphere rise r-√(r²-dr²); vee = a 90° cone
+  // (rise == radius). Clamped so it never reaches above the radius.
+  const profileRise = (dr2: number): number => {
+    if (toolType === 'flat') return 0
+    if (toolType === 'vee') return Math.sqrt(dr2)
+    // ball-nose hemisphere of radius r: surface height above the tip.
+    const inside = r2 - dr2
+    return inside > 0 ? r - Math.sqrt(inside) : r
+  }
+
   const stamp = (px: number, py: number, cutZ: number) => {
     if (cutZ >= topZ) return // not cutting into the stock
-    const cz = cutZ < floorZ ? floorZ : cutZ
     const cix = Math.round((px - x0) / dx)
     const ciy = Math.round((py - y0) / dy)
     for (let oy = -ryCells; oy <= ryCells; oy++) {
@@ -372,7 +419,13 @@ export function sweepRemoval(
         const jx = cix + ox
         if (jx < 0 || jx >= nx) continue
         const wx = ox * dx
-        if (wx * wx + wy * wy > r2) continue
+        const dr2 = wx * wx + wy * wy
+        if (dr2 > r2) continue
+        // The cutter surface at this cell sits above the tip by the profile rise;
+        // clamp the resulting cut Z to the floor.
+        let cz = cutZ + profileRise(dr2)
+        if (cz > topZ) continue // shaped edge doesn't reach into the stock here
+        if (cz < floorZ) cz = floorZ
         const idx = jy * nx + jx
         if (cz < z[idx]) {
           z[idx] = cz
@@ -421,7 +474,7 @@ export function buildRemovalHeightmap(
   opts: BuildRemovalOptions,
 ): RemovalHeightmap {
   const hm = createRemovalHeightmap(opts)
-  sweepRemoval(hm, segments, 0, count, opts.toolRadius, partialTo)
+  sweepRemoval(hm, segments, 0, count, opts.toolRadius, partialTo, hm.toolType)
   return hm
 }
 

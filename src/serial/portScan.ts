@@ -28,6 +28,7 @@
 // down a live link), which the caller enforces by passing `skipActive`.
 
 import { grbl } from './controller'
+import { withOpenLock, withPortBusy, isAlreadyOpenError } from './grblConnection'
 
 export type DetectedFirmware =
   | 'grbl'
@@ -248,14 +249,38 @@ interface BaudProbeResult extends ProbeResult {
   opened: boolean
 }
 
-async function probeAtBaud(port: SerialPort, baudRate: number): Promise<BaudProbeResult> {
+function probeAtBaud(port: SerialPort, baudRate: number): Promise<BaudProbeResult> {
+  // Hold THIS port busy for the whole open→read→close window so a racing connect
+  // (silent auto-reconnect) can never slip in and adopt a handle we're about to
+  // close. Different ports still probe/connect in parallel.
+  return withPortBusy(port as object, () => probeAtBaudLocked(port, baudRate))
+}
+
+async function probeAtBaudLocked(port: SerialPort, baudRate: number): Promise<BaudProbeResult> {
   let opened = false
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
   let writer: WritableStreamDefaultWriter<Uint8Array> | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   try {
-    await port.open({ baudRate })
-    opened = true
+    // Never probe a port that's already open: that's the live connection (or a
+    // connect mid-flight) — opening it again throws the "open in progress" error
+    // and would tear down the link. Take the same global open lock the real
+    // connect uses so a probe and an auto-connect can't open the same handle at
+    // once; once we hold it, bail if the port is now open (the connect won).
+    const skip = await withOpenLock(async (): Promise<boolean> => {
+      if (port.readable != null) return true // already open elsewhere — don't touch it
+      try {
+        await port.open({ baudRate })
+        opened = true
+        return false
+      } catch (err) {
+        // A racing connect won the open: treat as "couldn't probe", never throw
+        // the scary native error out of a background scan.
+        if (isAlreadyOpenError(err)) return true
+        throw err
+      }
+    })
+    if (skip) return { firmware: 'unknown', opened }
     if (!port.writable || !port.readable) return { firmware: 'unknown', opened }
     writer = port.writable.getWriter()
     reader = port.readable.getReader()
@@ -371,6 +396,11 @@ export async function scanGrantedPorts(): Promise<ScannedPort[]> {
   // USB ids, so we can skip probing it. grbl.activePort tells us a serial link is
   // live; we match the granted port whose ids equal the active connection's.
   const activeIds = activeSerialIds()
+  // Also skip a port that's being CONNECTED right now (auto-reconnect mid-flight):
+  // probing it would race the connect's open() and throw "open in progress". This
+  // covers the window before the connection reports `connected` (when activeIds is
+  // still null), resolving the scan↔autoConnect race up front.
+  const connectingIds = grbl.connectingPortIds
 
   const results: ScannedPort[] = []
   for (const port of ports) {
@@ -386,6 +416,14 @@ export async function scanGrantedPorts(): Promise<ScannedPort[]> {
       activeIds &&
       info.vendorId === activeIds.vendorId &&
       info.productId === activeIds.productId
+    ) {
+      continue
+    }
+    // Skip a port mid-connect (the auto-reconnect target) for the same reason.
+    if (
+      connectingIds &&
+      info.vendorId === connectingIds.vendorId &&
+      info.productId === connectingIds.productId
     ) {
       continue
     }

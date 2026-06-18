@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useTabCommands } from '../machine/tabCommands'
 import { useT } from '../i18n'
 import { useProgram, usePersistentState, useNotifications } from '../store'
 import { IconButton } from '../components/IconButton'
@@ -780,6 +781,22 @@ export function GluePanel() {
         : tool === 'line'
           ? t('glue.hint.line', 'Drag from one end of the bead to the other')
           : t('glue.hint.box', 'Drag a bounding box on the bed')
+
+  // ── Gamepad command bus: navigate / delete the bead shapes. All guarded. ──
+  const stepSel = (dir: -1 | 1) => {
+    if (shapes.length === 0) return
+    const cur = shapes.findIndex((s) => s.id === selected)
+    const base = cur < 0 ? (dir === 1 ? -1 : 0) : cur
+    const next = shapes[(base + dir + shapes.length) % shapes.length]
+    if (next) setSelected(next.id)
+  }
+  useTabCommands('glue', {
+    nextPoint: () => stepSel(1),
+    prevPoint: () => stepSel(-1),
+    deletePoint: () => {
+      if (selected) deleteShape(selected)
+    },
+  })
 
   return (
     <div className="cc-presets-host">

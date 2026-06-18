@@ -33,6 +33,7 @@ import { MotionPanel } from '../panels/MotionPanel'
 // reachable both ways). Do not remove the registry entry yet.
 import { ProbePanel } from '../panels/ProbePanel'
 import { PwaManager } from '../pwa/PwaManager'
+import { BackGuard } from './BackGuard'
 import '../styles/topbar.css'
 import '../styles/shell-extra.css'
 
@@ -536,6 +537,7 @@ export function Shell() {
         issuesUrl={ISSUES_URL}
       />
       <PwaManager />
+      <BackGuard />
     </div>
   )
 }

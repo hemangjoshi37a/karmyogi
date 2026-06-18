@@ -21,6 +21,7 @@ import { sectionColor } from '../viewer/sectionColors'
 import { useViewportShapes, type ShapeKind } from '../store/viewportShapes'
 import { useSpringViz } from '../store/springViz'
 import { getActiveTab, subscribeActiveTab } from '../track/activity'
+import { useTabCommands } from '../machine/tabCommands'
 import { Icon } from '../components/Icons'
 
 /**
@@ -170,6 +171,23 @@ const IconCone = (
     <path d="M12 18L7 7h10z" />
   </VIcon>
 )
+// Auto-stock: a block with a small "A" wand / auto cue (sparkle on a slab).
+const IconAutoStock = (
+  <VIcon>
+    <path d="M4 9l8-4 8 4-8 4z" />
+    <path d="M4 9v6l8 4 8-4V9" />
+    <path d="M17 3l.7 1.6L19.5 5l-1.8.4L17 7l-.7-1.6L14.5 5l1.8-.4z" />
+  </VIcon>
+)
+// Hide processed: a crossed-out eye (already-cut lines vanish during the reveal).
+const IconHideProcessed = (
+  <VIcon>
+    <path d="M3 3l18 18" />
+    <path d="M10.6 5.1A10 10 0 0 1 12 5c5 0 9 4.5 9 7a11 11 0 0 1-2.2 3" />
+    <path d="M6.6 6.6A11 11 0 0 0 3 12c0 2.5 4 7 9 7a9.6 9.6 0 0 0 3.4-.6" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+  </VIcon>
+)
 const IconCamera = (
   <VIcon>
     <path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L18 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z" />
@@ -227,6 +245,24 @@ export function VisualizerPanel() {
   // Material-removal simulation: progressively carve the stock surface as the
   // toolpath reveals. On by default so the operator sees stock → finished part.
   const [carveSim, setCarveSim] = useState(true)
+  // Auto-stock: derive the carve block from the toolpath extents + a thickness
+  // (so ANY loaded program can be simulated without a configured stock block).
+  // Persisted so the operator's preference survives reloads. Opt-in (off by
+  // default — the configured stock store block is used unless this is on).
+  const [autoStock, setAutoStock] = usePersistentState(
+    'karmyogi.viewer.carve.autoStock',
+    false,
+  )
+  const [autoStockThickness, setAutoStockThickness] = usePersistentState(
+    'karmyogi.viewer.carve.autoStockThickness',
+    12,
+  )
+  // V3 "hide processed": during a reveal, fully HIDE the already-cut lines
+  // (leaving only the remaining work) instead of dimming them. Persisted.
+  const [hideProcessed, setHideProcessed] = usePersistentState(
+    'karmyogi.viewer.hideProcessed',
+    false,
+  )
   // Engineering-style 3D dimension annotations (X/Y/Z) around the program bbox.
   // Persisted so the operator's preference survives reloads.
   const [showDimensions, setShowDimensions] = usePersistentState(
@@ -436,6 +472,11 @@ export function VisualizerPanel() {
     () => Math.max(0.1, (toolDiameter > 0 ? toolDiameter : 3.175) / 2),
     [toolDiameter],
   )
+  // Cutter PROFILE for the carve sim, from the same global bit (ball-nose vs
+  // flat endmill). 'ball' carves a rounded groove, 'flat' a flat floor — so the
+  // simulated surface matches the actual bit. (carve3d's ToolType is 'ball'|'flat'.)
+  const carveToolTypeRaw = useCarveJobs((s) => s.global.toolType)
+  const carveToolType: 'flat' | 'ball' = carveToolTypeRaw === 'ball' ? 'ball' : 'flat'
 
   // Build a time-parameterised simulation timeline from the loaded program and
   // install it in the playback store. Rebuilds only when the gcode text changes.
@@ -557,6 +598,28 @@ export function VisualizerPanel() {
     }
   }, [simSegments, bedW, bedD])
 
+  // ── Gamepad command bus: sim transport + camera views + hide-processed. ──
+  // Sim transport reuses the global playback store; views drive the imperative
+  // Viewer handle; hide-processed toggles the local persisted flag. All guarded.
+  useTabCommands('visualizer', {
+    simPlayPause: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().toggle()
+    },
+    simStart: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().seek(0)
+    },
+    simPrevSeg: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().stepSeg(-1)
+    },
+    simNextSeg: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().stepSeg(1)
+    },
+    viewFit: () => ref.current?.fit(),
+    viewIso: () => ref.current?.setView('iso'),
+    viewTop: () => ref.current?.setView('top'),
+    hideProcessed: () => setHideProcessed((s) => !s),
+  })
+
   return (
     <div className="vz-root">
       <style>{OVERLAY_CSS}</style>
@@ -598,6 +661,12 @@ export function VisualizerPanel() {
             setShowStock={setShowStock}
             carveSim={carveSim}
             setCarveSim={setCarveSim}
+            autoStock={autoStock}
+            setAutoStock={setAutoStock}
+            autoStockThickness={autoStockThickness}
+            setAutoStockThickness={setAutoStockThickness}
+            hideProcessed={hideProcessed}
+            setHideProcessed={setHideProcessed}
             showActualTool={showActualTool}
             setShowActualTool={setShowActualTool}
             showSimTool={showSimTool}
@@ -666,8 +735,11 @@ export function VisualizerPanel() {
           showSimTool={showSimTool}
           revealIndex={revealIndex}
           revealPoint={revealPoint}
+          hideProcessed={hideProcessed}
           carveSim={carveSim && simulating}
           toolRadius={toolRadius}
+          carveToolType={carveToolType}
+          carveAutoThickness={autoStock ? autoStockThickness : null}
           showStock={showStock}
           bedWidth={bedW}
           bedDepth={bedD}
@@ -754,6 +826,12 @@ function OverflowMenu({
   setShowStock,
   carveSim,
   setCarveSim,
+  autoStock,
+  setAutoStock,
+  autoStockThickness,
+  setAutoStockThickness,
+  hideProcessed,
+  setHideProcessed,
   showActualTool,
   setShowActualTool,
   showSimTool,
@@ -771,6 +849,12 @@ function OverflowMenu({
   setShowStock: Toggle
   carveSim: boolean
   setCarveSim: Toggle
+  autoStock: boolean
+  setAutoStock: Toggle
+  autoStockThickness: number
+  setAutoStockThickness: (v: number) => void
+  hideProcessed: boolean
+  setHideProcessed: Toggle
   showActualTool: boolean
   setShowActualTool: Toggle
   showSimTool: boolean
@@ -921,6 +1005,50 @@ function OverflowMenu({
             t('vz.carveSim', 'Material removal simulation'),
             () => setCarveSim((s) => !s),
             carveSim,
+          )}
+          <div className="vz-menu-group">
+            {t('sim.menu.stock', 'Stock simulation')}
+          </div>
+          {item(
+            IconAutoStock,
+            t('sim.autoStock', 'Auto stock from toolpath'),
+            () => setAutoStock((s) => !s),
+            autoStock,
+          )}
+          {autoStock && (
+            <label
+              className="vz-menu-item vz-menu-num"
+              title={t(
+                'sim.autoStockThickness.title',
+                'Stock thickness below the deepest cut (mm) for the auto-derived block',
+              )}
+            >
+              <span className="vz-menu-glyph" aria-hidden="true">
+                {IconStock}
+              </span>
+              <span className="vz-menu-label">
+                {t('sim.autoStockThickness', 'Thickness')}
+              </span>
+              <input
+                type="number"
+                className="vz-menu-input"
+                min={0.5}
+                step={0.5}
+                value={autoStockThickness}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  const v = e.target.valueAsNumber
+                  if (Number.isFinite(v) && v > 0) setAutoStockThickness(v)
+                }}
+              />
+              <span className="vz-menu-unit">{t('common.mm', 'mm')}</span>
+            </label>
+          )}
+          {item(
+            IconHideProcessed,
+            t('sim.hideProcessed', 'Hide processed cuts'),
+            () => setHideProcessed((s) => !s),
+            hideProcessed,
           )}
           {item(
             <span style={{ color: ACTUAL_TOOL_COLOR }}>{IconCone}</span>,
@@ -1737,6 +1865,29 @@ const OVERLAY_CSS = `
   line-height: 1;
 }
 .vz-menu-glyph svg { display: block; }
+/* A numeric row inside the menu (e.g. auto-stock thickness): keep the label
+   flexible and pin a compact right-aligned number field + unit. cursor:default
+   so it doesn't read as a toggle button. */
+.vz-menu-num { cursor: default; }
+.vz-menu-num .vz-menu-label { flex: 1 1 auto; }
+.vz-menu-input {
+  width: 56px;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg, var(--bg-elev));
+  color: var(--fg);
+  font: 600 12px/1 inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+.vz-menu-input::-webkit-outer-spin-button,
+.vz-menu-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vz-menu-input:focus { outline: none; border-color: var(--accent); }
+.vz-menu-unit { flex: 0 0 auto; color: var(--fg-muted); font-size: 10px; }
 .vz-layers-glyph { display: inline-flex; align-items: center; justify-content: center; }
 .vz-legend-cone svg { display: block; }
 .vz-menu-label { flex: 1 1 auto; min-width: 0; }
@@ -1910,6 +2061,7 @@ const OVERLAY_CSS = `
   .vz-layer-empty { font-size: 12px; }
   .vz-menu-item { min-height: 40px; font-size: 13px; }
   .vz-menu-glyph { font-size: 16px; }
+  .vz-menu-input { height: 34px; font-size: 14px; width: 64px; }
   .vz-legend { font-size: 11px; padding: 7px 11px; }
   .vz-bed-field { gap: 8px; font-size: 13px; }
   .vz-bed-axis { width: 14px; font-size: 13px; }

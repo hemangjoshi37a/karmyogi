@@ -26,6 +26,9 @@ import {
 } from '../core/fontLibrary'
 import { useProgram, usePersistentState } from '../store'
 import { useProgramOwner } from '../store/programOwner'
+import { grbl } from '../serial/controller'
+import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
+import { useTabCommands } from '../machine/tabCommands'
 import { useT } from '../i18n'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { IconButton } from '../components/IconButton'
@@ -908,6 +911,17 @@ export function WritingPanel() {
     storageKey: 'karmyogi.writing.presets',
     capture: () => doc,
     onApply: loadDoc,
+  })
+
+  // ── Gamepad command bus: frame the lettering's perimeter (pen UP). ──
+  useTabCommands('writing', {
+    frame: () => {
+      const lines = useProgram.getState().lines
+      if (!grbl.isConnected || lines.length === 0) return
+      const bounds = frameBoundsOfGcode(lines)
+      if (!bounds || !bounds.isValid()) return
+      for (const ln of buildFrameProgram(bounds, { safeZ: 5 })) void grbl.send(ln)
+    },
   })
 
   return (

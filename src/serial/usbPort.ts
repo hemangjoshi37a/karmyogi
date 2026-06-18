@@ -439,7 +439,12 @@ export class UsbPort implements PortLike {
    * `baudRate` (8N1, DTR+RTS asserted), and start the read pump.
    */
   async open(options: { baudRate: number; [k: string]: unknown }): Promise<void> {
-    if (this.opened) throw new Error('UsbPort already open')
+    // Idempotent re-open guard: a racing second opener (StrictMode double-mount /
+    // two autoConnectWebUsb calls) must not throw or re-run the chip init on an
+    // already-open device. The message also matches isAlreadyOpenError so the
+    // controller treats it as "already open" rather than a hard failure.
+    if (this.opened) return
+    if (this.device.opened) throw new Error('USB device is already open')
     this.closing = false
     const baud =
       Number.isFinite(options.baudRate) && options.baudRate > 0

@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useProgram, usePersistentState } from '../store'
+import { grbl } from '../serial/controller'
+import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
+import { useTabCommands } from '../machine/tabCommands'
 import { useT } from '../i18n'
 import { Icon, type IconName } from '../components/Icons'
 import { FrameButton } from '../components/FrameButton'
@@ -25,8 +28,23 @@ import {
   type LaserContour,
   type PlacedContour,
 } from '../core/laser'
+import {
+  DitherMode,
+  ScanAngle,
+  defaultImageAdjust,
+  defaultRasterParams,
+  rgbaToGray,
+  dither,
+  burnToRGBA,
+  emitRasterProgram,
+  dpiToInterval,
+  intervalToDpi,
+  type ImageAdjust,
+  type RasterParams,
+} from '../core/laserImage'
 import { CamEmpty } from '../components/cam/CamUI'
 import '../styles/laser.css'
+import '../styles/laserImage.css'
 import '../styles/cam.css'
 
 /** Hard cap on the Quantity field — keeps the O(n²) nest hill-climb bounded. */
@@ -311,7 +329,800 @@ function useNestWarnText() {
  * into the shared store (debounced) so the Visualizer renders it and the
  * Program tab streams it — there is no explicit "send" here.
  */
+/** Top-level workbench: vector cutting vs raster image engraving. */
+type LaserWorkbench = 'vector' | 'image'
+
+/**
+ * Laser workbench shell — switches between the VECTOR cutting workbench (DXF →
+ * cut loops/lines) and the RASTER IMAGE engraving workbench (PNG/JPG → dithered
+ * PWM raster). The two share the same Program-store sync contract (`'laser'`
+ * section name) so only ONE is ever pushing G-code at a time.
+ */
 export function LaserPanel() {
+  const t = useT()
+  const [workbench, setWorkbench] = usePersistentState<LaserWorkbench>(
+    'karmyogi.laser.workbench',
+    'vector',
+  )
+  return (
+    <div className="cc-presets-host" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div className="li-wb-switch" role="tablist" aria-label={t('laser.img.wb.aria', 'Laser workbench')}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workbench === 'vector'}
+          className={`li-seg-btn${workbench === 'vector' ? ' is-on' : ''}`}
+          onClick={() => setWorkbench('vector')}
+          title={t('laser.img.wb.vector.title', 'Vector cutting — DXF contours become cut loops and lines.')}
+        >
+          <Icon name="frame" size={14} /> {t('laser.img.wb.vector', 'Vector cut')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workbench === 'image'}
+          className={`li-seg-btn${workbench === 'image' ? ' is-on' : ''}`}
+          onClick={() => setWorkbench('image')}
+          title={t('laser.img.wb.image.title', 'Raster engraving — a photo or logo burned line-by-line with dithering.')}
+        >
+          <Icon name="camera" size={14} /> {t('laser.img.wb.image', 'Image engrave')}
+        </button>
+      </div>
+      {workbench === 'image' ? <LaserImageWorkbench /> : <LaserVectorWorkbench />}
+    </div>
+  )
+}
+
+// ===========================================================================
+//  RASTER IMAGE ENGRAVING WORKBENCH
+// ===========================================================================
+
+/** Cap the working (dither) resolution so the live preview stays responsive. */
+const MAX_WORK_PX = 1100 // longest edge of the working raster (≈1.2 MP cap)
+
+/** Compact slider+number row scoped to the image workbench (mirrors SliderField). */
+function ImgField(props: {
+  icon: IconName
+  label: string
+  value: number
+  min: number
+  max: number
+  step?: number
+  unit?: string
+  title?: string
+  integer?: boolean
+  onChange: (n: number) => void
+}) {
+  const { icon, label, value, min, max, step = 1, unit, title, integer, onChange } = props
+  const cl = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
+  const pct = max > min ? Math.min(100, Math.max(0, ((cl(value) - min) / (max - min)) * 100)) : 0
+  return (
+    <div className="li-sfield" title={title}>
+      <span className="li-sfield-lbl">
+        <span className="li-sfield-ico" aria-hidden>
+          <Icon name={icon} size={13} />
+        </span>
+        <span className="li-sfield-txt">{label}</span>
+      </span>
+      <input
+        type="range"
+        className="li-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={cl(value)}
+        style={{ '--pct': `${pct}%` } as React.CSSProperties}
+        onChange={(e) => onChange(cl(Number(e.target.value)))}
+        aria-label={label}
+        tabIndex={-1}
+      />
+      <span className="li-snum">
+        <input
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={String(value)}
+          aria-label={label}
+          onChange={(e) => {
+            const v = integer ? parseInt(e.target.value, 10) : parseFloat(e.target.value)
+            if (Number.isFinite(v)) onChange(v)
+          }}
+        />
+        {unit ? <i>{unit}</i> : null}
+      </span>
+    </div>
+  )
+}
+
+/** Decoded source image kept in memory as RGBA + its native dimensions. */
+interface SourceImage {
+  rgba: Uint8ClampedArray
+  w: number
+  h: number
+  name: string
+}
+
+/** Image-engraving params persisted to localStorage (adjust + raster + dither). */
+interface ImgParams {
+  adjust: ImageAdjust
+  dither: DitherMode
+  newsCell: number
+  // raster (subset of RasterParams driven by the UI)
+  dpi: number
+  scanAngle: ScanAngle
+  overscan: number
+  bidirectional: boolean
+  widthMm: number
+  lockAspect: boolean
+  feed: number
+  dynamicPower: boolean
+  sMin: number
+  sMax: number
+  passes: number
+  zPerPass: number
+  useFocusZ: boolean
+  focusZ: number
+  decimals: number
+}
+
+function defaultImgParams(): ImgParams {
+  const r = defaultRasterParams()
+  return {
+    adjust: defaultImageAdjust(),
+    dither: DitherMode.FloydSteinberg,
+    newsCell: 4,
+    dpi: Math.round(intervalToDpi(r.lineInterval)),
+    scanAngle: ScanAngle.Horizontal,
+    overscan: r.overscan,
+    bidirectional: r.bidirectional,
+    widthMm: r.widthMm,
+    lockAspect: true,
+    feed: r.feed,
+    dynamicPower: r.dynamicPower,
+    sMin: r.sMin,
+    sMax: r.sMax,
+    passes: r.passes,
+    zPerPass: r.zPerPass,
+    useFocusZ: r.useFocusZ,
+    focusZ: r.focusZ,
+    decimals: r.decimals,
+  }
+}
+
+function LaserImageWorkbench() {
+  const t = useT()
+  const setProgram = useProgram((s) => s.setProgram)
+  const streaming = useProgram((s) => s.streaming)
+
+  const [params, setParams] = usePersistentState<ImgParams>(
+    'karmyogi.laser.img.params',
+    defaultImgParams(),
+  )
+  const patch = useCallback(
+    (p: Partial<ImgParams>) => setParams((cur) => ({ ...cur, ...p })),
+    [setParams],
+  )
+  const patchAdjust = useCallback(
+    (p: Partial<ImageAdjust>) => setParams((cur) => ({ ...cur, adjust: { ...cur.adjust, ...p } })),
+    [setParams],
+  )
+
+  // Source image (NOT persisted — re-import each session).
+  const [src, setSrc] = useState<SourceImage | null>(null)
+  const [loadErr, setLoadErr] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [preview, setPreview] = useState<'dither' | 'source'>('dither')
+  const [busy, setBusy] = useState(false)
+
+  const previewCanvas = useRef<HTMLCanvasElement>(null)
+
+  // ---- Load + decode an image file to RGBA via an offscreen canvas. -------
+  const loadFile = useCallback((file: File) => {
+    setLoadErr('')
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      // Downscale to the working cap on load (keeps everything fast).
+      const scale = Math.min(1, MAX_WORK_PX / Math.max(img.width, img.height))
+      const w = Math.max(1, Math.round(img.width * scale))
+      const h = Math.max(1, Math.round(img.height * scale))
+      const cv = document.createElement('canvas')
+      cv.width = w
+      cv.height = h
+      const ctx = cv.getContext('2d')
+      if (!ctx) {
+        setLoadErr(t('laser.img.err.decode', 'Could not decode the image.'))
+        URL.revokeObjectURL(url)
+        return
+      }
+      ctx.drawImage(img, 0, 0, w, h)
+      const data = ctx.getImageData(0, 0, w, h).data
+      setSrc({ rgba: new Uint8ClampedArray(data), w, h, name: file.name })
+      URL.revokeObjectURL(url)
+    }
+    img.onerror = () => {
+      setLoadErr(t('laser.img.err.load', 'Could not load {name}. Use a PNG or JPG.', { name: file.name }))
+      URL.revokeObjectURL(url)
+    }
+    img.src = url
+  }, [t])
+
+  // Engraved output height derived from aspect when locked.
+  const aspect = src ? src.h / src.w : 0.75
+  const heightMm = useMemo(
+    () => (params.lockAspect && src ? params.widthMm * aspect : params.widthMm * aspect),
+    [params.lockAspect, params.widthMm, aspect, src],
+  )
+
+  // ---- Live dither (debounced) → burn map + preview canvas. ---------------
+  // The dither result is the SAME burn map the emitter uses, so the preview is
+  // literally what will burn. Kept off the critical path via a debounce.
+  const [burn, setBurn] = useState<{ map: Float32Array; w: number; h: number } | null>(null)
+
+  useEffect(() => {
+    if (!src) {
+      setBurn(null)
+      return
+    }
+    setBusy(true)
+    const id = window.setTimeout(() => {
+      const gray = rgbaToGray(src.rgba, src.w, src.h, params.adjust)
+      const map = dither(gray, params.dither, params.newsCell)
+      setBurn({ map, w: src.w, h: src.h })
+      setBusy(false)
+    }, 180)
+    return () => window.clearTimeout(id)
+  }, [src, params.adjust, params.dither, params.newsCell])
+
+  // Paint the preview canvas whenever the burn map / source / tab changes.
+  useEffect(() => {
+    const cv = previewCanvas.current
+    if (!cv || !src) return
+    const ctx = cv.getContext('2d')
+    if (!ctx) return
+    cv.width = src.w
+    cv.height = src.h
+    if (preview === 'source') {
+      const imgData = ctx.createImageData(src.w, src.h)
+      imgData.data.set(src.rgba)
+      ctx.putImageData(imgData, 0, 0)
+    } else if (burn) {
+      const rgba = burnToRGBA(burn.map, burn.w, burn.h)
+      const imgData = ctx.createImageData(burn.w, burn.h)
+      imgData.data.set(rgba)
+      ctx.putImageData(imgData, 0, 0)
+    }
+  }, [burn, src, preview])
+
+  // ---- Raster G-code (recomputed from the burn map + params). -------------
+  const result = useMemo(() => {
+    if (!burn) return null
+    const rp: Partial<RasterParams> = {
+      widthMm: Math.max(1, params.widthMm),
+      heightMm: Math.max(1, params.widthMm * aspect),
+      lineInterval: dpiToInterval(params.dpi),
+      scanAngle: params.scanAngle,
+      overscan: Math.max(0, params.overscan),
+      bidirectional: params.bidirectional,
+      feed: Math.max(1, params.feed),
+      dynamicPower: params.dynamicPower,
+      sMin: Math.max(0, Math.min(params.sMin, params.sMax)),
+      sMax: Math.max(params.sMin, params.sMax),
+      passes: Math.max(1, Math.floor(params.passes)),
+      zPerPass: params.zPerPass,
+      useFocusZ: params.useFocusZ,
+      focusZ: params.focusZ,
+      decimals: params.decimals,
+      programName: `hjLabs Laser raster — ${src?.name ?? 'image'}`,
+    }
+    return emitRasterProgram(burn.map, burn.w, burn.h, rp)
+  }, [burn, params, aspect, src])
+
+  // Live sync to the Program store (debounced; never while streaming).
+  useEffect(() => {
+    if (streaming) return
+    const gcode = result?.gcode ?? ''
+    const id = window.setTimeout(() => setProgram('laser', gcode), 300)
+    return () => window.clearTimeout(id)
+  }, [result, setProgram, streaming])
+
+  const showNewsCell = params.dither === DitherMode.Newsprint
+  const sMaxPct = params.sMax > 0 ? Math.round((params.sMin / params.sMax) * 100) : 0
+
+  // ── Gamepad command bus: frame the raster job's perimeter (tool/laser OFF). ──
+  useTabCommands('laser', {
+    frame: () => {
+      const lines = result?.gcode ? result.gcode.split(/\r?\n/) : []
+      if (!grbl.isConnected || lines.length === 0) return
+      const bounds = frameBoundsOfGcode(lines)
+      if (!bounds || !bounds.isValid()) return
+      for (const ln of buildFrameProgram(bounds, { safeZ: 5 })) void grbl.send(ln)
+    },
+  })
+
+  return (
+    <div className="li-root">
+      {/* Header + live status. */}
+      <header className="li-head">
+        <span className="li-head-title">
+          <span className="li-head-ico" aria-hidden>
+            <Icon name="camera" size={15} />
+          </span>
+          {t('laser.img.title', 'Image raster engraving')}
+        </span>
+        <span className="li-head-spacer" />
+        <FrameButton
+          lines={result?.gcode ? result.gcode.split(/\r?\n/) : []}
+          showOptions={false}
+          label={t('laser.img.frame', 'Frame')}
+          className="lp-frame"
+        />
+      </header>
+
+      <div className="li-status">
+        {src ? (
+          <>
+            <span className="li-status-pill">
+              <b>{src.w}×{src.h}</b> px
+            </span>
+            <span className="li-status-sep" aria-hidden>·</span>
+            <span className="li-status-pill">
+              <b>{params.widthMm.toFixed(0)}×{heightMm.toFixed(0)}</b> mm
+            </span>
+            <span className="li-status-sep" aria-hidden>·</span>
+            <span className="li-status-pill"><b>{params.dpi}</b> DPI</span>
+            {result && (
+              <>
+                <span className="li-status-sep" aria-hidden>·</span>
+                <span className="li-status-pill"><b>{result.scanLines}</b> {t('laser.img.status.lines', 'lines')}</span>
+                <span className="li-status-sep" aria-hidden>·</span>
+                <span
+                  className="li-status-pill"
+                  title={t('laser.img.status.estTitle', 'Estimated burn-path length and time (all passes).')}
+                >
+                  <b>{(result.pathLengthMm / 1000).toFixed(1)} m</b> · <b>{fmtDuration(result.timeSeconds)}</b>
+                </span>
+              </>
+            )}
+          </>
+        ) : (
+          <span>{t('laser.img.status.none', 'No image loaded')}</span>
+        )}
+        <span
+          className="li-status-sync"
+          title={
+            streaming
+              ? t('laser.img.status.streamingTitle', 'Streaming — live sync paused so the running job is not reset.')
+              : t('laser.img.status.syncTitle', 'Lines auto-synced to the Program tab.')
+          }
+        >
+          {streaming ? (
+            <>
+              <Icon name="play" size={12} /> {t('laser.img.status.streaming', 'Streaming')}
+            </>
+          ) : (
+            <>
+              <Icon name="chevron-right" size={12} /> {t('laser.img.status.program', 'Program')}
+            </>
+          )}
+        </span>
+      </div>
+
+      {/* Live preview — the glance-to-understand centerpiece. */}
+      <section className="li-card">
+        <div className="li-card-head">
+          <h4>
+            <span className="li-card-ico" aria-hidden>
+              <Icon name="eye" size={14} />
+            </span>
+            {t('laser.img.preview.title', 'Preview')}
+          </h4>
+          {src && (
+            <div className="li-preview-tabs" role="tablist" aria-label={t('laser.img.preview.aria', 'Preview source')}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={preview === 'dither'}
+                className={`li-preview-tab${preview === 'dither' ? ' is-on' : ''}`}
+                onClick={() => setPreview('dither')}
+                title={t('laser.img.preview.dither.title', 'Exactly what will burn — the dithered result.')}
+              >
+                {t('laser.img.preview.dither', 'Dithered')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={preview === 'source'}
+                className={`li-preview-tab${preview === 'source' ? ' is-on' : ''}`}
+                onClick={() => setPreview('source')}
+                title={t('laser.img.preview.source.title', 'The original image (before adjustments/dither).')}
+              >
+                {t('laser.img.preview.source', 'Original')}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="li-preview">
+          {src ? (
+            <>
+              <canvas ref={previewCanvas} />
+              {busy && (
+                <div className="li-preview-busy">{t('laser.img.preview.busy', 'Rendering…')}</div>
+              )}
+            </>
+          ) : (
+            <div className="li-preview-empty">
+              <span className="li-empty-ico" aria-hidden>
+                <Icon name="camera" size={26} />
+              </span>
+              <p>{t('laser.img.preview.empty', 'Load a PNG or JPG to see the live dithered preview — exactly what the laser will burn.')}</p>
+            </div>
+          )}
+        </div>
+        <div className="li-import-row" style={{ marginTop: 'var(--sp-2)' }}>
+          <button type="button" className="li-primary" onClick={() => fileRef.current?.click()}>
+            <Icon name="upload" size={15} /> {src ? t('laser.img.replace', 'Replace image…') : t('laser.img.load', 'Load image…')}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/bmp,image/gif"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) loadFile(f)
+              e.target.value = ''
+            }}
+          />
+          {src && <span className="li-import-info">{src.name}</span>}
+        </div>
+        {loadErr && <p className="li-warn">{loadErr}</p>}
+      </section>
+
+      {/* Image adjustments. */}
+      <section className="li-card">
+        <div className="li-card-head">
+          <h4>
+            <span className="li-card-ico" aria-hidden>
+              <Icon name="settings" size={14} />
+            </span>
+            {t('laser.img.adjust.title', 'Image')}
+          </h4>
+        </div>
+        <div className="li-fields">
+          <ImgField
+            icon="settings"
+            label={t('laser.img.adjust.brightness', 'Brightness')}
+            min={-100}
+            max={100}
+            step={1}
+            integer
+            value={params.adjust.brightness}
+            onChange={(n) => patchAdjust({ brightness: n })}
+            title={t('laser.img.adjust.brightness.title', 'Lighten or darken the whole image before dithering (−100…100).')}
+          />
+          <ImgField
+            icon="settings"
+            label={t('laser.img.adjust.contrast', 'Contrast')}
+            min={-100}
+            max={100}
+            step={1}
+            integer
+            value={params.adjust.contrast}
+            onChange={(n) => patchAdjust({ contrast: n })}
+            title={t('laser.img.adjust.contrast.title', 'Expand or compress the tonal range around mid-grey (−100…100).')}
+          />
+          <ImgField
+            icon="settings"
+            label={t('laser.img.adjust.gamma', 'Gamma')}
+            min={0.1}
+            max={3}
+            step={0.05}
+            value={params.adjust.gamma}
+            onChange={(n) => patchAdjust({ gamma: n })}
+            title={t('laser.img.adjust.gamma.title', 'Midtone curve. <1 darkens mids, >1 lightens them (0.1…3).')}
+          />
+        </div>
+        <div className="li-toggle-row">
+          <label className="li-toggle" title={t('laser.img.adjust.invert.title', 'Swap black and white — engrave the negative.')}>
+            <input
+              type="checkbox"
+              checked={params.adjust.invert}
+              onChange={(e) => patchAdjust({ invert: e.target.checked })}
+            />
+            {t('laser.img.adjust.invert', 'Invert')}
+          </label>
+        </div>
+      </section>
+
+      {/* Dither mode. */}
+      <section className="li-card">
+        <div className="li-card-head">
+          <h4>
+            <span className="li-card-ico" aria-hidden>
+              <Icon name="copy" size={14} />
+            </span>
+            {t('laser.img.dither.title', 'Dither')}
+          </h4>
+        </div>
+        <div className="li-dither-grid" role="radiogroup" aria-label={t('laser.img.dither.aria', 'Dither mode')}>
+          {[
+            { value: DitherMode.Threshold, label: t('laser.img.dither.threshold', 'Threshold'), title: t('laser.img.dither.threshold.title', 'Hard 50% cut — pure black/white, no shading.') },
+            { value: DitherMode.Ordered, label: t('laser.img.dither.ordered', 'Ordered'), title: t('laser.img.dither.ordered.title', 'Bayer matrix — fast, regular crosshatch pattern.') },
+            { value: DitherMode.FloydSteinberg, label: t('laser.img.dither.floyd', 'Floyd–Steinberg'), title: t('laser.img.dither.floyd.title', 'Classic error diffusion — best all-round photo detail.') },
+            { value: DitherMode.Jarvis, label: t('laser.img.dither.jarvis', 'Jarvis'), title: t('laser.img.dither.jarvis.title', 'Wider diffusion — smoother gradients, slightly softer.') },
+            { value: DitherMode.Stucki, label: t('laser.img.dither.stucki', 'Stucki'), title: t('laser.img.dither.stucki.title', 'Sharp, clean diffusion with strong edge retention.') },
+            { value: DitherMode.Atkinson, label: t('laser.img.dither.atkinson', 'Atkinson'), title: t('laser.img.dither.atkinson.title', 'High-contrast, airy look (classic Mac).') },
+            { value: DitherMode.Newsprint, label: t('laser.img.dither.newsprint', 'Newsprint'), title: t('laser.img.dither.newsprint.title', 'Clustered round dots — print/halftone look that survives low DPI.') },
+            { value: DitherMode.Grayscale, label: t('laser.img.dither.grayscale', 'Grayscale'), title: t('laser.img.dither.grayscale.title', 'No dither — power varies continuously with tone (variable-depth).') },
+          ].map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={params.dither === o.value}
+              className={`li-seg-btn${params.dither === o.value ? ' is-on' : ''}`}
+              title={o.title}
+              onClick={() => patch({ dither: o.value })}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {showNewsCell && (
+          <div className="li-fields" style={{ marginTop: 'var(--sp-2)' }}>
+            <ImgField
+              icon="settings"
+              label={t('laser.img.dither.cell', 'Dot cell')}
+              unit="px"
+              min={2}
+              max={12}
+              step={1}
+              integer
+              value={params.newsCell}
+              onChange={(n) => patch({ newsCell: n })}
+              title={t('laser.img.dither.cell.title', 'Halftone cell size — bigger cells = coarser, more visible dots.')}
+            />
+          </div>
+        )}
+      </section>
+
+      {/* Raster geometry. */}
+      <section className="li-card">
+        <div className="li-card-head">
+          <h4>
+            <span className="li-card-ico" aria-hidden>
+              <Icon name="frame" size={14} />
+            </span>
+            {t('laser.img.raster.title', 'Raster')}
+          </h4>
+        </div>
+        <div className="li-fields">
+          <ImgField
+            icon="frame"
+            label={t('laser.img.raster.width', 'Width')}
+            unit="mm"
+            min={1}
+            max={1000}
+            step={1}
+            value={params.widthMm}
+            onChange={(n) => patch({ widthMm: n })}
+            title={t('laser.img.raster.width.title', 'Engraved output width (X). Height follows the image aspect ratio.')}
+          />
+          <ImgField
+            icon="settings"
+            label={t('laser.img.raster.dpi', 'DPI')}
+            unit="dpi"
+            min={50}
+            max={1200}
+            step={10}
+            integer
+            value={params.dpi}
+            onChange={(n) => patch({ dpi: n })}
+            title={t('laser.img.raster.dpi.title', 'Lines per inch. Interval = {mm} mm. Higher = finer + slower.', { mm: dpiToInterval(params.dpi).toFixed(3) })}
+          />
+          <ImgField
+            icon="jog"
+            label={t('laser.img.raster.overscan', 'Overscan')}
+            unit="mm"
+            min={0}
+            max={20}
+            step={0.5}
+            value={params.overscan}
+            onChange={(n) => patch({ overscan: n })}
+            title={t('laser.img.raster.overscan.title', 'Extra travel past each end of a line so the head is at full speed over edge pixels (avoids edge over-burn).')}
+          />
+        </div>
+        <div className="li-segrow">
+          <span className="li-segrow-label" title={t('laser.img.raster.angle.title', 'Scan-line direction: horizontal (sweep X) or vertical (sweep Y).')}>
+            {t('laser.img.raster.angle', 'Scan angle')}
+          </span>
+          <div className="li-seg" role="radiogroup" aria-label={t('laser.img.raster.angle', 'Scan angle')}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={params.scanAngle === ScanAngle.Horizontal}
+              className={`li-seg-btn${params.scanAngle === ScanAngle.Horizontal ? ' is-on' : ''}`}
+              onClick={() => patch({ scanAngle: ScanAngle.Horizontal })}
+            >
+              {t('laser.img.raster.angle.h', '0° (horizontal)')}
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={params.scanAngle === ScanAngle.Vertical}
+              className={`li-seg-btn${params.scanAngle === ScanAngle.Vertical ? ' is-on' : ''}`}
+              onClick={() => patch({ scanAngle: ScanAngle.Vertical })}
+            >
+              {t('laser.img.raster.angle.v', '90° (vertical)')}
+            </button>
+          </div>
+        </div>
+        <div className="li-toggle-row">
+          <label className="li-toggle" title={t('laser.img.raster.bidi.title', 'Engrave on both sweep directions (faster) vs always left-to-right (more consistent, slower).')}>
+            <input
+              type="checkbox"
+              checked={params.bidirectional}
+              onChange={(e) => patch({ bidirectional: e.target.checked })}
+            />
+            {t('laser.img.raster.bidi', 'Bidirectional')}
+          </label>
+        </div>
+      </section>
+
+      {/* Power + passes. */}
+      <section className="li-card">
+        <div className="li-card-head">
+          <h4>
+            <span className="li-card-ico" aria-hidden>
+              <Icon name="laser" size={14} />
+            </span>
+            {t('laser.img.power.title', 'Power')}
+          </h4>
+        </div>
+        <div className="li-fields">
+          <ImgField
+            icon="jog"
+            label={t('laser.img.power.feed', 'Feed')}
+            unit="mm/min"
+            min={1}
+            max={20000}
+            step={50}
+            value={params.feed}
+            onChange={(n) => patch({ feed: n })}
+            title={t('laser.img.power.feed.title', 'Engraving speed for every scan line (G1 F…).')}
+          />
+          <ImgField
+            icon="laser"
+            label={t('laser.img.power.sMin', 'S-min (white)')}
+            unit="S"
+            min={0}
+            max={Math.max(1, params.sMax)}
+            step={5}
+            integer
+            value={params.sMin}
+            onChange={(n) => patch({ sMin: clamp(n, 0, Math.max(1, params.sMax)) })}
+            title={t('laser.img.power.sMin.title', 'Power for the LIGHTEST tone. Keep low (often 0) so white stays unburnt. ({pct}% of S-max)', { pct: sMaxPct })}
+          />
+          <ImgField
+            icon="laser"
+            label={t('laser.img.power.sMax', 'S-max (black)')}
+            unit="S"
+            min={1}
+            max={2000}
+            step={10}
+            integer
+            value={params.sMax}
+            onChange={(n) => patch({ sMax: n })}
+            title={t('laser.img.power.sMax.title', 'Power for the DARKEST tone (also your GRBL $30 ceiling).')}
+          />
+          <ImgField
+            icon="copy"
+            label={t('laser.img.power.passes', 'Passes')}
+            min={1}
+            max={20}
+            step={1}
+            integer
+            value={params.passes}
+            onChange={(n) => patch({ passes: n })}
+            title={t('laser.img.power.passes.title', 'How many times the whole image is engraved.')}
+          />
+          {params.passes > 1 && (
+            <ImgField
+              icon="probe"
+              label={t('laser.img.power.zPerPass', 'Z / pass')}
+              unit="mm"
+              min={-5}
+              max={5}
+              step={0.05}
+              value={params.zPerPass}
+              onChange={(n) => patch({ zPerPass: n })}
+              title={t('laser.img.power.zPerPass.title', 'Z change applied each pass (e.g. focus stepping for deep engraves). 0 = none.')}
+            />
+          )}
+          <ImgField
+            icon="settings"
+            label={t('laser.img.power.decimals', 'Decimals')}
+            min={0}
+            max={6}
+            step={1}
+            integer
+            value={params.decimals}
+            onChange={(n) => patch({ decimals: n })}
+            title={t('laser.img.power.decimals.title', 'Coordinate precision in the emitted G-code.')}
+          />
+        </div>
+        <div className="li-segrow">
+          <span className="li-segrow-label" title={t('laser.img.power.mode.title', 'M4 dynamic scales power with feed (recommended for engraving — even shading through accel); M3 is constant power.')}>
+            {t('laser.img.power.mode', 'Power mode')}
+          </span>
+          <div className="li-seg" role="radiogroup" aria-label={t('laser.img.power.mode', 'Power mode')}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={params.dynamicPower}
+              className={`li-seg-btn${params.dynamicPower ? ' is-on' : ''}`}
+              onClick={() => patch({ dynamicPower: true })}
+            >
+              <Icon name="play" size={13} /> {t('laser.img.power.m4', 'M4 dynamic')}
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!params.dynamicPower}
+              className={`li-seg-btn${!params.dynamicPower ? ' is-on' : ''}`}
+              onClick={() => patch({ dynamicPower: false })}
+            >
+              <Icon name="spindle" size={13} /> {t('laser.img.power.m3', 'M3 constant')}
+            </button>
+          </div>
+        </div>
+        <div className="li-toggle-row">
+          <label className="li-toggle" title={t('laser.img.power.focus.title', 'Move Z to a fixed focus height at program start (no negative Z — there is no safe-Z retract before it).')}>
+            <input
+              type="checkbox"
+              checked={params.useFocusZ}
+              onChange={(e) => patch({ useFocusZ: e.target.checked })}
+            />
+            {t('laser.img.power.focus', 'Set focus Z')}
+          </label>
+          {params.useFocusZ && (
+            <span className="li-snum">
+              <input
+                type="number"
+                min={0}
+                max={200}
+                step={0.1}
+                value={String(params.focusZ)}
+                aria-label={t('laser.img.power.focusZ', 'Focus Z')}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value)
+                  if (Number.isFinite(v)) patch({ focusZ: clamp(v, 0, 200) })
+                }}
+              />
+              <i>mm</i>
+            </span>
+          )}
+        </div>
+      </section>
+
+      <p className="li-safety">
+        <span className="li-safety-ico" aria-hidden>
+          <Icon name="warning" size={15} />
+        </span>
+        <span>
+          {t(
+            'laser.img.safety',
+            'Safety: never leave a firing laser unattended and always wear rated eye protection. Beam is OFF (S0/M5) on every travel and at program end; it fires only on scan moves. Requires GRBL laser mode $32=1, and S-max should not exceed your $30 ceiling.',
+          )}
+        </span>
+      </p>
+    </div>
+  )
+}
+
+function LaserVectorWorkbench() {
   const t = useT()
   const nestWarnText = useNestWarnText()
   const setProgram = useProgram((s) => s.setProgram)
@@ -525,6 +1336,17 @@ export function LaserPanel() {
   // Settings-only payload for the preset-bar Save/Load pair (mirrors the header
   // Save/Load doc minus the kind/version envelope) — loaded the same path.
   const settings: LaserPreset = captureSettings()
+
+  // ── Gamepad command bus: frame the vector cut's perimeter (laser OFF). ──
+  useTabCommands('laser', {
+    frame: () => {
+      const lines = gcode ? gcode.split(/\r?\n/) : []
+      if (!grbl.isConnected || lines.length === 0) return
+      const bounds = frameBoundsOfGcode(lines)
+      if (!bounds || !bounds.isValid()) return
+      for (const ln of buildFrameProgram(bounds, { safeZ: 5 })) void grbl.send(ln)
+    },
+  })
 
   return (
     <div className="cc-presets-host">

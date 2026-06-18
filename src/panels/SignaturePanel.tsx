@@ -29,6 +29,8 @@ import { Toolpath } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
+import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
+import { useTabCommands } from '../machine/tabCommands'
 import { IconButton } from '../components/IconButton'
 import { Icon } from '../components/Icons'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
@@ -711,6 +713,18 @@ export function SignaturePanel() {
     applySettings(data as unknown as SignatureSettings)
     setInfo(t('sig.info.settingsLoaded', 'Loaded signature settings — preview updated.'))
   }
+
+  // ── Gamepad command bus: (re)generate + push, and frame the signature. ──
+  useTabCommands('signature', {
+    generate: () => generate(true),
+    frame: () => {
+      const lines = useProgram.getState().lines
+      if (!grbl.isConnected || lines.length === 0) return
+      const bounds = frameBoundsOfGcode(lines)
+      if (!bounds || !bounds.isValid()) return
+      for (const ln of buildFrameProgram(bounds, { safeZ: 5 })) void grbl.send(ln)
+    },
+  })
 
   return (
     <div className="cc-presets-host">

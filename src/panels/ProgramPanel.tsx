@@ -18,6 +18,8 @@ import {
   estimateProgramSeconds,
   formatDuration,
 } from '../components/programWindow'
+import { useTabCommands } from '../machine/tabCommands'
+import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
 import { useT } from '../i18n'
 import '../styles/program.css'
 
@@ -270,6 +272,33 @@ export function ProgramPanel() {
   }, [sections])
 
   const canStream = connected && hasProgram && !streaming
+
+  // ── Gamepad command bus: expose this tab's transport + frame to the pad. ──
+  // Stream respects the start-line field; pause/resume toggles a feed hold;
+  // abort soft-resets; frame traces the loaded program's XY bounds (safe-Z, tool
+  // OFF) via the MDI path so the loaded program/cursor is untouched. All guarded.
+  useTabCommands('program', {
+    stream: () => {
+      if (held) grbl.resume()
+      else if (canStream) onStream()
+    },
+    resume: () => {
+      if (connected && held) grbl.resume()
+    },
+    pause: () => {
+      if (connected && streaming) onPauseResume()
+    },
+    abort: () => {
+      if (connected && streaming) grbl.abortProgram()
+    },
+    frame: () => {
+      if (!connected || streaming || !hasProgram) return
+      const bounds = frameBoundsOfGcode(lines)
+      if (!bounds || !bounds.isValid()) return
+      const prog = buildFrameProgram(bounds, { safeZ: 5 })
+      for (const ln of prog) void grbl.send(ln)
+    },
+  })
 
   return (
     <div

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } 
 import { importDxfString } from '../core/dxf'
 import { Drawing } from '../core/entity'
 import { engrave, profileContours, pocket, ProfileSide, type CamParams } from '../core/cam'
+import { vCarveContours, type VCarveParams } from '../core/vcarve'
 import { orderLoopsInsideOut } from '../core/geometry'
 import { defaultTool, type Tool, Toolpath } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
@@ -31,6 +32,10 @@ import {
   type FlipCorner,
 } from '../core/twoSided'
 import { useProgram, usePersistentState } from '../store'
+import { usePlayback } from '../store/playback'
+import { grbl } from '../serial/controller'
+import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
+import { useTabCommands } from '../machine/tabCommands'
 import {
   useCarveJobs,
   type CarveJob,
@@ -78,6 +83,9 @@ import {
   Ruler,
   FlipHorizontal2,
   FlipVertical2,
+  Triangle,
+  Spline,
+  Eraser,
 } from 'lucide-react'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
@@ -87,11 +95,12 @@ import { CamEmpty } from '../components/cam/CamUI'
 import { useT } from '../i18n'
 import '../styles/cadcam.css'
 import '../styles/cam.css'
+import '../styles/vcarve.css'
 
 /** Which import family is currently loaded — drives the whole panel layout. */
 type Mode = 'none' | '3d' | '2d' | 'step' | 'cdr'
 
-type Op = 'Engrave' | 'Profile' | 'Pocket'
+type Op = 'Engrave' | 'Profile' | 'Pocket' | 'VCarve'
 
 // ============================================================================
 // Color-coded SETTING PRESETS for the carving tab
@@ -109,6 +118,7 @@ interface CarvePreset {
   op: Op
   side: ProfileSide
   p2d: Params2D
+  vcarve?: VCarveUiParams
   cutout: CutoutParams
   bitId: string
   bitLength: number
@@ -395,6 +405,38 @@ const DEFAULT_2D: Params2D = (() => {
   }
 })()
 
+/** V-carving knobs (DXF / EPS / AI closed contours → variable-depth groove). */
+interface VCarveUiParams {
+  vBitAngleDeg: number // full included tip angle
+  vTipDiameterMm: number // flat tip ⌀ (0 = sharp point)
+  maxDepthMm: number // hard depth clamp
+  cleanup: boolean // run a flat-endmill clearance pass for wide areas
+  cleanupToolMm: number // flat cleanup tool ⌀
+  cleanupStepoverFrac: number // cleanup stepover (×⌀)
+}
+
+const DEFAULT_VCARVE: VCarveUiParams = {
+  vBitAngleDeg: 60,
+  vTipDiameterMm: 0,
+  maxDepthMm: 3,
+  cleanup: false,
+  cleanupToolMm: 3.175,
+  cleanupStepoverFrac: 0.45,
+}
+
+/** Narrow unknown into valid VCarveUiParams, falling back per-field to `base`. */
+function parseVcarve(v: unknown, base: VCarveUiParams): VCarveUiParams {
+  if (!isRecord(v)) return base
+  return {
+    vBitAngleDeg: numOr(v.vBitAngleDeg, base.vBitAngleDeg),
+    vTipDiameterMm: numOr(v.vTipDiameterMm, base.vTipDiameterMm),
+    maxDepthMm: numOr(v.maxDepthMm, base.maxDepthMm),
+    cleanup: boolOr(v.cleanup, base.cleanup),
+    cleanupToolMm: numOr(v.cleanupToolMm, base.cleanupToolMm),
+    cleanupStepoverFrac: numOr(v.cleanupStepoverFrac, base.cleanupStepoverFrac),
+  }
+}
+
 /** The serializable 3D-Carving document written by Save / read by Load. */
 interface CarveDoc {
   kind: 'karmyogi.carve'
@@ -608,6 +650,20 @@ export function CadCamPanel() {
   const [op, setOp] = useState<Op>('Profile')
   const [side, setSide] = useState<ProfileSide>(ProfileSide.Outside)
   const [p2d, setP2d] = usePersistentState<Params2D>('karmyogi.carve.2d', DEFAULT_2D)
+  // V-carve knobs (V-bit angle/tip + max depth + optional flat-bit cleanup),
+  // persisted so the operator's V-carve setup survives reloads.
+  const [vcarveRaw, setVcarve] = usePersistentState<VCarveUiParams>(
+    'karmyogi.carve.vcarve',
+    DEFAULT_VCARVE,
+  )
+  const vcarve = useMemo(() => parseVcarve(vcarveRaw, DEFAULT_VCARVE), [vcarveRaw])
+  /** Last V-carve generation stats (path/segment count) for the status line. */
+  const [vcarveStats, setVcarveStats] = useState<{
+    paths: number
+    segs: number
+    maxDepth: number
+    cleanupNeeded: boolean
+  } | null>(null)
 
   // Optional CUTOUT pass: after the relief is carved, profile the part's outer
   // perimeter down through the stock to free it, leaving holding tabs. One shared
@@ -769,6 +825,7 @@ export function CadCamPanel() {
     op,
     side,
     p2d: { ...p2d },
+    vcarve: { ...vcarve },
     cutout: { ...cutoutRaw },
     bitId,
     bitLength,
@@ -790,6 +847,7 @@ export function CadCamPanel() {
     setOp(p.op)
     setSide(p.side)
     setP2d(p.p2d)
+    if (p.vcarve) setVcarve(p.vcarve)
     setCutout(p.cutout)
     setBitId(p.bitId)
     setBitLength(p.bitLength)
@@ -1049,6 +1107,31 @@ export function CadCamPanel() {
     if (op === 'Engrave') return [engrave(polylines, p)]
     const closed = polylines.filter((pl) => pl.closed && pl.points.length >= 3)
     if (closed.length === 0) return []
+    if (op === 'VCarve') {
+      // Variable-depth groove from the medial axis of the closed contours.
+      const vp: VCarveParams = {
+        vBitAngleDeg: vcarve.vBitAngleDeg,
+        vTipDiameterMm: vcarve.vTipDiameterMm,
+        maxDepthMm: vcarve.maxDepthMm,
+        surfaceZ: p2d.surfaceZ,
+        safeZ: p2d.safeZ,
+        stepdownMm: p2d.stepdown,
+        feedXY: p2d.feedXY,
+        feedZ: p2d.feedZ,
+        cleanup: vcarve.cleanup,
+        cleanupToolMm: vcarve.cleanupToolMm,
+        cleanupStepoverFrac: vcarve.cleanupStepoverFrac,
+      }
+      const res = vCarveContours(closed, vp)
+      setVcarveStats({
+        paths: res.pathCount,
+        segs: res.segmentCount,
+        maxDepth: res.maxReachedDepthMm,
+        cleanupNeeded: res.cleanupNeeded,
+      })
+      if (res.warnings.length) setWarnings((w) => Array.from(new Set([...w, ...res.warnings])))
+      return res.toolpath.isEmpty() ? [] : [res.toolpath]
+    }
     if (op === 'Profile') {
       // Cut nested closed loops INNERMOST-FIRST: an inner cutout must be cut
       // before the outer loop that contains it, or freeing the outer loop lets
@@ -1102,13 +1185,16 @@ export function CadCamPanel() {
         ? `${opLabelText(t, op)} ${profileSideLabel(t, side)}`
         : opLabelText(t, op)
     const progName = `${fileName ?? t('cc.drawing', 'drawing')} — ${opLabel}`
+    // V-carving is a variable-Z milling operation — it cannot be plotted with a
+    // pen (the depth IS the result), so it always emits in Spindle Z mode.
+    const vCarveZMode = op === 'VCarve' ? ZMode.Spindle : p2d.zMode
     const emitter = new GcodeEmitter({
       programName: progName,
       safeZ: p2d.safeZ,
       feedXY: p2d.feedXY,
       feedZ: p2d.feedZ,
-      zMode: p2d.zMode,
-      useSpindle: p2d.zMode === ZMode.Spindle,
+      zMode: vCarveZMode,
+      useSpindle: vCarveZMode === ZMode.Spindle,
       spindleRPM: p2d.spindleRPM,
       penUpZ: p2d.penUpZ,
       penDownZ: p2d.penDownZ,
@@ -1343,12 +1429,13 @@ export function CadCamPanel() {
       return `3d|${carveRev}|${c}|${ts}`
     }
     if (mode === '2d') {
-      return `2d|${op}|${side}|${JSON.stringify(p2d)}`
+      const v = op === 'VCarve' ? `|${JSON.stringify(vcarve)}` : ''
+      return `2d|${op}|${side}|${JSON.stringify(p2d)}${v}`
     }
     return mode
     // polylines/drawing/epsPolys identity is folded in via the separate dep below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, carveRev, cutout, twoSided, op, side, p2d])
+  }, [mode, carveRev, cutout, twoSided, op, side, p2d, vcarve])
 
   // ---- clobber guard: only own the Visualizer when this panel is VISIBLE --
   // Several CAM panels write the shared program store via live-generate effects;
@@ -1503,7 +1590,8 @@ export function CadCamPanel() {
   const bedW = bed.width
   const bedH = bed.depth
 
-  const isPen = p2d.zMode === ZMode.Pen
+  // V-carve always mills in Spindle mode, so it never shows the pen-up/down fields.
+  const isPen = p2d.zMode === ZMode.Pen && op !== 'VCarve'
   const hasGeometry = polylines.length > 0
 
   // 2D placement: natural size (mm) + helpers so the Width/Height fields can
@@ -1633,6 +1721,36 @@ export function CadCamPanel() {
     if (isRecord(data.cutout)) setCutout(parseCutout(data.cutout, cutout))
     setLoadError('')
   }
+
+  // ── Gamepad command bus: regenerate, frame, sim, and job navigation. ──
+  // Generate re-runs the live toolpath build (idempotent — same as the auto
+  // regen). Frame traces the combined program's XY bounds. Prev/Next/Delete walk
+  // the carve-job list. All guarded; safe no-ops when there's nothing to act on.
+  const cycleCarveJob = (dir: -1 | 1) => {
+    if (jobs.length === 0) return
+    const cur = jobs.findIndex((j) => j.id === selectedId)
+    const start = cur < 0 ? (dir === 1 ? -1 : 0) : cur
+    const next = jobs[(start + dir + jobs.length) % jobs.length]
+    if (next) selectJob(next.id)
+  }
+  useTabCommands('cadcam', {
+    generate: () => generateRef.current(),
+    frame: () => {
+      const lines = useProgram.getState().lines
+      if (!grbl.isConnected || !lines.length) return
+      const bounds = frameBoundsOfGcode(lines)
+      if (!bounds || !bounds.isValid()) return
+      for (const ln of buildFrameProgram(bounds, { safeZ: 5 })) void grbl.send(ln)
+    },
+    simPlayPause: () => {
+      if (usePlayback.getState().timeline) usePlayback.getState().toggle()
+    },
+    prevJob: () => cycleCarveJob(-1),
+    nextJob: () => cycleCarveJob(1),
+    deleteJob: () => {
+      if (selectedId) removeJob(selectedId)
+    },
+  })
 
   return (
     <div
@@ -1918,7 +2036,7 @@ export function CadCamPanel() {
                 </h3>
                 <div className="cc-section-body">
                   <div className="cc-opseg" role="group" aria-label={t('cc.operation', 'Operation')}>
-                    {(['Engrave', 'Profile', 'Pocket'] as Op[]).map((o) => (
+                    {(['Engrave', 'Profile', 'Pocket', 'VCarve'] as Op[]).map((o) => (
                       <button
                         key={o}
                         type="button"
@@ -1952,11 +2070,133 @@ export function CadCamPanel() {
                   <span className="cc-hint">{opHelp(t, op)}</span>
                   {op !== 'Engrave' && closedCount === 0 && hasGeometry && (
                     <span className="cc-warn-line">
-                      ⚠ {t('cc.needClosed', '{op} needs a closed contour — none found in this file.', { op })}
+                      ⚠ {t('cc.needClosed', '{op} needs a closed contour — none found in this file.', { op: opLabelText(t, op) })}
                     </span>
                   )}
                 </div>
               </section>
+
+              {/* V-carve settings — only shown for the V-carve operation. */}
+              {op === 'VCarve' && (
+                <section className={'cc-section cc-vcarve' + (vcarve.cleanup ? ' has-cleanup' : '')}>
+                  <h3>
+                    <Spline className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                    {t('cc.vcarve.title', 'V-carve')}
+                    <Tip
+                      id="vcarve"
+                      title={t('cc.vcarve.title', 'V-carve')}
+                      body={t(
+                        'cc.vcarve.tip',
+                        'Finds each closed shape’s medial axis (centreline) and varies the Z so a V-bit cuts deeper where the shape is wide and tapers to nothing at sharp tips — the way carved signs & engraved text are made. Holes/counters are respected.',
+                      )}
+                    />
+                  </h3>
+                  <div className="cc-section-body">
+                    {/* Live preview swatch of the V-groove section + reach. */}
+                    <VCarveBitGlyph
+                      angleDeg={vcarve.vBitAngleDeg}
+                      tipMm={vcarve.vTipDiameterMm}
+                      maxDepth={vcarve.maxDepthMm}
+                    />
+                    <div className="cc-sgrid">
+                      <SliderField
+                        icon={<Triangle size={14} strokeWidth={1.8} style={{ transform: 'rotate(180deg)' }} />}
+                        label={t('cc.vcarve.angle', 'V-bit angle')}
+                        htmlFor="cc-vc-angle"
+                        unit="°"
+                        min={10}
+                        max={170}
+                        step={1}
+                        value={vcarve.vBitAngleDeg}
+                        onChange={(n) => setVcarve((v) => ({ ...v, vBitAngleDeg: n }))}
+                        title={t('cc.vcarve.angleTip', 'Full included tip angle of the V-bit (e.g. 60° or 90°). Sharper bits cut deeper for the same width.')}
+                      />
+                      <SliderField
+                        icon={<Drill size={14} strokeWidth={1.8} />}
+                        label={t('cc.vcarve.tip', 'Tip ⌀')}
+                        htmlFor="cc-vc-tip"
+                        unit="mm"
+                        min={0}
+                        max={6}
+                        step={0.1}
+                        value={vcarve.vTipDiameterMm}
+                        onChange={(n) => setVcarve((v) => ({ ...v, vTipDiameterMm: n }))}
+                        title={t('cc.vcarve.tipTip', 'Flat tip diameter of the V-bit (0 = perfectly sharp). The groove only deepens once it’s wider than the flat tip.')}
+                      />
+                      <SliderField
+                        icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
+                        label={t('cc.vcarve.maxDepth', 'Max depth')}
+                        htmlFor="cc-vc-maxdepth"
+                        unit="mm"
+                        min={0.1}
+                        max={30}
+                        step={0.1}
+                        value={vcarve.maxDepthMm}
+                        onChange={(n) => setVcarve((v) => ({ ...v, maxDepthMm: n }))}
+                        title={t('cc.vcarve.maxDepthTip', 'The groove never goes deeper than this, even in wide areas. Wide areas that hit this limit can be flattened by the cleanup pass below.')}
+                      />
+                    </div>
+
+                    {/* Flat-endmill cleanup (C3): clear wide areas the V-bit can't bottom. */}
+                    <label className="cc-vc-cleanup-toggle" title={t('cc.vcarve.cleanupTip', 'Adds a flat-endmill clearance pass that levels any area too wide for the V-bit to reach Max depth.')}>
+                      <input
+                        type="checkbox"
+                        checked={vcarve.cleanup}
+                        onChange={(e) => setVcarve((v) => ({ ...v, cleanup: e.target.checked }))}
+                      />
+                      <Eraser size={14} strokeWidth={1.8} aria-hidden />
+                      <span>{t('cc.vcarve.cleanup', 'Flat-bit cleanup for wide areas')}</span>
+                    </label>
+                    {vcarve.cleanup && (
+                      <div className="cc-sgrid">
+                        <SliderField
+                          icon={<Drill size={14} strokeWidth={1.8} />}
+                          label={t('cc.vcarve.cleanupTool', 'Cleanup tool ⌀')}
+                          htmlFor="cc-vc-cltool"
+                          unit="mm"
+                          min={0.5}
+                          max={12}
+                          step={0.1}
+                          value={vcarve.cleanupToolMm}
+                          onChange={(n) => setVcarve((v) => ({ ...v, cleanupToolMm: n }))}
+                          title={t('cc.vcarve.cleanupToolTip', 'Flat endmill ⌀ used to clear the wide areas at Max depth.')}
+                        />
+                        <SliderField
+                          icon={<ChevronsLeftRightEllipsis size={14} strokeWidth={1.8} />}
+                          label={t('cc.stepoverFrac', 'Stepover (×⌀)')}
+                          htmlFor="cc-vc-clstep"
+                          min={0.05}
+                          max={0.95}
+                          step={0.05}
+                          value={vcarve.cleanupStepoverFrac}
+                          onChange={(n) => setVcarve((v) => ({ ...v, cleanupStepoverFrac: n }))}
+                          title={t('cc.vcarve.cleanupStepTip', 'Sideways overlap between cleanup passes, as a fraction of the cleanup tool ⌀.')}
+                        />
+                      </div>
+                    )}
+
+                    {/* Status: path / segment count + reached depth + cleanup hint. */}
+                    {vcarveStats && closedCount > 0 && (
+                      <div className="cc-vc-status" role="status">
+                        <span className="cc-stat" title={t('cc.vcarve.pathsTip', 'Medial-axis paths the V-bit follows')}>
+                          {t('cc.vcarve.paths', 'Paths')} <b>{vcarveStats.paths}</b>
+                        </span>
+                        <span className="cc-stat" title={t('cc.vcarve.segsTip', 'Total cut segments generated')}>
+                          {t('cc.vcarve.segs', 'Segments')} <b>{vcarveStats.segs}</b>
+                        </span>
+                        <span className="cc-stat" title={t('cc.vcarve.depthTip', 'Deepest cut reached below the surface')}>
+                          {t('cc.vcarve.depth', 'Max depth')} <b>{vcarveStats.maxDepth.toFixed(2)} mm</b>
+                        </span>
+                        {vcarveStats.cleanupNeeded && !vcarve.cleanup && (
+                          <span className="cc-vc-flag" title={t('cc.vcarve.cleanupTip', 'Adds a flat-endmill clearance pass that levels any area too wide for the V-bit to reach Max depth.')}>
+                            <Eraser size={12} strokeWidth={1.9} /> {t('cc.vcarve.needsCleanup', 'wide areas — enable cleanup')}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {/* Position & size — offset + uniform scale (or type a target W/H to
                   auto-fit), mirroring the placement controls 3D jobs already have. */}
@@ -2077,27 +2317,33 @@ export function CadCamPanel() {
                 </h3>
                 <div className="cc-section-body">
                   <div className="cc-sgrid">
-                    <SliderField
-                      icon={<Drill size={14} strokeWidth={1.8} />}
-                      label={t('cc.toolDiaShort', 'Tool ⌀')}
-                      htmlFor="cc-diameter"
-                      unit="mm"
-                      min={0.1}
-                      max={25}
-                      step={0.1}
-                      hint={<>{t('cc.fromBit', 'from bit')}: {bit.diameter}</>}
-                      {...slider2d('diameter')}
-                    />
-                    <SliderField
-                      icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
-                      label={t('cc.cutDepthShort', 'Cut depth')}
-                      htmlFor="cc-cutdepth"
-                      unit="mm"
-                      min={0}
-                      max={60}
-                      step={0.1}
-                      {...slider2d('cutDepth')}
-                    />
+                    {/* For V-carve the tool ⌀ + cut depth are driven by the V-bit
+                        angle/tip + Max depth in the V-carve card above. */}
+                    {op !== 'VCarve' && (
+                      <SliderField
+                        icon={<Drill size={14} strokeWidth={1.8} />}
+                        label={t('cc.toolDiaShort', 'Tool ⌀')}
+                        htmlFor="cc-diameter"
+                        unit="mm"
+                        min={0.1}
+                        max={25}
+                        step={0.1}
+                        hint={<>{t('cc.fromBit', 'from bit')}: {bit.diameter}</>}
+                        {...slider2d('diameter')}
+                      />
+                    )}
+                    {op !== 'VCarve' && (
+                      <SliderField
+                        icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
+                        label={t('cc.cutDepthShort', 'Cut depth')}
+                        htmlFor="cc-cutdepth"
+                        unit="mm"
+                        min={0}
+                        max={60}
+                        step={0.1}
+                        {...slider2d('cutDepth')}
+                      />
+                    )}
                     <SliderField
                       icon={<Layers size={14} strokeWidth={1.8} />}
                       label={t('cc.stepdownPassShort', 'Stepdown / pass')}
@@ -2153,22 +2399,28 @@ export function CadCamPanel() {
                   {t('cc.zMode', 'Z mode')}
                 </h3>
                 <div className="cc-section-body">
-                  <div className="cc-zmode">
-                    <button
-                      className={p2d.zMode === ZMode.Spindle ? 'active' : ''}
-                      onClick={() => setP2d((p) => ({ ...p, zMode: ZMode.Spindle }))}
-                      title={t('cc.spindleModeTip', 'Router/spindle: Z is cut depth; M3/M5 control the spindle')}
-                    >
-                      <Icon name="spindle" size={14} /> {t('cc.spindle', 'Spindle')}
-                    </button>
-                    <button
-                      className={p2d.zMode === ZMode.Pen ? 'active' : ''}
-                      onClick={() => setP2d((p) => ({ ...p, zMode: ZMode.Pen }))}
-                      title={t('cc.penModeTip', 'Pen plotter: cuts → pen-down Z, travels → pen-up Z (no spindle)')}
-                    >
-                      ✒ {t('cc.pen', 'Pen')}
-                    </button>
-                  </div>
+                  {op === 'VCarve' ? (
+                    <span className="cc-hint">
+                      {t('cc.vcarve.spindleOnly', 'V-carve is a milling op — it always runs in Spindle mode (Z is the carved depth).')}
+                    </span>
+                  ) : (
+                    <div className="cc-zmode">
+                      <button
+                        className={p2d.zMode === ZMode.Spindle ? 'active' : ''}
+                        onClick={() => setP2d((p) => ({ ...p, zMode: ZMode.Spindle }))}
+                        title={t('cc.spindleModeTip', 'Router/spindle: Z is cut depth; M3/M5 control the spindle')}
+                      >
+                        <Icon name="spindle" size={14} /> {t('cc.spindle', 'Spindle')}
+                      </button>
+                      <button
+                        className={p2d.zMode === ZMode.Pen ? 'active' : ''}
+                        onClick={() => setP2d((p) => ({ ...p, zMode: ZMode.Pen }))}
+                        title={t('cc.penModeTip', 'Pen plotter: cuts → pen-down Z, travels → pen-up Z (no spindle)')}
+                      >
+                        ✒ {t('cc.pen', 'Pen')}
+                      </button>
+                    </div>
+                  )}
                   <div className="cc-sgrid">
                     {!isPen && (
                       <SliderField
@@ -3631,6 +3883,8 @@ function opHelp(t: (k: string, e: string) => string, op: Op): string {
       return t('cc.profileHelp', 'Cut along closed shapes (on / inside / outside the line).')
     case 'Pocket':
       return t('cc.pocketHelp', 'Clear out the inside area of closed shapes, pass by pass.')
+    case 'VCarve':
+      return t('cc.vcarve.help', 'Variable-depth V-bit groove from the shape’s centreline — deep where wide, sharp at the tips. Crisp signs, text & logos.')
   }
 }
 
@@ -3643,6 +3897,8 @@ function opLabelText(t: (k: string, e: string) => string, op: Op): string {
       return t('cc.profile', 'Profile')
     case 'Pocket':
       return t('cc.pocket', 'Pocket')
+    case 'VCarve':
+      return t('cc.vcarve.op', 'V-carve')
   }
 }
 
@@ -3658,7 +3914,59 @@ function opIcon(op: Op): ReactNode {
     case 'Pocket':
       // clear-out-area glyph
       return <Grid2x2 size={18} strokeWidth={1.8} aria-hidden />
+    case 'VCarve':
+      // V-bit groove glyph
+      return <Triangle size={18} strokeWidth={1.8} aria-hidden style={{ transform: 'rotate(180deg)' }} />
   }
+}
+
+/**
+ * A small live cross-section glyph of the chosen V-bit: a downward V (or flat-tip
+ * trapezoid) inscribed in a stock block, with the Max-depth line marked. Gives a
+ * glance-to-understand picture of how the angle/tip/depth shape the groove.
+ */
+function VCarveBitGlyph({
+  angleDeg,
+  tipMm,
+  maxDepth,
+}: {
+  angleDeg: number
+  tipMm: number
+  maxDepth: number
+}) {
+  const W = 132
+  const H = 56
+  const cx = W / 2
+  const top = 8
+  const half = (Math.max(10, Math.min(170, angleDeg)) * Math.PI) / 360
+  // Draw the V opening at a fixed visual depth; the half-width = depth*tan(half).
+  const depthPx = 34
+  const tan = Math.tan(half)
+  let halfW = depthPx * tan
+  if (halfW > cx - 8) halfW = cx - 8 // clamp very-obtuse bits to the glyph
+  const tipHalfPx = Math.min(halfW * 0.6, Math.max(0, tipMm) * 3)
+  const bottomY = top + depthPx
+  // Trapezoid (or triangle when tip=0): top opening → flat tip at bottom.
+  const leftTop = cx - halfW
+  const rightTop = cx + halfW
+  const leftBot = cx - tipHalfPx
+  const rightBot = cx + tipHalfPx
+  return (
+    <svg className="cc-vc-glyph" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden focusable="false">
+      {/* stock surface line */}
+      <line x1={2} y1={top} x2={W - 2} y2={top} className="cc-vc-glyph-surface" />
+      {/* the V groove */}
+      <path
+        d={`M ${leftTop} ${top} L ${leftBot} ${bottomY} L ${rightBot} ${bottomY} L ${rightTop} ${top}`}
+        className="cc-vc-glyph-groove"
+      />
+      {/* centreline (medial axis) */}
+      <line x1={cx} y1={top} x2={cx} y2={bottomY} className="cc-vc-glyph-axis" />
+      <text x={cx} y={H - 4} className="cc-vc-glyph-cap" textAnchor="middle">
+        {angleDeg}° · {maxDepth.toFixed(1)}mm
+      </text>
+    </svg>
+  )
 }
 
 /**

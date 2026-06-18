@@ -1,0 +1,228 @@
+/* F1 — Teach / record-position section (lives inside the Controller panel).
+   Compact, theme-token driven, glance-to-understand: a collapsible section with
+   a prominent "Capture current position" CTA and a dense points table
+   (name · X · Y · Z · actions). Touch targets ≥36px; reflows on mobile. */
+
+.teach-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+
+/* ---- Collapsible header (click to expand/collapse) ---- */
+.teach-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.teach-head:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.teach-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.teach-head-ico {
+  display: inline-flex;
+  color: var(--accent);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.teach-head[aria-expanded='false'] .teach-head-chev { transform: rotate(-90deg); }
+.teach-head-title { flex: 1; }
+.teach-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* ---- Body ---- */
+.teach-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+/* ---- Capture CTA + frame toggle ---- */
+.teach-capture-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-2);
+}
+.teach-capture {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-height: 36px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.12s ease, opacity 0.12s ease;
+}
+.teach-capture:hover:not(:disabled) { filter: brightness(1.08); }
+.teach-capture:disabled { opacity: 0.5; cursor: not-allowed; }
+.teach-capture:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Work / Machine frame segmented toggle. */
+.teach-frame {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.teach-frame button {
+  min-width: 40px;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  cursor: pointer;
+}
+.teach-frame button + button { border-left: 1px solid var(--border); }
+.teach-frame button.active { background: var(--accent); color: var(--accent-fg); }
+.teach-frame button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---- Empty state ---- */
+.teach-empty {
+  padding: var(--sp-3);
+  text-align: center;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--fg-muted);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+/* ---- Points table ---- */
+.teach-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+}
+.teach-table th {
+  text-align: right;
+  font-weight: 600;
+  color: var(--fg-muted);
+  padding: 2px var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.teach-table th.teach-col-name,
+.teach-table th.teach-col-act { text-align: left; }
+.teach-table td {
+  padding: 2px var(--sp-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  text-align: right;
+}
+.teach-table tr:last-child td { border-bottom: 0; }
+.teach-table tr:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.teach-coord { color: var(--fg); }
+
+/* Inline name input — borderless until focus/hover, fills the cell. */
+.teach-col-name { text-align: left; width: 38%; }
+.teach-name-input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-label);
+  font-weight: 600;
+}
+.teach-name-input:hover { border-color: var(--border); }
+.teach-name-input:focus {
+  border-color: var(--accent);
+  background: var(--bg);
+  outline: none;
+}
+
+/* Action cell: go-to · re-capture · delete. */
+.teach-col-act { text-align: right; white-space: nowrap; width: 1%; }
+.teach-acts { display: inline-flex; gap: 2px; justify-content: flex-end; }
+.teach-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.teach-icon-btn:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--border);
+  background: var(--bg);
+}
+.teach-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.teach-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.teach-icon-btn.teach-goto:hover:not(:disabled) { color: var(--accent); }
+.teach-icon-btn.teach-del:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+
+/* ---- Footer (clear all) ---- */
+.teach-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+.teach-clear {
+  min-height: 28px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+.teach-clear:hover { color: var(--danger); border-color: var(--danger); }
+.teach-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---- Mobile: keep targets ≥36px, let coords shrink ---- */
+@media (max-width: 560px) {
+  .teach-icon-btn { width: 36px; height: 36px; }
+  .teach-name-input { height: 32px; }
+  .teach-table th,
+  .teach-table td { padding: 3px 4px; }
+}

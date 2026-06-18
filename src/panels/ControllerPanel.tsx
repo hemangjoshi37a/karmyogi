@@ -7,14 +7,18 @@ import { DroReadout } from '../components/DroReadout'
 import { JogPad, jogKeyToDelta, jogParamsFromDelta, HOLD_DELAY_MS, type JogDelta } from '../components/JogPad'
 import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, SpindleCcwIcon, AxisZeroIcon, GoToZeroIcon, PlusIcon, MinusIcon, OvResetIcon } from '../components/MachineIcons'
 import { InfoTip } from '../components/InfoTip'
-import { Gamepad2 } from 'lucide-react'
+import { Gamepad2, Crosshair, Navigation, RefreshCw, Trash2, ChevronDown } from 'lucide-react'
+import { useTeachPoints, type TeachFrame, type TeachPoint } from '../store/teachPoints'
 import { GamepadModal } from '../components/GamepadModal'
-import { GamepadHud } from '../components/GamepadHud'
 import { useGamepad, type GamepadAction, type GamepadHandlers } from '../machine/useGamepad'
+import { useGamepadMap, padBindings, controlGlyph, tokenPressed, type GamepadActionId, type PadFamily } from '../store/gamepadMap'
 import { openTabs } from '../track/tabNav'
+import { usePlayback } from '../store/playback'
+import { useNotifications } from '../store/notifications'
 import { availablePanels } from '../app/panelRegistry'
 import { useT } from '../i18n'
 import '../styles/controller.css'
+import '../styles/teach.css'
 
 const STEP_SIZES = [0.1, 1, 10, 100]
 /** Largest continuous-jog distance (mm) we'll ever feed, regardless of travel. */
@@ -38,11 +42,27 @@ const WCS = [
   { code: 'G59', label: 'W6', tk: 'coord.wcs.g59', title: 'G59 — Work coordinate system 6.' },
 ] as const
 
-/** Tiny, barely-visible corner badge showing a button's keyboard shortcut. */
+/** Tiny, barely-visible UPPER-RIGHT corner badge showing a button's keyboard shortcut. */
 function Kbd({ k }: { k: string }) {
   return (
     <span className="kbd-hint" aria-hidden="true">
       {k}
+    </span>
+  )
+}
+
+/**
+ * Tiny UPPER-LEFT corner badge showing the GAMEPAD control bound to an element's
+ * action — the gamepad counterpart of `Kbd`. Same subtle visual family, mirrored
+ * to the left corner so both fit. Renders nothing when no glyph (action unbound)
+ * is supplied. When `active` it lights up (the live "operating" highlight is on
+ * the host element via `.gp-active`; the badge brightens in sympathy).
+ */
+function Pad({ glyph, active }: { glyph: string; active?: boolean }) {
+  if (!glyph) return null
+  return (
+    <span className={`pad-hint${active ? ' on' : ''}`} aria-hidden="true">
+      {glyph}
     </span>
   )
 }
@@ -103,6 +123,245 @@ function SliderField(props: {
 }
 
 /**
+ * F1 — Teach / record-position section.
+ *
+ * Jog the machine to a spot, hit "Capture current position", and the live X/Y/Z
+ * (and A if present) are saved into a named, editable list (rename inline,
+ * re-capture, go-to, delete) backed by the persisted `useTeachPoints` store so
+ * other workbenches (Soldering, Glue, PnP, Screw, Signature) can later consume
+ * the same taught points. A compact, collapsible section so it never bloats the
+ * Controller panel.
+ */
+function TeachSection({
+  connected,
+  busy,
+  machineState,
+  wpos,
+  mpos,
+  decimals,
+  safeZ,
+}: {
+  connected: boolean
+  busy: boolean
+  machineState: string
+  wpos: { x: number; y: number; z: number }
+  mpos: { x: number; y: number; z: number }
+  decimals: number
+  safeZ: number
+}) {
+  const t = useT()
+  const points = useTeachPoints((s) => s.points)
+  const capture = useTeachPoints((s) => s.capture)
+  const rename = useTeachPoints((s) => s.rename)
+  const recapture = useTeachPoints((s) => s.recapture)
+  const remove = useTeachPoints((s) => s.remove)
+  const clear = useTeachPoints((s) => s.clear)
+
+  // Collapsed by default (persisted) so the section stays out of the way until
+  // the operator wants it; opens automatically the first time a point exists.
+  const [open, setOpen] = usePersistentState('karmyogi.teach.open', false)
+  // Which coordinate frame the captured X/Y/Z are recorded in (persisted).
+  const [frame, setFrame] = usePersistentState<TeachFrame>('karmyogi.teach.frame', 'work')
+
+  const livePos = frame === 'machine' ? mpos : wpos
+  const fmt = (n: number) => n.toFixed(decimals)
+
+  const doCapture = useCallback(() => {
+    capture({ x: livePos.x, y: livePos.y, z: livePos.z, frame })
+  }, [capture, livePos.x, livePos.y, livePos.z, frame])
+
+  // SAFETY: go to a taught point — retract Z to the safe height FIRST, then
+  // rapid to its XY, then lower to its Z. Work-frame points use G90 work coords;
+  // machine-frame points use G53 (machine coords) for the moves.
+  const goTo = useCallback(
+    (p: TeachPoint) => {
+      if (!grbl.isConnected) return
+      if (busy) {
+        const ok = window.confirm(
+          t('teach.goto.confirmBusy', 'Machine is {state}. Retract Z and rapid to “{name}” anyway?', {
+            state: machineState,
+            name: p.name,
+          }),
+        )
+        if (!ok) return
+      }
+      const z = Number.isFinite(safeZ) ? safeZ : DEFAULT_SAFE_Z
+      const g53 = p.frame === 'machine' ? 'G53 ' : ''
+      // The initial retract is ALWAYS a work-frame safe-Z lift (just get the head
+      // clear before the XY rapid). `safeZ` is a work-coordinate clearance, so it
+      // must NOT be combined with G53 — a machine-frame point would otherwise
+      // command machine Z=safeZ and trip a soft limit / retract to the wrong height.
+      Promise.resolve()
+        .then(() => grbl.send(`G90 G0 Z${z}`))
+        .then(() => grbl.send(`${g53}G90 G0 X${p.x.toFixed(3)} Y${p.y.toFixed(3)}`))
+        .then(() => grbl.send(`${g53}G90 G0 Z${p.z.toFixed(3)}`))
+        .catch(() => {})
+    },
+    [busy, machineState, safeZ, t],
+  )
+
+  const doRecapture = useCallback(
+    (p: TeachPoint) => recapture(p.id, { x: livePos.x, y: livePos.y, z: livePos.z, frame }),
+    [recapture, livePos.x, livePos.y, livePos.z, frame],
+  )
+
+  const doClear = useCallback(() => {
+    if (points.length === 0) return
+    if (window.confirm(t('teach.clear.confirm', 'Delete all {n} taught points?', { n: points.length }))) clear()
+  }, [points.length, clear, t])
+
+  return (
+    <section className="mc-section mc-section--bare">
+      <div className="teach-section">
+        <button
+          type="button"
+          className="teach-head"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          title={t('teach.head.title', 'Teach points — jog to a spot and capture its position into a reusable named list')}
+        >
+          <span className="teach-head-ico">
+            <Crosshair size={15} aria-hidden="true" />
+          </span>
+          <span className="teach-head-title">{t('teach.head', 'Teach points')}</span>
+          {points.length > 0 && <span className="teach-count">{points.length}</span>}
+          <span className="teach-head-ico teach-head-chev">
+            <ChevronDown size={16} aria-hidden="true" />
+          </span>
+        </button>
+
+        {open && (
+          <div className="teach-body">
+            <div className="teach-capture-row">
+              <button
+                type="button"
+                className="teach-capture"
+                disabled={!connected}
+                onClick={doCapture}
+                title={t(
+                  'teach.capture.title',
+                  'Capture the current machine position ({x}, {y}, {z}) as a new taught point',
+                  { x: fmt(livePos.x), y: fmt(livePos.y), z: fmt(livePos.z) },
+                )}
+              >
+                <Crosshair size={15} aria-hidden="true" />
+                {t('teach.capture', 'Capture current position')}
+              </button>
+              <span
+                className="teach-frame"
+                role="group"
+                aria-label={t('teach.frame.aria', 'Coordinate frame for captured points')}
+              >
+                <button
+                  type="button"
+                  className={frame === 'work' ? 'active' : ''}
+                  aria-pressed={frame === 'work'}
+                  onClick={() => setFrame('work')}
+                  title={t('teach.frame.work', 'Record points in WORK coordinates (relative to the active work zero)')}
+                >
+                  {t('teach.frame.work.label', 'Work')}
+                </button>
+                <button
+                  type="button"
+                  className={frame === 'machine' ? 'active' : ''}
+                  aria-pressed={frame === 'machine'}
+                  onClick={() => setFrame('machine')}
+                  title={t('teach.frame.machine', 'Record points in MACHINE coordinates (absolute, from machine zero)')}
+                >
+                  {t('teach.frame.machine.label', 'Mach')}
+                </button>
+              </span>
+            </div>
+
+            {points.length === 0 ? (
+              <div className="teach-empty">
+                {t(
+                  'teach.empty',
+                  'No taught points yet. Jog the machine to a spot, then Capture to save it. Reuse taught points across Soldering, Glue, PnP and more.',
+                )}
+              </div>
+            ) : (
+              <>
+                <table className="teach-table">
+                  <thead>
+                    <tr>
+                      <th className="teach-col-name">{t('teach.col.name', 'Name')}</th>
+                      <th>{t('teach.col.x', 'X')}</th>
+                      <th>{t('teach.col.y', 'Y')}</th>
+                      <th>{t('teach.col.z', 'Z')}</th>
+                      <th className="teach-col-act" aria-label={t('teach.col.actions', 'Actions')} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {points.map((p) => (
+                      <tr key={p.id}>
+                        <td className="teach-col-name">
+                          <input
+                            className="teach-name-input"
+                            type="text"
+                            value={p.name}
+                            onChange={(e) => rename(p.id, e.target.value)}
+                            aria-label={t('teach.name.aria', 'Point name')}
+                            title={t('teach.name.title', '{frame} coordinates · captured point', {
+                              frame: p.frame === 'machine' ? t('teach.frame.machine.label', 'Mach') : t('teach.frame.work.label', 'Work'),
+                            })}
+                          />
+                        </td>
+                        <td className="teach-coord">{fmt(p.x)}</td>
+                        <td className="teach-coord">{fmt(p.y)}</td>
+                        <td className="teach-coord">{fmt(p.z)}</td>
+                        <td className="teach-col-act">
+                          <span className="teach-acts">
+                            <button
+                              type="button"
+                              className="teach-icon-btn teach-goto"
+                              disabled={!connected}
+                              onClick={() => goTo(p)}
+                              aria-label={t('teach.goto.aria', 'Go to {name}', { name: p.name })}
+                              title={t('teach.goto.title', 'Retract Z to the safe height, then rapid to this point')}
+                            >
+                              <Navigation size={14} aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              className="teach-icon-btn"
+                              disabled={!connected}
+                              onClick={() => doRecapture(p)}
+                              aria-label={t('teach.recapture.aria', 'Re-capture {name}', { name: p.name })}
+                              title={t('teach.recapture.title', 'Overwrite this point with the current machine position')}
+                            >
+                              <RefreshCw size={14} aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              className="teach-icon-btn teach-del"
+                              onClick={() => remove(p.id)}
+                              aria-label={t('teach.delete.aria', 'Delete {name}', { name: p.name })}
+                              title={t('teach.delete.title', 'Delete this taught point')}
+                            >
+                              <Trash2 size={14} aria-hidden="true" />
+                            </button>
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="teach-foot">
+                  <button type="button" className="teach-clear" onClick={doClear}>
+                    {t('teach.clear', 'Clear all')}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
  * Controller panel: connection, DRO, jog pad, home/unlock/reset, and
  * feed/rapid/spindle overrides. Touch-friendly and fully keyboard-operable
  * whenever the panel is VISIBLE and you're not typing in a field — no focus on
@@ -159,6 +418,8 @@ export function ControllerPanel() {
   const [safeZ] = usePersistentState('karmyogi.coord.safeZ', DEFAULT_SAFE_Z)
   // Game-controller (Gamepad API): persisted enable flag + modal open state.
   const [gamepadEnabled, setGamepadEnabled] = usePersistentState('karmyogi.gamepad.enabled', false)
+  // Remembers an EXPLICIT user "off" so auto-arm-on-connect never fights them.
+  const [gpAutoOptOut, setGpAutoOptOut] = usePersistentState('karmyogi.gamepad.autoArmOptOut', false)
   // Haptic (rumble) feedback on machine-state transitions — persisted, default on.
   const [gamepadHaptics, setGamepadHaptics] = usePersistentState('karmyogi.gamepad.haptics', true)
   const [gamepadHapticIntensity, setGamepadHapticIntensity] = usePersistentState('karmyogi.gamepad.hapticIntensity', 1)
@@ -366,10 +627,11 @@ export function ControllerPanel() {
     setStep(STEP_SIZES[Math.max(0, (i < 0 ? 1 : i) - 1)])
   }, [step, setStep])
 
-  // Analog jog from the sticks reuses the EXISTING continuous-jog plumbing: the
-  // hook calls jogXY/jogZ on deflection (a long doJogHold move that runs until
-  // cancelled) and cancelJog (0x85) when the sticks recenter — exactly like a
-  // press-and-hold of the on-screen / keyboard jog. We never spam one-shot jogs.
+  // Analog jog from the sticks uses SHORT-INCREMENT continuous jog: the hook calls
+  // jogXY/jogZ each due poll while deflected (a small move in the current stick
+  // direction that blends with the next in GRBL's planner) and cancelJog (0x85)
+  // when the sticks recenter. Unlike the keyboard hold (one long move), the stick
+  // tracks live and direction changes need no 0x85 thrash.
   const gamepadHandlers = useRef<GamepadHandlers>({
     jogXY: () => {},
     jogZ: () => {},
@@ -389,6 +651,14 @@ export function ControllerPanel() {
     },
     cancelJog,
     onAction: (action: GamepadAction) => {
+      // simToggle drives the 3D simulation — no machine needed, so handle it
+      // BEFORE the connected guard below.
+      if (action === 'simToggle') {
+        if (usePlayback.getState().timeline) usePlayback.getState().toggle()
+        return
+      }
+      // tabNav is handled inside the hook (it never reaches a machine action).
+      if (action === 'tabNav') return
       if (!grbl.isConnected) return
       switch (action) {
         case 'resume':
@@ -408,6 +678,9 @@ export function ControllerPanel() {
           break
         case 'reset':
           void grbl.softReset()
+          break
+        case 'zero':
+          doZeroAll()
           break
         case 'stepUp':
           stepUp()
@@ -451,6 +724,73 @@ export function ControllerPanel() {
     setGamepadEnabled,
   )
 
+  // ---- On-element gamepad hint badges + live "operating" highlight (Part A) ----
+  // The programmable map (store) drives WHICH control each action shows; the live
+  // pad state (gp.buttonsPressed / gp.axes) drives the active highlight. Badges
+  // are only rendered while the pad is ARMED + connected (mirrors the keyboard
+  // chips, which always show). All reads are cheap and gated, so the per-frame
+  // gp state updates don't add meaningful work when the pad is idle/absent.
+  // Per-pad bindings for the ACTIVE pad (so badges match the rebound layout).
+  const gpStore = useGamepadMap()
+  const gpBindings = padBindings(gpStore, gp.padKey)
+  const gpHints = gamepadEnabled && gp.connected
+  const padFamily: PadFamily = (gp.type as PadFamily) ?? 'xbox'
+  // Glyph for an action's bound control (empty when unbound → badge hidden).
+  const padGlyph = useCallback(
+    (action: GamepadActionId): string => {
+      const tok = gpBindings.actions[action] ?? ''
+      return tok ? controlGlyph(tok, padFamily) : ''
+    },
+    [gpBindings, padFamily],
+  )
+  // Is the control bound to `action` currently pressed/deflected? Drives `.gp-active`.
+  // Reads the FULL union (button / axis half / trigger axis) so non-standard pads
+  // light up correctly. `gp.buttonsPressed` carries the live pressed flags; axis
+  // values come from `gp.axes`. Button analog values aren't needed for highlight.
+  const padActive = useCallback(
+    (action: GamepadActionId): boolean => {
+      if (!gpHints) return false
+      const tok = gpBindings.actions[action] ?? ''
+      return tokenPressed(tok, gp.buttonsPressed, gp.axes)
+    },
+    [gpHints, gpBindings, gp.buttonsPressed, gp.axes],
+  )
+  // Live jog-axis deflection for the jog-pad highlight — read the BOUND jog axes
+  // (not fixed indices) so it works on remapped / non-standard pads.
+  const anyAnalog = useCallback(
+    (toks: string[]): boolean => gpHints && toks.some((tk) => tokenPressed(tk, [], gp.axes, { axisDead: 0.15, triggerThresh: 0.5 })),
+    [gpHints, gp.axes],
+  )
+  const stickXyActive = anyAnalog([
+    gpBindings.analog.jogXplus,
+    gpBindings.analog.jogXminus,
+    gpBindings.analog.jogYplus,
+    gpBindings.analog.jogYminus,
+  ])
+  const stickZActive = anyAnalog([gpBindings.analog.jogZplus, gpBindings.analog.jogZminus])
+  // Convenience: class string adding `gp-active` when a control is operating it.
+  const gpCls = useCallback(
+    (action: GamepadActionId): string => (padActive(action) ? ' gp-active' : ''),
+    [padActive],
+  )
+
+  // ---- Auto-arm the pad as soon as one is detected ----
+  // The operator shouldn't have to open the modal and click "on" — when a gamepad
+  // connects we auto-arm it. The ONLY thing that suppresses this is an explicit
+  // user "off" (remembered in `gpAutoOptOut`), so we never override a deliberate
+  // decision. The modal toggle goes through `armPad`, which keeps that intent.
+  const armPad = useCallback(
+    (v: boolean) => {
+      setGamepadEnabled(v)
+      setGpAutoOptOut(!v) // explicit ON clears opt-out; explicit OFF opts out of auto-arm
+    },
+    [setGamepadEnabled, setGpAutoOptOut],
+  )
+  useEffect(() => {
+    if (gp.connected && !gpAutoOptOut && !gamepadEnabled) setGamepadEnabled(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gp.connected, gpAutoOptOut])
+
   // ---- Haptic feedback driven off machine-state TRANSITIONS ----
   // Fire a rumble only when state/error CHANGES (not every frame), and only when
   // a pad is connected + control is armed. Feature-detection lives in the hook.
@@ -488,6 +828,24 @@ export function ControllerPanel() {
       }
     }
   }, [machineState, machineError, gp, gamepadEnabled])
+
+  // ---- Haptic feedback on NEW notifications ----
+  // A controller with a rumble motor buzzes whenever something notable is posted
+  // (job done, errors, alarms, update-ready…). `gp.rumble` is a no-op when no pad
+  // is attached or haptics are off, so this is always safe to call. We snapshot
+  // the current head id at mount (skip the backlog) and only buzz for newer ones.
+  const rumbleRef = useRef(gp.rumble)
+  rumbleRef.current = gp.rumble
+  const lastNotifIdRef = useRef(-1)
+  useEffect(() => {
+    lastNotifIdRef.current = useNotifications.getState().entries[0]?.id ?? 0
+    return useNotifications.subscribe((s) => {
+      const top = s.entries[0]
+      if (!top || top.id <= lastNotifIdRef.current) return
+      lastNotifIdRef.current = top.id
+      rumbleRef.current(top.level === 'error' || top.level === 'warn' ? 'error' : 'connect')
+    })
+  }, [])
 
   // SAFETY: stop any continuous jog if the window loses focus or is hidden
   // (e.g. holding an arrow key then alt-tabbing) — keyup never fires for the
@@ -717,7 +1075,7 @@ export function ControllerPanel() {
         <div className="mc-row mc-row--6">
           <button
             type="button"
-            className="mc-btn mc-btn-stack has-kbd"
+            className={`mc-btn mc-btn-stack has-kbd${gpCls('home')}`}
             disabled={!connected}
             onClick={() => void grbl.home()}
             title={t('ctrl.home.title', 'Home — run the homing cycle ($H)')}
@@ -726,11 +1084,12 @@ export function ControllerPanel() {
             <HomeIcon />
             <span className="mc-btn-label">{t('ctrl.home', 'Home')}</span>
             <span className="mc-btn-cmd" aria-hidden="true">$H</span>
+            {gpHints && <Pad glyph={padGlyph('home')} active={padActive('home')} />}
             <Kbd k="h" />
           </button>
           <button
             type="button"
-            className="mc-btn mc-btn-stack has-kbd"
+            className={`mc-btn mc-btn-stack has-kbd${gpCls('unlock')}`}
             disabled={!connected}
             onClick={() => void grbl.unlock()}
             title={t('ctrl.unlock.title', 'Unlock — clear alarm / kill alarm lock ($X)')}
@@ -739,11 +1098,12 @@ export function ControllerPanel() {
             <UnlockIcon />
             <span className="mc-btn-label">{t('ctrl.unlock', 'Unlock')}</span>
             <span className="mc-btn-cmd" aria-hidden="true">$X</span>
+            {gpHints && <Pad glyph={padGlyph('unlock')} active={padActive('unlock')} />}
             <Kbd k="u" />
           </button>
           <button
             type="button"
-            className="mc-btn mc-btn-stack has-kbd"
+            className={`mc-btn mc-btn-stack has-kbd${gpCls('reset')}`}
             disabled={!connected}
             onClick={() => void grbl.softReset()}
             title={t('ctrl.reset.title', 'Soft reset — abort & reset GRBL (Ctrl-X / 0x18)')}
@@ -752,11 +1112,12 @@ export function ControllerPanel() {
             <ResetIcon />
             <span className="mc-btn-label">{t('ctrl.reset', 'Reset')}</span>
             <span className="mc-btn-cmd" aria-hidden="true">⌃X</span>
+            {gpHints && <Pad glyph={padGlyph('reset')} active={padActive('reset')} />}
             <Kbd k="r" />
           </button>
           <button
             type="button"
-            className="mc-btn mc-btn-stack has-kbd"
+            className={`mc-btn mc-btn-stack has-kbd${gpCls('hold')}`}
             disabled={!connected}
             onClick={() => void grbl.feedHold()}
             title={t('ctrl.hold.title', 'Feed hold — pause motion (!)')}
@@ -765,11 +1126,12 @@ export function ControllerPanel() {
             <PauseIcon />
             <span className="mc-btn-label">{t('ctrl.hold', 'Hold')}</span>
             <span className="mc-btn-cmd" aria-hidden="true">!</span>
+            {gpHints && <Pad glyph={padGlyph('hold')} active={padActive('hold')} />}
             <Kbd k="!" />
           </button>
           <button
             type="button"
-            className="mc-btn mc-btn-stack has-kbd"
+            className={`mc-btn mc-btn-stack has-kbd${gpCls('resume')}`}
             disabled={!connected}
             onClick={() => void grbl.resume()}
             title={t('ctrl.resume.title', 'Cycle resume — continue (~)')}
@@ -778,11 +1140,12 @@ export function ControllerPanel() {
             <PlayIcon />
             <span className="mc-btn-label">{t('ctrl.resume', 'Resume')}</span>
             <span className="mc-btn-cmd" aria-hidden="true">~</span>
+            {gpHints && <Pad glyph={padGlyph('resume')} active={padActive('resume')} />}
             <Kbd k="~" />
           </button>
           <button
             type="button"
-            className="mc-btn mc-btn-stack has-kbd"
+            className={`mc-btn mc-btn-stack has-kbd${gpCls('zero')}`}
             disabled={!connected}
             onClick={doZeroAll}
             title={t('ctrl.zero.title', 'Zero — set the current position as work zero for X, Y and Z (G10 L20 P0)')}
@@ -791,6 +1154,7 @@ export function ControllerPanel() {
             <AxisZeroIcon />
             <span className="mc-btn-label">{t('ctrl.zero', 'Zero')}</span>
             <span className="mc-btn-cmd" aria-hidden="true">G10</span>
+            {gpHints && <Pad glyph={padGlyph('zero')} active={padActive('zero')} />}
             <Kbd k="z" />
           </button>
         </div>
@@ -802,19 +1166,26 @@ export function ControllerPanel() {
         <div className="mc-field">
           <span className="mc-label">{t('ctrl.step', 'Step')}</span>
           <span className="mc-seg mc-grow" role="group" aria-label={t('ctrl.step.aria', 'Jog step (mm)')}>
-            {STEP_SIZES.map((s, i) => (
-              <button
-                key={s}
-                type="button"
-                className={`has-kbd${step === s ? ' active' : ''}`}
-                onClick={() => setStep(s)}
-                aria-pressed={step === s}
-                title={t('ctrl.step.btn', 'Jog step {n} mm (key {k})', { n: s, k: i + 1 })}
-              >
-                {s}
-                <Kbd k={String(i + 1)} />
-              </button>
-            ))}
+            {STEP_SIZES.map((s, i) => {
+              // LB/RB cycle the step DOWN/UP — surface those pad glyphs on the
+              // first (−) and last (+) cells so the binding is discoverable.
+              const padAction: GamepadActionId | null =
+                i === 0 ? 'stepDown' : i === STEP_SIZES.length - 1 ? 'stepUp' : null
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  className={`has-kbd${step === s ? ' active' : ''}${padAction ? gpCls(padAction) : ''}`}
+                  onClick={() => setStep(s)}
+                  aria-pressed={step === s}
+                  title={t('ctrl.step.btn', 'Jog step {n} mm (key {k})', { n: s, k: i + 1 })}
+                >
+                  {s}
+                  {gpHints && padAction && <Pad glyph={padGlyph(padAction)} active={padActive(padAction)} />}
+                  <Kbd k={String(i + 1)} />
+                </button>
+              )
+            })}
           </span>
           <span className="mc-unit">{unitMm}</span>
         </div>
@@ -873,6 +1244,16 @@ export function ControllerPanel() {
         {/* Jog arrows (XY pad + Z column with Go-to-zero in its center) and, to
             the right, a stacked column of work-offset Zero X/Y/Z buttons. */}
         <div className="mc-jog-row">
+          {/* The jog pad is driven by the LEFT STICK / D-pad (XY) and the RIGHT
+              STICK / triggers (Z). A tiny pad badge sits at the pad's upper-left
+              and lights up while a stick/trigger is deflected (live highlight). */}
+          <div className={`pad-host mc-jogpad-host${stickXyActive || stickZActive ? ' gp-active' : ''}`}>
+            {gpHints && (
+              <Pad
+                glyph="L✚"
+                active={stickXyActive || stickZActive}
+              />
+            )}
           <JogPad
             disabled={!connected}
             step={step}
@@ -892,6 +1273,7 @@ export function ControllerPanel() {
               </button>
             }
           />
+          </div>
           <div className="mc-zero-col" role="group" aria-label={t('coord.wco.heading', 'Work Offset (WCO)')}>
             {(['X', 'Y', 'Z'] as const).map((ax) => (
               <button
@@ -916,6 +1298,18 @@ export function ControllerPanel() {
         </span>
       </section>
 
+      {/* Teach / record-position (F1) — capture jogged positions into a reusable
+          named list other workbenches can consume. Collapsible to stay tidy. */}
+      <TeachSection
+        connected={connected}
+        busy={busy}
+        machineState={machineState}
+        wpos={wpos}
+        mpos={mpos}
+        decimals={decimals}
+        safeZ={safeZ}
+      />
+
       {/* Spindle (below Jog) */}
       <section className="mc-section">
         <div className="mc-row tight mc-spindle-head">
@@ -924,7 +1318,7 @@ export function ControllerPanel() {
             type="button"
             role="switch"
             aria-checked={spindleRunning}
-            className={`mc-switch has-kbd${spindleRunning ? ' on' : ''}`}
+            className={`mc-switch has-kbd${spindleRunning ? ' on' : ''}${gpCls('spindle')}`}
             disabled={!connected || (busy && !spindleRunning)}
             onClick={spindleToggle}
             title={
@@ -939,6 +1333,7 @@ export function ControllerPanel() {
             aria-label={spindleRunning ? t('ctrl.spindle.on.aria', 'Spindle on (click to stop)') : t('ctrl.spindle.off.aria', 'Spindle off (click to start)')}
           >
             <span className="mc-switch-knob" aria-hidden="true" />
+            {gpHints && <Pad glyph={padGlyph('spindle')} active={padActive('spindle')} />}
             <Kbd k="s" />
           </button>
           <span
@@ -1127,7 +1522,7 @@ export function ControllerPanel() {
         onClose={() => setGamepadOpen(false)}
         gp={gp}
         armed={gamepadEnabled}
-        setArmed={setGamepadEnabled}
+        setArmed={armPad}
         machineConnected={connected}
         haptics={gamepadHaptics}
         setHaptics={setGamepadHaptics}
@@ -1135,20 +1530,10 @@ export function ControllerPanel() {
         setHapticIntensity={setGamepadHapticIntensity}
       />
 
-      {/* On-screen legend HUD: gamepad map (active tab) upper-left, keyboard
-          shortcuts upper-right. Shown only while armed + a pad is connected, and
-          suppressed while tab-nav mode is on (the tab-switch overlay below owns
-          the screen then) to avoid clutter. ControllerPanel stays mounted across
-          tab switches, so this is visible on every tab. */}
-      {!gp.tabNavMode && (
-        <GamepadHud
-          connected={gp.connected}
-          type={gp.type}
-          activeTab={gp.activeTab}
-          armed={gamepadEnabled}
-        />
-      )}
-
+      {/* The big corner HUD overlays were removed — gamepad hints now live ON each
+          mapped element (tiny upper-left pad glyph + the upper-right keyboard
+          chip) with a live `.gp-active` highlight while a control operates it.
+          The tab-switch overlay below still appears in tab-nav mode. */}
       {gp.tabNavMode && (
         <div className="gp-tabnav" role="status" aria-live="polite">
           <div className="gp-tabnav-card">

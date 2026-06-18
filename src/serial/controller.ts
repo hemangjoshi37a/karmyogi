@@ -7,7 +7,7 @@
 // Panels (Controller, Console, Program, Motion, …) import the `grbl` singleton
 // and the helpers here — they never touch the raw transport classes directly.
 
-import { GrblConnection, type PortLike } from './grblConnection'
+import { GrblConnection, isAlreadyOpenError, type PortLike } from './grblConnection'
 import { WsPort, normalizeWsUrl, mixedContentReason } from './wsPort'
 import { BlePort, describeBleRequestError } from './blePort'
 import { UsbPort } from './usbPort'
@@ -208,6 +208,27 @@ class GrblController {
   private pendingStatusAcks = 0
   private settingsReading = false
   private connecting = false
+  /** Throttle for the "jog ignored (machine not idle)" hint, so a held stick /
+   * key-repeat can't flood the console while the machine is locked out. */
+  private lastJogBlockHintAt = 0
+  /**
+   * USB vendor/product of the serial port we are CURRENTLY opening (set the
+   * instant connect() commits to a real serial port, cleared when the attempt
+   * finishes). The firmware-probe scan reads this to skip a port that's being
+   * connected — even before the connection reports `connected` — so a probe can
+   * never open the same handle the connect is opening (the "open in progress"
+   * race). Undefined for mock / WebSocket / BLE (no SerialPort to clash over).
+   */
+  private connectingIds: { vendorId?: number; productId?: number } | null = null
+  /**
+   * Synchronous re-entrancy guard for autoConnect(). The original guard only
+   * checked `this.connecting`, which connect() sets several awaits later — so two
+   * near-simultaneous autoConnect() calls (React StrictMode double-mounting the
+   * load effect) both passed the guard and raced into connect(), each opening the
+   * same port. This flag is set at the VERY TOP of autoConnect() (before any
+   * await) and reset in finally, so the second caller bails immediately.
+   */
+  private autoConnecting = false
   /**
    * Discrete jogs (`$J=`) sent but not yet acknowledged by an `ok`. Used to cap
    * how many jogs can be queued in GRBL at once so rapid clicks / key-repeat
@@ -231,6 +252,17 @@ class GrblController {
   /** Current active-connection descriptor (machineId/label/kind + connected). */
   get activePort(): ActivePortInfo {
     return this.active
+  }
+
+  /**
+   * USB ids of a serial port that is being connected RIGHT NOW (or null). The
+   * port scan uses this to skip a port mid-connect so a probe never opens the
+   * same handle the connect is opening. Distinct from `activePort` because the
+   * clash window opens the instant connect() commits to the port — before the
+   * connection ever reports `connected`.
+   */
+  get connectingPortIds(): { vendorId?: number; productId?: number } | null {
+    return this.connectingIds
   }
 
   /**
@@ -310,6 +342,17 @@ class GrblController {
         onDisconnect: (err) => this.handleDisconnect(err),
       })
       const chosen = port ?? (await GrblConnection.requestPort())
+      // Record the USB ids of the port we're about to open so a concurrent probe
+      // scan skips THIS handle (closing the open-in-progress race) — set BEFORE
+      // open() so the window is covered from the first instant. Real serial only.
+      if (!isMock) {
+        try {
+          const gi = (chosen as unknown as { getInfo?: () => { usbVendorId?: number; usbProductId?: number } }).getInfo?.()
+          if (gi) this.connectingIds = { vendorId: gi.usbVendorId, productId: gi.usbProductId }
+        } catch {
+          /* getInfo unavailable (BLE/WebUSB/mock) — leave null */
+        }
+      }
       await conn.open(chosen as PortLike)
       this.conn = conn
       // Coalesce cursor updates to ONE per animation frame. A char-counting
@@ -399,6 +442,14 @@ class GrblController {
       this.startStatusPolling()
     } catch (err) {
       machine.setConnection('disconnected')
+      // "A call to open() is already in progress" / "port already open": a racing
+      // opener (StrictMode double-mount, or a probe scan) touched the same handle.
+      // The open lock makes this rare, but if it still surfaces, handle it
+      // SMARTLY instead of scaring the user — never surface or spam it.
+      if (isAlreadyOpenError(err)) {
+        machine.setError(null)
+        throw err
+      }
       // Dismissing the Web Serial port picker (no device chosen) is a normal user
       // action, NOT a failure — don't surface it as an error.
       const name = (err as { name?: string } | null)?.name
@@ -408,6 +459,7 @@ class GrblController {
       throw err
     } finally {
       this.connecting = false
+      this.connectingIds = null
     }
   }
 
@@ -629,52 +681,66 @@ class GrblController {
     machineId?: string
     label?: string
   }): Promise<boolean> {
-    if (this.conn || this.connecting) return !!this.conn
-    if (!autoConnectEnabled()) return false
-    if (typeof navigator === 'undefined') return false
-    // No Web Serial (Android Chromium): fall back to WebUSB, whose permission
-    // grants Chrome also persists per origin — same silent-reconnect pattern.
-    if (!navigator.serial) return this.autoConnectWebUsb()
-    let ports: SerialPort[] = []
+    // SYNCHRONOUS guard FIRST — before any await. Two near-simultaneous
+    // autoConnect() calls (StrictMode double-mount, or App's reconnect racing
+    // another caller) must not both fall through to connect() and open the same
+    // port. `connecting` is only set deep inside connect(), so it can't guard
+    // this pre-await window; `autoConnecting` does.
+    if (this.conn || this.connecting || this.autoConnecting) return !!this.conn
+    this.autoConnecting = true
     try {
-      ports = await navigator.serial.getPorts()
-    } catch {
-      return false
-    }
-    if (ports.length === 0) return false
-    const pref = readPreferredPort()
-    // Restore the last-used controller so the selector reflects it and the
-    // connection (re)opens at that firmware's baud / capability set.
-    if (pref?.controllerKind) {
-      useMachineProfile.getState().setControllerKind(pref.controllerKind)
-    }
-    const matchIds = (ids?: { usbVendorId?: number; usbProductId?: number } | null) => {
-      if (ids?.usbVendorId == null) return undefined
-      return ports.find((p) => {
-        const i = p.getInfo()
-        return i.usbVendorId === ids.usbVendorId && i.usbProductId === ids.usbProductId
-      })
-    }
-    // 1) farm's last-active device, 2) last-used saved device. Either one is a
-    // deliberate prior choice, so it beats falling back to a lone port.
-    const chosen = matchIds(hint) ?? matchIds(pref)
-    // 3) Exactly one granted port and no specific match: an unambiguous
-    // single-machine user — reconnect to it. With several granted ports we stay
-    // silent rather than picking the wrong machine.
-    const target = chosen ?? (ports.length === 1 ? ports[0] : undefined)
-    if (!target) return false
-    try {
-      // Carry the farm's machineId/label through so the reconnect re-binds to the
-      // SAME Machine Farm entry (activeId) instead of being re-derived. Falls back
-      // to the controller's default label inference when no hint is supplied.
-      const meta =
-        hint?.machineId != null || hint?.label != null
-          ? { kind: 'serial' as const, machineId: hint?.machineId, label: hint?.label }
-          : undefined
-      await this.connect(target as unknown as PortLike, meta ? { meta } : undefined)
-      return true
-    } catch {
-      return false
+      if (!autoConnectEnabled()) return false
+      if (typeof navigator === 'undefined') return false
+      // No Web Serial (Android Chromium): fall back to WebUSB, whose permission
+      // grants Chrome also persists per origin — same silent-reconnect pattern.
+      if (!navigator.serial) return await this.autoConnectWebUsb()
+      let ports: SerialPort[] = []
+      try {
+        ports = await navigator.serial.getPorts()
+      } catch {
+        return false
+      }
+      if (ports.length === 0) return false
+      const pref = readPreferredPort()
+      // Restore the last-used controller so the selector reflects it and the
+      // connection (re)opens at that firmware's baud / capability set.
+      if (pref?.controllerKind) {
+        useMachineProfile.getState().setControllerKind(pref.controllerKind)
+      }
+      const matchIds = (ids?: { usbVendorId?: number; usbProductId?: number } | null) => {
+        if (ids?.usbVendorId == null) return undefined
+        return ports.find((p) => {
+          const i = p.getInfo()
+          return i.usbVendorId === ids.usbVendorId && i.usbProductId === ids.usbProductId
+        })
+      }
+      // 1) farm's last-active device, 2) last-used saved device. Either one is a
+      // deliberate prior choice, so it beats falling back to a lone port.
+      const chosen = matchIds(hint) ?? matchIds(pref)
+      // 3) Exactly one granted port and no specific match: an unambiguous
+      // single-machine user — reconnect to it. With several granted ports we stay
+      // silent rather than picking the wrong machine.
+      const target = chosen ?? (ports.length === 1 ? ports[0] : undefined)
+      if (!target) return false
+      try {
+        // Carry the farm's machineId/label through so the reconnect re-binds to the
+        // SAME Machine Farm entry (activeId) instead of being re-derived. Falls back
+        // to the controller's default label inference when no hint is supplied.
+        const meta =
+          hint?.machineId != null || hint?.label != null
+            ? { kind: 'serial' as const, machineId: hint?.machineId, label: hint?.label }
+            : undefined
+        await this.connect(target as unknown as PortLike, meta ? { meta } : undefined)
+        return true
+      } catch (err) {
+        // The open lock + guards make a genuine clash rare, but if a racing opener
+        // still produced "open in progress", the port likely ended up open via the
+        // other path — report success if we're now connected, never surface it.
+        if (isAlreadyOpenError(err)) return this.isConnected
+        return false
+      }
+    } finally {
+      this.autoConnecting = false
     }
   }
 
@@ -977,6 +1043,27 @@ class GrblController {
    * `G91 G1 … F…` move followed by a `G90` restore (not cancellable, but correct).
    */
   async jog({ x, y, z, feed }: JogParams, opts?: { force?: boolean }): Promise<void> {
+    // STATE GATE: GRBL only accepts `$J=` in Idle or Jog. In Alarm/Hold/Door/Home
+    // (or while streaming) every jog is rejected with `error:9` — and a held
+    // gamepad stick / key-repeat would spam it dozens of times a second. Skip the
+    // send entirely in those states (a centered stick still sends 0x85 safely),
+    // and surface ONE throttled hint so the operator knows to Unlock/Home.
+    const st = useMachine.getState().state
+    if (st !== 'Idle' && st !== 'Jog' && st !== 'Unknown') {
+      const now = Date.now()
+      if (now - this.lastJogBlockHintAt > 4000) {
+        this.lastJogBlockHintAt = now
+        useConsole
+          .getState()
+          .push(
+            'info',
+            st === 'Alarm'
+              ? 'Jog ignored — machine is in Alarm. Unlock ($X) or Home ($H) first.'
+              : `Jog ignored — machine is ${st} (jogging needs the Idle state).`,
+          )
+      }
+      return
+    }
     if (this.dialect.jogCommand === 'grbl-$J') {
       // Coalesce a flood: drop this jog if too many are already in flight
       // (unacknowledged). Rapid clicking / key auto-repeat thus produces smooth,
@@ -988,11 +1075,20 @@ class GrblController {
       // long, intentional move that motion-stops on release (0x85), so it must
       // not be coalesced away even if a just-tapped step is still unacked.
       if (!opts?.force && this.inflightJogs >= MAX_INFLIGHT_JOGS) return
+      // GRBL rejects scientific-notation numbers (e.g. `X1e-7`) with `error:20`
+      // ("invalid g-code"), which a near-axis-aligned analog stick can otherwise
+      // emit as a vanishingly small off-axis component. Format every axis word
+      // with FIXED decimals (never sci-notation) and DROP any component below the
+      // 0.001 mm step resolution so we never send a degenerate / malformed move.
+      const fmt = (n: number) => (Math.round(n * 1000) / 1000).toFixed(3)
       const parts = ['$J=G91', 'G21']
-      if (x) parts.push(`X${x}`)
-      if (y) parts.push(`Y${y}`)
-      if (z) parts.push(`Z${z}`)
-      parts.push(`F${feed}`)
+      if (x && Math.abs(x) >= 0.001) parts.push(`X${fmt(x)}`)
+      if (y && Math.abs(y) >= 0.001) parts.push(`Y${fmt(y)}`)
+      if (z && Math.abs(z) >= 0.001) parts.push(`Z${fmt(z)}`)
+      // No axis word survived rounding → there is no motion to command. Sending
+      // `$J=G91 G21 F…` alone is an invalid jog (error:20), so skip it entirely.
+      if (parts.length === 2) return
+      parts.push(`F${Math.max(1, Math.round(feed))}`)
       this.inflightJogs++
       try {
         await this.send(parts.join(''))

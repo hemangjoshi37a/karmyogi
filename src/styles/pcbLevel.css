@@ -1,0 +1,318 @@
+/* PCB auto-leveling (heightmap) section — O1/P1.
+   Co-located styles for the auto-level card inside the PCB panel. Uses theme
+   CSS variables only (theme-aware), compact on desktop, ≥36px touch targets on
+   coarse pointers. Class prefix `lvl-` keeps it isolated from pcb.css. */
+
+.lvl-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* Safety banner — probe must be wired; the cycle runs slow. */
+.lvl-safety {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg-panel));
+  color: var(--fg);
+  font-size: var(--fs-label);
+  line-height: 1.4;
+}
+.lvl-safety svg {
+  flex: 0 0 auto;
+  color: var(--warn);
+  margin-top: 1px;
+}
+
+/* Numbered step grid. */
+.lvl-steps {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: 1fr;
+}
+@container pcbpanel (min-width: 520px) {
+  .lvl-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.lvl-step {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.lvl-step-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--fg);
+}
+.lvl-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 11px;
+  font-weight: 700;
+}
+.lvl-step.done .lvl-step-num {
+  background: var(--ok);
+}
+.lvl-step.disabled {
+  opacity: 0.55;
+}
+
+/* Param rows. */
+.lvl-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+}
+.lvl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.lvl-field > span.lvl-field-lbl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.lvl-field input,
+.lvl-field select {
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: var(--fs-ctl);
+  width: 100%;
+}
+@media (pointer: coarse) {
+  .lvl-field input,
+  .lvl-field select {
+    min-height: var(--ctl-h-touch);
+  }
+}
+
+.lvl-area-readout {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.lvl-area-readout b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Buttons. */
+.lvl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.lvl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: var(--fs-ctl);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lvl-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.lvl-btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.lvl-btn.danger {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+  color: var(--danger);
+}
+.lvl-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (pointer: coarse) {
+  .lvl-btn {
+    min-height: var(--ctl-h-touch);
+  }
+}
+
+/* Probe progress. */
+.lvl-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.lvl-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.lvl-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+/* Apply-mode exclusive selector (segmented). */
+.lvl-modes {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  align-self: flex-start;
+}
+.lvl-modes button {
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: var(--fs-ctl);
+  cursor: pointer;
+}
+.lvl-modes button:last-child {
+  border-right: none;
+}
+.lvl-modes button.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.lvl-modes button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (pointer: coarse) {
+  .lvl-modes button {
+    min-height: var(--ctl-h-touch);
+  }
+}
+
+/* The 2D heatmap preview + color scale. */
+.lvl-preview {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.lvl-heat {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background:
+    repeating-conic-gradient(var(--bg-input) 0% 25%, transparent 0% 50%) 50% / 12px 12px;
+  image-rendering: pixelated;
+  max-width: 100%;
+  height: auto;
+}
+.lvl-scale {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  min-width: 90px;
+}
+.lvl-scale-bar {
+  width: 14px;
+  height: 96px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  /* Cool (low) → warm (high). */
+  background: linear-gradient(to top, #2b59ff, #16c2a3, #ffd23f, #ff5a3c);
+  align-self: flex-start;
+}
+.lvl-scale-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lvl-scale-vals {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 96px;
+  font-variant-numeric: tabular-nums;
+}
+.lvl-scale-vals b {
+  color: var(--fg);
+}
+
+.lvl-empty {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  padding: var(--sp-2) 0;
+}
+
+.lvl-status {
+  font-size: var(--fs-label);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.lvl-status.ok {
+  border-color: color-mix(in srgb, var(--ok) 50%, var(--border));
+  background: color-mix(in srgb, var(--ok) 12%, var(--bg-panel));
+}
+.lvl-status.err {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-panel));
+  color: var(--fg);
+}
+
+.lvl-hint {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+.lvl-applied-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-panel));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+}

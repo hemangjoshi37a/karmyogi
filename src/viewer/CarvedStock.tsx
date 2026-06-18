@@ -11,6 +11,7 @@ import {
   createRemovalHeightmap,
   sweepRemoval,
   type SimSegmentLike,
+  type SimToolType,
 } from '../core/simulation'
 import { useSettings } from '../store'
 import type { Segment } from './gcodeToPolylines'
@@ -24,6 +25,19 @@ interface CarvedStockProps {
   revealPoint?: [number, number, number] | null
   /** Cutter radius (mm) used to thicken each swept move. */
   toolRadius: number
+  /**
+   * Cutter profile shaping the carved floor (flat endmill / ball-nose / V-bit).
+   * Default 'flat' — the original behaviour. A ball mill leaves a rounded groove.
+   */
+  toolType?: SimToolType
+  /**
+   * Auto-derive a stock BLOCK from the toolpath when the stock store has no
+   * usable block (so any loaded program can be simulated). When set, the stock
+   * top sits at the toolpath's highest Z and its floor is this many mm below the
+   * deepest cut, so the carve reveals a believable slab even with no stock setup.
+   * Ignored when the stock store already defines a real block. Default off.
+   */
+  autoThickness?: number | null
   /** Visible? Default true. */
   visible?: boolean
 }
@@ -46,6 +60,8 @@ export function CarvedStock({
   revealIndex,
   revealPoint,
   toolRadius,
+  toolType = 'flat',
+  autoThickness = null,
   visible = true,
 }: CarvedStockProps) {
   const theme = useSettings((s) => s.theme)
@@ -71,11 +87,15 @@ export function CarvedStock({
     const okStock =
       max[0] - min[0] > 1e-6 && max[1] - min[1] > 1e-6 && max[2] - min[2] > 1e-6
 
-    // Toolpath XY bounds from the CUT moves (rapids don't remove material).
+    // Toolpath XY bounds + Z extent from the CUT moves (rapids don't remove
+    // material). We also track the highest/deepest cut Z so an auto-derived
+    // stock block can sit a believable slab under the actual cuts.
     let tx0 = Infinity
     let ty0 = Infinity
     let tx1 = -Infinity
     let ty1 = -Infinity
+    let tzTop = -Infinity
+    let tzBot = Infinity
     let anyCut = false
     for (const s of segments) {
       if (s.kind !== 'cut') continue
@@ -84,16 +104,28 @@ export function CarvedStock({
       ty0 = Math.min(ty0, s.from[1], s.to[1])
       tx1 = Math.max(tx1, s.from[0], s.to[0])
       ty1 = Math.max(ty1, s.from[1], s.to[1])
+      tzTop = Math.max(tzTop, s.from[2], s.to[2])
+      tzBot = Math.min(tzBot, s.from[2], s.to[2])
     }
 
-    if (!okStock) {
-      // No usable stock: fall back to the toolpath footprint alone so a carve
-      // surface still appears aligned under the cuts.
-      if (!anyCut) return null
+    // AUTO-DERIVE a block from the toolpath when (a) the operator opted into auto
+    // stock (`autoThickness` set) OR (b) the stock store has no usable block. This
+    // lets ANY loaded program be simulated without a configured stock: the
+    // footprint is the cut extent (padded by the cutter), the top sits at the
+    // highest cut Z (≈ the Z0 reference), and the floor is `autoThickness` below
+    // the deepest cut (or the stock store's Z range when no thickness is asked).
+    const wantAuto = (autoThickness != null && autoThickness > 0) || !okStock
+    if (wantAuto) {
+      if (!anyCut) return okStock ? { min, max } : null
       const pad = toolRadius * 2
+      const top = isFinite(tzTop) ? Math.max(tzTop, 0) : max[2]
+      const floor =
+        autoThickness != null && autoThickness > 0
+          ? Math.min(isFinite(tzBot) ? tzBot : top, top) - autoThickness
+          : min[2]
       return {
-        min: [tx0 - pad, ty0 - pad, min[2]] as [number, number, number],
-        max: [tx1 + pad, ty1 + pad, max[2]] as [number, number, number],
+        min: [tx0 - pad, ty0 - pad, floor] as [number, number, number],
+        max: [tx1 + pad, ty1 + pad, top] as [number, number, number],
       }
     }
 
@@ -114,7 +146,7 @@ export function CarvedStock({
         max[2],
       ] as [number, number, number],
     }
-  }, [width, depth, height, xyOrigin, zRef, segments, toolRadius])
+  }, [width, depth, height, xyOrigin, zRef, segments, toolRadius, autoThickness])
 
   // Build the flat heightmap grid + plane geometry when the program/stock/tool
   // changes. This is a PURE computation (no ref writes / side effects during
@@ -132,6 +164,7 @@ export function CarvedStock({
       topZ: box.max[2],
       floorZ: box.min[2],
       toolRadius,
+      toolType,
     })
 
     const { nx, ny, x0, y0, dx, dy, z } = hm
@@ -162,7 +195,7 @@ export function CarvedStock({
     g.setIndex(indices)
     g.computeVertexNormals()
     return { hm, geometry: g }
-  }, [visible, box, toolRadius, segments])
+  }, [visible, box, toolRadius, toolType, segments])
 
   const geom = built?.geometry ?? null
 
@@ -225,6 +258,7 @@ export function CarvedStock({
       idx,
       toolRadius,
       revealPoint ?? null,
+      hm.toolType,
     )
     appliedRef.current = idx
     lastRpRef.current = revealPoint ?? null
