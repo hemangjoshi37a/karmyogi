@@ -3,18 +3,19 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Html } from '@react-three/drei'
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import * as THREE from 'three'
-import occtWasmUrl from 'occt-import-js/dist/occt-import-js.wasm?url'
 import { useT } from '../i18n'
 
 /**
- * Interactive 3D controller carousel for the gamepad modal. Both controllers are
- * the ORIGINAL STEP CAD files, tessellated in-browser by occt-import-js
- * (OpenCASCADE WASM) — so they render at full quality with their real per-face
- * colors (Xbox; PlayStation "Pikachu" DualSense). STEP is B-rep CAD and must be
- * tessellated to render in WebGL; occt does that client-side. Each download is
- * CacheFirst-cached by the service worker (vite.config) so the MBs are fetched
- * once and served from cache afterwards. Meshes are normalized in-geometry
- * (centered, scaled to unit) so a fixed camera frames either consistently.
+ * Interactive 3D controller carousel for the gamepad modal (Xbox; PlayStation
+ * "Pikachu" DualSense), with their real per-face colors.
+ *
+ * PERF: the controllers are pre-tessellated at build time (scripts/bake-controllers.mjs
+ * turns the original 6 MB STEP CAD files into compact ~1 MB mesh JSON under
+ * public/controllers_3d/*.json). The runtime just fetches that JSON and builds a
+ * BufferGeometry — a few milliseconds — instead of running OpenCASCADE (occt-import-js)
+ * to tessellate B-rep CAD ON THE MAIN THREAD, which froze the whole page for many
+ * seconds. Meshes are normalized in-geometry (centered, scaled to unit) so a fixed
+ * camera frames either consistently.
  */
 
 const FALLBACK_COLOR = '#cdd2dc'
@@ -52,57 +53,39 @@ function Loading3D({ label }: { label: string }) {
   )
 }
 
-// occt-import-js is heavy (WASM) — load it lazily and cache parsed geometry.
-type StepPart = { geo: THREE.BufferGeometry; color: number[] | null }
-const stepCache = new Map<string, StepPart[]>()
+// Pre-baked mesh JSON (positions/indices/color per mesh) — see the file header.
+type MeshPart = { geo: THREE.BufferGeometry; color: number[] | null }
+type BakedMesh = { position: number[]; index: number[] | null; color: number[] | null }
+const meshCache = new Map<string, MeshPart[]>()
 
-/** A STEP controller tessellated in-browser by OpenCASCADE (occt-import-js). */
+/** A controller loaded from pre-tessellated mesh JSON (no OCCT at runtime). */
 function StepModel({ url, t }: { url: string; t: ReturnType<typeof useT> }) {
-  const [geos, setGeos] = useState<StepPart[] | null>(() => stepCache.get(url) ?? null)
+  const [geos, setGeos] = useState<MeshPart[] | null>(() => meshCache.get(url) ?? null)
   const [failed, setFailed] = useState(false)
 
   useEffect(() => {
-    if (stepCache.has(url)) {
-      setGeos(stepCache.get(url)!)
+    if (meshCache.has(url)) {
+      setGeos(meshCache.get(url)!)
       return
     }
     let alive = true
     ;(async () => {
       try {
-        const factory = (await import('occt-import-js')).default as (
-          opts?: { locateFile?: (p: string) => string },
-        ) => Promise<{
-          ReadStepFile: (
-            content: Uint8Array,
-            params: unknown,
-          ) => {
-            success: boolean
-            meshes: Array<{
-              attributes: { position: { array: ArrayLike<number> } }
-              index?: { array: ArrayLike<number> }
-              color?: number[]
-            }>
-          }
-        }>
-        const occt = await factory({ locateFile: () => occtWasmUrl })
-        const buf = new Uint8Array(await (await fetch(url)).arrayBuffer())
-        const result = occt.ReadStepFile(buf, null)
-        if (!result?.success) throw new Error('STEP parse failed')
-        const out: StepPart[] = []
-        for (const m of result.meshes) {
+        const res = await fetch(url)
+        if (!res.ok) throw new Error('model fetch failed')
+        const data = (await res.json()) as { meshes: BakedMesh[] }
+        const out: MeshPart[] = []
+        for (const m of data.meshes) {
           const g = new THREE.BufferGeometry()
-          g.setAttribute(
-            'position',
-            new THREE.Float32BufferAttribute(Float32Array.from(m.attributes.position.array), 3),
-          )
-          if (m.index?.array) g.setIndex(Array.from(m.index.array))
+          g.setAttribute('position', new THREE.Float32BufferAttribute(Float32Array.from(m.position), 3))
+          if (m.index) g.setIndex(m.index)
           out.push({ geo: g, color: m.color ?? null })
         }
         fitGroup(out.map((o) => o.geo))
-        stepCache.set(url, out)
+        meshCache.set(url, out)
         if (alive) setGeos(out)
       } catch (e) {
-        console.error('[GamepadModel3D] STEP load failed', e)
+        console.error('[GamepadModel3D] model load failed', e)
         if (alive) setFailed(true)
       }
     })()
@@ -144,8 +127,8 @@ export function GamepadModel3D({ detectedType }: { detectedType?: string | null 
   const t = useT()
   const controllers = useMemo<ControllerDef[]>(
     () => [
-      { id: 'playstation', name: t('gp.model.ps', 'PlayStation'), url: '/controllers_3d/ps5.step' },
-      { id: 'xbox', name: t('gp.model.xbox', 'Xbox'), url: '/controllers_3d/xbox.step' },
+      { id: 'playstation', name: t('gp.model.ps', 'PlayStation'), url: '/controllers_3d/ps5.json' },
+      { id: 'xbox', name: t('gp.model.xbox', 'Xbox'), url: '/controllers_3d/xbox.json' },
     ],
     [t],
   )
