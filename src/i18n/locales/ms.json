@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Mengisar kantung DI SEKELILING huruf → teks timbul (relief); huruf kekal berdiri. Menggunakan Z gelendong.",
   "writing.info.pocketEmpty": "Pengantungan tidak menghasilkan potongan — cuba alat ⌀ lebih kecil atau teks lebih besar.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(garis tengah diperoleh daripada rangka fon)"
+  "writing.info.centerline": "(garis tengah diperoleh daripada rangka fon)",
+  "cam.calib.oneCamHint": "Satu kamera — untuk satu paparan dari atas",
+  "cam.grid.twoCamHint": "Dua kamera (turut menganggar ketinggian)"
 }

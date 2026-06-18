@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "כרסום כיס סביב האותיות ← טקסט בולט (תבליט); האותיות נשארות עומדות. משתמש ב-Z של הציר.",
   "writing.info.pocketEmpty": "הכיס לא הפיק חיתוכים — נסה כלי ⌀ קטן יותר או טקסט גדול יותר.",
   "writing.mode.skeleton": "אוטומטי",
-  "writing.info.centerline": "(קו המרכז נגזר ממתאר הגופן)"
+  "writing.info.centerline": "(קו המרכז נגזר ממתאר הגופן)",
+  "cam.calib.oneCamHint": "מצלמה אחת — לתצוגה אחת ממבט-על",
+  "cam.grid.twoCamHint": "שתי מצלמות (מעריכות גם את הגובה)"
 }

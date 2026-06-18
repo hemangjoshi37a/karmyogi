@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Frezuje kieszeń WOKÓŁ liter → tekst wypukły (relief); litery zostają. Używa Z wrzeciona.",
   "writing.info.pocketEmpty": "Kieszeń nie dała żadnych cięć — spróbuj mniejszego narzędzia ⌀ lub większego tekstu.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(linia środkowa wyprowadzona z konturu czcionki)"
+  "writing.info.centerline": "(linia środkowa wyprowadzona z konturu czcionki)",
+  "cam.calib.oneCamHint": "Jedna kamera — do jednego widoku z góry",
+  "cam.grid.twoCamHint": "Dwie kamery (szacują też wysokość)"
 }

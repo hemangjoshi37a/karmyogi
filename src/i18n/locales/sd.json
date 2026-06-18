@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "اکرن جي چوڌاري پاڪيٽ مل ڪريو ← اڀريل (ريليف) متن؛ اکر بيٺا رهن ٿا. اسپنڊل Z استعمال ڪري ٿو.",
   "writing.info.pocketEmpty": "پاڪيٽ ڪوبه ڪٽ نه ٺاهيو — ننڍو اوزار ⌀ يا وڏو متن آزمايو.",
   "writing.mode.skeleton": "خودڪار",
-  "writing.info.centerline": "(مرڪزي ليڪ فونٽ جي خاڪي مان ورتل)"
+  "writing.info.centerline": "(مرڪزي ليڪ فونٽ جي خاڪي مان ورتل)",
+  "cam.calib.oneCamHint": "هڪ ڪئميرا — مٿان کان هڪ نظاري لاءِ",
+  "cam.grid.twoCamHint": "ٻه ڪئميرائون (اوچائي جو اندازو پڻ لڳائن ٿيون)"
 }

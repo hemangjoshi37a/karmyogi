@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Fresa una tasca INTORNO alle lettere → testo in rilievo; le lettere restano in piedi. Usa la Z del mandrino.",
   "writing.info.pocketEmpty": "Lo svuotamento non ha prodotto tagli — prova un utensile ⌀ più piccolo o un testo più grande.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(linea centrale derivata dal contorno del font)"
+  "writing.info.centerline": "(linea centrale derivata dal contorno del font)",
+  "cam.calib.oneCamHint": "Una sola fotocamera — per una vista dall'alto",
+  "cam.grid.twoCamHint": "Due fotocamere (stima anche l'altezza)"
 }

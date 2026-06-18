@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Phay hốc XUNG QUANH các chữ → văn bản nổi; chữ được giữ nguyên. Dùng Z trục chính.",
   "writing.info.pocketEmpty": "Hốc không tạo ra vết cắt nào — hãy thử dụng cụ ⌀ nhỏ hơn hoặc văn bản lớn hơn.",
   "writing.mode.skeleton": "tự động",
-  "writing.info.centerline": "(đường tâm suy ra từ đường viền phông)"
+  "writing.info.centerline": "(đường tâm suy ra từ đường viền phông)",
+  "cam.calib.oneCamHint": "Một camera — cho một góc nhìn từ trên xuống",
+  "cam.grid.twoCamHint": "Hai camera (cũng ước tính chiều cao)"
 }

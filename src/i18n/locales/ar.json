@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "تفريغ جيب حول الحروف ← نص بارز (نافر)؛ تبقى الحروف قائمة. يستخدم الـ Z للمغزل.",
   "writing.info.pocketEmpty": "لم يُنتج التجويف أي قطع — جرّب أداة ⌀ أصغر أو نصًا أكبر.",
   "writing.mode.skeleton": "تلقائي",
-  "writing.info.centerline": "(الخط المركزي مُشتقّ من مخطط الحرف)"
+  "writing.info.centerline": "(الخط المركزي مُشتقّ من مخطط الحرف)",
+  "cam.calib.oneCamHint": "كاميرا واحدة — لعرض علوي واحد",
+  "cam.grid.twoCamHint": "كاميرتان (تقدّران الارتفاع أيضًا)"
 }

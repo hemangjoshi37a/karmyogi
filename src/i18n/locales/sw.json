@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Saga mfuko KUZUNGUKA herufi → maandishi yaliyoinuka (nakshi); herufi zinabaki zimesimama. Hutumia Z ya spindle.",
   "writing.info.pocketEmpty": "Mfuko haukuzalisha mikato yoyote — jaribu kifaa ⌀ kidogo zaidi au maandishi makubwa zaidi.",
   "writing.mode.skeleton": "otomatiki",
-  "writing.info.centerline": "(mstari wa kati umetokana na muhtasari wa fonti)"
+  "writing.info.centerline": "(mstari wa kati umetokana na muhtasari wa fonti)",
+  "cam.calib.oneCamHint": "Kamera moja — kwa mwonekano mmoja kutoka juu",
+  "cam.grid.twoCamHint": "Kamera mbili (pia hukadiria urefu)"
 }

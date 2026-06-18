@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "በፊደላት ዙሪያ ኪስ ይፍጩ → ከፍ ያለ (እፎይታ) ጽሑፍ፤ ፊደላት ቆመው ይቀራሉ። የስፒንድል Z ይጠቀማል።",
   "writing.info.pocketEmpty": "ኪሱ ምንም ቁረጥ አላመነጨም — ትንሽ መሳሪያ ⌀ ወይም ትልቅ ጽሑፍ ይሞክሩ።",
   "writing.mode.skeleton": "በራስ-ሰር",
-  "writing.info.centerline": "(ማእከላዊ መስመር ከፊደል ቅርጽ የተገኘ)"
+  "writing.info.centerline": "(ማእከላዊ መስመር ከፊደል ቅርጽ የተገኘ)",
+  "cam.calib.oneCamHint": "ነጠላ ካሜራ — ለአንድ ከላይ-ወደ-ታች እይታ",
+  "cam.grid.twoCamHint": "ሁለት ካሜራዎች (ቁመትንም ይገምታል)"
 }

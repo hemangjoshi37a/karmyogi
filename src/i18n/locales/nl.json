@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Freest een holte ROND de letters → verhoogde (reliëf)tekst; letters blijven staan. Gebruikt de spil-Z.",
   "writing.info.pocketEmpty": "Het uitruimen leverde geen sneden op — probeer een kleiner gereedschap ⌀ of grotere tekst.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(middellijn afgeleid van de lettercontour)"
+  "writing.info.centerline": "(middellijn afgeleid van de lettercontour)",
+  "cam.calib.oneCamHint": "Eén camera — voor één bovenaanzicht",
+  "cam.grid.twoCamHint": "Twee camera's (schat ook de hoogte)"
 }

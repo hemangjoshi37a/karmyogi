@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Membuat kantong DI SEKITAR huruf → teks timbul (relief); huruf tetap berdiri. Memakai Z spindel.",
   "writing.info.pocketEmpty": "Pengantongan tidak menghasilkan potongan — coba pahat ⌀ lebih kecil atau teks lebih besar.",
   "writing.mode.skeleton": "otomatis",
-  "writing.info.centerline": "(garis tengah diturunkan dari kerangka font)"
+  "writing.info.centerline": "(garis tengah diturunkan dari kerangka font)",
+  "cam.calib.oneCamHint": "Satu kamera — untuk satu tampilan dari atas",
+  "cam.grid.twoCamHint": "Dua kamera (juga memperkirakan tinggi)"
 }

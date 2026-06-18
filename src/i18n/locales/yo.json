@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Gbẹ́ àpò YÍKÁ àwọn lẹ́tà → ọ̀rọ̀ tí ó yọ jáde (ìtẹ̀jáde); àwọn lẹ́tà dúró. Ó ń lo Z spindle.",
   "writing.info.pocketEmpty": "Àpò kò ṣe gígẹ́ kankan — gbìyànjú ohun ìṣiṣẹ́ ⌀ kékeré tàbí ọ̀rọ̀ tí ó tóbi sí i.",
   "writing.mode.skeleton": "aládàáṣe",
-  "writing.info.centerline": "(ìlà àárín wá láti inú ìlà ìta fọ́ǹtì)"
+  "writing.info.centerline": "(ìlà àárín wá láti inú ìlà ìta fọ́ǹtì)",
+  "cam.calib.oneCamHint": "Kamẹra kan — fún ìwòye kan láti òkè",
+  "cam.grid.twoCamHint": "Kamẹra méjì (ó tún ṣírò gíga)"
 }

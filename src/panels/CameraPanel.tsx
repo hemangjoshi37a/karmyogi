@@ -307,6 +307,25 @@ function CamSection({
 }
 
 /**
+ * Tiny "ⓘ" info affordance — a compact, accessible way to relocate a long
+ * explanatory paragraph into a hover/focus tooltip so the panel stays dense.
+ * The descriptive text rides on BOTH `title` (native hover tooltip) and
+ * `aria-label` (screen-reader name) so nothing is lost when the prose leaves
+ * the visible flow. Sits inline next to a section heading or label.
+ */
+function CamInfo({ text, label }: { text: string; label: string }) {
+  return (
+    <button type="button" className="cam-info" title={text} aria-label={label}>
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+        <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        <circle cx="8" cy="4.6" r="0.95" fill="currentColor" />
+        <rect x="7.2" y="6.7" width="1.6" height="5" rx="0.8" fill="currentColor" />
+      </svg>
+    </button>
+  )
+}
+
+/**
  * Sleek slider + number-input + unit row — a local replica of the CadCam panel's
  * SliderField (and the Controller jog "Feed" control), restyled with `.cam-*`
  * classes so camera.css owns its own slider chrome (no cross-panel CSS import).
@@ -2456,15 +2475,20 @@ export function CameraPanel() {
         {/* ---- calibration sheet (printable QR fiducials) ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
-            <h4><Icon name="frame" size={14} className="cam-card-ico" /> {t('cam.calib.title', 'Calibration sheet')}</h4>
-            <span className="cam-raw">{t('cam.calib.badge', 'A4 · QR')}</span>
+            <h4>
+              <Icon name="frame" size={14} className="cam-card-ico" /> {t('cam.calib.title', 'Calibration sheet')}
+              <CamInfo
+                label={t('cam.calib.title', 'Calibration sheet')}
+                text={t(
+                  'cam.calib.hint',
+                  'Print this QR fiducial sheet at 100% scale and lay it flat on the bed. The camera reads the codes to learn mm-per-pixel + perspective, then measures bed and stock size automatically. Cut out the S# stickers for the workpiece.',
+                )}
+              />
+            </h4>
+            <span className="cam-raw" title={t('cam.calib.oneCamHint', 'Single camera — for one top-down view')}>
+              {t('cam.calib.badge', 'A4 · QR')}
+            </span>
           </header>
-          <p className="cam-hint">
-            {t(
-              'cam.calib.hint',
-              'Print this QR fiducial sheet at 100% scale and lay it flat on the bed. The camera reads the codes to learn mm-per-pixel + perspective, then measures bed and stock size automatically. Cut out the S# stickers for the workpiece.',
-            )}
-          </p>
           <div className="cam-row">
             <a
               className="cam-btn cam-primary cam-grow"
@@ -2494,7 +2518,16 @@ export function CameraPanel() {
         {/* ---- secondary camera slot toggle + slot ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
-            <h4><Icon name="camera" size={14} className="cam-card-ico" /> {t('cam.slot2.title', 'Second camera')}</h4>
+            <h4>
+              <Icon name="camera" size={14} className="cam-card-ico" /> {t('cam.slot2.title', 'Second camera')}
+              <CamInfo
+                label={t('cam.slot2.title', 'Second camera')}
+                text={t(
+                  'cam.slot2.hint',
+                  'A second camera (different angle) lets karmyogi estimate the stock HEIGHT by shape-from-silhouette. Optional — leave off for a single top-down view.',
+                )}
+              />
+            </h4>
             <label className="cam-switch">
               <input
                 type="checkbox"
@@ -2505,19 +2538,22 @@ export function CameraPanel() {
               <span>{t('cam.slot2.enable', 'Enable')}</span>
             </label>
           </header>
-          <p className="cam-hint">
-            {t(
-              'cam.slot2.hint',
-              'A second camera (different angle) lets karmyogi estimate the stock HEIGHT by shape-from-silhouette. Optional — leave off for a single top-down view.',
-            )}
-          </p>
         </section>
         {secondaryEnabled && renderSlot(1)}
 
         {/* ---- auto-record while streaming (slot 0 / Camera 1 only) ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
-            <h4><Icon name="play" size={14} className="cam-card-ico" /> {t('cam.auto.title', 'Auto-record runs')}</h4>
+            <h4>
+              <Icon name="play" size={14} className="cam-card-ico" /> {t('cam.auto.title', 'Auto-record runs')}
+              <CamInfo
+                label={t('cam.auto.title', 'Auto-record runs')}
+                text={t(
+                  'cam.auto.hint',
+                  'Automatically record Camera 1 whenever the machine streams a program — the clip is saved to this browser when the run finishes.',
+                )}
+              />
+            </h4>
             {autoRecActive ? (
               <span className="cam-rec" title={t('cam.auto.recTip', 'Recording the current run')}>
                 <span className="cam-rec-dot" aria-hidden="true" />
@@ -2529,12 +2565,6 @@ export function CameraPanel() {
               </span>
             )}
           </header>
-          <p className="cam-hint">
-            {t(
-              'cam.auto.hint',
-              'Automatically record Camera 1 whenever the machine streams a program — the clip is saved to this browser when the run finishes.',
-            )}
-          </p>
           {!recorderSupported && (
             <p className="cam-warn">
               {t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).')}
@@ -2634,7 +2664,13 @@ export function CameraPanel() {
         {/* ---- timelapse (slot 0 / Camera 1 only) ---- */}
         <section className="cam-card">
           <header className="cam-card-head">
-            <h4>{t('cam.timelapse.title', 'Timelapse')}</h4>
+            <h4>
+              {t('cam.timelapse.title', 'Timelapse')}
+              <CamInfo
+                label={t('cam.timelapse.title', 'Timelapse')}
+                text={t('cam.timelapse.hint', 'Grab a frame every interval, play them back fast into one webm.')}
+              />
+            </h4>
             {tlActive ? (
               <span className="cam-raw" data-on={true}>
                 {t('cam.timelapse.frames', '{count} frame(s)', { count: tlCount })}
@@ -2643,9 +2679,6 @@ export function CameraPanel() {
               <span className="cam-raw">{t('cam.capture.cam1only', 'Camera 1 only')}</span>
             )}
           </header>
-          <p className="cam-hint">
-            {t('cam.timelapse.hint', 'Grab a frame every interval, play them back fast into one webm.')}
-          </p>
           {!recorderSupported && (
             <p className="cam-warn">
               {t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).')}
@@ -2729,19 +2762,22 @@ export function CameraPanel() {
       <div className="cam-cards">
         <section className="cam-card cam-span">
           <header className="cam-card-head">
-            <h4>{t('cam.bt.title', 'Bed tracking (3D)')}</h4>
+            <h4>
+              {t('cam.bt.title', 'Bed tracking (3D)')}
+              <CamInfo
+                label={t('cam.bt.title', 'Bed tracking (3D)')}
+                text={t(
+                  'cam.bt.hint',
+                  'Teach a camera where the bed is so the 3D viewer can show the real machine behind your toolpaths and check whether the design fits the stock.',
+                )}
+              />
+            </h4>
             <span className="cam-raw" data-on={calib.isCalibrated()}>
               {calib.isCalibrated()
                 ? t('cam.bt.calibBadge', 'calibrated')
                 : t('cam.bt.uncalibBadge', 'not calibrated')}
             </span>
           </header>
-          <p className="cam-hint">
-            {t(
-              'cam.bt.hint',
-              'Teach a camera where the bed is so the 3D viewer can show the real machine behind your toolpaths and check whether the design fits the stock.',
-            )}
-          </p>
 
           {/* show-in-3D toggle + opacity */}
           <div className="cam-seg-row">
@@ -2826,6 +2862,14 @@ export function CameraPanel() {
               <span className="cam-seg-label cam-feed-title">
                 <span className="cam-dev-badge">{t('cam.bt.feed.devBadge', 'DEV')}</span>
                 {t('cam.bt.feed.title', 'Camera → server bridge')}
+                <CamInfo
+                  label={t('cam.bt.feed.title', 'Camera → server bridge')}
+                  text={
+                    live(0) || live(1)
+                      ? t('cam.bt.feed.autoNote', 'Dev-only: live frames stream to the local dev server automatically — no clicking needed. This never runs in a production build.')
+                      : t('cam.bt.feed.startNote', 'Dev-only: start a camera above (allow the permission) and frames stream to the local dev server automatically. This never runs in a production build.')
+                  }
+                />
                 {(live(0) || live(1)) && (
                   <span className={`cam-feed-dot${feedAuto ? ' on' : ''}`} title={feedAuto ? t('cam.bt.feed.autoOn', 'Auto-streaming frames to the server') : t('cam.bt.feed.autoWait', 'Waiting for frames…')}>
                     <span className="cam-feed-dot-mark" aria-hidden="true" />
@@ -2833,11 +2877,6 @@ export function CameraPanel() {
                   </span>
                 )}
               </span>
-              <p className="cam-hint">
-                {live(0) || live(1)
-                  ? t('cam.bt.feed.autoNote', 'Dev-only: live frames stream to the local dev server automatically — no clicking needed. This never runs in a production build.')
-                  : t('cam.bt.feed.startNote', 'Dev-only: start a camera above (allow the permission) and frames stream to the local dev server automatically. This never runs in a production build.')}
-              </p>
               <div className="cam-row">
                 <button
                   type="button"
@@ -3206,15 +3245,16 @@ export function CameraPanel() {
           {calibMsg && <p className="cam-calib-msg">{calibMsg}</p>}
 
           {/* --- two-camera printed-grid calibration --- */}
-          <div className="cam-subhead">
+          <div className="cam-subhead" title={t('cam.grid.twoCamHint', 'Two cameras (also estimates height)')}>
             {t('cam.grid.title', 'Two-camera grid (print & auto-calibrate)')}
+            <CamInfo
+              label={t('cam.grid.title', 'Two-camera grid (print & auto-calibrate)')}
+              text={t(
+                'cam.grid.hint',
+                'For a head-mounted + a stationary external camera. Print the marker grid, lay it flat on the bed, then let karmyogi read each marker’s printed mm coordinate and solve both cameras at once — and tell which camera is on the head.',
+              )}
+            />
           </div>
-          <p className="cam-hint">
-            {t(
-              'cam.grid.hint',
-              'For a head-mounted + a stationary external camera. Print the marker grid, lay it flat on the bed, then let karmyogi read each marker’s printed mm coordinate and solve both cameras at once — and tell which camera is on the head.',
-            )}
-          </p>
           <div className="cam-grid-cal">
             {/* (1) generate the printable sheet */}
             <div className="cam-grid-step">
@@ -3222,13 +3262,14 @@ export function CameraPanel() {
               <div className="cam-grid-step-body">
                 <span className="cam-grid-step-title">
                   {t('cam.grid.step1', 'Print the marker sheet')}
+                  <CamInfo
+                    label={t('cam.grid.step1', 'Print the marker sheet')}
+                    text={t(
+                      'cam.grid.step1Note',
+                      'Each QR encodes its own bed position in mm. PRINT AT 100% (no “fit to page”), measure the 50 mm ruler to confirm scale, and tape it flat on the bed.',
+                    )}
+                  />
                 </span>
-                <p className="cam-hint">
-                  {t(
-                    'cam.grid.step1Note',
-                    'Each QR encodes its own bed position in mm. PRINT AT 100% (no “fit to page”), measure the 50 mm ruler to confirm scale, and tape it flat on the bed.',
-                  )}
-                </p>
                 <div className="cam-row">
                   <button
                     type="button"
@@ -3254,13 +3295,14 @@ export function CameraPanel() {
               <div className="cam-grid-step-body">
                 <span className="cam-grid-step-title">
                   {t('cam.reg.title', 'Register the sheet to the machine')}
+                  <CamInfo
+                    label={t('cam.reg.title', 'Register the sheet to the machine')}
+                    text={t(
+                      'cam.reg.note',
+                      'The sheet sits at an unknown spot on the bed. Tie it to the machine: jog the tool TIP exactly onto two printed markers and capture the live work XY at each. karmyogi bakes that into the calibration so the overlay lands in true machine coordinates (without this it would be offset/rotated). Needs the machine connected.',
+                    )}
+                  />
                 </span>
-                <p className="cam-hint">
-                  {t(
-                    'cam.reg.note',
-                    'The sheet sits at an unknown spot on the bed. Tie it to the machine: jog the tool TIP exactly onto two printed markers and capture the live work XY at each. karmyogi bakes that into the calibration so the overlay lands in true machine coordinates (without this it would be offset/rotated). Needs the machine connected.',
-                  )}
-                </p>
                 {machineConn !== 'connected' && (
                   <p className="cam-warn cam-disabled-why">
                     {t('cam.reg.notConnectedHint', 'Connect the machine in the Controller tab to capture work XY.')}
@@ -3354,13 +3396,14 @@ export function CameraPanel() {
               <div className="cam-grid-step-body">
                 <span className="cam-grid-step-title">
                   {t('cam.grid.step2', 'Auto-calibrate from the grid')}
+                  <CamInfo
+                    label={t('cam.grid.step2', 'Auto-calibrate from the grid')}
+                    text={t(
+                      'cam.grid.step2Note',
+                      'Aim each camera at the sheet so several markers are visible, then scan. ≥4 markers per camera are needed. Do step 2 (register) first so the result lands in machine coordinates.',
+                    )}
+                  />
                 </span>
-                <p className="cam-hint">
-                  {t(
-                    'cam.grid.step2Note',
-                    'Aim each camera at the sheet so several markers are visible, then scan. ≥4 markers per camera are needed. Do step 2 (register) first so the result lands in machine coordinates.',
-                  )}
-                </p>
                 {!qrSupported && (
                   <p className="cam-warn cam-disabled-why">
                     {t('cam.grid.noDetector', 'BarcodeDetector is unavailable in this browser — use Auto or Manual calibration instead.')}
@@ -3436,13 +3479,14 @@ export function CameraPanel() {
               <div className="cam-grid-step-body">
                 <span className="cam-grid-step-title">
                   {t('cam.role.title', 'Detect head vs stationary camera')}
+                  <CamInfo
+                    label={t('cam.role.title', 'Detect head vs stationary camera')}
+                    text={t(
+                      'cam.role.note',
+                      'Jogs the machine a small known distance and watches which feed the world shifts in — the head-mounted camera moves with the spindle; the external one barely changes. Needs the machine connected; it will ask before jogging.',
+                    )}
+                  />
                 </span>
-                <p className="cam-hint">
-                  {t(
-                    'cam.role.note',
-                    'Jogs the machine a small known distance and watches which feed the world shifts in — the head-mounted camera moves with the spindle; the external one barely changes. Needs the machine connected; it will ask before jogging.',
-                  )}
-                </p>
                 {machineConn !== 'connected' && (
                   <p className="cam-warn cam-disabled-why">
                     {t('cam.role.notConnectedHint', 'Connect the machine in the Controller tab to run the probe.')}
@@ -3504,13 +3548,16 @@ export function CameraPanel() {
           {gridMsg && <p className="cam-calib-msg">{gridMsg}</p>}
 
           {/* --- job footprint + height --- */}
-          <div className="cam-subhead">{t('cam.bt.jobTitle', 'Job (stock) on the bed')}</div>
-          <p className="cam-hint">
-            {t(
-              'cam.bt.jobHint',
-              'Tell karmyogi where the workpiece sits so it can fit-check the design. Detect it from STOCK stickers, or set the size by hand.',
-            )}
-          </p>
+          <div className="cam-subhead">
+            {t('cam.bt.jobTitle', 'Job (stock) on the bed')}
+            <CamInfo
+              label={t('cam.bt.jobTitle', 'Job (stock) on the bed')}
+              text={t(
+                'cam.bt.jobHint',
+                'Tell karmyogi where the workpiece sits so it can fit-check the design. Detect it from STOCK stickers, or set the size by hand.',
+              )}
+            />
+          </div>
           {detectQrReason && <p className="cam-warn cam-disabled-why">{detectQrReason}</p>}
           <div className="cam-row">
             <button

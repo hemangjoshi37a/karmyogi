@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Fraise un évidement AUTOUR des lettres → texte en relief ; les lettres restent en saillie. Utilise la Z de broche.",
   "writing.info.pocketEmpty": "L'évidement n'a produit aucune coupe — essayez un outil ⌀ plus petit ou un texte plus grand.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(axe dérivé du contour de la police)"
+  "writing.info.centerline": "(axe dérivé du contour de la police)",
+  "cam.calib.oneCamHint": "Une seule caméra — pour une vue de dessus",
+  "cam.grid.twoCamHint": "Deux caméras (estime aussi la hauteur)"
 }

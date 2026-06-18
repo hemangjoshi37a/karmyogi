@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Fresa um bolsão AO REDOR das letras → texto em relevo; as letras ficam em pé. Usa o Z do fuso.",
   "writing.info.pocketEmpty": "O esvaziamento não produziu cortes — tente uma ferramenta ⌀ menor ou um texto maior.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(linha central derivada do contorno da fonte)"
+  "writing.info.centerline": "(linha central derivada do contorno da fonte)",
+  "cam.calib.oneCamHint": "Uma só câmera — para uma vista de cima",
+  "cam.grid.twoCamHint": "Duas câmeras (também estima a altura)"
 }

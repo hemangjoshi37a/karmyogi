@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "تراش جیب پیرامون حروف ← متن برجسته؛ حروف برپا می‌مانند. از Z اسپیندل استفاده می‌کند.",
   "writing.info.pocketEmpty": "جیب هیچ برشی تولید نکرد — ابزار ⌀ کوچک‌تر یا متن بزرگ‌تر را امتحان کنید.",
   "writing.mode.skeleton": "خودکار",
-  "writing.info.centerline": "(خط مرکزی برگرفته از طرح کلی فونت)"
+  "writing.info.centerline": "(خط مرکزی برگرفته از طرح کلی فونت)",
+  "cam.calib.oneCamHint": "یک دوربین — برای یک نمای از بالا",
+  "cam.grid.twoCamHint": "دو دوربین (ارتفاع را نیز تخمین می‌زند)"
 }

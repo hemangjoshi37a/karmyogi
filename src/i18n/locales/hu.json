@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Zsebet mar a betűk KÖRÉ → kiemelkedő (dombor) szöveg; a betűk állva maradnak. Az orsó Z-jét használja.",
   "writing.info.pocketEmpty": "A zseb nem hozott létre vágást — próbáljon kisebb szerszám ⌀-t vagy nagyobb szöveget.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(a középvonal a betűkontúrból származtatva)"
+  "writing.info.centerline": "(a középvonal a betűkontúrból származtatva)",
+  "cam.calib.oneCamHint": "Egy kamera — egy felülnézethez",
+  "cam.grid.twoCamHint": "Két kamera (a magasságot is becsüli)"
 }

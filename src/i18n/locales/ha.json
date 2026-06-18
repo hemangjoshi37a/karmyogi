@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Nika aljihu KEWAYE da haruffa → rubutu mai tashi (relief); haruffa sun tsaya. Yana amfani da spindle Z.",
   "writing.info.pocketEmpty": "Aljihun bai samar da wani yanka ba — gwada ƙaramin kayan aiki ⌀ ko babban rubutu.",
   "writing.mode.skeleton": "kai-tsaye",
-  "writing.info.centerline": "(an samo layin tsakiya daga zayyana harafin)"
+  "writing.info.centerline": "(an samo layin tsakiya daga zayyana harafin)",
+  "cam.calib.oneCamHint": "Kamara ɗaya — don kallo ɗaya daga sama",
+  "cam.grid.twoCamHint": "Kyamarori biyu (suna kuma kintata tsayi)"
 }

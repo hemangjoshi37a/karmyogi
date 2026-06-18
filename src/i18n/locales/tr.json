@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Harflerin ETRAFINA cep açar → kabarık (rölyef) metin; harfler ayakta kalır. İğ Z'sini kullanır.",
   "writing.info.pocketEmpty": "Cep hiç kesim üretmedi — daha küçük takım ⌀ veya daha büyük metin deneyin.",
   "writing.mode.skeleton": "otomatik",
-  "writing.info.centerline": "(orta hat yazı tipi dış hattından türetildi)"
+  "writing.info.centerline": "(orta hat yazı tipi dış hattından türetildi)",
+  "cam.calib.oneCamHint": "Tek kamera — tek bir üstten görünüm için",
+  "cam.grid.twoCamHint": "İki kamera (yüksekliği de tahmin eder)"
 }

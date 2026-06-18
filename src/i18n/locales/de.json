@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Fräst eine Tasche UM die Buchstaben herum → erhabener (Relief-)Text; Buchstaben bleiben stehen. Nutzt die Spindel-Z.",
   "writing.info.pocketEmpty": "Das Ausräumen erzeugte keine Schnitte — versuchen Sie ein kleineres Werkzeug ⌀ oder größeren Text.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(Mittellinie aus der Schriftkontur abgeleitet)"
+  "writing.info.centerline": "(Mittellinie aus der Schriftkontur abgeleitet)",
+  "cam.calib.oneCamHint": "Eine Kamera — für eine Draufsicht",
+  "cam.grid.twoCamHint": "Zwei Kameras (schätzt auch die Höhe)"
 }

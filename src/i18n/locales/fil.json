@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Mag-mill ng pocket SA PALIGID ng mga letra → nakaumbok (relief) na teksto; nananatiling nakatayo ang mga letra. Gumagamit ng spindle Z.",
   "writing.info.pocketEmpty": "Walang putol na nalikha ang pocket — subukan ang mas maliit na tool ⌀ o mas malaking teksto.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(ang gitnang linya ay hango sa outline ng font)"
+  "writing.info.centerline": "(ang gitnang linya ay hango sa outline ng font)",
+  "cam.calib.oneCamHint": "Isang camera — para sa isang top-down na view",
+  "cam.grid.twoCamHint": "Dalawang camera (tinatantya rin ang taas)"
 }

@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "在字母周围铣出凹槽 → 凸起（浮雕）文字；字母保留凸出。使用主轴 Z。",
   "writing.info.pocketEmpty": "挖槽未产生切削 — 请尝试更小的刀具 ⌀ 或更大的文字。",
   "writing.mode.skeleton": "自动",
-  "writing.info.centerline": "（中心线由字体轮廓推导得出）"
+  "writing.info.centerline": "（中心线由字体轮廓推导得出）",
+  "cam.calib.oneCamHint": "单摄像头 — 用于单一俯视图",
+  "cam.grid.twoCamHint": "双摄像头（同时估算高度）"
 }

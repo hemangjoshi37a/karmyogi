@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Fresa un vaciado ALREDEDOR de las letras → texto en relieve; las letras quedan en pie. Usa la Z del husillo.",
   "writing.info.pocketEmpty": "El vaciado no produjo cortes — prueba una herramienta ⌀ menor o un texto mayor.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(línea central derivada del contorno de la fuente)"
+  "writing.info.centerline": "(línea central derivada del contorno de la fuente)",
+  "cam.calib.oneCamHint": "Una sola cámara — para una vista cenital",
+  "cam.grid.twoCamHint": "Dos cámaras (también estima la altura)"
 }

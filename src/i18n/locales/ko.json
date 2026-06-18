@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "글자 주위에 포켓을 밀링 → 돋움(릴리프) 텍스트; 글자는 남습니다. 스핀들 Z 를 사용합니다.",
   "writing.info.pocketEmpty": "포켓이 절삭을 생성하지 않았습니다 — 더 작은 공구 ⌀ 또는 더 큰 텍스트를 시도하세요.",
   "writing.mode.skeleton": "자동",
-  "writing.info.centerline": "(중심선은 글꼴 윤곽에서 도출됨)"
+  "writing.info.centerline": "(중심선은 글꼴 윤곽에서 도출됨)",
+  "cam.calib.oneCamHint": "카메라 1대 — 위에서 내려다보는 단일 뷰용",
+  "cam.grid.twoCamHint": "카메라 2대 (높이도 추정)"
 }

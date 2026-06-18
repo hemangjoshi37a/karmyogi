@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Vyfrézuje kapsu KOLEM písmen → vystouplý (reliéfní) text; písmena zůstávají stát. Používá Z vřetena.",
   "writing.info.pocketEmpty": "Kapsa nevytvořila žádné řezy — zkuste menší nástroj ⌀ nebo větší text.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(středová čára odvozená z obrysu písma)"
+  "writing.info.centerline": "(středová čára odvozená z obrysu písma)",
+  "cam.calib.oneCamHint": "Jedna kamera — pro jeden pohled shora",
+  "cam.grid.twoCamHint": "Dvě kamery (odhaduje i výšku)"
 }

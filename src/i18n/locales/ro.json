@@ -2712,5 +2712,7 @@
   "writing.mode.reliefTip": "Frezează un buzunar ÎN JURUL literelor → text în relief; literele rămân în picioare. Folosește Z-ul axului.",
   "writing.info.pocketEmpty": "Buzunarul nu a produs nicio tăietură — încercați o sculă ⌀ mai mică sau un text mai mare.",
   "writing.mode.skeleton": "auto",
-  "writing.info.centerline": "(linia centrală derivată din conturul fontului)"
+  "writing.info.centerline": "(linia centrală derivată din conturul fontului)",
+  "cam.calib.oneCamHint": "O singură cameră — pentru o vedere de sus",
+  "cam.grid.twoCamHint": "Două camere (estimează și înălțimea)"
 }
