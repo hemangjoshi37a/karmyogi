@@ -47,6 +47,8 @@ export function CameraBedPlane() {
   const pxPerMm = useCameraCalib((s) => s.cameras[0].pxPerMm)
   const rotationDeg = useCameraCalib((s) => s.cameras[0].rotationDeg)
   const headMap = useCameraCalib((s) => s.cameras[0].headMap)
+  const headHomography = useCameraCalib((s) => s.cameras[0].headHomography)
+  const headRefMm = useCameraCalib((s) => s.cameras[0].headRefMm)
   const headRotateQuarters = useCameraCalib((s) => s.cameras[0].headRotateQuarters)
   const headFlipH = useCameraCalib((s) => s.cameras[0].headFlipH)
   const headFlipV = useCameraCalib((s) => s.cameras[0].headFlipV)
@@ -108,6 +110,25 @@ export function CameraBedPlane() {
     return mat
   }, [isHead, H, frameW, frameH])
 
+  // Head PERSPECTIVE homography → world→texture-uv (same convention as `uMat`).
+  // When present, the head overlay rectifies the bed to TRUE top-down (corrects
+  // the camera tilt / parallax), not just affine scale+rotation. Absolute
+  // placement adds the live (wpos − refHead) offset (see uWorldOffset below).
+  const headHomoUMat = useMemo<THREE.Matrix3 | null>(() => {
+    if (!isHead || !headHomography || headHomography.length !== 9 || !(frameW > 0) || !(frameH > 0)) return null
+    const w2i = invertMat3(headHomography)
+    if (!w2i) return null
+    const sx = 1 / frameW
+    const sy = 1 / frameH
+    const mat = new THREE.Matrix3()
+    mat.set(
+      sx * w2i[0], sx * w2i[1], sx * w2i[2],
+      sy * w2i[3], sy * w2i[4], sy * w2i[5],
+      w2i[6], w2i[7], w2i[8],
+    )
+    return mat
+  }, [isHead, headHomography, frameW, frameH])
+
   // --- live video texture ----------------------------------------------------
   const texture = useMemo(() => {
     if (!video) return null
@@ -127,9 +148,12 @@ export function CameraBedPlane() {
     void video.play().catch(() => {})
   }, [video, epoch])
 
-  const headReady = isHead && !!effHeadMap && frameW > 0 && frameH > 0 && !!texture
+  // Prefer the perspective homography for the head overlay (true top-down); fall
+  // back to the affine quad only when no homography has been solved (Quick-scale).
+  const usingHeadHomo = isHead && !!headHomoUMat && !!texture
+  const headReady = isHead && !usingHeadHomo && !!effHeadMap && frameW > 0 && frameH > 0 && !!texture
   const fixedReady = !isHead && !!uMat && !!texture
-  const overlayReady = headReady || fixedReady
+  const overlayReady = headReady || fixedReady || usingHeadHomo
 
   // Image corners as pixel offsets from the frame centre, paired with the texture
   // uv that matches each (flipY=false → texture(0,0)=image top-left). Order builds
@@ -215,7 +239,44 @@ export function CameraBedPlane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [headReady, texture])
 
-  const material = isHead ? headMaterial : fixedMaterial
+  // Head PERSPECTIVE-homography material: the fixed homography shader + a live
+  // `uWorldOffset` (wpos − refHead + lensOffset) subtracted from the world coord,
+  // so the rectified top-down patch follows the head. Updated each frame.
+  const headHomoMaterial = useMemo(() => {
+    if (!usingHeadHomo || !headHomoUMat || !texture) return null
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uVideo: { value: texture },
+        uMat: { value: headHomoUMat },
+        uOpacity: { value: overlayOpacity },
+        uK: { value: distortK },
+        uWorldOffset: { value: new THREE.Vector2(0, 0) },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vWorld;
+        void main() { vWorld = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        precision highp float;
+        uniform sampler2D uVideo; uniform mat3 uMat; uniform float uOpacity; uniform float uK; uniform vec2 uWorldOffset;
+        varying vec2 vWorld;
+        ${UNDISTORT_GLSL}
+        void main() {
+          vec3 q = uMat * vec3(vWorld - uWorldOffset, 1.0);
+          if (abs(q.z) < 1e-8) discard;
+          vec2 uv = kmUndistort(q.xy / q.z, uK);
+          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+          gl_FragColor = vec4(texture2D(uVideo, vec2(uv.x, 1.0 - uv.y)).rgb, uOpacity);
+        }
+      `,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usingHeadHomo, headHomoUMat, texture])
+
+  const material = usingHeadHomo ? headHomoMaterial : isHead ? headMaterial : fixedMaterial
   useEffect(() => () => material?.dispose(), [material])
 
   // ── persistent bed mosaic (opt-in) ─────────────────────────────────────────
@@ -229,6 +290,8 @@ export function CameraBedPlane() {
   // position is supplied separately via worldOffset (negated).
   const mosaicMat = useMemo<THREE.Matrix3 | null>(() => {
     if (!isHead) return uMat
+    // Head + perspective homography: the same world→uv matrix the overlay uses.
+    if (headHomoUMat) return headHomoUMat
     if (!effHeadMap || !(frameW > 0) || !(frameH > 0)) return null
     const [a, b, c, d] = effHeadMap
     const det = a * d - b * c
@@ -240,7 +303,7 @@ export function CameraBedPlane() {
     const m = new THREE.Matrix3()
     m.set(i00 / frameW, i01 / frameW, 0.5, -i10 / frameH, -i11 / frameH, 0.5, 0, 0, 1)
     return m
-  }, [isHead, uMat, effHeadMap, frameW, frameH])
+  }, [isHead, uMat, headHomoUMat, effHeadMap, frameW, frameH])
 
   // Per-frame: push opacity + distortion, and (head) recompute the patch corners
   // from the live machine XY so it pans with the head, anchored on the bed.
@@ -253,10 +316,19 @@ export function CameraBedPlane() {
       m.uniforms.uOpacity.value = overlayOpacity
       m.uniforms.uK.value = distortK
     }
-    if (isHead && headGeom && effHeadMap && headMeshRef.current) {
-      const { x, y } = useMachine.getState().wpos
-      const ox = x + offsetMm[0]
-      const oy = y + offsetMm[1]
+    const { x: wx, y: wy } = useMachine.getState().wpos
+    if (usingHeadHomo) {
+      // Perspective top-down: world offset = (wpos − refHead) + lensOffset.
+      const ox = wx - headRefMm[0] + offsetMm[0]
+      const oy = wy - headRefMm[1] + offsetMm[1]
+      const u = matRef.current?.uniforms?.uWorldOffset?.value as THREE.Vector2 | undefined
+      if (u) u.set(ox, oy)
+      // Mosaic samples bed-offset-from-camera → feed −offset.
+      worldOffsetRef.current[0] = -ox
+      worldOffsetRef.current[1] = -oy
+    } else if (isHead && headGeom && effHeadMap && headMeshRef.current) {
+      const ox = wx + offsetMm[0]
+      const oy = wy + offsetMm[1]
       const [a, b, c, d] = effHeadMap
       const posAttr = headGeom.getAttribute('position') as THREE.BufferAttribute
       for (let i = 0; i < headCorners.length; i++) {
@@ -266,15 +338,11 @@ export function CameraBedPlane() {
       }
       posAttr.needsUpdate = true
       headGeom.computeBoundingSphere()
+      worldOffsetRef.current[0] = -ox
+      worldOffsetRef.current[1] = -oy
     }
-    // Live world offset for the mosaic compositor (mutated in place on a STABLE
-    // array so BedMosaic reads it each frame without re-rendering). Head: negate
-    // (wpos+lensOffset) — the mosaic maps a bed-offset-from-camera to uv. Fixed: 0.
-    if (isHead) {
-      const { x, y } = useMachine.getState().wpos
-      worldOffsetRef.current[0] = -(x + offsetMm[0])
-      worldOffsetRef.current[1] = -(y + offsetMm[1])
-    } else {
+    // Fixed camera: mosaic maps absolute world → uv, no offset.
+    if (!isHead) {
       worldOffsetRef.current[0] = 0
       worldOffsetRef.current[1] = 0
     }

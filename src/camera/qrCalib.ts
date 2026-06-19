@@ -304,6 +304,9 @@ export interface HeadMotionResult {
   /** Perspective image-px → bed-mm homography (length-9), or null if not solvable
    *  (needs ≥4 samples). Corrects keystone/tilt → true top-down. */
   headHomography: number[] | null
+  /** Machine work XY at calibration start — the homography consumer needs it:
+   *  bedAbs = applyHomography(H,p) + (wpos − refHead) + lensOffset. */
+  refHead: [number, number]
   frameW: number
   frameH: number
   /** How many jog samples decoded the marker (≥3 needed). */
@@ -441,7 +444,7 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
     const hg = solveHeadHomographyFromMotion(samples)
     const headHomography = hg ? [...hg] : null
     onProgress('done')
-    return { headMap, headHomography, frameW, frameH, used: samples.length }
+    return { headMap, headHomography, refHead: [startX, startY], frameW, frameH, used: samples.length }
   } catch (err) {
     grbl.jogCancel().catch(() => {})
     if (movedAway) grbl.send(`$J=G90 X${fmt(startX)} Y${fmt(startY)} F${fmt(feed)}`).catch(() => {})

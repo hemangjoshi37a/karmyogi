@@ -69,6 +69,10 @@ export interface CameraSlot {
    * when present: it also corrects keystone/tilt, so a side-angled camera renders
    * TOP-DOWN. A pixel maps to bed via `applyHomography(H,p) + wpos + offsetMm`. */
   headHomography: number[] | null
+  /** Machine work XY at the moment the homography was calibrated. The homography
+   *  maps a pixel to a bed point RELATIVE to this, so the live overlay adds
+   *  `(wpos − headRefMm)` to place it absolutely. [0,0] when not motion-calibrated. */
+  headRefMm: [number, number]
   /** Manual view-orientation override for a rotated mount: quarter turns (0..3 =
    *  0°/90°/180°/270°) applied ON TOP of the calibration. (Auto-align already
    *  detects orientation; this is for the Quick-QR method or a deliberate flip.) */
@@ -98,6 +102,7 @@ function emptySlot(): CameraSlot {
     rotationDeg: 0,
     headMap: null,
     headHomography: null,
+    headRefMm: [0, 0],
     headRotateQuarters: 0,
     headFlipH: false,
     headFlipV: false,

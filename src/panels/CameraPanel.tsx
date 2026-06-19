@@ -1919,6 +1919,7 @@ export function CameraPanel() {
         mount: 'head',
         headMap: res.headMap,
         headHomography: res.headHomography,
+        headRefMm: res.refHead,
         frameW: res.frameW,
         frameH: res.frameH,
       })

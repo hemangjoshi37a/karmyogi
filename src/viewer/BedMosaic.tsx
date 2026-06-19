@@ -109,6 +109,15 @@ const COMPOSITE_FRAG = /* glsl */ `
     // Sampled coordinate (matches CameraBedPlane: texture at (uv.x, 1-uv.y)).
     vec2 samp = vec2(uv.x, 1.0 - uv.y);
 
+    // EDGE GUARD: the outer band of the frame is the most motion-blurred and most
+    // lens-distorted, so never stamp it into the persistent mosaic — keep the
+    // (sharper) previous pixel there. Only the clean central region accumulates.
+    float em = 0.12;
+    if (samp.x < em || samp.x > 1.0 - em || samp.y < em || samp.y > 1.0 - em) {
+      gl_FragColor = vec4(prev, 1.0);
+      return;
+    }
+
     // Optional tool-region mask: skip painting inside the rect.
     if (uMaskRect.z > 0.0) {
       if (samp.x >= uMaskRect.x && samp.x <= uMaskRect.x + uMaskRect.z &&
