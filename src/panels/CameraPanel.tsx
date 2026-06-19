@@ -1915,17 +1915,16 @@ export function CameraPanel() {
         )
         return
       }
+      // NOTE: auto-flip + auto-offset were reverted — they were derived blind (the
+      // bridge shows the camera feed, not the 3D overlay, so they couldn't be
+      // verified) and broke placement. Orientation stays on the manual flip/rotate
+      // buttons (which worked); offset stays user-tunable. Re-enable once we have a
+      // real visual loop on the 3D view.
       calib.setCamera(calibSlot, {
         mount: 'head',
         headMap: res.headMap,
         headHomography: res.headHomography,
         headRefMm: res.refHead,
-        // Orientation auto-detected from the QR (overridable via the flip buttons).
-        headFlipH: res.autoFlipH,
-        headFlipV: res.autoFlipV,
-        headRotateQuarters: 0,
-        // Auto-solved lens offset so the overlay lands where the tool actually is.
-        offsetMm: res.offsetMm,
         frameW: res.frameW,
         frameH: res.frameH,
       })
