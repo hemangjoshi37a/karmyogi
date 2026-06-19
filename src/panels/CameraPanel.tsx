@@ -1924,6 +1924,8 @@ export function CameraPanel() {
         headFlipH: res.autoFlipH,
         headFlipV: res.autoFlipV,
         headRotateQuarters: 0,
+        // Auto-solved lens offset so the overlay lands where the tool actually is.
+        offsetMm: res.offsetMm,
         frameW: res.frameW,
         frameH: res.frameH,
       })

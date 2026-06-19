@@ -311,6 +311,10 @@ export interface HeadMotionResult {
    *  (so the overlay is upright without a hardcoded/manual flip). */
   autoFlipH: boolean
   autoFlipV: boolean
+  /** Lens offset (mm) auto-solved so the camera CENTRE maps to the head's own XY
+   *  — locks the overlay to the machine frame so it lands where the tool actually
+   *  is (otherwise the relative homography sits ~2·refHead away). Tunable after. */
+  offsetMm: [number, number]
   frameW: number
   frameH: number
   /** How many jog samples decoded the marker (≥3 needed). */
@@ -472,6 +476,7 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
     // any hardcoded/manual flip with one derived from how the QR actually looks.
     let autoFlipH = false
     let autoFlipV = false
+    let offsetMm: [number, number] = [0, 0]
     if (hg && refCorners) {
       const bTL = applyHomography(hg, refCorners[0])
       const bTR = applyHomography(hg, refCorners[1])
@@ -479,8 +484,26 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
       autoFlipH = bTR[0] - bTL[0] < 0 // QR's right maps to bed −X → mirrored
       autoFlipV = bBL[1] - bTL[1] > 0 // QR's top→bottom maps to bed +Y → flipped
     }
+    if (hg) {
+      // Lock the overlay to the machine frame: the head camera looks straight down,
+      // so its CENTRE pixel images the head's own XY. Solve offsetMm so
+      //   applyHomography(H, centre) + (wpos−refHead) + offsetMm = wpos  ⇒
+      //   offsetMm = refHead − applyHomography(H, centre).
+      const bc = applyHomography(hg, [frameW / 2, frameH / 2])
+      offsetMm = [startX - bc[0], startY - bc[1]]
+    }
     onProgress('done')
-    return { headMap, headHomography, refHead: [startX, startY], autoFlipH, autoFlipV, frameW, frameH, used: samples.length }
+    return {
+      headMap,
+      headHomography,
+      refHead: [startX, startY],
+      autoFlipH,
+      autoFlipV,
+      offsetMm,
+      frameW,
+      frameH,
+      used: samples.length,
+    }
   } catch (err) {
     grbl.jogCancel().catch(() => {})
     if (movedAway) grbl.send(`$J=G90 X${fmt(startX)} Y${fmt(startY)} F${fmt(feed)}`).catch(() => {})
