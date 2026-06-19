@@ -5,6 +5,9 @@ import {
   type KinematicsInfo,
 } from '../camera/autoCalib'
 import { generateCalibrationSheet, generateCornerMarkersPdf, registrationMarkers } from '../camera/calibPdf'
+import { useBedMosaic } from '../store/bedMosaic'
+import { useToolMask } from '../store/toolMask'
+import { ToolMaskEditor } from '../components/ToolMaskEditor'
 import {
   detectGridMarkers,
   calibrateCameraFromGrid,
@@ -439,6 +442,8 @@ export function CameraPanel() {
 
   // ---- bed-tracking stores ----
   const calib = useCameraCalib()
+  const mosaic = useBedMosaic()
+  const toolMask = useToolMask()
   const setVideoEl = useCameraLive((s) => s.setVideoEl)
   const bed = useBed()
   const machineConn = useMachine((s) => s.connection)
@@ -1910,7 +1915,13 @@ export function CameraPanel() {
         )
         return
       }
-      calib.setCamera(calibSlot, { mount: 'head', headMap: res.headMap, frameW: res.frameW, frameH: res.frameH })
+      calib.setCamera(calibSlot, {
+        mount: 'head',
+        headMap: res.headMap,
+        headHomography: res.headHomography,
+        frameW: res.frameW,
+        frameH: res.frameH,
+      })
       calib.setEnabled(true)
       setCalibMsg(
         t('cam.head.motionOk', 'Head camera aligned from motion ({n} samples) — direction & skew auto-corrected. Tune offset to place it.', {
@@ -3693,6 +3704,42 @@ export function CameraPanel() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Persistent bed mosaic (extend-the-view) + tool removal */}
+                  <div className="cam-subhead" style={{ marginTop: '0.6rem' }}>
+                    {t('cam.mosaic.title', 'Stitched bed view (experimental)')}
+                    <CamInfo
+                      label={t('cam.mosaic.title', 'Stitched bed view (experimental)')}
+                      text={t(
+                        'cam.mosaic.hint',
+                        'Accumulates the moving head-camera into a persistent top-down picture of the WHOLE bed — areas out of frame stay visible from when they were last seen. Mark the tool region below so the fixed soldering iron is excluded (the bed under it fills in from other views). Opt-in; toggle off if alignment looks wrong and tell me.',
+                      )}
+                    />
+                  </div>
+                  <div className="cam-row">
+                    <label className="cam-check" title={t('cam.mosaic.enableTip', 'Build a persistent stitched top-down bed image')}>
+                      <input type="checkbox" checked={mosaic.enabled} onChange={(e) => mosaic.setEnabled(e.target.checked)} />
+                      {t('cam.mosaic.enable', 'Stitch the bed view')}
+                    </label>
+                    <button
+                      type="button"
+                      className="cam-btn"
+                      disabled={!mosaic.enabled}
+                      onClick={() => mosaic.clear()}
+                      title={t('cam.mosaic.clearTip', 'Wipe the accumulated mosaic and start fresh')}
+                    >
+                      {t('cam.mosaic.clear', 'Clear')}
+                    </button>
+                  </div>
+                  <div className="cam-row">
+                    <label className="cam-check" title={t('cam.mask.enableTip', 'Exclude the fixed tool region from the stitched view')}>
+                      <input type="checkbox" checked={toolMask.enabled} onChange={(e) => toolMask.setEnabled(e.target.checked)} />
+                      {t('cam.mask.enable', 'Remove tool from stitched view')}
+                    </label>
+                  </div>
+                  {toolMask.enabled && (
+                    <ToolMaskEditor video={videoRefs.current[calibSlot]} />
+                  )}
                 </div>
               )
             })()}

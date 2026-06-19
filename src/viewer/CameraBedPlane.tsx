@@ -4,6 +4,9 @@ import * as THREE from 'three'
 import { useCameraCalib, useCameraLive, useSettings, useMachine } from '../store'
 import { useBed } from '../store/bed'
 import { invertMat3 } from '../core/cameraCalib'
+import { BedMosaic } from './BedMosaic'
+import { useBedMosaic } from '../store/bedMosaic'
+import { useToolMask, maskRectArray } from '../store/toolMask'
 
 /**
  * Live-camera overlay rectified onto the bed plane, for BOTH mount types:
@@ -215,6 +218,30 @@ export function CameraBedPlane() {
   const material = isHead ? headMaterial : fixedMaterial
   useEffect(() => () => material?.dispose(), [material])
 
+  // ── persistent bed mosaic (opt-in) ─────────────────────────────────────────
+  const mosaicEnabled = useBedMosaic((s) => s.enabled)
+  const toolMaskState = useToolMask()
+  const maskRect = useMemo(() => maskRectArray(toolMaskState), [toolMaskState])
+  const worldOffsetRef = useRef<[number, number]>([0, 0])
+  // world→texture-uv matrix in BedMosaic's convention. FIXED: the absolute uMat.
+  // HEAD: maps a bed-offset-from-camera → uv (v-row negated to match BedMosaic's
+  // (uv.x, 1-uv.y) sampling vs. the head overlay's direct-uv quad); the live head
+  // position is supplied separately via worldOffset (negated).
+  const mosaicMat = useMemo<THREE.Matrix3 | null>(() => {
+    if (!isHead) return uMat
+    if (!effHeadMap || !(frameW > 0) || !(frameH > 0)) return null
+    const [a, b, c, d] = effHeadMap
+    const det = a * d - b * c
+    if (Math.abs(det) < 1e-12) return null
+    const i00 = d / det
+    const i01 = -b / det
+    const i10 = -c / det
+    const i11 = a / det
+    const m = new THREE.Matrix3()
+    m.set(i00 / frameW, i01 / frameW, 0.5, -i10 / frameH, -i11 / frameH, 0.5, 0, 0, 1)
+    return m
+  }, [isHead, uMat, effHeadMap, frameW, frameH])
+
   // Per-frame: push opacity + distortion, and (head) recompute the patch corners
   // from the live machine XY so it pans with the head, anchored on the bed.
   const headMeshRef = useRef<THREE.Mesh | null>(null)
@@ -240,27 +267,58 @@ export function CameraBedPlane() {
       posAttr.needsUpdate = true
       headGeom.computeBoundingSphere()
     }
+    // Live world offset for the mosaic compositor (mutated in place on a STABLE
+    // array so BedMosaic reads it each frame without re-rendering). Head: negate
+    // (wpos+lensOffset) — the mosaic maps a bed-offset-from-camera to uv. Fixed: 0.
+    if (isHead) {
+      const { x, y } = useMachine.getState().wpos
+      worldOffsetRef.current[0] = -(x + offsetMm[0])
+      worldOffsetRef.current[1] = -(y + offsetMm[1])
+    } else {
+      worldOffsetRef.current[0] = 0
+      worldOffsetRef.current[1] = 0
+    }
   })
 
-  if (!enabled) return null
+  if (!enabled && !mosaicEnabled) return null
 
-  if (overlayReady && material) {
-    if (isHead && headGeom) {
-      return <mesh ref={headMeshRef} geometry={headGeom} material={material} />
+  // The persistent mosaic layer (self-gates on its own `enabled`); sits just below
+  // the live overlay. Sharing the live video + the same image→bed mapping.
+  const mosaic = (
+    <BedMosaic
+      videoTexture={texture}
+      imageToBedMat={mosaicMat}
+      worldOffset={worldOffsetRef.current}
+      maskRect={maskRect}
+    />
+  )
+
+  const overlay = (() => {
+    if (!enabled) return null
+    if (overlayReady && material) {
+      if (isHead && headGeom) {
+        return <mesh ref={headMeshRef} geometry={headGeom} material={material} />
+      }
+      return (
+        <mesh position={[0, 0, 0.02]} material={material}>
+          <planeGeometry args={[bedW, bedD]} />
+        </mesh>
+      )
     }
+    // Enabled but not usable yet: faint placeholder so the toggle is visible.
+    const accent = theme === 'dark' ? '#38bdf8' : '#0284c7'
     return (
-      <mesh position={[0, 0, 0.02]} material={material}>
+      <mesh position={[0, 0, 0.02]}>
         <planeGeometry args={[bedW, bedD]} />
+        <meshBasicMaterial color={accent} transparent opacity={0.12} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
     )
-  }
+  })()
 
-  // Enabled but not usable yet: faint placeholder so the toggle is visible.
-  const accent = theme === 'dark' ? '#38bdf8' : '#0284c7'
   return (
-    <mesh position={[0, 0, 0.02]}>
-      <planeGeometry args={[bedW, bedD]} />
-      <meshBasicMaterial color={accent} transparent opacity={0.12} depthWrite={false} side={THREE.DoubleSide} />
-    </mesh>
+    <>
+      {mosaic}
+      {overlay}
+    </>
   )
 }

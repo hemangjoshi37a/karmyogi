@@ -1,7 +1,8 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useSettings } from '../store'
+import { useSettings, useMachine } from '../store'
+import { useCameraCalib } from '../store/cameraCalib'
 
 /**
  * Variant tints the metalwork: `actual` = the live machine spindle (warm steel),
@@ -10,8 +11,15 @@ import { useSettings } from '../store'
 export type SpindleVariant = 'actual' | 'sim'
 
 interface SpindleToolProps {
-  /** Tool-tip position [x, y, z] in machine mm (Z-up). The bit tip sits here. */
-  position: [number, number, number]
+  /**
+   * Tool-tip position [x, y, z] in machine mm (Z-up). The bit tip sits here.
+   *
+   * OMIT it to make the marker track the machine LIVE: it then reads
+   * `useMachine.getState().wpos` (the GRBL work position, defaults to 0 when
+   * disconnected) every frame and adds the camera tool-offset, so it always
+   * shows where the physical tool is on the bed without any React re-renders.
+   */
+  position?: [number, number, number]
   /** Active cutter DIAMETER in mm. Drives the bit ⌀ and (loosely) its length. */
   toolDiameter?: number
   /** Visible? Default true. */
@@ -47,6 +55,14 @@ export function SpindleTool({
   const theme = useSettings((s) => s.theme)
   const dark = theme === 'dark'
   const spinRef = useRef<THREE.Group>(null)
+  const rootRef = useRef<THREE.Group>(null)
+
+  // When `position` is omitted, this marker is a LIVE tracker: it follows the
+  // machine's work position itself, reading the stores imperatively each frame
+  // (never via a React subscription — that would re-render on every GRBL
+  // status poll and thrash the scene). `wpos` defaults to {0,0,0} while
+  // disconnected, so this stays safe and simply parks at the origin.
+  const live = position === undefined
 
   // Honour reduced-motion: never auto-spin if the user asked for less motion.
   const reduceMotion = useMemo(
@@ -144,15 +160,29 @@ export function SpindleTool({
   }
 
   // Gentle spin while running/scrubbing. Allocation-free; reads the live ref.
+  // When in live mode, also pull the machine's work position + camera tool
+  // offset and drive the root group imperatively (no setState → no re-render).
   useFrame((_, delta) => {
     if (spinRef.current && spinning && !reduceMotion) {
       spinRef.current.rotation.y += delta * 22 // rad/s — a believable idle whirr
+    }
+    if (live && rootRef.current) {
+      const w = useMachine.getState().wpos
+      const off = useCameraCalib.getState().cameras[0]?.offsetMm ?? [0, 0]
+      // Lift the marker a hair above the bed/overlay so its contact halo and bit
+      // tip stay readable on top of the work plane (z≈0).
+      rootRef.current.position.set(
+        (w?.x ?? 0) + (off[0] ?? 0),
+        (w?.y ?? 0) + (off[1] ?? 0),
+        (w?.z ?? 0) + 0.02,
+      )
     }
   })
 
   if (!visible) return null
 
-  const [x, y, z] = position
+  // In live mode the tip sits at local origin and the group is moved each frame.
+  const [x, y, z] = position ?? [0, 0, 0]
   const d = dims
 
   // Stack everything along +Z from the tip (z=0 local) upward. coneGeometry's
@@ -166,7 +196,7 @@ export function SpindleTool({
   const bodyCenter = bodyBase + d.bodyLen / 2
 
   return (
-    <group position={[x, y, z]}>
+    <group ref={rootRef} position={[x, y, z]}>
       {/* Spinning assembly: bit + shank (+ a faint motion ring while running). */}
       <group ref={spinRef}>
         {/* Tool BIT — a tapered cone whose point sits exactly at the tip (z=0). */}

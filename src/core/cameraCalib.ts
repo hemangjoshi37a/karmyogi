@@ -1535,3 +1535,82 @@ export function parseMarkerPayload(
  * and applyHomography(invertMat3(Htrue), [30, 40]) = [(30-10)/2, (40-20)/2]
  * = [10, 10] = the original src[2]. Consistent.
  */
+
+// ---------------------------------------------------------------------------
+// Head-camera PERSPECTIVE map from motion (homography analogue of solveHeadMotionMap)
+// ---------------------------------------------------------------------------
+
+/**
+ * Solve the HEAD-camera image→bed PERSPECTIVE map (homography) from motion
+ * samples — the keystone-correcting analogue of {@link solveHeadMotionMap}.
+ *
+ * {@link solveHeadMotionMap} fits a 2×2 AFFINE pixel→bed map, which captures
+ * scale + rotation + shear + handedness but CANNOT model the perspective
+ * (keystone) distortion produced by a camera that images the bed at an ANGLE
+ * through a wide-angle lens. This function fits a full 3×3 homography instead.
+ *
+ * Derivation: a FIXED bed marker Q is imaged at pixel `p_i` while the head is at
+ * machine position `H_i`. The marker's bed coordinate (as seen relative to the
+ * head) shifts by exactly `−H_i` as the head moves, so the image→bed homography
+ * `Hb` we want satisfies
+ *
+ *     Hb(p_i) = Q_bed − H_i = const − H_i .
+ *
+ * The unknown constant translation `const` (the marker's absolute bed position)
+ * is fully absorbed by the homography's own translation degrees of freedom, so
+ * we may drop it and fit `Hb` mapping
+ *
+ *     src = p_i              (pixels)
+ *     dst = (−H_i.x, −H_i.y) (negated machine XY, mm)
+ *
+ * directly with the EXISTING normalized-DLT {@link solveHomography}. Because the
+ * fit is from REAL head motion, the result auto-corrects movement direction
+ * (including a MIRRORED image), rotation, scale, shear, AND perspective/keystone
+ * — no manual flipping or tilt entry.
+ *
+ * Consumer usage (perspective analogue of {@link solveHeadMotionMap}): map a
+ * pixel `p` to bed mm via `applyHomography(H, p)`, then for ABSOLUTE placement
+ * add the live head offset `(wpos − wposAtCalib)` plus a tunable lens offset:
+ *
+ *     bedAbs = applyHomography(H, p) + (wpos − wposAtCalib) + lensOffset .
+ *
+ * (The fitted `H` only resolves the perspective shape + orientation relative to
+ * the calibration pose; the additive terms place it absolutely on the bed,
+ * exactly as the affine map's `M⁻¹` does.)
+ *
+ * @param samples `{ machine:[x,y], px:[u,v] }` pairs from jogging the head to
+ *   known positions and reading the SAME fixed marker's pixel each time. Needs
+ *   ≥4 non-collinear head positions for a homography.
+ * @returns The row-major 3×3 image→bed homography `H`, or `null` if there are
+ *   fewer than 4 samples or the configuration is degenerate (collinear head
+ *   positions / singular DLT).
+ */
+export function solveHeadHomographyFromMotion(
+  samples: { machine: Vec2; px: Vec2 }[],
+): Mat3 | null {
+  if (samples.length < 4) return null;
+  const src: Vec2[] = samples.map((s) => [s.px[0], s.px[1]]);
+  const dst: Vec2[] = samples.map((s) => [-s.machine[0], -s.machine[1]]);
+  return solveHomography(src, dst);
+}
+
+/**
+ * Root-mean-square residual of a head-motion homography over its motion
+ * samples, in bed-mm. Reuses {@link reprojectionRMS} with the SAME src/dst
+ * convention as {@link solveHeadHomographyFromMotion}: `src = p_i` (pixels),
+ * `dst = (−H_i.x, −H_i.y)` (negated machine XY). A low value means the fitted
+ * perspective map explains the observed marker motion well.
+ *
+ * @param H Row-major 3×3 image→bed homography from
+ *   {@link solveHeadHomographyFromMotion}.
+ * @param samples The same `{ machine, px }` samples used to fit `H`.
+ * @returns The RMS residual in mm (0 for an empty sample set).
+ */
+export function headHomographyRms(
+  H: Mat3,
+  samples: { machine: Vec2; px: Vec2 }[],
+): number {
+  const src: Vec2[] = samples.map((s) => [s.px[0], s.px[1]]);
+  const dst: Vec2[] = samples.map((s) => [-s.machine[0], -s.machine[1]]);
+  return reprojectionRMS(H, src, dst);
+}

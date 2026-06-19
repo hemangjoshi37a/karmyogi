@@ -30,6 +30,7 @@ import {
   estimateGlobalShift,
   applyHomography,
   solveHeadMotionMap,
+  solveHeadHomographyFromMotion,
   type Vec2,
   type Mat3,
 } from '../core/cameraCalib'
@@ -300,6 +301,9 @@ export interface RoleDetectResult {
 export interface HeadMotionResult {
   /** Pixel-offset → bed-mm-offset 2×2 map [m00,m01,m10,m11] (auto orientation). */
   headMap: number[]
+  /** Perspective image-px → bed-mm homography (length-9), or null if not solvable
+   *  (needs ≥4 samples). Corrects keystone/tilt → true top-down. */
+  headHomography: number[] | null
   frameW: number
   frameH: number
   /** How many jog samples decoded the marker (≥3 needed). */
@@ -431,8 +435,13 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
     if (!headMap) {
       throw new Error('Calibration was degenerate (jog moves too small or collinear) — retry with the marker clearly in view.')
     }
+    // Also solve the PERSPECTIVE homography (keystone/tilt → true top-down). Needs
+    // ≥4 samples; null when not solvable, in which case the overlay falls back to
+    // the affine headMap.
+    const hg = solveHeadHomographyFromMotion(samples)
+    const headHomography = hg ? [...hg] : null
     onProgress('done')
-    return { headMap, frameW, frameH, used: samples.length }
+    return { headMap, headHomography, frameW, frameH, used: samples.length }
   } catch (err) {
     grbl.jogCancel().catch(() => {})
     if (movedAway) grbl.send(`$J=G90 X${fmt(startX)} Y${fmt(startY)} F${fmt(feed)}`).catch(() => {})
