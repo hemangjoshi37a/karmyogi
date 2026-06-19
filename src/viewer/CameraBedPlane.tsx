@@ -126,8 +126,34 @@ export function CameraBedPlane() {
       sy * w2i[3], sy * w2i[4], sy * w2i[5],
       w2i[6], w2i[7], w2i[8],
     )
-    return mat
-  }, [isHead, headHomography, frameW, frameH])
+    // Bake the MANUAL orientation overrides (quarter-turn + H/V flip) into the
+    // world→uv matrix, as a uv-space transform applied AFTER the homography. This
+    // makes the rotation/flip buttons work in top-down mode (and lets you cancel
+    // the homography↔sampler Y-convention flip), for both the overlay + the mosaic.
+    const q = ((headRotateQuarters % 4) + 4) % 4
+    const xform = new THREE.Matrix3() // identity
+    if (q !== 0) {
+      const ang = (q * Math.PI) / 2
+      const c = Math.cos(ang)
+      const s = Math.sin(ang)
+      // Rotate uv about its centre (0.5,0.5).
+      const rot = new THREE.Matrix3()
+      rot.set(c, -s, 0.5 - c * 0.5 + s * 0.5, s, c, 0.5 - s * 0.5 - c * 0.5, 0, 0, 1)
+      xform.premultiply(rot)
+    }
+    if (headFlipH) {
+      const f = new THREE.Matrix3()
+      f.set(-1, 0, 1, 0, 1, 0, 0, 0, 1) // uv.x → 1 - uv.x
+      xform.premultiply(f)
+    }
+    if (headFlipV) {
+      const f = new THREE.Matrix3()
+      f.set(1, 0, 0, 0, -1, 1, 0, 0, 1) // uv.y → 1 - uv.y
+      xform.premultiply(f)
+    }
+    // headHomoUMat = xform · (world→uv): apply the uv transform after the mapping.
+    return xform.multiply(mat)
+  }, [isHead, headHomography, frameW, frameH, headRotateQuarters, headFlipH, headFlipV])
 
   // --- live video texture ----------------------------------------------------
   const texture = useMemo(() => {

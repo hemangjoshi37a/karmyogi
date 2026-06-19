@@ -365,13 +365,26 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
   const d = Math.max(1, Math.abs(stepMm))
   const startX = m.wpos.x
   const startY = m.wpos.y
-  // Non-collinear bounded grid around the start (5 stops).
+  // Bounded grid around the start. A 13-stop pattern — a full 3×3 (corners give
+  // the marker wide field coverage, which conditions the perspective homography
+  // far better than a +-cross) PLUS a half-step inner ring — over-determines the
+  // 8-DOF homography for higher accuracy. Any stops where the marker isn't decoded
+  // are simply skipped; ≥4 good ones are enough.
+  const h = d / 2
   const offsets: Array<[number, number]> = [
     [0, 0],
     [d, 0],
+    [d, d],
     [0, d],
+    [-d, d],
     [-d, 0],
+    [-d, -d],
     [0, -d],
+    [d, -d],
+    [h, 0],
+    [0, h],
+    [-h, 0],
+    [0, -h],
   ]
   const samples: { machine: Vec2; px: Vec2 }[] = []
   let frameW = 0
