@@ -547,7 +547,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         // Vega + Mesa via ANGLE on Linux) are far less likely to drop the WebGL
         // context: no MSAA buffers, don't fail on a perf caveat, and cap the device
         // pixel ratio so the framebuffer never balloons on a HiDPI display.
-        gl={{ antialias: false, failIfMajorPerformanceCaveat: false, powerPreference: 'default' }}
+        gl={{
+          antialias: false,
+          failIfMajorPerformanceCaveat: false,
+          powerPreference: 'default',
+          // DEV: lets us snapshot the 3D canvas (toBlob) and POST it to the bridge
+          // so an agent can SEE the rendered overlay/twin, not just the camera feed.
+          preserveDrawingBuffer: import.meta.env.DEV,
+        }}
         dpr={[1, 1.5]}
         // WebGL CONTEXT-LOSS handling: a driver can drop the context (GPU OOM,
         // power-switch, tab backgrounding). preventDefault() asks the browser to
@@ -789,6 +796,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       )}
       {/* Live camera → 3D overlay (self-gated on the camera-calib store's `enabled`). */}
       <CameraBedPlane />
+      <ViewerBridge />
       <JobBox />
       <CameraQuatReporter />
       <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.1} />
@@ -1014,6 +1022,45 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     </div>
   )
 })
+
+/**
+ * DEV-ONLY: periodically snapshot the 3D canvas and POST it to the bridge
+ * (`/__camera_frame?name=viewer3d` → `.camera-frames/viewer3d.jpg`), so an agent
+ * on the server can SEE the rendered scene/overlay/twin — not just the raw camera
+ * feed — and verify changes visually. No-op (and stripped) in production.
+ */
+function ViewerBridge() {
+  const gl = useThree((s) => s.gl)
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    let alive = true
+    const tick = () => {
+      if (!alive) return
+      try {
+        gl.domElement.toBlob(
+          (blob) => {
+            if (!blob) return
+            fetch('/__camera_frame?name=viewer3d', {
+              method: 'POST',
+              headers: { 'content-type': 'image/jpeg' },
+              body: blob,
+            }).catch(() => {})
+          },
+          'image/jpeg',
+          0.85,
+        )
+      } catch {
+        /* ignore */
+      }
+    }
+    const id = window.setInterval(tick, 1500)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [gl])
+  return null
+}
 
 /**
  * Inside-Canvas helper that wires the imperative view controls to the live
