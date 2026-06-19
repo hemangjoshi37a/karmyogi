@@ -21,6 +21,15 @@ const MAX = 5000
 const clampDim = (v: number, fallback: number) =>
   Number.isFinite(v) ? Math.min(MAX, Math.max(MIN, v)) : fallback
 
+/** Which machine axes physically MOVE THE BED (vs. moving the head). On a
+ *  moving-bed machine, jogging these axes shifts the bed under a head-mounted
+ *  camera while the frame/structure stays put — used to segment the bed by motion. */
+export interface BedMotionAxes {
+  x: boolean
+  y: boolean
+  z: boolean
+}
+
 interface BedState {
   /** Work area width — X axis (mm). */
   width: number
@@ -28,10 +37,13 @@ interface BedState {
   depth: number
   /** Work area height — Z axis (mm). */
   height: number
+  /** Axes that move the bed (default: Y — typical bed-slinger). */
+  motionAxes: BedMotionAxes
   setWidth: (w: number) => void
   setDepth: (d: number) => void
   setHeight: (h: number) => void
   setSize: (size: { width?: number; depth?: number; height?: number }) => void
+  setMotionAxis: (axis: keyof BedMotionAxes, on: boolean) => void
 }
 
 export const useBed = create<BedState>()(
@@ -40,6 +52,7 @@ export const useBed = create<BedState>()(
       width: 300,
       depth: 200,
       height: 100,
+      motionAxes: { x: false, y: true, z: false },
       setWidth: (w) => set({ width: clampDim(w, get().width) }),
       setDepth: (d) => set({ depth: clampDim(d, get().depth) }),
       setHeight: (h) => set({ height: clampDim(h, get().height) }),
@@ -49,10 +62,11 @@ export const useBed = create<BedState>()(
           depth: depth === undefined ? s.depth : clampDim(depth, s.depth),
           height: height === undefined ? s.height : clampDim(height, s.height),
         })),
+      setMotionAxis: (axis, on) => set((s) => ({ motionAxes: { ...s.motionAxes, [axis]: on } })),
     }),
     {
       name: KEY,
-      partialize: (s) => ({ width: s.width, depth: s.depth, height: s.height }),
+      partialize: (s) => ({ width: s.width, depth: s.depth, height: s.height, motionAxes: s.motionAxes }),
     },
   ),
 )

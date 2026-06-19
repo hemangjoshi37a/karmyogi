@@ -3747,6 +3747,31 @@ export function CameraPanel() {
                   {toolMask.enabled && (
                     <ToolMaskEditor video={videoRefs.current[calibSlot]} />
                   )}
+                  <div className="cam-seg-row" style={{ marginTop: '0.4rem' }}>
+                    <span className="cam-seg-label">
+                      {t('cam.bed.motionAxis', 'Bed-moving axis')}
+                      <CamInfo
+                        label={t('cam.bed.motionAxis', 'Bed-moving axis')}
+                        text={t(
+                          'cam.bed.motionAxisHint',
+                          'Which machine axis physically moves the BED (not the head). On a moving-bed machine, jogging this axis shifts only the bed in a head-camera view, so we can detect the bed by motion. Default Y (bed-slinger).',
+                        )}
+                      />
+                    </span>
+                    <div className="cam-seg" role="group" aria-label={t('cam.bed.motionAxis', 'Bed-moving axis')}>
+                      {(['x', 'y', 'z'] as const).map((ax) => (
+                        <button
+                          key={ax}
+                          type="button"
+                          className={`cam-seg-btn${bed.motionAxes[ax] ? ' on' : ''}`}
+                          aria-pressed={bed.motionAxes[ax]}
+                          onClick={() => bed.setMotionAxis(ax, !bed.motionAxes[ax])}
+                        >
+                          {ax.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )
             })()}
