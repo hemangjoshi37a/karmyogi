@@ -131,7 +131,10 @@ export function CameraBedPlane() {
     // makes the rotation/flip buttons work in top-down mode (and lets you cancel
     // the homography↔sampler Y-convention flip), for both the overlay + the mosaic.
     const q = ((headRotateQuarters % 4) + 4) % 4
-    const xform = new THREE.Matrix3() // identity
+    // Orientation is auto-detected from the QR during Auto-align and stored in
+    // headFlipH/V/headRotateQuarters (see calibrateHeadFromMotion); the user can
+    // still override. No hardcoded convention flip here.
+    const xform = new THREE.Matrix3()
     if (q !== 0) {
       const ang = (q * Math.PI) / 2
       const c = Math.cos(ang)

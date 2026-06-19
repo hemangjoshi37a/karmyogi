@@ -1920,6 +1920,10 @@ export function CameraPanel() {
         headMap: res.headMap,
         headHomography: res.headHomography,
         headRefMm: res.refHead,
+        // Orientation auto-detected from the QR (overridable via the flip buttons).
+        headFlipH: res.autoFlipH,
+        headFlipV: res.autoFlipV,
+        headRotateQuarters: 0,
         frameW: res.frameW,
         frameH: res.frameH,
       })

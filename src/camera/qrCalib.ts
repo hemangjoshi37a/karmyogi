@@ -307,6 +307,10 @@ export interface HeadMotionResult {
   /** Machine work XY at calibration start — the homography consumer needs it:
    *  bedAbs = applyHomography(H,p) + (wpos − refHead) + lensOffset. */
   refHead: [number, number]
+  /** Orientation auto-detected from the QR's corner order through the homography
+   *  (so the overlay is upright without a hardcoded/manual flip). */
+  autoFlipH: boolean
+  autoFlipV: boolean
   frameW: number
   frameH: number
   /** How many jog samples decoded the marker (≥3 needed). */
@@ -387,6 +391,9 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
     [0, -h],
   ]
   const samples: { machine: Vec2; px: Vec2 }[] = []
+  // The QR's 4 corners (QR-frame order TL,TR,BR,BL) from a decoded stop — used to
+  // auto-detect the overlay orientation (flip) from the marker's known geometry.
+  let refCorners: Vec2[] | null = null
   let frameW = 0
   let frameH = 0
   let movedAway = false
@@ -412,7 +419,10 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
         frameW = frame.width
         frameH = frame.height
         const codes = await detectQrCodes(frame)
-        if (codes.length > 0) center = codes[0].center
+        if (codes.length > 0) {
+          center = codes[0].center
+          if (!refCorners && codes[0].corners.length >= 4) refCorners = codes[0].corners
+        }
       }
       if (center) {
         const here = useMachine.getState().wpos
@@ -456,8 +466,21 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
     // the affine headMap.
     const hg = solveHeadHomographyFromMotion(samples)
     const headHomography = hg ? [...hg] : null
+    // Auto-detect orientation from the QR's known corner order: map TL/TR/BL
+    // through the homography to bed coords. The QR's top→right must land along
+    // bed +X and top→bottom along bed −Y; if not, flag the flip(s). This replaces
+    // any hardcoded/manual flip with one derived from how the QR actually looks.
+    let autoFlipH = false
+    let autoFlipV = false
+    if (hg && refCorners) {
+      const bTL = applyHomography(hg, refCorners[0])
+      const bTR = applyHomography(hg, refCorners[1])
+      const bBL = applyHomography(hg, refCorners[3])
+      autoFlipH = bTR[0] - bTL[0] < 0 // QR's right maps to bed −X → mirrored
+      autoFlipV = bBL[1] - bTL[1] > 0 // QR's top→bottom maps to bed +Y → flipped
+    }
     onProgress('done')
-    return { headMap, headHomography, refHead: [startX, startY], frameW, frameH, used: samples.length }
+    return { headMap, headHomography, refHead: [startX, startY], autoFlipH, autoFlipV, frameW, frameH, used: samples.length }
   } catch (err) {
     grbl.jogCancel().catch(() => {})
     if (movedAway) grbl.send(`$J=G90 X${fmt(startX)} Y${fmt(startY)} F${fmt(feed)}`).catch(() => {})
