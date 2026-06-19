@@ -133,6 +133,9 @@ const DEADZONE = 0.15
 /** Analog press threshold (trigger axes / axis-half discrete bindings). */
 const PRESS_THRESHOLD = 0.5
 const JOG_FEED_FLOOR = 30
+/** Min interval (ms) between jog RE-ISSUES, so a fast stick sweep can't storm GRBL
+ * with cancel+re-issue every frame. A steady hold never re-issues at all. */
+const REISSUE_MIN_MS = 110
 
 function responseCurve(mag: number): number {
   if (mag <= DEADZONE) return 0
@@ -207,6 +210,10 @@ export function identify(pad: Gamepad): GamepadIds {
     product,
     nonStandard: pad.mapping !== 'standard',
   }
+}
+
+function nowMs(): number {
+  return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
 }
 
 function modalFocused(): boolean {
@@ -312,6 +319,7 @@ export function useGamepad(
     feedXY: 0,
     feedZ: 0,
   })
+  const lastReissueAt = useRef(0)
 
   const setEnabled = useCallback((v: boolean) => onEnabledChangeRef.current?.(v), [])
 
@@ -617,26 +625,43 @@ export function useGamepad(
       const movingXY = feedXY > 0
       const movingZ = feedZ > 0
       const moving = movingXY || movingZ
-      // Continuous jog (press-and-hold semantics): start a long move on the first
-      // deflected frame and let it run; only RE-ISSUE when the direction or feed
-      // changes meaningfully (hysteresis), so we don't flood GRBL. The sticks
-      // returning to center (below the deadzone) cancels it (0x85). This is the
-      // original, simple, reliable behavior.
-      const feedHyst = Math.max(20, (optionsRef.current.jogFeed || 1000) * 0.05)
+      // SMOOTH continuous jog, snappy on change. Hold the stick steady → ONE long
+      // move runs at constant speed (no per-increment chunking). We ONLY touch the
+      // machine when the stick actually MOVES: a direction/feed change past a small
+      // hysteresis cancels the current move (0x85, so the change is instant — no
+      // waiting for it to drain) and re-issues in the new direction/speed. Centering
+      // cancels. A steady hold therefore sends NOTHING and stays perfectly smooth.
+      // Re-issues are throttled so a fast sweep can't storm GRBL.
+      const feedHyst = Math.max(20, (optionsRef.current.jogFeed || 1000) * 0.06)
       const xyChanged =
-        Math.abs(nx - lastJog.current.x) > 0.05 ||
-        Math.abs(ny - lastJog.current.y) > 0.05 ||
+        Math.abs(nx - lastJog.current.x) > 0.06 ||
+        Math.abs(ny - lastJog.current.y) > 0.06 ||
         Math.abs(feedXY - lastJog.current.feedXY) > feedHyst
       const zChanged =
-        Math.abs(dz - lastJog.current.z) > 0.05 ||
+        Math.abs(dz - lastJog.current.z) > 0.06 ||
         Math.abs(feedZ - lastJog.current.feedZ) > feedHyst
       if (moving) {
-        if ((!jogActive.current || xyChanged) && movingXY) handlersRef.current.jogXY(nx, ny, feedXY)
-        if ((!jogActive.current || zChanged) && movingZ) handlersRef.current.jogZ(dz, feedZ)
-        jogActive.current = true
-        lastJog.current = { x: nx, y: ny, z: dz, feedXY, feedZ }
+        if (!jogActive.current) {
+          // First deflection → start the continuous move.
+          if (movingXY) handlersRef.current.jogXY(nx, ny, feedXY)
+          if (movingZ) handlersRef.current.jogZ(dz, feedZ)
+          jogActive.current = true
+          lastJog.current = { x: nx, y: ny, z: dz, feedXY, feedZ }
+          lastReissueAt.current = nowMs()
+        } else if (
+          ((movingXY && xyChanged) || (movingZ && zChanged)) &&
+          nowMs() - lastReissueAt.current >= REISSUE_MIN_MS
+        ) {
+          // Stick moved → flush the running move (0x85) and re-issue immediately.
+          handlersRef.current.cancelJog()
+          if (movingXY) handlersRef.current.jogXY(nx, ny, feedXY)
+          if (movingZ) handlersRef.current.jogZ(dz, feedZ)
+          lastJog.current = { x: nx, y: ny, z: dz, feedXY, feedZ }
+          lastReissueAt.current = nowMs()
+        }
+        // else: steady hold (or change still within the throttle window) → do NOTHING.
       } else if (jogActive.current) {
-        // Sticks returned to center → CANCEL the continuous jog (0x85).
+        // Stick returned to center → cancel the continuous move (0x85).
         handlersRef.current.cancelJog()
         jogActive.current = false
         lastJog.current = { x: 0, y: 0, z: 0, feedXY: 0, feedZ: 0 }

@@ -1,38 +1,54 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useCameraCalib, useCameraLive, useSettings } from '../store'
+import { useCameraCalib, useCameraLive, useSettings, useMachine } from '../store'
 import { useBed } from '../store/bed'
 import { invertMat3 } from '../core/cameraCalib'
 
 /**
- * Live overhead-camera overlay, rectified onto the bed plane.
+ * Live-camera overlay rectified onto the bed plane, for BOTH mount types:
  *
- * Reads the persisted calibration (`useCameraCalib`) and the transient live
- * <video> bus (`useCameraLive`). When the primary camera (slot 0) is both
- * streaming and calibrated, we draw a thin horizontal plane just above the bed
- * grid and texture it with a `THREE.VideoTexture` sampled through the
- * image←world homography, so the live frame appears geometrically aligned with
- * the work coordinate system (work zero centred, Z-up, mm).
+ *  • `fixed`  — overhead/stationary camera that sees the whole bed. The live
+ *    frame is sampled through the image←world homography so it appears pinned to
+ *    the work coordinate system.
  *
- * The plane geometry is centred at the origin and sized to the bed (W×D), so
- * the geometry's local (x, y) ARE the world (x, y) and can be fed straight into
- * the homography in the shader. Sampling math lives entirely in the GPU; the
- * only CPU work per-calibration is composing the texture-normalisation matrix.
+ *  • `head`   — camera bolted to the spindle, CLOSE to the bed. We draw a small
+ *    quad whose 4 corners are the image corners mapped to bed-mm via `headMap`
+ *    (the motion-calibrated pixel→bed 2×2 linear map: scale + rotation + shear +
+ *    handedness), translated to the LIVE machine XY each frame. So a fixed bed
+ *    feature stays anchored at its real place while the patch pans with the head,
+ *    in the correct direction (no inversion/mirror) and de-skewed. Falls back to
+ *    a pxPerMm+rotation map when only the single-QR measure was done.
  *
- * Falls back to a faint placeholder plane when enabled but not yet usable
- * (no calibration or no live video) so the toggle always has a visible effect.
- *
- * No business logic — purely a display driven by the two camera stores.
+ * A radial lens-distortion correction (`distortK`) straightens a wide-angle view.
  */
+
+const UNDISTORT_GLSL = /* glsl */ `
+  vec2 kmUndistort(vec2 uv, float k) {
+    vec2 c = vec2(0.5);
+    vec2 d = uv - c;
+    float r2 = dot(d, d);
+    return c + d * (1.0 + k * r2);
+  }
+`
+
 export function CameraBedPlane() {
   const theme = useSettings((s) => s.theme)
 
   const enabled = useCameraCalib((s) => s.enabled)
   const overlayOpacity = useCameraCalib((s) => s.overlayOpacity)
+  const mount = useCameraCalib((s) => s.cameras[0].mount)
   const H = useCameraCalib((s) => s.cameras[0].H)
   const frameW = useCameraCalib((s) => s.cameras[0].frameW)
   const frameH = useCameraCalib((s) => s.cameras[0].frameH)
+  const pxPerMm = useCameraCalib((s) => s.cameras[0].pxPerMm)
+  const rotationDeg = useCameraCalib((s) => s.cameras[0].rotationDeg)
+  const headMap = useCameraCalib((s) => s.cameras[0].headMap)
+  const headRotateQuarters = useCameraCalib((s) => s.cameras[0].headRotateQuarters)
+  const headFlipH = useCameraCalib((s) => s.cameras[0].headFlipH)
+  const headFlipV = useCameraCalib((s) => s.cameras[0].headFlipV)
+  const offsetMm = useCameraCalib((s) => s.cameras[0].offsetMm)
+  const distortK = useCameraCalib((s) => s.cameras[0].distortK)
 
   const video = useCameraLive((s) => s.videoEls[0])
   const epoch = useCameraLive((s) => s.epoch)
@@ -40,33 +56,56 @@ export function CameraBedPlane() {
   const bedW = useBed((s) => s.width)
   const bedD = useBed((s) => s.depth)
 
-  // --- world(x,y,1) -> texture(u*w, v*w, w) matrix --------------------------
-  // cameras[0].H maps IMAGE px -> world mm, so world -> image = inverse(H).
-  // Pre-multiply by diag(1/frameW, 1/frameH, 1) to land in [0..1] texture space.
-  // Row-major Mat3 (length 9) -> THREE.Matrix3 (column-major .set takes rows).
+  const isHead = mount === 'head'
+
+  // Effective head map (pixel-offset → bed-mm-offset). Prefer the motion-solved
+  // map; else build a scale+rotation map from the single-QR measure.
+  const effHeadMap = useMemo<number[] | null>(() => {
+    if (!isHead) return null
+    let base: number[] | null = null
+    if (headMap && headMap.length === 4) base = headMap
+    else if (pxPerMm && pxPerMm > 0) {
+      const r = (rotationDeg * Math.PI) / 180
+      const s = 1 / pxPerMm
+      base = [s * Math.cos(r), -s * Math.sin(r), s * Math.sin(r), s * Math.cos(r)]
+    }
+    if (!base) return null
+    // Compose the manual quarter-turn override: effMap = R(q·90°) · base, which
+    // rotates the displayed patch about its centre (fixes a rotated mount).
+    const q = ((headRotateQuarters % 4) + 4) % 4
+    let m = base
+    if (q !== 0) {
+      const ang = (q * Math.PI) / 2
+      const cs = Math.cos(ang)
+      const sn = Math.sin(ang)
+      const [a, b, c, d] = m
+      m = [cs * a - sn * c, cs * b - sn * d, sn * a + cs * c, sn * b + cs * d]
+    }
+    // Flips mirror the IMAGE: feed (∓du, ∓dv) to the map → negate the matching
+    // column. H = mirror left↔right (negate col 0), V = mirror top↔bottom (col 1).
+    if (headFlipH) m = [-m[0], m[1], -m[2], m[3]]
+    if (headFlipV) m = [m[0], -m[1], m[2], -m[3]]
+    return m
+  }, [isHead, headMap, pxPerMm, rotationDeg, headRotateQuarters, headFlipH, headFlipV])
+
+  // --- world→texture matrix (FIXED mount only) -------------------------------
   const uMat = useMemo(() => {
-    if (!H || H.length !== 9 || !(frameW > 0) || !(frameH > 0)) return null
+    if (isHead || !H || H.length !== 9 || !(frameW > 0) || !(frameH > 0)) return null
     const world2img = invertMat3(H)
     if (!world2img) return null
     const sx = 1 / frameW
     const sy = 1 / frameH
-    // S * world2img, S = diag(sx, sy, 1) scales rows 0 and 1.
     const m = [
       sx * world2img[0], sx * world2img[1], sx * world2img[2],
       sy * world2img[3], sy * world2img[4], sy * world2img[5],
       world2img[6], world2img[7], world2img[8],
     ]
     const mat = new THREE.Matrix3()
-    // Matrix3.set takes ROW-major arguments — matches our row-major layout.
-    mat.set(
-      m[0], m[1], m[2],
-      m[3], m[4], m[5],
-      m[6], m[7], m[8],
-    )
+    mat.set(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8])
     return mat
-  }, [H, frameW, frameH])
+  }, [isHead, H, frameW, frameH])
 
-  // --- live video texture, rebuilt whenever the stream (epoch) or el changes -
+  // --- live video texture ----------------------------------------------------
   const texture = useMemo(() => {
     if (!video) return null
     const tex = new THREE.VideoTexture(video)
@@ -74,91 +113,141 @@ export function CameraBedPlane() {
     tex.magFilter = THREE.LinearFilter
     tex.generateMipmaps = false
     tex.colorSpace = THREE.SRGBColorSpace
-    // We handle vertical orientation explicitly in the fragment shader, so keep
-    // the raw sampling space predictable.
     tex.flipY = false
     return tex
-    // epoch is intentionally a dep so a restarted stream rebuilds the texture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [video, epoch])
 
-  useEffect(() => {
-    return () => {
-      texture?.dispose()
-    }
-  }, [texture])
-
-  // Keep the texture's video playing whenever it is mounted.
+  useEffect(() => () => texture?.dispose(), [texture])
   useEffect(() => {
     if (!video) return
-    // play() can reject if not yet allowed; ignore — the panel owns the stream.
     void video.play().catch(() => {})
   }, [video, epoch])
 
-  const overlayReady = !!uMat && !!texture
+  const headReady = isHead && !!effHeadMap && frameW > 0 && frameH > 0 && !!texture
+  const fixedReady = !isHead && !!uMat && !!texture
+  const overlayReady = headReady || fixedReady
 
-  // --- shader material (only when we can actually sample the overlay) --------
-  const material = useMemo(() => {
-    if (!overlayReady) return null
+  // Image corners as pixel offsets from the frame centre, paired with the texture
+  // uv that matches each (flipY=false → texture(0,0)=image top-left). Order builds
+  // two triangles: TL, TR, BR, BL.
+  const headCorners = useMemo(() => {
+    const hw = frameW / 2
+    const hh = frameH / 2
+    return [
+      { off: [-hw, -hh], uv: [0, 0] }, // TL
+      { off: [hw, -hh], uv: [1, 0] }, // TR
+      { off: [hw, hh], uv: [1, 1] }, // BR
+      { off: [-hw, hh], uv: [0, 1] }, // BL
+    ]
+  }, [frameW, frameH])
+
+  // Head-mount geometry: 4 dynamic vertices (positions recomputed each frame from
+  // the live machine XY + headMap), static uv, two triangles.
+  const headGeom = useMemo(() => {
+    if (!headReady) return null
+    const g = new THREE.BufferGeometry()
+    const pos = new Float32Array(12) // 4 verts × xyz
+    const uv = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1])
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+    g.setIndex([0, 1, 2, 0, 2, 3])
+    return g
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headReady])
+  useEffect(() => () => headGeom?.dispose(), [headGeom])
+
+  // --- materials -------------------------------------------------------------
+  const fixedMaterial = useMemo(() => {
+    if (!fixedReady || !uMat || !texture) return null
     return new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
-      uniforms: {
-        uVideo: { value: texture },
-        uMat: { value: uMat },
-        uOpacity: { value: overlayOpacity },
-      },
+      uniforms: { uVideo: { value: texture }, uMat: { value: uMat }, uOpacity: { value: overlayOpacity }, uK: { value: distortK } },
       vertexShader: /* glsl */ `
         varying vec2 vWorld;
-        void main() {
-          // Plane is centred at the origin and sized to the bed, so the local
-          // x,y equal the world x,y (mm). Pass them straight to the fragment.
-          vWorld = position.xy;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
+        void main() { vWorld = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
       `,
       fragmentShader: /* glsl */ `
         precision highp float;
-        uniform sampler2D uVideo;
-        uniform mat3 uMat;
-        uniform float uOpacity;
+        uniform sampler2D uVideo; uniform mat3 uMat; uniform float uOpacity; uniform float uK;
         varying vec2 vWorld;
+        ${UNDISTORT_GLSL}
         void main() {
           vec3 q = uMat * vec3(vWorld, 1.0);
           if (abs(q.z) < 1e-8) discard;
-          vec2 uv = q.xy / q.z;
+          vec2 uv = kmUndistort(q.xy / q.z, uK);
           if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
-          // Texture has flipY=false; flip vertically so the bed reads upright.
-          vec3 rgb = texture2D(uVideo, vec2(uv.x, 1.0 - uv.y)).rgb;
-          gl_FragColor = vec4(rgb, uOpacity);
+          gl_FragColor = vec4(texture2D(uVideo, vec2(uv.x, 1.0 - uv.y)).rgb, uOpacity);
         }
       `,
     })
-    // overlayOpacity is pushed live in useFrame, not a rebuild dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlayReady, texture, uMat])
+  }, [fixedReady, texture, uMat])
 
-  useEffect(() => {
-    return () => {
-      material?.dispose()
-    }
-  }, [material])
+  const headMaterial = useMemo(() => {
+    if (!headReady || !texture) return null
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      uniforms: { uVideo: { value: texture }, uOpacity: { value: overlayOpacity }, uK: { value: distortK } },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        precision highp float;
+        uniform sampler2D uVideo; uniform float uOpacity; uniform float uK;
+        varying vec2 vUv;
+        ${UNDISTORT_GLSL}
+        void main() {
+          vec2 uv = kmUndistort(vUv, uK);
+          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+          gl_FragColor = vec4(texture2D(uVideo, uv).rgb, uOpacity);
+        }
+      `,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headReady, texture])
 
-  // Push the latest opacity from the store every frame (cheap; avoids rebuild).
+  const material = isHead ? headMaterial : fixedMaterial
+  useEffect(() => () => material?.dispose(), [material])
+
+  // Per-frame: push opacity + distortion, and (head) recompute the patch corners
+  // from the live machine XY so it pans with the head, anchored on the bed.
+  const headMeshRef = useRef<THREE.Mesh | null>(null)
   const matRef = useRef<THREE.ShaderMaterial | null>(null)
   matRef.current = material
   useFrame(() => {
     const m = matRef.current
-    if (m) m.uniforms.uOpacity.value = overlayOpacity
+    if (m) {
+      m.uniforms.uOpacity.value = overlayOpacity
+      m.uniforms.uK.value = distortK
+    }
+    if (isHead && headGeom && effHeadMap && headMeshRef.current) {
+      const { x, y } = useMachine.getState().wpos
+      const ox = x + offsetMm[0]
+      const oy = y + offsetMm[1]
+      const [a, b, c, d] = effHeadMap
+      const posAttr = headGeom.getAttribute('position') as THREE.BufferAttribute
+      for (let i = 0; i < headCorners.length; i++) {
+        const [du, dv] = headCorners[i].off
+        // bed-mm offset = headMap · (du,dv); world = machine XY + offset + that.
+        posAttr.setXYZ(i, ox + a * du + b * dv, oy + c * du + d * dv, 0.02)
+      }
+      posAttr.needsUpdate = true
+      headGeom.computeBoundingSphere()
+    }
   })
 
   if (!enabled) return null
 
-  // The plane already lies in the XY plane (PlaneGeometry is built in XY with
-  // +Z normal), which is exactly the bed plane in this Z-up scene — no rotation
-  // needed. Lift it just above the grid to avoid z-fighting.
   if (overlayReady && material) {
+    if (isHead && headGeom) {
+      return <mesh ref={headMeshRef} geometry={headGeom} material={material} />
+    }
     return (
       <mesh position={[0, 0, 0.02]} material={material}>
         <planeGeometry args={[bedW, bedD]} />
@@ -166,19 +255,12 @@ export function CameraBedPlane() {
     )
   }
 
-  // Enabled but not usable yet: faint placeholder so the toggle is visible and
-  // the user can see where the bed-plane overlay will land.
+  // Enabled but not usable yet: faint placeholder so the toggle is visible.
   const accent = theme === 'dark' ? '#38bdf8' : '#0284c7'
   return (
     <mesh position={[0, 0, 0.02]}>
       <planeGeometry args={[bedW, bedD]} />
-      <meshBasicMaterial
-        color={accent}
-        transparent
-        opacity={0.12}
-        depthWrite={false}
-        side={THREE.DoubleSide}
-      />
+      <meshBasicMaterial color={accent} transparent opacity={0.12} depthWrite={false} side={THREE.DoubleSide} />
     </mesh>
   )
 }

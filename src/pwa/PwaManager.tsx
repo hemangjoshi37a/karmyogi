@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { useProgram } from '../store'
+import { useProgram, useMachine } from '../store'
 import { useT } from '../i18n'
 import { Icon } from '../components/Icons'
 import { fetchBuildInfo, formatBytes, type BuildInfo } from './buildInfo'
@@ -50,7 +50,18 @@ type UpdatePhase = 'idle' | 'downloading' | 'ready' | 'waiting'
  */
 export function PwaManager() {
   const t = useT()
+  // "Busy" = a job is actively streaming to the controller, OR the machine is
+  // otherwise mid-motion (Run/Hold/Jog/Home — incl. a paused/feed-held job, an
+  // MDI move, or homing). We never apply a service-worker update / reload while
+  // busy, so an update can never interrupt a running cut.
   const streaming = useProgram((s) => s.streaming)
+  const machineState = useMachine((s) => s.state)
+  const machineBusy =
+    machineState === 'Run' ||
+    machineState === 'Hold' ||
+    machineState === 'Jog' ||
+    machineState === 'Home'
+  const busy = streaming || machineBusy
 
   // ---- update state ----
   const [phase, setPhase] = useState<UpdatePhase>(DEMO ? 'downloading' : 'idle')
@@ -129,20 +140,29 @@ export function PwaManager() {
   updateFnRef.current = updateServiceWorker
   setUpdater(updateServiceWorker)
 
-  // Apply (skipWaiting + reload) as soon as the download is ready AND the machine
-  // is idle. While a job streams we sit in 'waiting' and re-check when it ends.
-  useEffect(() => {
-    if (DEMO || appliedRef.current) return
-    if (phase !== 'ready' && phase !== 'waiting') return
-    if (streaming) {
-      setPhase('waiting')
-      return
-    }
+  // Apply the staged update: skipWaiting + reload onto the new worker. Guarded so
+  // it can NEVER run while a job is streaming / the machine is mid-motion — both
+  // the auto-apply effect and the explicit "Reload now" button funnel through here.
+  const applyUpdate = useCallback(() => {
+    if (appliedRef.current) return
     appliedRef.current = true
     const fn = updateFnRef.current
     if (fn) void fn(true)
     else window.location.reload()
-  }, [phase, streaming])
+  }, [])
+
+  // Auto-apply as soon as the download is ready AND the machine is idle. While a
+  // job streams (or the machine is otherwise busy) we sit in 'waiting' and
+  // re-check when it goes idle, so the update applies the moment the job ends.
+  useEffect(() => {
+    if (DEMO || appliedRef.current) return
+    if (phase !== 'ready' && phase !== 'waiting') return
+    if (busy) {
+      setPhase('waiting')
+      return
+    }
+    applyUpdate()
+  }, [phase, busy, applyUpdate])
 
   // ---- install reminder state ----
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null)
@@ -198,6 +218,10 @@ export function PwaManager() {
         ? t('pwa.update.ready', 'Finishing update…')
         : t('pwa.update.downloading', 'Updating karmyogi')
 
+  // The held-for-job card offers an explicit, opt-in "Reload now" so the user can
+  // apply during a long pause if they choose — we never reload on our own mid-job.
+  const showWaitingActions = phase === 'waiting'
+
   return (
     <div className="km-pwa-stack" aria-live="polite">
       {showUpdate && (
@@ -210,7 +234,7 @@ export function PwaManager() {
               <strong>{updateTitle}</strong>
               <span className="km-pwa-sub">
                 {phase === 'waiting'
-                  ? t('pwa.update.heldForJob', 'Will apply when the machine is idle')
+                  ? t('pwa.update.heldForJob', 'Applies after the job — or reload now')
                   : t('pwa.update.subtitle', 'Getting the newest version')}
               </span>
             </div>
@@ -223,20 +247,42 @@ export function PwaManager() {
               <Icon name="close" size={14} />
             </button>
           </div>
-          <div className="km-pwa-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-            <div
-              className={'km-pwa-bar-fill' + (total > 0 ? '' : ' km-pwa-bar-indet')}
-              style={total > 0 ? { width: `${pct}%` } : undefined}
-            />
-          </div>
-          <div className="km-pwa-meta">
-            <span className="km-pwa-pct">{total > 0 ? `${pct}%` : t('pwa.update.preparing', 'Preparing…')}</span>
-            {total > 0 && (
-              <span className="km-pwa-bytes">
-                {formatBytes(received)} / {formatBytes(total)}
-              </span>
-            )}
-          </div>
+          {showWaitingActions ? (
+            <div className="km-pwa-actions">
+              <button className="km-pwa-btn km-pwa-btn-primary" onClick={applyUpdate}>
+                <Icon name="download" size={15} />
+                {t('pwa.update.reloadNow', 'Reload now')}
+              </button>
+              <button className="km-pwa-btn" onClick={() => setUpdateHidden(true)}>
+                {t('pwa.update.afterJob', 'After the job')}
+              </button>
+            </div>
+          ) : (
+            <>
+              <div
+                className="km-pwa-bar"
+                role="progressbar"
+                aria-valuenow={pct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className={'km-pwa-bar-fill' + (total > 0 ? '' : ' km-pwa-bar-indet')}
+                  style={total > 0 ? { width: `${pct}%` } : undefined}
+                />
+              </div>
+              <div className="km-pwa-meta">
+                <span className="km-pwa-pct">
+                  {total > 0 ? `${pct}%` : t('pwa.update.preparing', 'Preparing…')}
+                </span>
+                {total > 0 && (
+                  <span className="km-pwa-bytes">
+                    {formatBytes(received)} / {formatBytes(total)}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 

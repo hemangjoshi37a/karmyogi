@@ -641,8 +641,9 @@ export function ControllerPanel() {
   gamepadHandlers.current = {
     jogXY: (dx, dy, feed) => {
       if (!grbl.isConnected) return
-      // dx,dy is the normalized stick vector; feed is magnitude-scaled. Reuses
-      // the same continuous-jog path as press-and-hold, just parameterized.
+      // dx,dy is the normalized stick vector; feed is magnitude-scaled. One long
+      // continuous move that runs smoothly until the hook re-issues it (on a stick
+      // change) or cancels it (on release) — same path as press-and-hold.
       doJogHold({ x: dx, y: dy }, feed)
     },
     jogZ: (dz, feed) => {

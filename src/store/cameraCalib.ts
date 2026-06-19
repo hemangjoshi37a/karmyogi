@@ -20,16 +20,29 @@ import type { Mat3, Rect } from '../core/cameraCalib'
 
 const KEY = 'karmyogi.camera'
 
+/**
+ * Camera mount type.
+ *  • `fixed`     — overhead/stationary camera that sees the whole bed; calibrated
+ *                  by a single image→bed-mm homography (4 corners / motion / grid).
+ *  • `head`      — camera bolted to the spindle/head; CLOSE to the bed so it only
+ *                  sees a small patch and CANNOT see all 4 corners at once. Its
+ *                  view is placed on the bed at the LIVE machine XY (it pans with
+ *                  the head), scaled by px-per-mm + rotation, with a lens offset.
+ */
+export type CameraMount = 'fixed' | 'head'
+
 /** One calibrated camera slot. */
 export interface CameraSlot {
   /** Chosen `MediaDeviceInfo.deviceId` (re-acquired on reload), or '' if unset. */
   deviceId: string
   /** Human label for the picker. */
   label: string
+  /** How the camera is mounted (drives which calibration + overlay model is used). */
+  mount: CameraMount
   /**
    * Image-pixel → bed-mm homography (length-9 row-major Mat3), or null until
-   * calibrated. Solved from QR `TARGET` corners (recommended) or clicked bed
-   * corners (markerless fallback) via core `solveHomography`.
+   * calibrated. Used by the `fixed` mount. Solved from QR `TARGET` corners,
+   * clicked bed corners, or machine motion via core `solveHomography`.
    */
   H: number[] | null
   /** Reprojection RMS in mm of the last solve (calibration quality); null if uncalibrated. */
@@ -37,10 +50,53 @@ export interface CameraSlot {
   /** Frame size (px) the homography was solved at — overlay sampling needs it. */
   frameW: number
   frameH: number
+  // ── head-mount calibration (ignored when mount==='fixed') ──────────────────
+  /** Image scale: pixels per millimetre of bed, at the bed plane. null = uncalibrated. */
+  pxPerMm: number | null
+  /** Camera rotation about the optical axis relative to the bed +X, degrees.
+   *  (Used by the simple single-QR head calibration when `headMap` is null.) */
+  rotationDeg: number
+  /**
+   * Head-camera pixel-offset → bed-mm-offset 2×2 linear map `[m00,m01,m10,m11]`
+   * (= M⁻¹ from {@link solveHeadMotionMap}). Solved by jogging the head and
+   * tracking a fixed marker, so it encodes scale + rotation + shear + handedness
+   * (mirror) automatically — the overlay orients the live patch with this. null
+   * until motion-calibrated (then it supersedes pxPerMm + rotationDeg). */
+  headMap: number[] | null
+  /** Manual view-orientation override for a rotated mount: quarter turns (0..3 =
+   *  0°/90°/180°/270°) applied ON TOP of the calibration. (Auto-align already
+   *  detects orientation; this is for the Quick-QR method or a deliberate flip.) */
+  headRotateQuarters: number
+  /** Manual horizontal flip (mirror left↔right) of the head overlay. */
+  headFlipH: boolean
+  /** Manual vertical flip (mirror top↔bottom) of the head overlay. */
+  headFlipV: boolean
+  /** Lens-centre offset on the bed relative to the tool/work XY, mm [dx,dy]
+   *  (parallax between the camera's optical axis and the spindle). */
+  offsetMm: [number, number]
+  /** Radial (barrel/pincushion) lens-distortion coefficient k1 applied at render
+   *  to straighten a wide-angle view. 0 = none; >0 corrects barrel distortion. */
+  distortK: number
 }
 
 function emptySlot(): CameraSlot {
-  return { deviceId: '', label: '', H: null, rmsMm: null, frameW: 0, frameH: 0 }
+  return {
+    deviceId: '',
+    label: '',
+    mount: 'fixed',
+    H: null,
+    rmsMm: null,
+    frameW: 0,
+    frameH: 0,
+    pxPerMm: null,
+    rotationDeg: 0,
+    headMap: null,
+    headRotateQuarters: 0,
+    headFlipH: false,
+    headFlipV: false,
+    offsetMm: [0, 0],
+    distortK: 0,
+  }
 }
 
 interface CameraCalibState {
@@ -97,12 +153,14 @@ export const useCameraCalib = create<CameraCalibState>()(
       setJobRect: (r) => set({ jobRect: r }),
       setJobHeight: (mm) => set({ jobHeightMm: mm == null || Number.isFinite(mm) ? mm : get().jobHeightMm }),
       isCalibrated: () => {
-        const h = get().cameras[0].H
-        return Array.isArray(h) && h.length === 9
+        const c = get().cameras[0]
+        if (c.mount === 'head') return Number.isFinite(c.pxPerMm) && (c.pxPerMm ?? 0) > 0
+        return Array.isArray(c.H) && c.H.length === 9
       },
     }),
     {
       name: KEY,
+      version: 2,
       // Persist calibration + the toggle; the live stream/reference frame are transient.
       partialize: (s) => ({
         enabled: s.enabled,
@@ -111,6 +169,18 @@ export const useCameraCalib = create<CameraCalibState>()(
         jobRect: s.jobRect,
         jobHeightMm: s.jobHeightMm,
       }),
+      // Backfill the head-mount fields onto calibrations saved before they existed
+      // (older persisted slots only have deviceId/label/H/rms/frame*).
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<CameraCalibState>
+        const fix = (c: Partial<CameraSlot> | undefined): CameraSlot => ({ ...emptySlot(), ...(c ?? {}) })
+        const cams = p.cameras
+        const cameras: [CameraSlot, CameraSlot] = [
+          fix(cams?.[0]),
+          fix(cams?.[1]),
+        ]
+        return { ...current, ...p, cameras }
+      },
     },
   ),
 )

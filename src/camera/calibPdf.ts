@@ -287,6 +287,95 @@ export async function generateCalibrationSheet(
   }
 }
 
+/**
+ * Generate a print-ready A4 PDF of the FOUR low-density bed-corner markers
+ * (`TL`/`TR`/`BL`/`BR`, each a version-1 QR → big, robust modules that decode
+ * even soft / wide-angle / small-in-frame, unlike the dense verbose markers).
+ * Laid out 2×2 with large labels, a print-scale ruler, and instructions.
+ */
+export async function generateCornerMarkersPdf(sizeMm = 70): Promise<Blob> {
+  const pxPerMm = DPI / MM_PER_INCH
+  const W = Math.round(A4_W_MM * pxPerMm)
+  const H = Math.round(A4_H_MM * pxPerMm)
+  const canvas = document.createElement('canvas')
+  canvas.width = W
+  canvas.height = H
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not get a 2D canvas context for the marker sheet.')
+  const mm = (v: number) => v * pxPerMm
+
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = '#000000'
+  ctx.textBaseline = 'top'
+  ctx.font = `${Math.round(mm(5))}px sans-serif`
+  ctx.fillText('karmyogi · bed corner markers', mm(12), mm(8))
+  ctx.font = `${Math.round(mm(3.2))}px sans-serif`
+  ctx.fillStyle = '#444444'
+  ctx.fillText('Print at 100% (NO fit-to-page), ideally a laser printer. Cut out;', mm(12), mm(15))
+  ctx.fillText('tape one at each bed corner — TL/TR/BL/BR. Keep flat + glare-free.', mm(12), mm(19.5))
+
+  // 50 mm scale ruler.
+  const rulerY = mm(A4_H_MM - 14)
+  ctx.strokeStyle = '#000000'
+  ctx.lineWidth = Math.max(1, mm(0.3))
+  ctx.beginPath()
+  ctx.moveTo(mm(12), rulerY)
+  ctx.lineTo(mm(62), rulerY)
+  ctx.stroke()
+  for (let i = 0; i <= 50; i += 10) {
+    ctx.beginPath()
+    ctx.moveTo(mm(12 + i), rulerY - mm(2))
+    ctx.lineTo(mm(12 + i), rulerY + mm(2))
+    ctx.stroke()
+  }
+  ctx.fillStyle = '#000000'
+  ctx.font = `${Math.round(mm(3))}px sans-serif`
+  ctx.fillText('0', mm(12), rulerY + mm(3))
+  ctx.fillText('50 mm — measure to verify print scale', mm(64), rulerY - mm(1))
+
+  // 2×2 grid of markers, centred horizontally.
+  const labels = ['TL', 'TR', 'BL', 'BR']
+  const gapMm = 24
+  const totalW = sizeMm * 2 + gapMm
+  const startX = (A4_W_MM - totalW) / 2
+  const startY = 30
+  const rowGapMm = 30
+  for (let i = 0; i < labels.length; i++) {
+    const r = Math.floor(i / 2)
+    const c = i % 2
+    const matrix = encodeQr(labels[i])
+    const n = matrix.size
+    const xMm = startX + c * (sizeMm + gapMm)
+    const yMm = startY + r * (sizeMm + rowGapMm)
+    const sizePx = mm(sizeMm)
+    const left = mm(xMm)
+    const top = mm(yMm)
+    const cell = sizePx / n
+    ctx.fillStyle = '#000000'
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        if (matrix.get(x, y)) {
+          ctx.fillRect(Math.round(left + x * cell), Math.round(top + y * cell), Math.ceil(cell), Math.ceil(cell))
+        }
+      }
+    }
+    ctx.fillStyle = '#000000'
+    ctx.font = `700 ${Math.round(mm(9))}px monospace`
+    ctx.textAlign = 'center'
+    ctx.fillText(labels[i], mm(xMm) + sizePx / 2, top + sizePx + mm(2))
+    ctx.textAlign = 'left'
+  }
+
+  const jpeg = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.95),
+  )
+  if (!jpeg) throw new Error('Could not rasterize the marker sheet.')
+  const jpegBytes = new Uint8Array(await jpeg.arrayBuffer())
+  const pdf = wrapJpegInPdf(jpegBytes, W, H, A4_W_MM, A4_H_MM)
+  return new Blob([new Uint8Array(pdf)], { type: 'application/pdf' })
+}
+
 // ---------------------------------------------------------------------------
 // Minimal single-page PDF wrapping a JPEG (DCTDecode) at A4 size
 // ---------------------------------------------------------------------------
@@ -469,8 +558,10 @@ class BitBuffer {
   }
 }
 
-/** Encode `text` (ASCII bytes) into a QR module matrix (level M, mask 0). */
-function encodeQr(text: string): QrMatrix {
+/** Encode `text` (ASCII bytes) into a QR module matrix (level M, mask 0).
+ * Exported so the QR-decode fallback can be round-trip tested against the exact
+ * codes this module prints onto the calibration sheet. */
+export function encodeQr(text: string): QrMatrix {
   const bytes: number[] = []
   for (let i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i) & 0xff)
   const version = pickVersion(bytes.length)

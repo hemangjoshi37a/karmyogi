@@ -29,6 +29,7 @@ import {
   parseMarkerPayload,
   estimateGlobalShift,
   applyHomography,
+  solveHeadMotionMap,
   type Vec2,
   type Mat3,
 } from '../core/cameraCalib'
@@ -38,9 +39,11 @@ import {
   videoToGray,
   detectQrCodes,
   barcodeDetectorAvailable,
+  qrDecodeAvailable,
+  zxingStatus,
 } from './bedTracking'
 
-export { barcodeDetectorAvailable }
+export { barcodeDetectorAvailable, qrDecodeAvailable }
 
 // ---------------------------------------------------------------------------
 // Marker detection
@@ -63,8 +66,8 @@ export async function detectGridMarkers(
 ): Promise<{ markers: DetectedGridMarker[]; frameW: number; frameH: number }> {
   const frame = captureFrame(video)
   if (!frame) return { markers: [], frameW: 0, frameH: 0 }
-  if (!barcodeDetectorAvailable()) return { markers: [], frameW: frame.width, frameH: frame.height }
-
+  // No BarcodeDetector gate here: detectQrCodes() falls back to the pure-JS
+  // decoder, so grid detection works on every platform/camera.
   const codes = await detectQrCodes(frame)
   const markers: DetectedGridMarker[] = []
   for (const code of codes) {
@@ -287,6 +290,154 @@ export interface RoleDetectResult {
   headSlot: 0 | 1 | null
   /** Which slot index is the stationary external camera, or null if undecided. */
   stationarySlot: 0 | 1 | null
+}
+
+// ---------------------------------------------------------------------------
+// Head-camera motion calibration (jog the head, track a fixed marker)
+// ---------------------------------------------------------------------------
+
+/** Result of {@link calibrateHeadFromMotion}. */
+export interface HeadMotionResult {
+  /** Pixel-offset → bed-mm-offset 2×2 map [m00,m01,m10,m11] (auto orientation). */
+  headMap: number[]
+  frameW: number
+  frameH: number
+  /** How many jog samples decoded the marker (≥3 needed). */
+  used: number
+}
+
+/** Options for {@link calibrateHeadFromMotion}. */
+export interface HeadMotionOptions {
+  /** The slot's live <video>. */
+  video: HTMLVideoElement | null
+  /** Jog radius (mm) for the calibration moves around the start position. */
+  stepMm: number
+  /** Jog feed (mm/min). */
+  feed: number
+  /** Settle delay (ms) after each move before sampling the frame. */
+  settleMs: number
+  signal: AbortSignal
+  onProgress: (code: 'moving' | 'sampling' | 'returning' | 'solving' | 'done', i?: number, n?: number) => void
+}
+
+/** Wait until the machine is Idle within `tol` mm of (tx,ty), or time out. */
+async function waitForArrivalXY(
+  tx: number,
+  ty: number,
+  signal: AbortSignal,
+): Promise<void> {
+  const start = Date.now()
+  for (;;) {
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+    const s = useMachine.getState()
+    if (s.state === 'Alarm') throw new Error('Machine entered Alarm during calibration.')
+    const near = Math.hypot(s.wpos.x - tx, s.wpos.y - ty) < ARRIVE_TOL_MM
+    if (near && s.state === 'Idle') return
+    if (Date.now() - start > MOVE_TIMEOUT_MS) throw new Error('Timed out moving during head calibration.')
+    await delay(POLL_MS, signal)
+  }
+}
+
+/**
+ * Fully-automatic HEAD-camera calibration from machine motion. Jogs the head to
+ * a small bounded grid around the start position, reads a FIXED marker's pixel
+ * centre at each stop, and solves the pixel→bed linear map ({@link
+ * solveHeadMotionMap}) — which auto-corrects movement direction (incl. a mirrored
+ * image), rotation, scale, and shear-skew. Returns to start when done.
+ *
+ * SAFETY: only bounded, cancellable absolute XY jogs (Z untouched); gated on
+ * connected + Idle; on any throw/abort the jog is cancelled and a best-effort
+ * return-to-start is issued. Requires a marker decodable in EVERY sampled frame.
+ */
+export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<HeadMotionResult | null> {
+  const { video, stepMm, feed, settleMs, signal, onProgress } = opts
+  const m = useMachine.getState()
+  if (m.connection !== 'connected') throw new Error('Machine is not connected.')
+  if (m.state === 'Alarm') throw new Error('Machine is in Alarm — unlock it first.')
+  if (m.state !== 'Idle' && m.state !== 'Jog') throw new Error(`Machine must be Idle (state: ${m.state}).`)
+  const d = Math.max(1, Math.abs(stepMm))
+  const startX = m.wpos.x
+  const startY = m.wpos.y
+  // Non-collinear bounded grid around the start (5 stops).
+  const offsets: Array<[number, number]> = [
+    [0, 0],
+    [d, 0],
+    [0, d],
+    [-d, 0],
+    [0, -d],
+  ]
+  const samples: { machine: Vec2; px: Vec2 }[] = []
+  let frameW = 0
+  let frameH = 0
+  let movedAway = false
+  try {
+    for (let i = 0; i < offsets.length; i++) {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+      const tx = startX + offsets[i][0]
+      const ty = startY + offsets[i][1]
+      onProgress('moving', i, offsets.length)
+      await grbl.send(`$J=G90 G21 X${fmt(tx)} Y${fmt(ty)} F${fmt(feed)}`)
+      grbl.realtime(0x3f)
+      movedAway = true
+      await waitForArrivalXY(tx, ty, signal)
+      if (settleMs > 0) await delay(settleMs, signal)
+      onProgress('sampling', i, offsets.length)
+      // Retry the decode a few times — a just-settled frame can still be a touch
+      // blurred, and the marker may need a moment to come back into focus.
+      let center: Vec2 | null = null
+      for (let attempt = 0; attempt < 3 && !center; attempt++) {
+        if (attempt > 0) await delay(160, signal)
+        const frame = captureFrame(video)
+        if (!frame) continue
+        frameW = frame.width
+        frameH = frame.height
+        const codes = await detectQrCodes(frame)
+        if (codes.length > 0) center = codes[0].center
+      }
+      if (center) {
+        const here = useMachine.getState().wpos
+        samples.push({ machine: [here.x, here.y], px: center })
+      }
+    }
+    onProgress('returning')
+    await grbl.send(`$J=G90 G21 X${fmt(startX)} Y${fmt(startY)} F${fmt(feed)}`)
+    grbl.realtime(0x3f)
+    await waitForArrivalXY(startX, startY, signal)
+    movedAway = false
+
+    onProgress('solving')
+    // Specific failure reasons (the panel shows err.message) so the operator
+    // knows whether it's detection, machine motion, or geometry.
+    if (samples.length < 3) {
+      const zx = zxingStatus()
+      const hint =
+        zx.state === 'error'
+          ? ` — the QR decoder FAILED to load (${zx.error || 'wasm error'}); hard-reload (Ctrl+Shift+R) to clear a stale cached build`
+          : zx.state === 'idle'
+            ? ' — the QR decoder never ran (stale cached build?); hard-reload (Ctrl+Shift+R)'
+            : ' — keep ONE marker sharp and fully in view across the whole jog (centre it so it cannot drift out of frame)'
+      throw new Error(`Marker decoded at only ${samples.length}/${offsets.length} jog stops${hint}.`)
+    }
+    let spanMm = 0
+    for (const a of samples)
+      for (const b of samples)
+        spanMm = Math.max(spanMm, Math.hypot(a.machine[0] - b.machine[0], a.machine[1] - b.machine[1]))
+    if (spanMm < 2) {
+      throw new Error(
+        'The machine barely moved during calibration (the jog was rejected?) — make sure it is homed/unlocked and not at a soft limit, then retry.',
+      )
+    }
+    const headMap = solveHeadMotionMap(samples)
+    if (!headMap) {
+      throw new Error('Calibration was degenerate (jog moves too small or collinear) — retry with the marker clearly in view.')
+    }
+    onProgress('done')
+    return { headMap, frameW, frameH, used: samples.length }
+  } catch (err) {
+    grbl.jogCancel().catch(() => {})
+    if (movedAway) grbl.send(`$J=G90 X${fmt(startX)} Y${fmt(startY)} F${fmt(feed)}`).catch(() => {})
+    throw err
+  }
 }
 
 /** Stable progress codes for the role probe (the panel maps these to t()). */

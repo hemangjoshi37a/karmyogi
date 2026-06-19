@@ -395,6 +395,62 @@ export function invertMat3(m: Mat3): Mat3 | null {
 }
 
 /**
+ * Solve the HEAD-camera image⇄machine linear map from motion samples.
+ *
+ * For a camera bolted to the head looking down, a FIXED bed feature's pixel
+ * position is affine in the machine head position: `p_i = a − M · H_i`, where
+ * `M` (2×2) folds in scale + rotation + shear + handedness (mirror), and `a` is a
+ * constant. We fit `M` and `a` by least squares (the x and y rows are independent
+ * 3-parameter fits), then return **M⁻¹** — the pixel-offset → bed-mm-offset map
+ * the overlay uses to orient the live patch. Because `M` is recovered from REAL
+ * motion, the result auto-corrects the movement direction (incl. a mirrored
+ * image), rotation, scale, and shear-skew — no manual flipping.
+ *
+ * @param samples `{ machine:[x,y], px:[u,v] }` pairs from jogging the head to
+ *   known positions and reading the fixed marker's pixel each time. Needs ≥3
+ *   non-collinear machine positions.
+ * @returns `M⁻¹` as `[m00,m01,m10,m11]` (maps pixel delta → bed-mm delta), or
+ *   `null` if degenerate (collinear jog / singular).
+ */
+export function solveHeadMotionMap(
+  samples: { machine: Vec2; px: Vec2 }[],
+): number[] | null {
+  if (samples.length < 3) return null
+  // Two independent normal-equation fits (3 params each):
+  //   u = ax - (M00*Hx + M01*Hy)   →  row [1, -Hx, -Hy] · [ax, M00, M01]
+  //   v = ay - (M10*Hx + M11*Hy)   →  row [1, -Hx, -Hy] · [ay, M10, M11]
+  // Both share the SAME design matrix, so accumulate one 3×3 normal matrix.
+  const N = [0, 0, 0, 0, 0, 0, 0, 0, 0] // 3×3 row-major (symmetric)
+  const bu = [0, 0, 0]
+  const bv = [0, 0, 0]
+  for (const s of samples) {
+    const r = [1, -s.machine[0], -s.machine[1]]
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) N[i * 3 + j] += r[i] * r[j]
+      bu[i] += r[i] * s.px[0]
+      bv[i] += r[i] * s.px[1]
+    }
+  }
+  const Ninv = invertMat3(N)
+  if (!Ninv) return null
+  const mul = (m: Mat3, v: number[]) => [
+    m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+    m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+    m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
+  ]
+  const su = mul(Ninv, bu) // [ax, M00, M01]
+  const sv = mul(Ninv, bv) // [ay, M10, M11]
+  const M00 = su[1]
+  const M01 = su[2]
+  const M10 = sv[1]
+  const M11 = sv[2]
+  const det = M00 * M11 - M01 * M10
+  if (Math.abs(det) < kEps) return null
+  // M⁻¹ (pixel-offset → bed-mm-offset).
+  return [M11 / det, -M01 / det, -M10 / det, M00 / det]
+}
+
+/**
  * Root-mean-square reprojection error of a homography over a correspondence
  * set: `sqrt( mean_i | applyHomography(H, src_i) − dst_i |² )`.
  *
@@ -1380,7 +1436,17 @@ export function fitCheck(designBBox: Rect, jobRect: Rect): FitResult {
 export function parseMarkerPayload(
   raw: string,
 ): { kind: string; fields: Record<string, string> } | null {
-  if (typeof raw !== 'string' || !raw.startsWith('KMYG1|')) return null;
+  if (typeof raw !== 'string') return null;
+  // LOW-DENSITY corner markers: a bare "TL"/"TR"/"BL"/"BR" payload encodes a
+  // version-1 QR (21×21, big modules) that survives a soft/wide-angle/over-
+  // exposed close-up where the verbose `KMYG1|TARGET|…` (≈v5, tiny modules)
+  // can't be decoded at all. Treat it as a TARGET corner with the default 28 mm
+  // size. (Print four QRs containing exactly TL / TR / BL / BR.)
+  const bare = raw.trim().toUpperCase();
+  if (bare === 'TL' || bare === 'TR' || bare === 'BL' || bare === 'BR') {
+    return { kind: 'TARGET', fields: { pos: bare, S: '28' } };
+  }
+  if (!raw.startsWith('KMYG1|')) return null;
 
   const parts = raw.split('|');
   // parts[0] === 'KMYG1'; parts[1] === kind (may be '' if malformed).

@@ -180,15 +180,23 @@ function readPreferredPort(): PortPref | null {
 }
 
 /**
- * Max number of discrete `$J=` jogs allowed to be in flight (sent but not yet
- * acknowledged with `ok`) at once. GRBL queues jogs in its small planner buffer
- * (~15 deep) and rejects/queues excess; rapid clicking or key auto-repeat can
- * otherwise overrun the planner + 127-byte RX buffer and wedge the controller.
- * Capping outstanding jogs (and dropping extras) coalesces a flood into smooth,
- * bounded motion. 2 keeps motion fluid (one executing, one queued) without ever
- * piling up.
+ * Max number of `$J=` jogs allowed to be in flight (sent but not yet acked) at
+ * once. GRBL queues jogs in its small planner buffer (~15 deep); rapid clicking /
+ * key auto-repeat / a deflected joystick can otherwise overrun the planner and
+ * wedge the controller. Capping outstanding jogs (and DROPPING extras — for live
+ * jogging a stale increment is worthless; the next frame sends a fresh one)
+ * coalesces a flood into smooth, bounded motion. 2 keeps motion fluid (one
+ * executing, one queued) without piling up.
  */
 const MAX_INFLIGHT_JOGS = 2
+/**
+ * Char-counting flow control for jogs: cap the bytes of unacked jog lines well
+ * under GRBL's 128-byte serial RX buffer (headroom left for `?`/realtime bytes
+ * and the odd MDI line). This is the SAME discipline the program streamer uses,
+ * applied to jogs — so a flood of jog commands can never overflow GRBL's RX
+ * buffer (the real cause of the "controller goes unresponsive, needs a reset").
+ */
+const JOG_RX_WINDOW = 96
 
 class GrblController {
   private conn: GrblConnection | null = null
@@ -230,11 +238,16 @@ class GrblController {
    */
   private autoConnecting = false
   /**
-   * Discrete jogs (`$J=`) sent but not yet acknowledged by an `ok`. Used to cap
-   * how many jogs can be queued in GRBL at once so rapid clicks / key-repeat
-   * can't flood the planner + RX buffer (see MAX_INFLIGHT_JOGS).
+   * Jog flow-control gate. `jogAckSizes` holds the byte length (incl. newline) of
+   * each `$J=` line sent but not yet acked, FIFO — its length is the in-flight jog
+   * count (≤ MAX_INFLIGHT_JOGS) and its sum is `jogUnackedBytes` (≤ JOG_RX_WINDOW).
+   * An `ok`/`error` credits the oldest entry back. This is char-counting flow
+   * control (RX-buffer safe) plus a planner-block cap. It is SELF-CORRECTING: every
+   * status report resyncs it to ground truth (cleared when GRBL is Idle or its RX
+   * buffer is empty), so a missed or stray `ok` can never permanently wedge jogging.
    */
-  private inflightJogs = 0
+  private jogAckSizes: number[] = []
+  private jogUnackedBytes = 0
   /**
    * Resolved protocol dialect for the active connection. Defaults to pure GRBL so
    * everything behaves exactly as before unless the selected firmware opts into
@@ -775,7 +788,7 @@ class GrblController {
 
   async disconnect(): Promise<void> {
     this.stopStatusPolling()
-    this.inflightJogs = 0
+    this.resetJogGate()
     this.pendingStatusAcks = 0
     this.suppressNextOk = false
     this.streamer?.reset()
@@ -794,6 +807,17 @@ class GrblController {
     if (this.dialect.status === 'grbl') {
       if (isStatusReport(line)) {
         useMachine.getState().ingestStatusLine(line)
+        // SELF-CORRECTING jog gate: resync to ground truth on every status report.
+        // If GRBL is Idle (nothing can be pending) or its RX buffer is reported
+        // empty (Bf:<plan>,<rx> with rx≈128), there are no unacked jogs in reality
+        // — clear any accounting drift so a missed/stray `ok` can NEVER permanently
+        // wedge jogging (the old failure: gate stuck full → silent, needs a reset).
+        if (this.jogAckSizes.length > 0 && !this.streamer?.isRunning) {
+          const rep = parseStatusForDialect(this.dialect, line)
+          if (rep && (rep.state === 'Idle' || (rep.buffer && rep.buffer.rx >= 120))) {
+            this.resetJogGate()
+          }
+        }
         return
       }
       // `$G` parser-state report (`[GC:G0 G54 …]`): record the active WCS + modal
@@ -872,10 +896,11 @@ class GrblController {
     // Account for jog acks: an `ok`/`error` frees one in-flight jog so the next
     // queued jog can go out. Only consume one when we're NOT streaming a program
     // (a program's acks belong to the streamer, not the jog gate).
-    if (this.inflightJogs > 0 && !this.streamer?.isRunning) {
+    if (this.jogAckSizes.length > 0 && !this.streamer?.isRunning) {
       const lower = line.trim().toLowerCase()
       if (lower === 'ok' || lower.startsWith('error')) {
-        this.inflightJogs--
+        const n = this.jogAckSizes.shift()
+        if (n != null) this.jogUnackedBytes = Math.max(0, this.jogUnackedBytes - n)
       }
     }
     this.streamer?.onResponse(line)
@@ -987,7 +1012,7 @@ class GrblController {
    * local stream state. In every case the local streamer/program state is reset.
    */
   async softReset(): Promise<void> {
-    this.inflightJogs = 0
+    this.resetJogGate()
     this.streamer?.reset()
     useProgram.getState().setStreaming?.(false)
     useProgram.getState().setCursor?.(-1)
@@ -1065,16 +1090,6 @@ class GrblController {
       return
     }
     if (this.dialect.jogCommand === 'grbl-$J') {
-      // Coalesce a flood: drop this jog if too many are already in flight
-      // (unacknowledged). Rapid clicking / key auto-repeat thus produces smooth,
-      // bounded motion instead of piling jogs into GRBL's planner + RX buffer
-      // until the controller stops accepting input. The dropped jog is simply
-      // not sent — the next accepted press/tap continues motion.
-      //
-      // `force` is used for the single continuous (press-hold) jog: it's one
-      // long, intentional move that motion-stops on release (0x85), so it must
-      // not be coalesced away even if a just-tapped step is still unacked.
-      if (!opts?.force && this.inflightJogs >= MAX_INFLIGHT_JOGS) return
       // GRBL rejects scientific-notation numbers (e.g. `X1e-7`) with `error:20`
       // ("invalid g-code"), which a near-axis-aligned analog stick can otherwise
       // emit as a vanishingly small off-axis component. Format every axis word
@@ -1089,12 +1104,27 @@ class GrblController {
       // `$J=G91 G21 F…` alone is an invalid jog (error:20), so skip it entirely.
       if (parts.length === 2) return
       parts.push(`F${Math.max(1, Math.round(feed))}`)
-      this.inflightJogs++
+      const lineStr = parts.join('')
+      const lineBytes = lineStr.length + 1 // GRBL counts the line-terminating newline
+
+      // FLOW CONTROL: drop this jog if it would exceed the in-flight jog count OR
+      // overrun GRBL's RX buffer (char-counting window). For live jogging a dropped
+      // increment is worthless — the next frame sends a fresh one — so dropping
+      // (not queueing) keeps motion current AND prevents the flood that wedges the
+      // controller. `force` (the single press-hold continuous move) bypasses the
+      // CAPS but is still accounted, so the gate stays consistent.
+      if (!opts?.force) {
+        if (this.jogAckSizes.length >= MAX_INFLIGHT_JOGS) return
+        if (this.jogUnackedBytes + lineBytes > JOG_RX_WINDOW) return
+      }
+      this.jogAckSizes.push(lineBytes)
+      this.jogUnackedBytes += lineBytes
       try {
-        await this.send(parts.join(''))
+        await this.send(lineStr)
       } catch (e) {
-        // Send failed — don't leave a phantom in-flight jog wedging the gate.
-        this.inflightJogs = Math.max(0, this.inflightJogs - 1)
+        // Send failed — roll back this jog's accounting so it can't wedge the gate.
+        this.jogAckSizes.pop()
+        this.jogUnackedBytes = Math.max(0, this.jogUnackedBytes - lineBytes)
         throw e
       }
       return
@@ -1111,8 +1141,14 @@ class GrblController {
    * there's nothing to cancel).
    */
   jogCancel = async (): Promise<void> => {
-    this.inflightJogs = 0
+    this.resetJogGate()
     await this.realtime(0x85)
+  }
+
+  /** Clear the jog flow-control gate (no jogs considered in flight). */
+  private resetJogGate(): void {
+    this.jogAckSizes.length = 0
+    this.jogUnackedBytes = 0
   }
 
   /**

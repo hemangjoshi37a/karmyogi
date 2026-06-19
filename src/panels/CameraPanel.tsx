@@ -4,11 +4,12 @@ import {
   type AutoCalibProgress,
   type KinematicsInfo,
 } from '../camera/autoCalib'
-import { generateCalibrationSheet, registrationMarkers } from '../camera/calibPdf'
+import { generateCalibrationSheet, generateCornerMarkersPdf, registrationMarkers } from '../camera/calibPdf'
 import {
   detectGridMarkers,
   calibrateCameraFromGrid,
   detectCameraRoles,
+  calibrateHeadFromMotion,
   solveSheetTransform,
   type CameraRole,
   type RoleProbeProgress,
@@ -46,12 +47,12 @@ import {
   type Vec2,
 } from '../core/cameraCalib'
 import {
-  loadMarkerRegistry,
-  targetMarkers,
   captureFrame,
   videoToGray,
   detectQrCodes,
-  barcodeDetectorAvailable,
+  frameDiagnostics,
+  zxingStatus,
+  qrDecodeAvailable,
   bedCornersMm,
   BED_CORNER_ORDER,
   clickToImagePx,
@@ -107,7 +108,7 @@ type SlotIdx = 0 | 1
  *   - 'qr'      : read the printed TARGET QR codes.
  *   - 'manual'  : click the 4 bed corners.
  */
-type CalibMethod = 'auto' | 'machine' | 'qr' | 'manual'
+type CalibMethod = 'auto' | 'machine' | 'qr' | 'manual' | 'head'
 
 /** Live state of an automatic-calibration run (drives the progress UI). */
 interface AutoRunState {
@@ -232,6 +233,27 @@ const ADV_CAP_DEFS: AdvCapDef[] = [
   { name: 'iso', key: 'cam.adv.iso', label: 'ISO' },
   { name: 'focusDistance', key: 'cam.adv.focusDistance', label: 'Focus distance' },
   { name: 'zoom', key: 'cam.adv.zoom', label: 'Zoom' },
+]
+
+/**
+ * The camera "auto" modes (enum constrainable properties, NOT numeric ranges):
+ * each is a `*Mode` whose 'continuous' value turns the auto function ON and
+ * 'manual' hands control to a linked numeric setting. Enabled (continuous) by
+ * default on start so the camera's autofocus / auto-exposure / auto-white-balance
+ * all engage. Mirrors the v4l2 controls (auto_exposure, white_balance_automatic).
+ */
+interface AutoModeDef {
+  /** MediaStreamTrack `*Mode` constrainable property. */
+  mode: 'focusMode' | 'exposureMode' | 'whiteBalanceMode'
+  /** Linked numeric setting used when switched to manual. */
+  manual: string
+  key: string
+  label: string
+}
+const AUTO_MODE_DEFS: AutoModeDef[] = [
+  { mode: 'focusMode', manual: 'focusDistance', key: 'cam.adv.autofocus', label: 'Autofocus' },
+  { mode: 'exposureMode', manual: 'exposureTime', key: 'cam.adv.autoexposure', label: 'Auto exposure' },
+  { mode: 'whiteBalanceMode', manual: 'colorTemperature', key: 'cam.adv.autowb', label: 'Auto white balance' },
 ]
 
 /** A numeric range as reported by getCapabilities() for one setting. */
@@ -584,6 +606,23 @@ export function CameraPanel() {
     advOverridesRef.current = advOverrides
   }, [advOverrides])
 
+  // Camera AUTO modes (focus / exposure / white balance). `autoModeCaps` is the
+  // per-slot map of modeName → supported values the device reports (empty = the
+  // browser/OS exposes no control for it). `autoModeOn` (persisted) chooses
+  // continuous (auto) vs manual per mode; a mode missing from the map defaults to
+  // auto (true).
+  const [autoModeCaps, setAutoModeCaps] = useState<
+    [Record<string, string[]>, Record<string, string[]>]
+  >([{}, {}])
+  const [autoModeOn, setAutoModeOn] = usePersistentState<
+    [Record<string, boolean>, Record<string, boolean>]
+  >('karmyogi.camera.autoMode', [{}, {}])
+  const autoModeOnRef = useRef(autoModeOn)
+  useEffect(() => {
+    autoModeOnRef.current = autoModeOn
+  }, [autoModeOn])
+  const isAutoOn = (s: SlotIdx, mode: string) => autoModeOn[s][mode] !== false
+
   // ---- collapsible-section open/closed (persisted) ----
   // The panel is grouped into a few house-style sections. The everyday ones
   // ("Live view") start open; the advanced/occasional ones start collapsed so a
@@ -593,7 +632,9 @@ export function CameraPanel() {
   const [secSavedOpen, setSecSavedOpen] = usePersistentState<boolean>('karmyogi.camera.sec.saved', false)
   const [secCalibOpen, setSecCalibOpen] = usePersistentState<boolean>('karmyogi.camera.sec.calib', false)
 
-  const qrSupported = barcodeDetectorAvailable()
+  // QR works everywhere: native BarcodeDetector when present, else the bundled
+  // pure-JS decoder fallback. So the QR method is always offered.
+  const qrSupported = qrDecodeAvailable()
   // MediaRecorder is needed for both Record and Timelapse (which assemble webm).
   const recorderSupported = typeof MediaRecorder !== 'undefined'
 
@@ -694,6 +735,51 @@ export function CameraPanel() {
       next[s] = found
       return next
     })
+    // Enum `*Mode` controls (focus/exposure/white balance) — tracked separately
+    // from the numeric ranges, for the Auto/Manual toggles.
+    const modeCaps: Record<string, string[]> = {}
+    for (const def of AUTO_MODE_DEFS) {
+      const v = caps[def.mode]
+      if (Array.isArray(v) && v.length > 0) modeCaps[def.mode] = v as string[]
+    }
+    setAutoModeCaps((prev) => {
+      const next: [Record<string, string[]>, Record<string, string[]>] = [prev[0], prev[1]]
+      next[s] = modeCaps
+      return next
+    })
+  }, [])
+
+  // Apply ALL supported auto modes for a slot: continuous (auto) by default — so
+  // autofocus / auto-exposure / auto-white-balance all engage — or manual + the
+  // linked numeric setting when the user turned that mode off. No-op for any mode
+  // the device/browser doesn't expose.
+  const applyAutoModes = useCallback(async (s: SlotIdx) => {
+    const track = streamRefs.current[s]?.getVideoTracks()[0]
+    if (!trackSupportsAdvanced(track)) return
+    let caps: Record<string, unknown> = {}
+    try {
+      caps = track!.getCapabilities() as unknown as Record<string, unknown>
+    } catch {
+      return
+    }
+    for (const def of AUTO_MODE_DEFS) {
+      const modes = Array.isArray(caps[def.mode]) ? (caps[def.mode] as string[]) : []
+      if (modes.length === 0) continue
+      const auto = autoModeOnRef.current[s][def.mode] !== false // default: auto
+      try {
+        if (auto && modes.includes('continuous')) {
+          await track!.applyConstraints({ advanced: [{ [def.mode]: 'continuous' } as unknown as MediaTrackConstraintSet] })
+        } else if (!auto && modes.includes('manual')) {
+          await track!.applyConstraints({ advanced: [{ [def.mode]: 'manual' } as unknown as MediaTrackConstraintSet] })
+          const mv = advOverridesRef.current[s][def.manual]
+          if (Number.isFinite(mv)) {
+            await track!.applyConstraints({ advanced: [{ [def.manual]: mv } as MediaTrackConstraintSet] })
+          }
+        }
+      } catch {
+        /* device rejected this mode — keep going with the others */
+      }
+    }
   }, [])
 
   // Re-apply this slot's PERSISTED overrides to its live track. Called on every
@@ -767,8 +853,17 @@ export function CameraPanel() {
       }
       stopStream(s)
       setSlotStatus(s, { kind: 'starting' })
+      // Request a HIGH resolution: the default is often 640×480, which leaves a
+      // close-up QR with too few pixels per module to decode reliably. The IMX179
+      // is 8MP, so ask for 1080p (the browser picks the nearest the device + the
+      // chosen pixel format support, falling back gracefully).
+      const videoConstraints: MediaTrackConstraints = {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      }
+      if (id) videoConstraints.deviceId = { exact: id }
       const constraints: MediaStreamConstraints = {
-        video: id ? { deviceId: { exact: id } } : true,
+        video: videoConstraints,
         audio: false,
       }
       try {
@@ -797,7 +892,12 @@ export function CameraPanel() {
         // adjustable settings for the UI. Order: apply first, then re-read so the
         // sliders reflect what actually took effect.
         await applyAdvancedToSlot(s)
+        // Engage the camera's auto modes (focus / exposure / white balance) so an
+        // autofocus module like the Arducam IMX179 sharpens, and auto-exposure /
+        // auto-WB track the scene, instead of being stuck on whatever the browser
+        // defaulted to. Discover caps FIRST so applyAutoModes sees them.
         discoverAdvCaps(s)
+        await applyAutoModes(s)
       } catch (err) {
         const e = err as DOMException
         if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
@@ -812,7 +912,7 @@ export function CameraPanel() {
         }
       }
     },
-    [supported, stopStream, enumerate, setVideoEl, setSlotStatus, applyAdvancedToSlot, discoverAdvCaps, t],
+    [supported, stopStream, enumerate, setVideoEl, setSlotStatus, applyAdvancedToSlot, applyAutoModes, discoverAdvCaps, t],
   )
 
   // ---- SYNTHETIC test-pattern source (no camera / no permission needed) ----
@@ -1371,7 +1471,13 @@ export function CameraPanel() {
         return false
       }
       const rms = reprojectionRMS(H, imgPts, worldPts)
-      calib.setCamera(s, { H: [...H], rmsMm: rms, frameW, frameH })
+      // These methods calibrate a FIXED (overhead) camera — store the homography
+      // and mark the mount fixed so the overlay uses the whole-bed rectification.
+      calib.setCamera(s, { mount: 'fixed', H: [...H], rmsMm: rms, frameW, frameH })
+      // Turn the bed overlay ON so the rectified camera view appears on the 3D
+      // bed immediately — otherwise a successful calibration looks like nothing
+      // happened (the overlay defaults off and CameraBedPlane renders null).
+      calib.setEnabled(true)
       setCalibMsg(
         t('cam.bt.calibrated', 'Calibrated Cam {n} — RMS {rms} mm', {
           n: s + 1,
@@ -1643,36 +1749,182 @@ export function CameraPanel() {
       setCalibMsg(t('cam.bt.err.noFrame', 'No live frame — start this camera first.'))
       return
     }
-    const reg = await loadMarkerRegistry()
-    const targets = targetMarkers(reg)
-    if (targets.length === 0) {
-      setCalibMsg(t('cam.bt.err.noRegistry', 'Marker registry unavailable — use manual or machine motion.'))
-      return
-    }
     const codes = await detectQrCodes(frame)
-    // Match each detected payload to a TARGET marker by its id.
-    const imgPts: Vec2[] = []
-    const worldPts: Vec2[] = []
-    let matched = 0
+    // Each TARGET code is placed at a BED CORNER (its TL/TR/BL/BR id). Map the
+    // detected pixel centre of each to that bed corner in MACHINE-WORK mm (bed
+    // centred on work zero) — the SAME frame the manual corner method and the 3D
+    // overlay (CameraBedPlane) use, so the rectified view lands on the real bed.
+    const bedCorners = bedCornersMm(bed.width, bed.depth) // order: TL, TR, BR, BL
+    const imgByCorner = new Map<string, Vec2>()
     for (const code of codes) {
       const parsed = parseMarkerPayload(code.rawValue)
       if (!parsed || parsed.kind !== 'TARGET') continue
-      const pos = parsed.fields.pos
-      const tgt = targets.find((m) => m.id === pos)
-      if (!tgt) continue
-      imgPts.push(code.center)
-      worldPts.push([tgt.frameXmm, tgt.frameYmm])
-      matched++
+      const pos = parsed.fields.pos // 'TL' | 'TR' | 'BL' | 'BR'
+      if (pos && BED_CORNER_ORDER.includes(pos as (typeof BED_CORNER_ORDER)[number])) {
+        imgByCorner.set(pos, code.center)
+      }
     }
-    setQrFound(matched)
-    if (matched < 4) {
+    const imgPts: Vec2[] = []
+    const worldPts: Vec2[] = []
+    for (let i = 0; i < BED_CORNER_ORDER.length; i++) {
+      const px = imgByCorner.get(BED_CORNER_ORDER[i])
+      if (!px) continue
+      imgPts.push(px)
+      worldPts.push(bedCorners[i])
+    }
+    setQrFound(imgPts.length)
+    if (imgPts.length < 4) {
       setCalibMsg(
-        t('cam.bt.qr.notEnough', 'Found {n}/4 TARGET markers — need all 4 visible.', { n: matched }),
+        t('cam.bt.qr.notEnough', 'Found {n}/4 TARGET markers — need all 4 visible.', { n: imgPts.length }),
       )
       return
     }
     commitHomography(calibSlot, imgPts, worldPts, frame.width, frame.height)
-  }, [calibSlot, commitHomography, t])
+  }, [calibSlot, commitHomography, bed.width, bed.depth, t])
+
+  // ---- (d) head-mounted camera: scale + rotation from ONE visible QR ----
+  // A head camera sits close to the bed and can't see all 4 corners, so we get
+  // px-per-mm from a SINGLE marker's pixel size vs its known physical size, and
+  // rotation from its top edge. Absolute placement then comes live from the
+  // machine XY (+ tunable offset) — see CameraBedPlane (head mount).
+  const runHeadScaleFromQr = useCallback(async () => {
+    const v = videoRefs.current[calibSlot]
+    if (!captureFrame(v)) {
+      setCalibMsg(t('cam.bt.err.noFrame', 'No live frame — start this camera first.'))
+      return
+    }
+    // BURST: a single click can land on a motion-blurred / glare frame, so grab
+    // several over ~1s and use the first that decodes. Keep the last frame for
+    // the failure diagnostic.
+    let codes: Awaited<ReturnType<typeof detectQrCodes>> = []
+    let frame = captureFrame(v)!
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const f = captureFrame(v)
+      if (f) frame = f
+      codes = await detectQrCodes(frame)
+      if (codes.length > 0) break
+      await new Promise((r) => window.setTimeout(r, 160))
+    }
+    const d = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1])
+    let best: { sidePx: number; angleDeg: number; sizeMm: number } | null = null
+    for (const code of codes) {
+      if (code.corners.length < 4) continue
+      const parsed = parseMarkerPayload(code.rawValue)
+      const sizeMm = parsed && parsed.fields.S ? Number(parsed.fields.S) : 28
+      if (!Number.isFinite(sizeMm) || sizeMm <= 0) continue
+      const c = code.corners
+      // Mean of the 4 edge lengths → robust pixel size (order-independent).
+      const sidePx = (d(c[0], c[1]) + d(c[1], c[2]) + d(c[2], c[3]) + d(c[3], c[0])) / 4
+      // Rotation from the top edge (corner0→corner1); image Y is down, bed Y is
+      // up, so negate to get the bed-frame angle.
+      const angleDeg = (-Math.atan2(c[1][1] - c[0][1], c[1][0] - c[0][0]) * 180) / Math.PI
+      if (!best || sidePx > best.sidePx) best = { sidePx, angleDeg, sizeMm }
+    }
+    if (!best || best.sidePx <= 0) {
+      // Surface WHY it failed so we can tell a bad frame from a decode failure.
+      const diag = frameDiagnostics(frame)
+      const zx = zxingStatus()
+      // If the robust decoder errored (e.g. wasm didn't load), say so explicitly —
+      // that's a software/caching issue (hard-reload), not a focus problem.
+      const decoder =
+        zx.state === 'error'
+          ? `decoder FAILED to load (${zx.error || 'wasm error'}) — hard-reload the page (Ctrl+Shift+R) to clear a stale cached build`
+          : zx.state === 'idle'
+            ? 'decoder did not run (stale cached build?) — hard-reload (Ctrl+Shift+R)'
+            : `decoder ran, found 0 codes — likely soft focus or glare`
+      const detail = !diag.readable
+        ? 'frame pixels unreadable (camera stream is cross-origin/tainted)'
+        : diag.lum < 12
+          ? `frame nearly black (brightness ${diag.lum}) — check exposure/lighting`
+          : `frame ${frame.width}×${frame.height}, brightness ${diag.lum}; ${decoder}`
+      setCalibMsg(
+        t('cam.head.noQrDiag', 'No QR decoded — {detail}.', { detail }),
+      )
+      return
+    }
+    const pxPerMm = best.sidePx / best.sizeMm
+    calib.setCamera(calibSlot, {
+      mount: 'head',
+      pxPerMm,
+      rotationDeg: best.angleDeg,
+      frameW: frame.width,
+      frameH: frame.height,
+    })
+    calib.setEnabled(true)
+    setCalibMsg(
+      t('cam.head.calibrated', 'Head camera: {ppm} px/mm, {rot}° — tune offset so it lines up.', {
+        ppm: pxPerMm.toFixed(2),
+        rot: best.angleDeg.toFixed(1),
+      }),
+    )
+  }, [calibSlot, calib, t])
+
+  // Download a print-ready PDF of the 4 simple low-density corner markers.
+  const downloadCornerMarkers = useCallback(async () => {
+    try {
+      const blob = await generateCornerMarkersPdf()
+      const url = URL.createObjectURL(blob)
+      downloadUrl(url, 'karmyogi-corner-markers.pdf')
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000)
+    } catch {
+      setCalibMsg(t('cam.head.pdfErr', 'Could not generate the marker PDF.'))
+    }
+  }, [t])
+
+  // Full AUTO head calibration from motion: jogs the head a small grid, tracks a
+  // fixed marker, and solves the pixel→bed map (auto direction/rotation/scale/
+  // shear — no manual flipping). Needs a marker visible in every jog frame.
+  const [headBusy, setHeadBusy] = useState(false)
+  const headAbort = useRef<AbortController | null>(null)
+  const runHeadMotionCalib = useCallback(async () => {
+    const v = videoRefs.current[calibSlot]
+    if (!v) {
+      setCalibMsg(t('cam.bt.err.noFrame', 'No live frame — start this camera first.'))
+      return
+    }
+    if (machineConn !== 'connected') {
+      setCalibMsg(t('cam.head.notConnected', 'Connect the machine (Controller tab) — the head overlay follows the live machine position.'))
+      return
+    }
+    const ac = new AbortController()
+    headAbort.current = ac
+    setHeadBusy(true)
+    setCalibMsg(t('cam.head.calibrating', 'Calibrating — jogging the head and tracking the marker…'))
+    try {
+      const res = await calibrateHeadFromMotion({
+        video: v,
+        stepMm: 8,
+        feed: 800,
+        settleMs: 350,
+        signal: ac.signal,
+        onProgress: (code, i, n) =>
+          setCalibMsg(
+            code === 'moving' || code === 'sampling'
+              ? t('cam.head.calibStep', 'Calibrating… {i}/{n}', { i: (i ?? 0) + 1, n: n ?? 5 })
+              : t('cam.head.calibPhase', 'Calibrating… {code}', { code }),
+          ),
+      })
+      if (!res) {
+        setCalibMsg(
+          t('cam.head.calibFail', 'Could not solve — keep ONE marker sharp and visible in every jog frame, then retry.'),
+        )
+        return
+      }
+      calib.setCamera(calibSlot, { mount: 'head', headMap: res.headMap, frameW: res.frameW, frameH: res.frameH })
+      calib.setEnabled(true)
+      setCalibMsg(
+        t('cam.head.motionOk', 'Head camera aligned from motion ({n} samples) — direction & skew auto-corrected. Tune offset to place it.', {
+          n: res.used,
+        }),
+      )
+    } catch (e) {
+      const err = e as Error
+      setCalibMsg(err?.message || t('cam.head.calibErr', 'Head calibration failed.'))
+    } finally {
+      setHeadBusy(false)
+      headAbort.current = null
+    }
+  }, [calibSlot, machineConn, calib, t])
 
   // ---- (b1) sheet → machine registration ----
   // The printed grid uses cols:4, rows:5 (see generateSheet), so the two
@@ -2395,6 +2647,40 @@ export function CameraPanel() {
                   'Adjust the live feed. Only settings your camera reports are shown; values are saved and re-applied when the camera restarts.',
                 )}
               </p>
+              {AUTO_MODE_DEFS.some((d) => (autoModeCaps[s][d.mode] ?? []).length > 0) && (
+                <div className="cam-row cam-focus-row">
+                  {AUTO_MODE_DEFS.filter((d) => (autoModeCaps[s][d.mode] ?? []).length > 0).map((d) => (
+                    <label key={d.mode} className="cam-check" title={t(d.key, d.label)}>
+                      <input
+                        type="checkbox"
+                        checked={isAutoOn(s, d.mode)}
+                        onChange={(e) => {
+                          const on = e.target.checked
+                          setAutoModeOn((prev) => {
+                            const next: [Record<string, boolean>, Record<string, boolean>] = [
+                              { ...prev[0] },
+                              { ...prev[1] },
+                            ]
+                            next[s] = { ...next[s], [d.mode]: on }
+                            return next
+                          })
+                          autoModeOnRef.current[s] = { ...autoModeOnRef.current[s], [d.mode]: on }
+                          applyAutoModes(s).catch(() => {})
+                        }}
+                      />
+                      {t(d.key, d.label)}
+                    </label>
+                  ))}
+                </div>
+              )}
+              {AUTO_MODE_DEFS.every((d) => (autoModeCaps[s][d.mode] ?? []).length === 0) && (
+                <p className="cam-hint cam-warn">
+                  {t(
+                    'cam.adv.noAutoCtrl',
+                    'This browser/OS exposes no focus/exposure/white-balance mode control for this camera (common for UVC cameras on Linux Chrome). Set these on the OS instead — e.g. v4l2-ctl -d /dev/video2 --set-ctrl=auto_exposure=3 (auto) / =1 (manual), and --set-ctrl=white_balance_automatic=1. (This IMX179 has no focus control — focus it by rotating the lens.)',
+                  )}
+                </p>
+              )}
               <div className="cam-sgrid">
                 {caps.map((cap) => {
                   const value =
@@ -2966,6 +3252,15 @@ export function CameraPanel() {
               >
                 {t('cam.bt.m.manual', 'Bed corners')}
               </button>
+              <button
+                type="button"
+                className={`cam-seg-btn${method === 'head' ? ' on' : ''}`}
+                onClick={() => setMethod('head')}
+                aria-pressed={method === 'head'}
+                title={t('cam.bt.m.headTip', 'Camera on the spindle/head, close to the bed — the view follows the machine position')}
+              >
+                {t('cam.bt.m.head', 'Head cam')}
+              </button>
             </div>
           </div>
 
@@ -3251,6 +3546,156 @@ export function CameraPanel() {
               </div>
             </div>
           )}
+
+          {method === 'head' &&
+            (() => {
+              const hc = calib.cameras[calibSlot]
+              return (
+                <div className="cam-method">
+                  <details className="cam-guide">
+                    <summary>{t('cam.bt.howItWorks', 'How this works')}</summary>
+                    <p className="cam-hint">
+                      {t(
+                        'cam.head.guide',
+                        'For a camera on the spindle/head, too close to see all 4 corners. Point it at ONE printed QR marker and press Measure to set scale (px/mm) + rotation. The live view is then drawn on the bed at the machine position and FOLLOWS the head as it moves. Tune the offset so it lines up with the real bed, and the warp slider to straighten a wide-angle lens.',
+                      )}
+                    </p>
+                  </details>
+                  <div className="cam-row">
+                    <button
+                      type="button"
+                      className="cam-btn cam-grow"
+                      onClick={() => {
+                        downloadCornerMarkers().catch(() => {})
+                      }}
+                      title={t(
+                        'cam.head.dlMarkersTip',
+                        'Download a print-ready PDF of the 4 simple corner markers (TL/TR/BL/BR) — big modules that decode reliably',
+                      )}
+                    >
+                      <Icon name="download" size={14} />
+                      {t('cam.head.dlMarkers', 'Download corner markers (PDF)')}
+                    </button>
+                  </div>
+                  {machineConn !== 'connected' && (
+                    <p className="cam-warn">
+                      {t(
+                        'cam.head.notConnected',
+                        'Connect the machine (Controller tab) — the head overlay follows the live machine position.',
+                      )}
+                    </p>
+                  )}
+                  <div className="cam-row">
+                    <button
+                      type="button"
+                      className="cam-btn cam-primary cam-grow"
+                      disabled={!live(calibSlot) || machineConn !== 'connected' || headBusy}
+                      onClick={() => {
+                        runHeadMotionCalib().catch(() => {})
+                      }}
+                      title={t(
+                        'cam.head.autoAlignTip',
+                        'Recommended — jogs the head and tracks one fixed marker to auto-solve direction, rotation, scale & skew',
+                      )}
+                    >
+                      {headBusy
+                        ? t('cam.head.calibBusy', 'Calibrating…')
+                        : t('cam.head.autoAlign', 'Auto-align (jog the head)')}
+                    </button>
+                  </div>
+                  <div className="cam-row">
+                    <button
+                      type="button"
+                      className="cam-btn cam-grow"
+                      disabled={!live(calibSlot) || headBusy}
+                      onClick={() => {
+                        runHeadScaleFromQr().catch(() => {})
+                      }}
+                      title={t('cam.head.measureTip', 'Quick fallback — read one visible QR for scale + rotation only (no skew/mirror correction)')}
+                    >
+                      {t('cam.head.measure', 'Quick: scale & rotation from a QR')}
+                    </button>
+                  </div>
+                  <p className="cam-hint">
+                    {hc.pxPerMm
+                      ? t('cam.head.cur', 'Scale {ppm} px/mm · rotation {rot}°', {
+                          ppm: hc.pxPerMm.toFixed(2),
+                          rot: hc.rotationDeg.toFixed(1),
+                        })
+                      : t('cam.head.uncal', 'Not measured yet — point at a QR and press Measure.')}
+                  </p>
+                  <CamSlider
+                    label={t('cam.head.offX', 'Offset X')}
+                    htmlFor="cam-head-offx"
+                    unit="mm"
+                    min={-bed.width}
+                    max={bed.width}
+                    step={1}
+                    value={hc.offsetMm[0]}
+                    onChange={(n) => calib.setCamera(calibSlot, { offsetMm: [n, hc.offsetMm[1]] })}
+                  />
+                  <CamSlider
+                    label={t('cam.head.offY', 'Offset Y')}
+                    htmlFor="cam-head-offy"
+                    unit="mm"
+                    min={-bed.depth}
+                    max={bed.depth}
+                    step={1}
+                    value={hc.offsetMm[1]}
+                    onChange={(n) => calib.setCamera(calibSlot, { offsetMm: [hc.offsetMm[0], n] })}
+                  />
+                  <CamSlider
+                    label={t('cam.head.warp', 'Lens warp')}
+                    htmlFor="cam-head-warp"
+                    min={-0.6}
+                    max={0.6}
+                    step={0.01}
+                    value={hc.distortK}
+                    onChange={(n) => calib.setCamera(calibSlot, { distortK: n })}
+                  />
+                  <div className="cam-seg-row">
+                    <span className="cam-seg-label">{t('cam.head.orient', 'View rotation')}</span>
+                    <div className="cam-seg" role="group" aria-label={t('cam.head.orient', 'View rotation')}>
+                      {[0, 1, 2, 3].map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          className={`cam-seg-btn${(hc.headRotateQuarters % 4) === q ? ' on' : ''}`}
+                          aria-pressed={(hc.headRotateQuarters % 4) === q}
+                          onClick={() => calib.setCamera(calibSlot, { headRotateQuarters: q })}
+                          title={t('cam.head.orientTip', 'Rotate the overlay for a rotated camera mount')}
+                        >
+                          {q * 90}°
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="cam-seg-row">
+                    <span className="cam-seg-label">{t('cam.head.flip', 'Flip')}</span>
+                    <div className="cam-seg" role="group" aria-label={t('cam.head.flip', 'Flip')}>
+                      <button
+                        type="button"
+                        className={`cam-seg-btn${hc.headFlipH ? ' on' : ''}`}
+                        aria-pressed={hc.headFlipH}
+                        onClick={() => calib.setCamera(calibSlot, { headFlipH: !hc.headFlipH })}
+                        title={t('cam.head.flipHTip', 'Mirror the overlay left ↔ right')}
+                      >
+                        {t('cam.head.flipH', 'Horizontal')}
+                      </button>
+                      <button
+                        type="button"
+                        className={`cam-seg-btn${hc.headFlipV ? ' on' : ''}`}
+                        aria-pressed={hc.headFlipV}
+                        onClick={() => calib.setCamera(calibSlot, { headFlipV: !hc.headFlipV })}
+                        title={t('cam.head.flipVTip', 'Mirror the overlay top ↔ bottom')}
+                      >
+                        {t('cam.head.flipV', 'Vertical')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
 
           {calibMsg && <p className="cam-calib-msg">{calibMsg}</p>}
 

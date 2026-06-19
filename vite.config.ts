@@ -15,6 +15,9 @@ import { machineBridgeReceiver } from './vite-machine-plugin.mjs'
 // locale with hreflang + a multilingual sitemap. Plain .mjs (Node fs APIs).
 // @ts-ignore - JS module, not typechecked by the app tsconfig
 import { i18nSeoGenerator } from './vite-i18n-seo.mjs'
+// Serves the ZXing QR-decoder wasm at a stable /zxing_reader.wasm in dev + build.
+// @ts-ignore - JS module, not typechecked by the app tsconfig
+import { zxingWasm } from './vite-zxing-plugin.mjs'
 
 // `process` is provided by Node when Vite loads this config; declare it locally
 // (the app tsconfig deliberately omits @types/node so browser globals stay clean).
@@ -123,6 +126,7 @@ export default defineConfig({
     cameraFrameReceiver(),
     machineBridgeReceiver(),
     buildInfoEmitter(),
+    zxingWasm(),
     ...(useHttps ? [basicSsl()] : []),
     // PWA / offline: precache ONLY the small, always-needed app shell so the
     // first-install download stays light (it was ~18MB because the ~7.6MB OCCT
