@@ -42,6 +42,7 @@ import {
   barcodeDetectorAvailable,
   qrDecodeAvailable,
   zxingStatus,
+  getLastBarrelC,
 } from './bedTracking'
 
 export { barcodeDetectorAvailable, qrDecodeAvailable }
@@ -315,6 +316,10 @@ export interface HeadMotionResult {
    *  — locks the overlay to the machine frame so it lands where the tool actually
    *  is (otherwise the relative homography sits ~2·refHead away). Tunable after. */
   offsetMm: [number, number]
+  /** Barrel-distortion coefficient the decoder needed to read the markers (median
+   *  across stops) — a data-driven lens-distortion estimate for the overlay. 0 if
+   *  the raw frames decoded (no correction needed). */
+  barrelC: number
   frameW: number
   frameH: number
   /** How many jog samples decoded the marker (≥3 needed). */
@@ -398,6 +403,8 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
   // The QR's 4 corners (QR-frame order TL,TR,BR,BL) from a decoded stop — used to
   // auto-detect the overlay orientation (flip) from the marker's known geometry.
   let refCorners: Vec2[] | null = null
+  // Barrel coefficient each decode needed (for a median lens-distortion estimate).
+  const barrelCs: number[] = []
   let frameW = 0
   let frameH = 0
   let movedAway = false
@@ -426,6 +433,7 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
         if (codes.length > 0) {
           center = codes[0].center
           if (!refCorners && codes[0].corners.length >= 4) refCorners = codes[0].corners
+          barrelCs.push(getLastBarrelC())
         }
       }
       if (center) {
@@ -492,6 +500,12 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
       const bc = applyHomography(hg, [frameW / 2, frameH / 2])
       offsetMm = [startX - bc[0], startY - bc[1]]
     }
+    // Median barrel coefficient across the decoded stops (robust lens estimate).
+    let barrelC = 0
+    if (barrelCs.length > 0) {
+      const sorted = [...barrelCs].sort((a, b) => a - b)
+      barrelC = sorted[Math.floor(sorted.length / 2)]
+    }
     onProgress('done')
     return {
       headMap,
@@ -500,6 +514,7 @@ export async function calibrateHeadFromMotion(opts: HeadMotionOptions): Promise<
       autoFlipH,
       autoFlipV,
       offsetMm,
+      barrelC,
       frameW,
       frameH,
       used: samples.length,

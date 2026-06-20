@@ -11,6 +11,10 @@ import { cameraFrameReceiver } from './vite-camera-plugin.mjs'
 // kept out of the app tsconfig like the camera plugin above.
 // @ts-ignore - JS module, not typechecked by the app tsconfig
 import { machineBridgeReceiver } from './vite-machine-plugin.mjs'
+// Dev observability + control bridge: mirrors the whole app state to the server
+// and accepts machine-independent app commands (panel focus, calibration tuning).
+// @ts-ignore - JS module, not typechecked by the app tsconfig
+import { devBridgeReceiver } from './vite-dev-bridge.mjs'
 // Build-only international-SEO generator: emits a crawlable /<code>/ page per
 // locale with hreflang + a multilingual sitemap. Plain .mjs (Node fs APIs).
 // @ts-ignore - JS module, not typechecked by the app tsconfig
@@ -125,6 +129,8 @@ export default defineConfig({
     react(),
     cameraFrameReceiver(),
     machineBridgeReceiver(),
+    devBridgeReceiver(), // dev observability + control relay
+
     buildInfoEmitter(),
     zxingWasm(),
     ...(useHttps ? [basicSsl()] : []),

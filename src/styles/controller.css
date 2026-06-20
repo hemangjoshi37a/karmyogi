@@ -942,7 +942,7 @@
 }
 .gp-diag-row {
   display: grid;
-  grid-template-columns: 22px 1fr auto;
+  grid-template-columns: minmax(48px, auto) 1fr auto minmax(64px, auto);
   align-items: center;
   gap: 7px;
   padding: 1px 3px;

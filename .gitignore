@@ -36,6 +36,7 @@ test_stl_files/
 .camera-frames/
 .ui-shots/
 .machine-bridge/
+.dev-bridge/
 
 # Stray editor/agent config (do not track)
 .antigravitycli/

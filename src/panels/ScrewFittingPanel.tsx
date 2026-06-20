@@ -281,14 +281,15 @@ export function ScrewFittingPanel() {
   // Record the live machine position: fill the selected row's X/Y, else append.
   function recordPosition() {
     if (!connected) return
-    if (selected >= 0 && selected < points.length) {
-      updatePoint(selected, { x: wpos.x, y: wpos.y })
-    } else {
-      setPoints((p) => {
-        setSelected(p.length)
-        return [...p, defaultScrewDrivePoint({ x: wpos.x, y: wpos.y, depth: params.defaultDepth })]
-      })
-    }
+    // ALWAYS append a new point at the live position (and select it). Record =
+    // "teach a new point" every press; re-positioning an existing point is done
+    // by editing its row, not by this button. (Previously it overwrote the
+    // selected point, and since each capture auto-selects, repeated presses just
+    // overwrote the same point — so you could never build a list.)
+    setPoints((p) => {
+      setSelected(p.length)
+      return [...p, defaultScrewDrivePoint({ x: wpos.x, y: wpos.y, depth: params.defaultDepth })]
+    })
   }
 
   function clearAll() {

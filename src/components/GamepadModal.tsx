@@ -1,23 +1,24 @@
-import { Gamepad2, Vibrate, Move, ChevronsUpDown, RotateCcw, X, Crosshair, Plus, Sliders, Layers } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Gamepad2, Vibrate, Move, ChevronsUpDown, RotateCcw, X, Crosshair, Sliders, Layers, Tag } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Modal } from './Modal'
 import { GamepadModel3D } from './GamepadModel3D'
 import { GamepadDiagnostic } from './GamepadDiagnostic'
-import { type GamepadState } from '../machine/useGamepad'
+import { type GamepadState, type RawSnapshot } from '../machine/useGamepad'
 import {
   useGamepadMap,
   padBindings,
   GAMEPAD_ACTIONS,
   GAMEPAD_ANALOG,
-  controlGlyph,
   buttonToken,
   axisToken,
   triggerToken,
+  tokenPressed,
   type GamepadActionId,
   type GamepadAnalogId,
   type ControlToken,
   type PadFamily,
 } from '../store/gamepadMap'
+import { useGamepadLabels, labelFor, baseToken, STD_CONTROL_NAMES } from '../store/gamepadLabels'
 import {
   TABS_WITH_ACTIONS,
   tabLegend,
@@ -105,9 +106,14 @@ function useControlCapture(active: boolean, onCaptured: (tok: ControlToken) => v
             const v = ax[i] ?? 0
             if (!Number.isFinite(v)) continue
             const travel = Math.abs(v - base)
-            // Trigger heuristic: started near a rail (−1 or 0) and swept far toward +1.
-            const startedAtRail = base <= -0.6 || Math.abs(base) < 0.2
-            if (startedAtRail && v > 0.4 && travel > CAPTURE_TRIGGER_TRAVEL) {
+            // Trigger ONLY when the axis rests at the NEGATIVE rail (−1) and sweeps
+            // far toward +1 — that's a real analog trigger. A CENTER-resting axis
+            // (base ≈ 0) is a stick/D-pad-hat: each direction is a distinct axis
+            // HALF, captured below as a<i>±. (The old `|Math.abs(base)<0.2|` wrongly
+            // treated a centered hat going 0→+1 as a trigger, so D-pad ↑/→ couldn't
+            // be bound as directions.)
+            const restsAtNegRail = base <= -0.6
+            if (restsAtNegRail && v > 0.4 && travel > CAPTURE_TRIGGER_TRAVEL) {
               cbRef.current(triggerToken(i))
               return
             }
@@ -123,6 +129,150 @@ function useControlCapture(active: boolean, onCaptured: (tok: ControlToken) => v
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
   }, [active])
+}
+
+/**
+ * A bound-control glyph chip that SHIMMERS while its control is held. It owns its
+ * own subscription to the high-frequency raw snapshot (via `useSyncExternalStore`,
+ * the same stable `subscribeRaw`/`getRawSnapshot` the diagnostic uses), so only
+ * this tiny chip re-renders each animation frame — the surrounding rows,
+ * dropdowns and memoised modal stay stable. `className` selects which row style
+ * the chip wears (the glyph spans the rows used to render statically).
+ */
+function LiveGlyph({
+  token,
+  family,
+  className,
+  subscribeRaw,
+  getRawSnapshot,
+  title,
+  padKey,
+  labels,
+}: {
+  token: ControlToken
+  family: PadFamily
+  className: string
+  subscribeRaw: (cb: () => void) => () => void
+  getRawSnapshot: () => RawSnapshot | null
+  title?: string
+  padKey: string
+  labels: Record<string, Record<string, string>>
+}) {
+  const raw = useSyncExternalStore(subscribeRaw, getRawSnapshot, getRawSnapshot)
+  const pressed = token
+    ? tokenPressed(token, raw?.buttons ?? [], raw?.axes ?? [], { triggerThresh: 0.6 })
+    : false
+  return (
+    <span className={`${className}${pressed ? ' is-pressed' : ''}`} title={title}>
+      {labelFor(padKey, token, family, labels)}
+    </span>
+  )
+}
+
+/**
+ * A manual control-picker `<select>` shown ALONGSIDE Rebind/Clear: instead of
+ * pressing the physical control, the user can pick it from a list. The option
+ * list is built ONCE from `getRawSnapshot()` at render (button/axis counts are
+ * stable per pad), so it does NOT subscribe to the per-frame raw stream. Picking
+ * `''` clears the binding. Pure DISPLAY/selection path — it routes through the
+ * same `bind`/`setTabOverride` the buttons use; no input-reading change.
+ */
+function ControlPicker({
+  value,
+  onPick,
+  family,
+  padKey,
+  labels,
+  subscribeRaw,
+  getRawSnapshot,
+}: {
+  value: ControlToken
+  onPick: (tok: ControlToken) => void
+  family: PadFamily
+  padKey: string
+  labels: Record<string, Record<string, string>>
+  subscribeRaw: (cb: () => void) => () => void
+  getRawSnapshot: () => RawSnapshot | null
+}) {
+  const t = useT()
+  // Subscribe but surface only a STABLE counts key ("nBtns:nAxes"). String
+  // equality means this re-renders only when the pad (dis)connects or its control
+  // count changes — NOT every frame — so the option list populates once the pad
+  // is live (the old one-shot getRawSnapshot() read an empty/null snapshot at the
+  // memoized modal's render and left the dropdown empty), while an open <select>
+  // isn't torn down by per-frame input.
+  const countsKey = useSyncExternalStore(subscribeRaw, () => {
+    const r = getRawSnapshot()
+    return r ? `${r.buttons.length}:${r.axes.length}` : ''
+  })
+  const [nBtns, nAxes] = countsKey ? countsKey.split(':').map(Number) : [0, 0]
+
+  const buttonOpts = useMemo(() => {
+    const out: { tok: ControlToken; text: string }[] = []
+    for (let i = 0; i < nBtns; i++) {
+      const tok = buttonToken(i)
+      out.push({ tok, text: `${labelFor(padKey, tok, family, labels)} (b${i})` })
+    }
+    return out
+  }, [nBtns, padKey, family, labels])
+
+  const axisOpts = useMemo(() => {
+    const out: { tok: ControlToken; text: string }[] = []
+    for (let i = 0; i < nAxes; i++) {
+      const plus = axisToken(i, 1)
+      const minus = axisToken(i, -1)
+      const trig = triggerToken(i)
+      out.push({ tok: plus, text: `${labelFor(padKey, plus, family, labels)} (a${i}+)` })
+      out.push({ tok: minus, text: `${labelFor(padKey, minus, family, labels)} (a${i}-)` })
+      out.push({ tok: trig, text: `${labelFor(padKey, trig, family, labels)} (t${i})` })
+    }
+    return out
+  }, [nAxes, padKey, family, labels])
+
+  // If the current value isn't in the generated lists (snapshot null / pad
+  // disconnected / exotic index), still surface it so the binding shows.
+  const known = useMemo(() => {
+    const s = new Set<ControlToken>([''])
+    for (const o of buttonOpts) s.add(o.tok)
+    for (const o of axisOpts) s.add(o.tok)
+    return s
+  }, [buttonOpts, axisOpts])
+  const showCurrent = value !== '' && !known.has(value)
+
+  const disabled = nBtns === 0 && nAxes === 0
+  return (
+    <select
+      className="mc-select gp-remap-picker"
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onPick(e.target.value as ControlToken)}
+      title={t('gp.remap.pick.title', 'Pick a control from the list')}
+      aria-label={t('gp.remap.pick.aria', 'Pick a control')}
+    >
+      <option value="">{t('gp.remap.pick.none', '— none —')}</option>
+      {showCurrent && (
+        <option value={value}>{labelFor(padKey, value, family, labels)}</option>
+      )}
+      {buttonOpts.length > 0 && (
+        <optgroup label={t('gp.remap.pick.buttons', 'Buttons')}>
+          {buttonOpts.map((o) => (
+            <option key={o.tok} value={o.tok}>
+              {o.text}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {axisOpts.length > 0 && (
+        <optgroup label={t('gp.remap.pick.axes', 'Axes')}>
+          {axisOpts.map((o) => (
+            <option key={o.tok} value={o.tok}>
+              {o.text}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </select>
+  )
 }
 
 function GamepadModalInner({
@@ -144,6 +294,10 @@ function GamepadModalInner({
 
   // Per-pad bindings + per-tab overrides for the ACTIVE pad.
   const store = useGamepadMap()
+  // User HID label layer (display names) — bound-control chips render through it.
+  const labels = useGamepadLabels((s) => s.labels)
+  const setLabel = useGamepadLabels((s) => s.setLabel)
+  const clearLabel = useGamepadLabels((s) => s.clearLabel)
   const bindings = useMemo(() => padBindings(store, padKey), [store, padKey])
   const bind = store.bind
   const bindAnalog = store.bindAnalog
@@ -157,6 +311,7 @@ function GamepadModalInner({
     | { kind: 'action'; id: GamepadActionId }
     | { kind: 'analog'; id: GamepadAnalogId }
     | { kind: 'tab'; tab: string; action: string }
+    | { kind: 'label'; name: string }
     | null
   const [capturing, setCapturing] = useState<Capture>(null)
   useEffect(() => {
@@ -170,9 +325,18 @@ function GamepadModalInner({
       if (cap.kind === 'action') bind(padKey, cap.id, tok)
       else if (cap.kind === 'analog') bindAnalog(padKey, cap.id, tok)
       else if (cap.kind === 'tab') store.setTabOverride(padKey, cap.tab, tok, cap.action as GamepadActionId)
+      else if (cap.kind === 'label') {
+        const base = baseToken(tok)
+        // Enforce uniqueness: a name maps to exactly one physical control. Clear
+        // this name off any OTHER base it was previously assigned to.
+        for (const [b, v] of Object.entries(labels[padKey] ?? {})) {
+          if (v === cap.name && b !== base) clearLabel(padKey, b)
+        }
+        setLabel(padKey, base, cap.name)
+      }
       setCapturing(null)
     },
-    [capturing, bind, bindAnalog, store, padKey],
+    [capturing, bind, bindAnalog, store, padKey, labels, setLabel, clearLabel],
   )
   useControlCapture(capturing != null, onCaptured)
 
@@ -269,7 +433,83 @@ function GamepadModalInner({
             useSyncExternalStore), so per-frame pad input re-renders ONLY this
             child — the modal + its dropdowns stay stable and an open menu stays
             open. */}
-        <GamepadDiagnostic subscribeRaw={gp.subscribeRaw} getRawSnapshot={gp.getRawSnapshot} family={family} />
+        <GamepadDiagnostic subscribeRaw={gp.subscribeRaw} getRawSnapshot={gp.getRawSnapshot} family={family} padKey={padKey} />
+
+        {/* ───────── Button names (press-to-detect labelling) ─────────
+            A SECOND way to label a physical control (the dropdowns in the live
+            diagnostic above are the first): pick a standard name, click Rebind,
+            then press the real button. Pure DISPLAY layer — never touches input
+            reading or bindings. Each name maps to exactly one physical control. */}
+        <div className="gp-remap gp-labels">
+          <div className="gp-remap-head">
+            <Tag size={14} aria-hidden="true" className="gp-sec-ico" />
+            <h4>{t('gp.labels.title', 'Button names')}</h4>
+            <span
+              className="gp-remap-sub"
+              title={t(
+                'gp.labels.help',
+                'Give each control its real-world name so every glyph in the app shows the correct label. Click Rebind, then press the button — or use the dropdowns in Live inputs above.',
+              )}
+            >
+              {t('gp.labels.hint', 'Click Rebind, then press the button — or use the dropdowns in Live inputs above')}
+            </span>
+          </div>
+
+          <div className="gp-remap-list">
+            {STD_CONTROL_NAMES.map((nm) => {
+              const base = Object.entries(labels[padKey] ?? {}).find(([, v]) => v === nm)?.[0]
+              const isCapturing = capturing?.kind === 'label' && capturing.name === nm
+              return (
+                <div className={`gp-remap-row${isCapturing ? ' is-capturing' : ''}`} key={nm}>
+                  <span className="gp-remap-label" title={nm}>
+                    {nm}
+                  </span>
+                  <span className="gp-remap-glyph-wrap">
+                    {isCapturing ? (
+                      <span className="gp-remap-capture" role="status">
+                        {t('gp.remap.press', 'Press a control…')}
+                      </span>
+                    ) : base ? (
+                      <LiveGlyph
+                        token={base as ControlToken}
+                        family={family}
+                        className="gp-remap-glyph"
+                        subscribeRaw={gp.subscribeRaw}
+                        getRawSnapshot={gp.getRawSnapshot}
+                        padKey={padKey}
+                        labels={labels}
+                      />
+                    ) : (
+                      <span className="gp-remap-unbound">{t('gp.labels.unmapped', 'Unmapped')}</span>
+                    )}
+                  </span>
+                  <span className="gp-remap-acts">
+                    <button
+                      type="button"
+                      className="gp-remap-btn"
+                      onClick={() => setCapturing(isCapturing ? null : { kind: 'label', name: nm })}
+                      title={t('gp.labels.rebind.title', 'Name a control — then press that button on your gamepad')}
+                    >
+                      {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
+                    </button>
+                    <button
+                      type="button"
+                      className="gp-remap-btn gp-remap-clear"
+                      disabled={!base || isCapturing}
+                      onClick={() => {
+                        if (base) clearLabel(padKey, base)
+                      }}
+                      aria-label={t('gp.labels.clear.aria', 'Clear the control named {name}', { name: nm })}
+                      title={t('gp.labels.clear.title', 'Clear this name')}
+                    >
+                      <X size={13} aria-hidden="true" />
+                    </button>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
 
         {/* ───────── Programmable mapping (video-game-style rebinding) ───────── */}
         <div className="gp-remap">
@@ -302,7 +542,6 @@ function GamepadModalInner({
           <div className="gp-remap-analog gp-remap-analog--grid">
             {GAMEPAD_ANALOG.map((a) => {
               const tok = bindings.analog[a.id] ?? ''
-              const glyph = tok ? controlGlyph(tok, family) : ''
               const isCapturing = capturing?.kind === 'analog' && capturing.id === a.id
               return (
                 <div className={`gp-remap-arow${isCapturing ? ' is-capturing' : ''}`} key={a.id}>
@@ -317,8 +556,16 @@ function GamepadModalInner({
                       <span className="gp-remap-capture" role="status">
                         {t('gp.remap.press', 'Press a control…')}
                       </span>
-                    ) : glyph ? (
-                      <span className="gp-remap-actl">{glyph}</span>
+                    ) : tok ? (
+                      <LiveGlyph
+                        token={tok}
+                        family={family}
+                        className="gp-remap-actl"
+                        subscribeRaw={gp.subscribeRaw}
+                        getRawSnapshot={gp.getRawSnapshot}
+                        padKey={padKey}
+                        labels={labels}
+                      />
                     ) : (
                       <span className="gp-remap-unbound">{t('gp.remap.unbound', 'Unbound')}</span>
                     )}
@@ -350,7 +597,6 @@ function GamepadModalInner({
           <div className="gp-remap-list">
             {GAMEPAD_ACTIONS.map((a) => {
               const tok = bindings.actions[a.id] ?? ''
-              const glyph = tok ? controlGlyph(tok, family) : ''
               const isCapturing = capturing?.kind === 'action' && capturing.id === a.id
               const owner = isCapturing ? undefined : actionOwner(tok)
               const dupWarn = owner != null && owner !== a.id
@@ -369,15 +615,31 @@ function GamepadModalInner({
                       <span className="gp-remap-capture" role="status">
                         {t('gp.remap.press', 'Press a control…')}
                       </span>
-                    ) : glyph ? (
-                      <span className={`gp-remap-glyph${dupWarn ? ' warn' : ''}`} title={dupWarn ? t('gp.remap.conflict', 'Also used elsewhere') : undefined}>
-                        {glyph}
-                      </span>
+                    ) : tok ? (
+                      <LiveGlyph
+                        token={tok}
+                        family={family}
+                        className={`gp-remap-glyph${dupWarn ? ' warn' : ''}`}
+                        subscribeRaw={gp.subscribeRaw}
+                        getRawSnapshot={gp.getRawSnapshot}
+                        title={dupWarn ? t('gp.remap.conflict', 'Also used elsewhere') : undefined}
+                        padKey={padKey}
+                        labels={labels}
+                      />
                     ) : (
                       <span className="gp-remap-unbound">{t('gp.remap.unbound', 'Unbound')}</span>
                     )}
                   </span>
                   <span className="gp-remap-acts">
+                    <ControlPicker
+                      value={tok}
+                      onPick={(tk) => (tk ? bind(padKey, a.id, tk) : clearBind(padKey, a.id))}
+                      family={family}
+                      padKey={padKey}
+                      labels={labels}
+                      subscribeRaw={gp.subscribeRaw}
+                      getRawSnapshot={gp.getRawSnapshot}
+                    />
                     <button
                       type="button"
                       className="gp-remap-btn"
@@ -403,7 +665,15 @@ function GamepadModalInner({
           </div>
 
           {/* Per-tab context overrides. */}
-          <TabOverridesEditor padKey={padKey} family={family} capturing={capturing} setCapturing={setCapturing} />
+          <TabOverridesEditor
+            padKey={padKey}
+            family={family}
+            labels={labels}
+            capturing={capturing}
+            setCapturing={setCapturing}
+            subscribeRaw={gp.subscribeRaw}
+            getRawSnapshot={gp.getRawSnapshot}
+          />
         </div>
       </div>
     </Modal>
@@ -443,34 +713,39 @@ export const GamepadModal = memo(GamepadModalInner, (a, b) => {
 function TabOverridesEditor({
   padKey,
   family,
+  labels,
   capturing,
   setCapturing,
+  subscribeRaw,
+  getRawSnapshot,
 }: {
   padKey: string
   family: PadFamily
+  labels: Record<string, Record<string, string>>
   capturing:
     | { kind: 'action'; id: GamepadActionId }
     | { kind: 'analog'; id: GamepadAnalogId }
     | { kind: 'tab'; tab: string; action: string }
+    | { kind: 'label'; name: string }
     | null
   setCapturing: (c: { kind: 'tab'; tab: string; action: string } | null) => void
+  subscribeRaw: (cb: () => void) => () => void
+  getRawSnapshot: () => RawSnapshot | null
 }) {
   const t = useT()
   const [tab, setTab] = useState<string>(TABS_WITH_ACTIONS[0] ?? 'program')
   const store = useGamepadMap()
   const overrides = (store.tabOverrides[padKey]?.[tab] ?? {}) as Record<string, string>
   const legend = useMemo(() => tabLegend(tab, overrides), [tab, overrides])
-  // The bindable command catalogue for the SELECTED tab (changes with the tab).
+  // EVERY bindable command for the SELECTED tab — the editor shows one row per
+  // command (bind / rebind / clear), so the whole tab is programmable at a glance.
   const catalogue = useMemo(() => tabCommandCatalogue(tab), [tab])
-  const [addAction, setAddAction] = useState<string>(catalogue[0]?.id ?? '')
-  // Keep the "action to add" picker valid for the current tab's catalogue: when
-  // the tab changes (or its catalogue doesn't contain the current pick), reset to
-  // the tab's first command so the picker never shows a foreign action.
-  useEffect(() => {
-    if (!catalogue.some((d) => d.id === addAction)) {
-      setAddAction(catalogue[0]?.id ?? '')
-    }
-  }, [catalogue, addAction])
+  // Effective binding (token + whether it's a user override) for each command id.
+  const byCmd = useMemo(() => {
+    const m = new Map<string, { token: ControlToken; override: boolean }>()
+    for (const row of legend) m.set(row.cmdId, { token: row.token, override: !!row.override })
+    return m
+  }, [legend])
 
   const tabTitle = (id: string) => {
     const spec = availablePanels.find((p) => p.id === id)
@@ -486,21 +761,6 @@ function TabOverridesEditor({
           {t('gp.tabedit.hint', 'Layered over Global on the chosen tab')}
         </span>
         <span className="gp-remap-spacer" />
-        <label className="gp-tabedit-pick">
-          <span className="gp-tabedit-picklbl">{t('gp.tabedit.tab', 'Tab')}</span>
-          <select
-            className="mc-select"
-            value={tab}
-            onChange={(e) => setTab(e.target.value)}
-            aria-label={t('gp.tabedit.tab.aria', 'Workbench tab to customise')}
-          >
-            {TABS_WITH_ACTIONS.map((id) => (
-              <option key={id} value={id}>
-                {tabTitle(id)}
-              </option>
-            ))}
-          </select>
-        </label>
         <button
           type="button"
           className="gp-remap-reset"
@@ -512,68 +772,90 @@ function TabOverridesEditor({
         </button>
       </div>
 
+      {/* Tab picker as a horizontal strip (replaces the dropdown). */}
+      <div className="gp-tabedit-tabs" role="tablist" aria-label={t('gp.tabedit.tab.aria', 'Workbench tab to customise')}>
+        {TABS_WITH_ACTIONS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-pressed={id === tab}
+            aria-selected={id === tab}
+            className={`gp-tabedit-tab${id === tab ? ' is-active' : ''}`}
+            onClick={() => setTab(id)}
+          >
+            {tabTitle(id)}
+          </button>
+        ))}
+      </div>
+
       <div className="gp-tabedit-list">
-        {legend.length === 0 && (
-          <div className="gp-remap-unbound gp-tabedit-empty">{t('gp.tabedit.empty', 'No tab actions — add one below.')}</div>
+        {catalogue.length === 0 && (
+          <div className="gp-remap-unbound gp-tabedit-empty">{t('gp.tabedit.none', 'No actions for this tab.')}</div>
         )}
-        {legend.map((row) => (
-          <div className="gp-tabedit-row" key={row.token}>
-            <span className="gp-remap-glyph gp-tabedit-glyph">{controlGlyph(row.token, family)}</span>
-            <span className="gp-tabedit-label">
-              {t(row.labelKey, row.label)}
-              {row.override && <span className="gp-tabedit-tag">{t('gp.tabedit.custom', 'custom')}</span>}
-            </span>
-            <span className="gp-remap-spacer" />
-            {row.override && (
+        {catalogue.map((c) => {
+          const bound = byCmd.get(c.id)
+          const tok = bound?.token ?? ''
+          const override = bound?.override ?? false
+          const isCapturing = capturing?.kind === 'tab' && capturing.tab === tab && capturing.action === c.id
+          return (
+            <div className={`gp-tabedit-row${isCapturing ? ' is-capturing' : ''}`} key={c.id}>
+              <span className="gp-tabedit-cmdglyph">
+                {isCapturing ? (
+                  <span className="gp-remap-capture" role="status">{t('gp.remap.press', 'Press a control…')}</span>
+                ) : tok ? (
+                  <LiveGlyph
+                    token={tok}
+                    family={family}
+                    className="gp-remap-glyph gp-tabedit-glyph"
+                    subscribeRaw={subscribeRaw}
+                    getRawSnapshot={getRawSnapshot}
+                    padKey={padKey}
+                    labels={labels}
+                  />
+                ) : (
+                  <span className="gp-remap-unbound">{t('gp.remap.unbound', 'Unbound')}</span>
+                )}
+              </span>
+              <span className="gp-tabedit-label">
+                {t(c.labelKey, c.label)}
+                {override && <span className="gp-tabedit-tag">{t('gp.tabedit.custom', 'custom')}</span>}
+              </span>
+              <span className="gp-remap-spacer" />
+              <ControlPicker
+                value={tok}
+                onPick={(tk) =>
+                  tk
+                    ? store.setTabOverride(padKey, tab, tk, c.id as GamepadActionId)
+                    : tok && store.clearTabOverride(padKey, tab, tok)
+                }
+                family={family}
+                padKey={padKey}
+                labels={labels}
+                subscribeRaw={subscribeRaw}
+                getRawSnapshot={getRawSnapshot}
+              />
+              <button
+                type="button"
+                className="gp-remap-btn"
+                onClick={() => setCapturing(isCapturing ? null : { kind: 'tab', tab, action: c.id })}
+                title={t('gp.tabedit.rebind.title', 'Bind a control to this action on this tab — then press a control')}
+              >
+                {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
+              </button>
               <button
                 type="button"
                 className="gp-remap-btn gp-remap-clear"
-                onClick={() => store.clearTabOverride(padKey, tab, row.token)}
+                disabled={!override || isCapturing}
+                onClick={() => tok && store.clearTabOverride(padKey, tab, tok)}
                 aria-label={t('gp.tabedit.remove.aria', 'Remove override')}
                 title={t('gp.tabedit.remove.title', 'Remove this override')}
               >
                 <X size={12} aria-hidden="true" />
               </button>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="gp-tabedit-add">
-        <select
-          className="mc-select"
-          value={addAction}
-          onChange={(e) => setAddAction(e.target.value)}
-          aria-label={t('gp.tabedit.add.aria', 'Action to bind on this tab')}
-          disabled={catalogue.length === 0}
-        >
-          {catalogue.map((d) => (
-            <option key={d.id} value={d.id}>
-              {t(d.labelKey, d.label)}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="gp-remap-btn gp-tabedit-addbtn"
-          onClick={() => addAction && setCapturing({ kind: 'tab', tab, action: addAction })}
-          disabled={capturing?.kind === 'tab' || !addAction}
-          title={t('gp.tabedit.add.title', 'Bind a control to this action on the chosen tab — then press a control')}
-        >
-          {capturing?.kind === 'tab' ? (
-            <span className="gp-remap-capture">{t('gp.remap.press', 'Press a control…')}</span>
-          ) : (
-            <>
-              <Plus size={13} aria-hidden="true" />
-              {t('gp.tabedit.add', 'Bind control')}
-            </>
-          )}
-        </button>
-        {capturing?.kind === 'tab' && (
-          <button type="button" className="gp-remap-btn" onClick={() => setCapturing(null)}>
-            {t('gp.remap.cancel', 'Cancel')}
-          </button>
-        )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

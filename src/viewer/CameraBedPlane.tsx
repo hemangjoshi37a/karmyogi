@@ -297,7 +297,11 @@ export function CameraBedPlane() {
           vec3 q = uMat * vec3(vWorld - uWorldOffset, 1.0);
           if (abs(q.z) < 1e-8) discard;
           vec2 uv = kmUndistort(q.xy / q.z, uK);
-          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+          // EDGE GUARD: drop the outer frame band. A tilted camera's homography
+          // smears its far/edge texels across a huge bed region (the streak
+          // artifact); only the clean central region is shown.
+          float em = 0.08;
+          if (uv.x < em || uv.x > 1.0 - em || uv.y < em || uv.y > 1.0 - em) discard;
           gl_FragColor = vec4(texture2D(uVideo, vec2(uv.x, 1.0 - uv.y)).rgb, uOpacity);
         }
       `,

@@ -3,6 +3,7 @@ import { Shell } from './shell'
 import { grbl } from '../serial/controller'
 import { usePersistentState, useMachines } from '../store'
 import { useMachineBridge } from '../machine/machineBridge'
+import { useDevBridge } from '../dev/devBridge'
 import { AuthGate } from '../auth/AuthGate'
 import { useActivityTracking } from '../track/useActivityTracking'
 import { useAuth } from '../auth/authStore'
@@ -145,6 +146,11 @@ export function App() {
   // relays while enabled AND the machine is connected.
   const [bridgeEnabled] = usePersistentState('karmyogi.machineBridge.enabled', false)
   useMachineBridge(bridgeEnabled)
+
+  // DEV observability + control bridge: always on in dev, machine-independent.
+  // Lets an agent on the server read live app/calibration state and drive app
+  // actions (panel focus, calibration tuning) without the user touching the UI.
+  useDevBridge()
 
   // Central activity tracking (no-ops unless Firebase is configured + signed in).
   useActivityTracking()

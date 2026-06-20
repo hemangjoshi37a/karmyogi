@@ -644,17 +644,14 @@ export function SolderingPanel() {
   // otherwise append a new row at that position.
   function recordPosition() {
     if (!connected) return
-    if (selected >= 0 && selected < points.length) {
-      updatePoint(selected, { x: wpos.x, y: wpos.y })
-    } else {
-      // Append at the live position (X/Y plus the touch-down Z) and select it
-      // via the functional updater so the new index is computed from the current
-      // list, not a stale closure.
-      setPoints((p) => {
-        setSelected(p.length)
-        return [...p, newRow(wpos.x, wpos.y, wpos.z)]
-      })
-    }
+    // ALWAYS append a new point per press (X/Y + touch-down Z) and select it.
+    // Record = "teach a new point"; reposition an existing one by editing its row.
+    // (Previously it overwrote the selected point, and each capture auto-selects,
+    // so repeated presses just rewrote the same point instead of building a list.)
+    setPoints((p) => {
+      setSelected(p.length)
+      return [...p, newRow(wpos.x, wpos.y, wpos.z)]
+    })
   }
 
   // Live G-code preview, recomputed whenever points/params change. The core

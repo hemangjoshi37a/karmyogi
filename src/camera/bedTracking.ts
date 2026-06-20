@@ -32,6 +32,15 @@ export function zxingStatus(): { state: 'idle' | 'ok' | 'error'; error: string }
   return { state: zxingState, error: zxingErr }
 }
 
+// The barrel-undistortion coefficient that LAST successfully decoded a frame: 0
+// when the raw frame decoded (no lens correction needed), else the negative C from
+// the undistort sweep. A real, data-driven estimate of the lens distortion — fed
+// into the overlay so the rectified bed is auto-undistorted (no manual warp slider).
+let lastBarrelC = 0
+export function getLastBarrelC(): number {
+  return lastBarrelC
+}
+
 let zxingPrepared = false
 function prepareZxing(): void {
   if (zxingPrepared) return
@@ -334,6 +343,7 @@ async function detectQrCodesUndistortSweep(frame: CapturedFrame): Promise<Detect
     }
     if (out.length > 0) {
       zxingState = 'ok'
+      lastBarrelC = C // this barrel strength straightened the lens enough to decode
       return out
     }
   }
@@ -360,6 +370,7 @@ async function detectQrCodesZxing(frame: CapturedFrame): Promise<DetectedCode[]>
     })
     zxingState = 'ok'
     zxingErr = ''
+    lastBarrelC = 0 // raw frame decoded → no lens-undistortion was needed
     const out: DetectedCode[] = []
     for (const r of results) {
       if (!r.text) continue

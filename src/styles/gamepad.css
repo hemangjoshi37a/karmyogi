@@ -430,3 +430,159 @@
   color: var(--fg-muted);
   text-align: center;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   GAMEPAD MODAL — live-input polish (feeds the diagnostic + remap glyphs)
+   - friendly control names beside the raw index in the diagnostic,
+   - a continuous shimmer on the glyph chip of whatever control is held,
+   - a horizontal tab STRIP (segmented control) for the per-tab editor.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ---- Friendly name + muted index in the raw-inputs diagnostic ---- */
+.gp-diag-label {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  min-width: 0; overflow: hidden;
+}
+.gp-diag-name {
+  font-size: 11px; font-weight: 700; color: var(--fg);
+  white-space: nowrap;
+}
+.gp-diag-row.is-active .gp-diag-name { color: var(--accent); }
+
+/* ---- Pressed-control highlight: UNMISTAKABLE so the user instantly sees which
+   binding a held control maps to. Solid bright fill + scale-up + pulsing glow,
+   with hard hex fallbacks so it never silently drops if --accent is unusual. ---- */
+@keyframes gp-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes gp-press-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--accent, #14b8a6), 0 0 8px 1px rgba(45, 212, 191, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 3px var(--accent, #14b8a6), 0 0 18px 4px rgba(45, 212, 191, 0.95);
+  }
+}
+.gp-remap-glyph.is-pressed,
+.gp-remap-actl.is-pressed,
+.gp-tabedit-glyph.is-pressed {
+  position: relative;
+  background: var(--accent, #14b8a6) !important;
+  color: #fff !important;
+  border-color: var(--accent, #14b8a6) !important;
+  transform: scale(1.18);
+  z-index: 2;
+  animation: gp-press-pulse 0.7s ease-in-out infinite;
+}
+/* A travelling white sheen across the chip while held (on top of the fill). */
+.gp-remap-glyph.is-pressed::after,
+.gp-remap-actl.is-pressed::after,
+.gp-tabedit-glyph.is-pressed::after {
+  content: '';
+  position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.65) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: gp-shimmer 1.1s linear infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gp-remap-glyph.is-pressed,
+  .gp-remap-actl.is-pressed,
+  .gp-tabedit-glyph.is-pressed { animation: none; }
+  .gp-remap-glyph.is-pressed::after,
+  .gp-remap-actl.is-pressed::after,
+  .gp-tabedit-glyph.is-pressed::after { animation: none; }
+}
+
+/* ---- Per-tab editor: horizontal tab STRIP (replaces the dropdown) ---- */
+.gp-tabedit-tabs {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 4px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--bg-input);
+  overflow-x: auto;
+}
+.gp-tabedit-tab {
+  flex: 0 0 auto;
+  font-size: 11.5px; min-height: 28px; padding: 4px 11px;
+  border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--fg-muted); cursor: pointer;
+  white-space: nowrap;
+}
+.gp-tabedit-tab:hover { color: var(--fg); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.gp-tabedit-tab.is-active {
+  color: var(--accent-fg); background: var(--accent);
+  border-color: var(--accent); font-weight: 700;
+}
+
+/* ---- Per-tab editor: fully-programmable command rows ---- */
+.gp-tabedit-row.is-capturing { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.gp-tabedit-cmdglyph { min-width: 92px; display: inline-flex; align-items: center; }
+
+/* ---- Per-row HID name picker in the live diagnostic (display-label layer) ---- */
+/* A small, unobtrusive select that lets the operator assign each raw input's
+   real-world name (fixes mislabelled non-standard pads). Sits in the 4th column
+   of the .gp-diag-row grid; inherits the .mc-select look but compact. */
+.gp-diag-namesel {
+  min-height: 22px;
+  height: 22px;
+  padding: 0 18px 0 6px;
+  font-size: 10.5px;
+  line-height: 1;
+  border-radius: 5px;
+  width: 100%;
+  max-width: 96px;
+  color: var(--fg-muted);
+  background-position: right 4px center;
+}
+.gp-diag-namesel:hover,
+.gp-diag-namesel:focus { color: var(--fg); }
+.gp-diag-row.is-active .gp-diag-namesel { border-color: var(--accent); }
+
+/* Bipolar AXIS rows carry TWO labelable directions (− and +), e.g. a hat D-pad.
+   Two compact name selects with a direction marker, wrapping on narrow widths. */
+.gp-diag-axsel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+}
+.gp-diag-axsel-dir {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg-muted);
+}
+.gp-diag-axsel .gp-diag-namesel { min-width: 56px; width: auto; max-width: 88px; }
+
+@media (max-width: 560px) {
+  .gp-diag-namesel { max-width: none; min-height: 30px; height: 30px; font-size: 12px; }
+  .gp-diag-axsel { width: 100%; }
+  .gp-diag-axsel .gp-diag-namesel { flex: 1 1 80px; max-width: none; }
+}
+
+/* ---- Manual control-picker (alongside Rebind/Clear in the mapping rows) ---- */
+/* A compact select inheriting the .mc-select look, sized to fit the row without
+   crowding out the Rebind/Clear buttons. Allowed to shrink and wrap on narrow
+   widths so .gp-remap-row / .gp-remap-acts never overflow. */
+.gp-remap-picker {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 22px 0 8px;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 6px;
+  flex: 0 1 130px;
+  min-width: 84px;
+  max-width: 150px;
+}
+/* In the inline-flex .gp-remap-acts cluster, let the cluster wrap so the picker
+   can drop below Rebind/Clear instead of overflowing. */
+.gp-remap-acts { flex-wrap: wrap; align-items: center; }
+/* Per-tab rows are a flex container; keep the picker compact there too. */
+.gp-tabedit-row { flex-wrap: wrap; }
+.gp-tabedit-row .gp-remap-picker { flex: 0 1 130px; }
+@media (max-width: 560px) {
+  .gp-remap-picker { flex-basis: 100%; max-width: none; min-height: 32px; height: 32px; font-size: 12px; }
+}

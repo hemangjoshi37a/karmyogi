@@ -5,8 +5,9 @@ import {
   useRef,
   useState,
   useEffect,
+  useCallback,
 } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, GizmoHelper, GizmoViewcube, Environment, Lightformer } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import * as THREE from 'three'
@@ -409,6 +410,36 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // user never has to click; a manual button stays as a fallback.
   const [glLost, setGlLost] = useState(false)
   const [glEpoch, setGlEpoch] = useState(0)
+
+  // DEV: publish 3D health to the dev-bridge state mirror so an agent on the
+  // server can SEE whether the WebGL context is alive (vs lost/blank) without
+  // needing the rendered frame. Written by the parent Viewer, which stays mounted
+  // even when the <Canvas> children unmount on context loss. A `forceRebuild`
+  // remount can also be triggered remotely via the 'rebuildGl' app command.
+  const forceRebuild = useCallback(() => {
+    setGlLost(false)
+    setGlEpoch((n) => n + 1)
+  }, [])
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    ;(window as unknown as { __viewerHealth?: unknown }).__viewerHealth = {
+      glLost,
+      glEpoch,
+      t: Date.now(),
+    }
+    const onApp = (e: Event) => {
+      const action = String((e as CustomEvent).detail || '')
+      if (action === 'rebuildGl') return forceRebuild()
+      // Remote camera framing so an agent can inspect the twin from a known angle
+      // (top-down is needed to judge the 1:1 mapping). view:top|iso|front | fit.
+      if (action === 'view:top') return apiRef.current.setView('top')
+      if (action === 'view:iso') return apiRef.current.setView('iso')
+      if (action === 'view:front') return apiRef.current.setView('front')
+      if (action === 'fit') return apiRef.current.fit()
+    }
+    window.addEventListener('karmyogi:app', onApp as EventListener)
+    return () => window.removeEventListener('karmyogi:app', onApp as EventListener)
+  }, [glLost, glEpoch, forceRebuild, apiRef])
 
   // ---- Lasso-delete state ----------------------------------------------------
   // While drawing: polygon points in CANVAS px. On release the polygon is handed
@@ -1030,35 +1061,93 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
  * feed — and verify changes visually. No-op (and stripped) in production.
  */
 function ViewerBridge() {
-  const gl = useThree((s) => s.gl)
+  const busy = useRef(false)
+  // Wall-clock (ms) of the last useFrame tick — so the timer below can tell when
+  // requestAnimationFrame has been PAUSED (tab backgrounded) and fall back to a
+  // manual render. r3f's clock stalls with rAF, so we use Date.now() here.
+  const lastFrameAt = useRef(0)
+  const lastCapAt = useRef(0)
+  // r3f imperative getter — lets the setInterval read the CURRENT gl/scene/camera
+  // outside the render loop so it can render + capture even when rAF is paused.
+  const get = useThree((s) => s.get)
+
+  const capture = (gl: THREE.WebGLRenderer) => {
+    if (busy.current) return
+    try {
+      gl.domElement.toBlob(
+        (blob) => {
+          if (!blob) return
+          busy.current = true
+          fetch('/__camera_frame?name=viewer3d', {
+            method: 'POST',
+            headers: { 'content-type': 'image/jpeg' },
+            body: blob,
+          })
+            .catch(() => {})
+            .finally(() => {
+              busy.current = false
+            })
+        },
+        'image/jpeg',
+        0.85,
+      )
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // FOREGROUND path: capture inside the render loop (drawing buffer is fresh),
+  // throttled to ~1.5s. Also records that rAF is alive.
+  useFrame((state) => {
+    if (!import.meta.env.DEV) return
+    const now = Date.now()
+    lastFrameAt.current = now
+    if (now - lastCapAt.current < 1500) return
+    lastCapAt.current = now
+    capture(state.gl)
+  })
+
+  // BACKGROUND path: setInterval survives tab-backgrounding (rAF does not). If no
+  // useFrame tick has happened recently (rAF paused), MANUALLY render the scene to
+  // refresh the drawing buffer, then capture. This keeps the twin observable to an
+  // agent on the server regardless of whether the tab is focused/visible.
   useEffect(() => {
     if (!import.meta.env.DEV) return
-    let alive = true
-    const tick = () => {
-      if (!alive) return
-      try {
-        gl.domElement.toBlob(
-          (blob) => {
-            if (!blob) return
-            fetch('/__camera_frame?name=viewer3d', {
-              method: 'POST',
-              headers: { 'content-type': 'image/jpeg' },
-              body: blob,
-            }).catch(() => {})
-          },
-          'image/jpeg',
-          0.85,
-        )
-      } catch {
-        /* ignore */
+    const id = setInterval(() => {
+      const now = Date.now()
+      // Telemetry so the server-side agent can see WHY a hidden-tab capture
+      // succeeds/fails (read via /__app_state → viewerDebug). Diagnostic only.
+      const dbg: Record<string, unknown> = {
+        t: now,
+        hidden: typeof document !== 'undefined' ? document.hidden : null,
+        frameAgeMs: now - lastFrameAt.current,
       }
-    }
-    const id = window.setInterval(tick, 1500)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [gl])
+      try {
+        // rAF is alive → the useFrame path is handling capture; don't double up.
+        if (now - lastFrameAt.current < 1200) {
+          dbg.path = 'raf-alive'
+          return
+        }
+        if (now - lastCapAt.current < 1500) {
+          dbg.path = 'throttle'
+          return
+        }
+        lastCapAt.current = now
+        const { gl, scene, camera } = get()
+        const el = gl.domElement
+        dbg.canvas = `${el.width}x${el.height}`
+        gl.render(scene, camera) // refresh the preserved drawing buffer off-rAF
+        dbg.path = 'rendered'
+        capture(gl)
+      } catch (e) {
+        dbg.path = 'error'
+        dbg.err = String((e as Error)?.message || e)
+      } finally {
+        ;(window as unknown as { __viewerDebug?: unknown }).__viewerDebug = dbg
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [get])
   return null
 }
 

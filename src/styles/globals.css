@@ -120,7 +120,11 @@ textarea { min-height: auto; }
 .zoom-group button { padding: 4px 8px; min-width: 30px; }
 .zoom-group button:nth-child(2) { min-width: 48px; font-variant-numeric: tabular-nums; }
 
-.dock-host { flex: 1 1 auto; position: relative; min-height: 0; }
+/* Clip to the dock area: dockview manages its own internal layout/scroll, and a
+   panel kept mounted-but-inactive (e.g. the always-mounted Camera panel, so its
+   stream survives tab switches) must never spill into normal flow and add a
+   page-level scrollbar with empty space below. */
+.dock-host { flex: 1 1 auto; position: relative; min-height: 0; overflow: hidden; }
 
 /* Generic panel body */
 .panel-body { padding: 7px; height: 100%; overflow: auto; color: var(--fg); background: var(--bg-panel); }

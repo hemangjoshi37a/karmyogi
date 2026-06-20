@@ -1365,6 +1365,36 @@ export function CameraPanel() {
     }
   }, [deviceIds, calib])
 
+  // DEV: auto-start the head camera on mount when permission is ALREADY granted,
+  // so the live feed (and the twin's bed image) survives reloads with NO fresh
+  // user gesture. getUserMedia needs a gesture only while permission is in the
+  // 'prompt' state; once 'granted' it may start programmatically. This makes the
+  // dev bridge self-sufficient: an agent can keep observing after a reload
+  // without the user re-clicking "start camera". The one-time grant still needs a
+  // click the very first time per browser profile.
+  useEffect(() => {
+    if (!import.meta.env.DEV || !supported) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const perm = await navigator.permissions?.query({
+          name: 'camera' as PermissionName,
+        })
+        if (cancelled || !perm || perm.state !== 'granted') return
+        if (streamRefs.current[0]) return // already live
+        const id = useCameraCalib.getState().cameras[0]?.deviceId ?? ''
+        await startStream(0, id)
+      } catch {
+        /* permissions API unsupported / rejected — user starts the camera manually */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // Mount-only: start once if already permitted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Initial enumeration + device-change listener.
   useEffect(() => {
     if (!supported) return
@@ -1915,16 +1945,28 @@ export function CameraPanel() {
         )
         return
       }
-      // NOTE: auto-flip + auto-offset were reverted — they were derived blind (the
-      // bridge shows the camera feed, not the 3D overlay, so they couldn't be
-      // verified) and broke placement. Orientation stays on the manual flip/rotate
-      // buttons (which worked); offset stays user-tunable. Re-enable once we have a
-      // real visual loop on the 3D view.
+      // Auto-detected from the QR + decoder, now VERIFIABLE via the 3D-view bridge:
+      // orientation (flip), lens-offset (overlay→machine frame), and lens warp
+      // (k ≈ −4·C, the decoder's barrel coefficient). All overridable by the manual
+      // controls. Being iterated/verified autonomously from the server.
+      const autoDistortK = Math.max(-0.6, Math.min(0.6, -4 * (res.barrelC || 0)))
+      // PRESERVE the user's manual orientation (flip + quarter-rotation). The
+      // motion-based auto-flip proved unreliable for this rig — the homography is
+      // solved in a negated-machine frame, so the heuristic kept INVERTING a flip
+      // the user had already set correctly, forcing a re-flip after every
+      // calibration. Orientation is a fixed property of the camera mount: set it
+      // once by hand; calibration only refines homography / offset / lens warp.
+      const prev = useCameraCalib.getState().cameras[calibSlot]
       calib.setCamera(calibSlot, {
         mount: 'head',
         headMap: res.headMap,
         headHomography: res.headHomography,
         headRefMm: res.refHead,
+        headFlipH: prev.headFlipH,
+        headFlipV: prev.headFlipV,
+        headRotateQuarters: prev.headRotateQuarters,
+        offsetMm: res.offsetMm,
+        distortK: autoDistortK,
         frameW: res.frameW,
         frameH: res.frameH,
       })
@@ -1942,6 +1984,61 @@ export function CameraPanel() {
       headAbort.current = null
     }
   }, [calibSlot, machineConn, calib, t])
+
+  // Remote trigger: an agent on the server can run head-camera Auto-align via the
+  // machine bridge (POST {cmd:"KMAPP:autoAlign"}) → machineBridge dispatches a
+  // window event → we run it here. Lets the calibration be driven + verified
+  // autonomously (jog + solve + auto-set) without manual clicks.
+  const runHeadMotionCalibRef = useRef(runHeadMotionCalib)
+  runHeadMotionCalibRef.current = runHeadMotionCalib
+  const calibSlotRef = useRef(calibSlot)
+  calibSlotRef.current = calibSlot
+  const startStreamRef = useRef(startStream)
+  startStreamRef.current = startStream
+  const stopStreamRef = useRef(stopStream)
+  stopStreamRef.current = stopStream
+  const deviceIdsRef = useRef(deviceIds)
+  deviceIdsRef.current = deviceIds
+  useEffect(() => {
+    // Full remote control of the head-camera calibration (driven by an agent via
+    // the machine bridge: POST {cmd:"KMAPP:<action>"}). Lets the whole twin be
+    // calibrated + tuned + verified autonomously. Reads live store state so it's
+    // never stale. Supported actions:
+    //   startCamera | stopCamera | autoAlign | flipV | flipH | rot
+    //   clearMosaic | mosaicOn | mosaicOff | offset:<x>,<y> | warp:<k>
+    const onApp = (e: Event) => {
+      const action = String((e as CustomEvent).detail || '')
+      const s = calibSlotRef.current
+      const cam = useCameraCalib.getState().cameras[s]
+      const set = (patch: Partial<typeof cam>) => useCameraCalib.getState().setCamera(s, patch)
+      if (action === 'startCamera') {
+        // Re-acquire the live feed (a page reload drops getUserMedia). Chrome
+        // usually allows this without a fresh gesture once the origin is granted.
+        startStreamRef.current(s, deviceIdsRef.current[s]).catch(() => {})
+        return
+      }
+      if (action === 'stopCamera') {
+        stopStreamRef.current(s)
+        return
+      }
+      if (action === 'autoAlign') {
+        runHeadMotionCalibRef.current().catch(() => {})
+        return
+      }
+      if (action === 'flipV') return set({ headFlipV: !cam.headFlipV })
+      if (action === 'flipH') return set({ headFlipH: !cam.headFlipH })
+      if (action === 'rot') return set({ headRotateQuarters: (cam.headRotateQuarters + 1) % 4 })
+      if (action === 'mosaicOn') return useBedMosaic.getState().setEnabled(true)
+      if (action === 'mosaicOff') return useBedMosaic.getState().setEnabled(false)
+      if (action === 'clearMosaic') return useBedMosaic.getState().clear()
+      const off = action.match(/^offset:(-?[\d.]+),(-?[\d.]+)$/)
+      if (off) return set({ offsetMm: [Number(off[1]), Number(off[2])] })
+      const warp = action.match(/^warp:(-?[\d.]+)$/)
+      if (warp) return set({ distortK: Number(warp[1]) })
+    }
+    window.addEventListener('karmyogi:app', onApp as EventListener)
+    return () => window.removeEventListener('karmyogi:app', onApp as EventListener)
+  }, [])
 
   // ---- (b1) sheet → machine registration ----
   // The printed grid uses cols:4, rows:5 (see generateSheet), so the two

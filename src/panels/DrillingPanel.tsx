@@ -253,14 +253,14 @@ export function DrillingPanel() {
   // Record the live machine position: fill the selected row's X/Y, else append.
   function recordPosition() {
     if (!connected) return
-    if (selected >= 0 && selected < points.length) {
-      updatePoint(selected, { x: wpos.x, y: wpos.y })
-    } else {
-      setPoints((p) => {
-        setSelected(p.length)
-        return [...p, defaultScrewPoint({ x: wpos.x, y: wpos.y })]
-      })
-    }
+    // ALWAYS append a new point per press (and select it). Record = "teach a new
+    // point"; edit a row to reposition an existing one. (Previously it overwrote
+    // the selected point — and each capture auto-selects — so repeated presses
+    // just rewrote the same point instead of building a list.)
+    setPoints((p) => {
+      setSelected(p.length)
+      return [...p, defaultScrewPoint({ x: wpos.x, y: wpos.y })]
+    })
   }
 
   function clearAll() {

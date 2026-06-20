@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -309,6 +310,20 @@ export function SpringCoilingPanel() {
   const claimOwner = useProgramOwner((s) => s.claim)
 
   const [params, setParams] = useState<EditableParams>(() => toParams(undefined))
+  // TRUE only after the operator actually edits the coil (any param change /
+  // preset / file load). The program section + 3D spring scene are published
+  // ONLY once this is set — so merely mounting this panel (page load, or dev
+  // keeping panels mounted) NEVER auto-creates a "Spring coil" section or draws
+  // the spring in the Visualizer. Replaces the fragile "skip first effect run"
+  // guard, which republished whenever an axis/setting settled after mount.
+  const userTouchedRef = useRef(false)
+  const editParams = useCallback(
+    (next: EditableParams | ((p: EditableParams) => EditableParams)) => {
+      userTouchedRef.current = true
+      setParams(next)
+    },
+    [],
+  )
   const [showRaw, setShowRaw] = useState(false)
   // Which physical GRBL axis the chuck (rotary) and carriage (linear) are wired
   // to. MUST be a real axis on the controller: a standard 3-axis GRBL 1.1 board
@@ -327,7 +342,7 @@ export function SpringCoilingPanel() {
 
   // ---- colour-coded setting PRESETS (the coiling params) ----
   const capturePreset = (): EditableParams => ({ ...params })
-  const applyPreset = (p: EditableParams) => setParams(toParams(p))
+  const applyPreset = (p: EditableParams) => editParams(toParams(p))
   const presets = usePresets<EditableParams>({
     storageKey: 'karmyogi.springcoiling.presets',
     capture: capturePreset,
@@ -378,10 +393,6 @@ export function SpringCoilingPanel() {
   // program/cursor mid-wind — AND we clear the spring-viz channel so the Viewer
   // shows the generic streamed toolpath instead of the static coil preview.
   const rafRef = useRef<number | null>(null)
-  // Don't auto-load the default coil into the program on page load. We skip the
-  // FIRST run (mount with default params) and only publish once the operator
-  // actually adjusts the coil — so a fresh load / refresh shows an empty program.
-  const didInitRef = useRef(false)
   useEffect(() => {
     // While a job is streaming, leave the running program/cursor alone — but do
     // NOT clear the spring-viz channel. Clearing it made the Viewer fall back to
@@ -396,11 +407,9 @@ export function SpringCoilingPanel() {
     // and evict whatever was just streamed (the reported "program auto-removed on
     // finish" bug). We only (re)publish on a real coil edit (machineGcode change).
     if (useProgram.getState().streaming) return
-    // Skip the initial mount (default coil) so nothing is auto-loaded on page load.
-    if (!didInitRef.current) {
-      didInitRef.current = true
-      return
-    }
+    // Publish ONLY after a real operator edit — never on mere mount/hydration, so
+    // a page load (or dev keeping the panel mounted) cannot auto-create a section.
+    if (!userTouchedRef.current) return
     // (Re)building the coil program → CLAIM ownership (last writer wins) + publish.
     claimOwner('springcoiling')
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
@@ -424,7 +433,11 @@ export function SpringCoilingPanel() {
   // spring scene — the live carriage X then animates the coil. The scene is purely
   // dimensional, so re-publishing during a stream is harmless and never resets the
   // running program (that's the setProgram effect above, which DOES skip streaming).
+  // Publish the coil to the Visualizer ONLY after a real operator edit — merely
+  // mounting this panel (page load, or dev keeping panels mounted for the viewer
+  // bridge) must NEVER auto-draw the spring. Matches the program effect above.
   useEffect(() => {
+    if (!userTouchedRef.current) return
     setSpringViz({
       wireDiameter: safeParams.wireDiameter,
       coilDiameter: safeParams.coilDiameter,
@@ -566,7 +579,7 @@ export function SpringCoilingPanel() {
             />
             <SaveLoadButtons
               value={params}
-              onLoad={(data) => setParams(toParams(data))}
+              onLoad={(data) => editParams(toParams(data))}
               fileBase="karmyogi-spring"
               ext="kspring"
               saveTitle={t('spring.save', 'Save spring settings')}
@@ -658,7 +671,7 @@ export function SpringCoilingPanel() {
                   ariaLabel={t('spring.field.type', 'Type')}
                   variant="tile"
                   value={params.springType}
-                  onChange={(v) => setParams((p) => ({ ...p, springType: v }))}
+                  onChange={(v) => editParams((p) => ({ ...p, springType: v }))}
                   options={[
                     { id: 'compression', label: t('spring.type.compression', 'Compression'), title: t('spring.type.compression.body', 'Closed ends, open body pitch'), icon: <CompressionSpringGlyph /> },
                     { id: 'extension', label: t('spring.type.extension', 'Extension'), title: t('spring.type.extension.body', 'Tight coils throughout; hooks made manually'), icon: <ExtensionSpringGlyph /> },
@@ -672,7 +685,7 @@ export function SpringCoilingPanel() {
                   ariaLabel={t('spring.field.direction', 'Direction')}
                   variant="tile"
                   value={params.direction}
-                  onChange={(v) => setParams((p) => ({ ...p, direction: v }))}
+                  onChange={(v) => editParams((p) => ({ ...p, direction: v }))}
                   options={[
                     { id: 'cw', label: t('spring.dir.cw', 'CW'), title: t('spring.dir.cw.body', 'Right-hand winding (clockwise)'), icon: <CwGlyph /> },
                     { id: 'ccw', label: t('spring.dir.ccw', 'CCW'), title: t('spring.dir.ccw.body', 'Left-hand winding (counter-clockwise)'), icon: <CcwGlyph /> },
@@ -706,7 +719,7 @@ export function SpringCoilingPanel() {
                 max={6}
                 step={0.05}
                 value={params.wireDiameter}
-                onChange={(n) => setParams((p) => ({ ...p, wireDiameter: n }))}
+                onChange={(n) => editParams((p) => ({ ...p, wireDiameter: n }))}
                 info={{ title: t('spring.field.wireDia', 'Wire diameter'), body: t('spring.field.wireDia.body', 'Wire diameter (mm). Closed/tight coils use this as the pitch so the coils touch.') }}
               />
               <SliderField
@@ -716,7 +729,7 @@ export function SpringCoilingPanel() {
                 max={80}
                 step={0.5}
                 value={params.coilDiameter}
-                onChange={(n) => setParams((p) => ({ ...p, coilDiameter: n }))}
+                onChange={(n) => editParams((p) => ({ ...p, coilDiameter: n }))}
                 info={{ title: t('spring.field.coilDia', 'Mean coil diameter'), body: t('spring.field.coilDia.body', 'Mean coil diameter (mm) — the diameter the wire centre traces. The 3D helix radius is half this.') }}
               />
               <SliderField
@@ -725,7 +738,7 @@ export function SpringCoilingPanel() {
                 max={60}
                 step={0.5}
                 value={params.bodyTurns}
-                onChange={(n) => setParams((p) => ({ ...p, bodyTurns: n }))}
+                onChange={(n) => editParams((p) => ({ ...p, bodyTurns: n }))}
                 info={{ title: t('spring.field.bodyTurns', 'Body turns'), body: t('spring.field.bodyTurns.body', 'Active turns wound at the body pitch (one revolution of the chuck = one turn).') }}
               />
               <SliderField
@@ -736,7 +749,7 @@ export function SpringCoilingPanel() {
                 step={0.1}
                 value={tight ? safeParams.wireDiameter : params.pitch}
                 disabled={tight}
-                onChange={(n) => setParams((p) => ({ ...p, pitch: n }))}
+                onChange={(n) => editParams((p) => ({ ...p, pitch: n }))}
                 info={{ title: t('spring.field.pitch', 'Body pitch'), body: t('spring.field.pitch.body', 'Axial advance per revolution in the body (mm). Locked to the wire diameter for tight extension/torsion springs.') }}
               />
             </div>
@@ -767,7 +780,7 @@ export function SpringCoilingPanel() {
                     max={5}
                     step={0.25}
                     value={params.closeTurnsStart}
-                    onChange={(n) => setParams((p) => ({ ...p, closeTurnsStart: n }))}
+                    onChange={(n) => editParams((p) => ({ ...p, closeTurnsStart: n }))}
                     info={{ title: t('spring.field.closeStart', 'Closing turns (start)'), body: t('spring.field.closeStart.body', 'Tight, touching turns at the START end (pitch = wire diameter).') }}
                   />
                   <SliderField
@@ -777,7 +790,7 @@ export function SpringCoilingPanel() {
                     max={5}
                     step={0.25}
                     value={params.closeTurnsEnd}
-                    onChange={(n) => setParams((p) => ({ ...p, closeTurnsEnd: n }))}
+                    onChange={(n) => editParams((p) => ({ ...p, closeTurnsEnd: n }))}
                     info={{ title: t('spring.field.closeEnd', 'Closing turns (end)'), body: t('spring.field.closeEnd.body', 'Tight, touching turns at the END end (pitch = wire diameter).') }}
                   />
                 </>
@@ -791,7 +804,7 @@ export function SpringCoilingPanel() {
                 max={5}
                 step={0.25}
                 value={params.releaseTurns}
-                onChange={(n) => setParams((p) => ({ ...p, releaseTurns: n }))}
+                onChange={(n) => editParams((p) => ({ ...p, releaseTurns: n }))}
                 info={{
                   title: t('spring.field.releaseTurns', 'Release turns'),
                   body: t(
@@ -822,7 +835,7 @@ export function SpringCoilingPanel() {
                 max={200}
                 step={1}
                 value={params.chuckRpm}
-                onChange={(n) => setParams((p) => ({ ...p, chuckRpm: n }))}
+                onChange={(n) => editParams((p) => ({ ...p, chuckRpm: n }))}
                 info={{ title: t('spring.field.rpm', 'Chuck speed'), body: t('spring.field.rpm.body', 'Chuck rotational speed (rev/min). The synced linear feed = speed × pitch.') }}
               />
               <SliderField
@@ -832,7 +845,7 @@ export function SpringCoilingPanel() {
                 step={1}
                 value={params.segmentsPerRev}
                 parse={(v, fb) => intNum(v, fb)}
-                onChange={(n) => setParams((p) => ({ ...p, segmentsPerRev: Math.floor(n) }))}
+                onChange={(n) => editParams((p) => ({ ...p, segmentsPerRev: Math.floor(n) }))}
                 info={{ title: t('spring.field.segs', 'Segments per revolution'), body: t('spring.field.segs.body', 'How many coordinated moves make up each revolution (higher = smoother motion + bigger program).') }}
               />
               <SliderField
@@ -842,7 +855,7 @@ export function SpringCoilingPanel() {
                 step={1}
                 value={params.decimals}
                 parse={(v, fb) => clampDecimals(intNum(v, fb))}
-                onChange={(n) => setParams((p) => ({ ...p, decimals: clampDecimals(n) }))}
+                onChange={(n) => editParams((p) => ({ ...p, decimals: clampDecimals(n) }))}
                 info={{ title: t('spring.field.decimals', 'Decimals'), body: t('spring.field.decimals.body', 'Number of decimal places in the emitted coordinates (0–6).') }}
               />
               <p className="spr-note">
@@ -887,7 +900,7 @@ export function SpringCoilingPanel() {
         extra={
           <SaveLoadButtons
             value={params}
-            onLoad={(data) => setParams(toParams(data))}
+            onLoad={(data) => editParams(toParams(data))}
             fileBase="spring-settings"
             ext="ksprcfg"
             saveTitle={t('spring.settings.save', 'Save spring settings')}

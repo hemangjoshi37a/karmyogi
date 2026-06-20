@@ -130,8 +130,18 @@ export interface GamepadState {
 
 /** Stick deadzone — below this magnitude is treated as centered. */
 const DEADZONE = 0.15
-/** Analog press threshold (trigger axes / axis-half discrete bindings). */
+/** Analog press threshold (axis-half discrete bindings). */
 const PRESS_THRESHOLD = 0.5
+/**
+ * Trigger ON threshold (normalised 0..1) — DELIBERATELY above 0.5.
+ *
+ * `triggerValue(raw) = (raw+1)/2` assumes a trigger RESTS at raw=−1 (→0). But
+ * many pads report an absent/phantom axis as raw=0, which normalises to exactly
+ * 0.5 — so a 0.5 threshold reads that phantom axis as permanently half-pressed,
+ * firing continuous input / continuous jog with nothing touched. Requiring ≥0.6
+ * ignores a 0-resting axis while real triggers (which sweep to ~1.0) still work.
+ */
+const TRIGGER_ON = 0.6
 const JOG_FEED_FLOOR = 30
 /** Min interval (ms) between jog RE-ISSUES, so a fast stick sweep can't storm GRBL
  * with cancel+re-issue every frame. A steady hold never re-issues at all. */
@@ -543,7 +553,7 @@ export function useGamepad(
         if (p.kind === 'button') return pressedNow[p.index] ?? false
         const v = ax[p.index]
         if (typeof v !== 'number' || !Number.isFinite(v)) return false
-        if (p.trigger) return triggerValue(v) >= PRESS_THRESHOLD
+        if (p.trigger) return triggerValue(v) >= TRIGGER_ON
         return p.dir > 0 ? v > PRESS_THRESHOLD : v < -PRESS_THRESHOLD
       }
       // Previous-frame deflection for an axis token (buttons use prevPressed).
@@ -763,7 +773,13 @@ function axisMagnitude(tok: ControlToken, axes: ReadonlyArray<number>): number {
   const raw = axes[p.index]
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return 0
   // A trigger axis rests at -1 → triggerValue maps it to 0..1 (0 when released).
-  if (p.trigger) return triggerValue(raw)
+  // Deadzone below TRIGGER_ON and rescale, so a phantom 0-resting axis (→0.5)
+  // contributes ZERO jog instead of a permanent half-speed move, while a real
+  // trigger still reaches full magnitude. (See TRIGGER_ON.)
+  if (p.trigger) {
+    const tv = triggerValue(raw)
+    return tv <= TRIGGER_ON ? 0 : (tv - TRIGGER_ON) / (1 - TRIGGER_ON)
+  }
   // A bipolar stick axis rests at 0; only the bound half contributes (0..1). A
   // released stick reads ~0 (the deadzone, applied to the vector, absorbs drift),
   // so the jog stops on release.
@@ -782,7 +798,7 @@ function rememberAxisDefl(binds: PadBindings, axes: ReadonlyArray<number>, m: Ma
       return
     }
     if (p.trigger) {
-      m.set(tok, triggerValue(v) >= PRESS_THRESHOLD)
+      m.set(tok, triggerValue(v) >= TRIGGER_ON)
       return
     }
     m.set(tok, p.dir > 0 ? v > PRESS_THRESHOLD : v < -PRESS_THRESHOLD)

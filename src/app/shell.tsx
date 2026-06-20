@@ -366,6 +366,19 @@ export function Shell() {
       for (const spec of availablePanels) {
         event.api.getPanel(spec.id)?.api.setTitle(t('tab.' + spec.id, spec.title))
       }
+      // Keep the CAMERA panel MOUNTED even when its tab isn't the active one, so a
+      // running camera stream (and the <video> the 3D Visualizer textures the bed
+      // from) survives switching to another tab. Otherwise dockview unmounts the
+      // panel, the stream stops, and the live feed in the Visualizer goes dark.
+      // The camera panel is lightweight (a video element + controls), so always-
+      // mounting it is cheap — unlike the heavy 3D Visualizer, which stays
+      // 'onlyWhenVisible'. Applied in all environments (the feed should persist
+      // for everyone, not just dev). Best-effort: ignore if dockview rejects it.
+      try {
+        event.api.getPanel('camera')?.api.setRenderer?.('always')
+      } catch {
+        /* older dockview without per-panel renderer — feed just won't persist */
+      }
       event.api.onDidLayoutChange(scheduleSave)
       // Report the active tab to the activity tracker for per-tab dwell time.
       // (No-ops unless tracking is live.)
