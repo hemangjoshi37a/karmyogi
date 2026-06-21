@@ -28,8 +28,15 @@
   border: 1px solid var(--border);
   background: var(--bg-input);
 }
+/* Vector / Image is a MODE switch — active uses the tonal --accent-soft tint
+   (not a full-accent primary), so only the real CTA reads as primary (W-C). */
 .li-wb-switch .li-seg-btn.is-on {
+  background: var(--accent-soft);
+  color: var(--fg);
   border-color: var(--accent);
+}
+.li-wb-switch .li-seg-btn.is-on svg {
+  color: var(--accent);
 }
 
 /* ---- Header ------------------------------------------------------------- */
@@ -48,7 +55,7 @@
 }
 .li-head-ico {
   display: inline-flex;
-  color: var(--accent);
+  color: var(--fg-muted);
 }
 .li-head-spacer {
   flex: 1 1 auto;
@@ -86,7 +93,7 @@
 .li-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--bg-panel) 70%, var(--bg-elev) 30%);
+  background: var(--bg-card);
   padding: var(--sp-2) var(--sp-3) var(--sp-3);
 }
 .li-card-head {
@@ -95,20 +102,25 @@
   gap: var(--sp-2);
   margin-bottom: var(--sp-2);
 }
+/* Canonical section header (§2.8/W-F). */
 .li-card-head h4 {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
 }
+/* Leading glyph muted + 14px, never accent (W-F). */
 .li-card-ico {
   display: inline-flex;
-  color: var(--accent);
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
 }
 .li-card-count {
   margin-left: auto;
@@ -152,7 +164,7 @@
   max-height: 320px;
   image-rendering: pixelated;
   display: block;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-1);
 }
 .li-preview-empty {
   display: flex;
@@ -236,7 +248,11 @@
   color: var(--fg-muted);
 }
 
-/* ---- Sliders (compact field rows, mirrors .laser-sfield) ---------------- */
+/* ---- Sliders (compact field rows, unified with the app kit — W-B) -------
+   Geometry follows §2.8: a narrow wrapping label (no ellipsis stub), a slider
+   that is always a usable track (min-width 72px), and a compact number+unit
+   frame. The track unfilled portion uses --bg-input so it reads against the
+   --bg-card surface; the thumb is one canonical size with a focus ring. */
 .li-fields {
   display: grid;
   grid-template-columns: 1fr;
@@ -244,7 +260,7 @@
 }
 .li-sfield {
   display: grid;
-  grid-template-columns: minmax(86px, 0.9fr) 1fr auto;
+  grid-template-columns: minmax(64px, 0.7fr) minmax(72px, 1.4fr) auto;
   align-items: center;
   gap: var(--sp-2);
   min-height: var(--ctl-h);
@@ -253,8 +269,8 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  font-size: var(--fs-ctl);
-  color: var(--fg);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
   overflow: hidden;
 }
 .li-sfield-ico {
@@ -264,45 +280,81 @@
 }
 .li-sfield-txt {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* wrap rather than ellipsing to a stub (W-B). */
+  white-space: normal;
+  line-height: 1.2;
 }
 .li-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
+  min-width: 72px;
+  height: 18px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.li-slider::-webkit-slider-runnable-track {
   height: 5px;
   border-radius: 999px;
-  background:
-    linear-gradient(to right, var(--accent) var(--pct, 0%), var(--border) var(--pct, 0%));
-  outline: none;
-  cursor: pointer;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--pct, 0%),
+    var(--bg-input) var(--pct, 0%) 100%
+  );
+}
+.li-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+}
+.li-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
 }
 .li-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
   border-radius: 50%;
   background: var(--accent);
-  border: 2px solid var(--bg-panel);
+  border: 2px solid var(--bg-card);
+  box-shadow: 0 0 0 1px var(--border);
   cursor: pointer;
 }
 .li-slider::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
   background: var(--accent);
-  border: 2px solid var(--bg-panel);
+  border: 2px solid var(--bg-card);
+  box-shadow: 0 0 0 1px var(--border);
   cursor: pointer;
+}
+/* focus ring on the thumb (the global input outline is suppressed for ranges,
+   so the thumb carries the visible focus indicator — matches laser.css). */
+.li-slider:focus-visible {
+  outline: none;
+}
+.li-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.li-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .li-snum {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  flex: 0 0 auto;
 }
 .li-snum input {
-  width: 58px;
+  width: 52px;
   min-height: calc(var(--ctl-h) - 4px);
   padding: 0 6px;
   background: var(--bg-input);
@@ -317,7 +369,27 @@
   font-style: normal;
   font-size: var(--fs-sm, 10px);
   color: var(--fg-muted);
-  min-width: 30px;
+  min-width: 24px;
+}
+/* coarse-pointer / touch sizing — fatter track + thumb so it stays grabbable. */
+@media (pointer: coarse) {
+  .li-slider {
+    height: 24px;
+  }
+  .li-slider::-webkit-slider-runnable-track,
+  .li-slider::-moz-range-track,
+  .li-slider::-moz-range-progress {
+    height: 6px;
+  }
+  .li-slider::-webkit-slider-thumb {
+    width: 17px;
+    height: 17px;
+    margin-top: -6px;
+  }
+  .li-slider::-moz-range-thumb {
+    width: 17px;
+    height: 17px;
+  }
 }
 
 /* ---- Segmented controls (mode pickers) ---------------------------------- */
@@ -342,6 +414,7 @@
   min-height: calc(var(--ctl-h) - 2px);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .li-seg-btn:hover {
   color: var(--fg);
@@ -421,7 +494,7 @@
   font-size: var(--fs-sm, 11px);
   color: var(--fg-muted);
   background: color-mix(in srgb, var(--danger) 12%, var(--bg-input));
-  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border: 1px solid var(--border-danger);
   border-radius: var(--radius);
   padding: var(--sp-2) var(--sp-3);
   line-height: 1.4;

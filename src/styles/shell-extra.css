@@ -5,26 +5,30 @@
 .topbar .brand-by a { color: var(--accent); text-decoration: none; }
 .topbar .brand-by a:hover { text-decoration: underline; }
 
-/* ---- connection control (top bar) ---- */
+/* ---- connection control (top bar) ----
+   The cluster is a single rounded "pill" whose inner controls all share the
+   --ctl-h-sm small-control height so the connection group reads as one
+   coherent unit at the same baseline as the rest of the bar (W-G height-mismatch
+   fix — was a 24px island next to 30px icon buttons). */
 .km-conn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 2px 6px 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 999px;
   background: var(--bg-input);
 }
 .km-conn-select {
-  min-height: 24px;
+  min-height: var(--ctl-h-sm);
   max-width: 130px;
   padding: 2px 6px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-label);
   color: var(--fg);
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 999px;
   cursor: pointer;
 }
 .km-conn-select:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -37,21 +41,29 @@
 .km-conn-dot[data-state='Alarm'] { background: var(--danger); }
 .km-conn-state {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-label);
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--fg-muted);
   min-width: 64px;
 }
+/* Disconnected is the most safety-relevant status — give it real presence (full
+   --fg, not the lowest-emphasis muted gray) so it isn't easy to miss (W-G). */
+.km-conn-state[data-conn='disconnected'] { color: var(--fg); }
 .km-conn-btn {
-  min-height: 24px;
+  min-height: var(--ctl-h-sm);
   padding: 2px 10px;
   font-size: 11px;
-  border-radius: 12px;
+  border-radius: 999px;
 }
 .km-conn-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+/* Disconnect is destructive (ends a live machine link): danger-tinted on hover
+   so it reads distinct from a neutral action (W-H). */
+.km-conn-btn.danger:hover,
+.km-conn-btn.danger:focus-visible { border-color: var(--border-danger); color: var(--danger); }
 
-/* Thin divider between the connect/disconnect buttons and the ⌖/⚙ actions. */
+/* Thin divider between the connect/disconnect buttons and the ⌖/⚙ actions.
+   Generalized as .topbar-sep too; kept here for the in-cluster separator. */
 .km-conn-sep {
   width: 1px;
   align-self: stretch;
@@ -59,8 +71,14 @@
   background: var(--border);
 }
 /* ⌖ Probe + ⚙ settings buttons live inside the connection cluster: keep them
-   slim and the same height as the connect buttons. */
-.km-conn .km-conn-icon { min-height: 24px; min-width: 24px; padding: 2px 6px; }
+   slim and the same small-control height as the connect buttons. Neutral border
+   at rest; accent only on hover/active/focus (no persistent "selected" look). */
+.km-conn .km-conn-icon {
+  min-height: var(--ctl-h-sm);
+  min-width: var(--ctl-h-sm);
+  padding: 2px 6px;
+  border-radius: 999px;
+}
 
 /* ---- modal ---- */
 .km-modal-overlay {
@@ -82,8 +100,8 @@
   background: var(--bg-panel);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
 }
 .km-modal-head {
@@ -94,14 +112,36 @@
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
 }
-.km-modal-title { font-weight: 600; font-size: 13px; }
-.km-modal-close { min-height: 26px; padding: 2px 8px; }
+.km-modal-title { font-weight: var(--fw-title); font-size: var(--fs-title); line-height: var(--lh-tight); }
+/* Close = a real 28px square icon button with a hover background (the icon is
+   already rendered by Modal.tsx). Neutral at rest, accent border + tinted bg on
+   hover/focus; the global :focus-visible ring covers keyboard focus. */
+.km-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  min-height: var(--icon-btn);
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+}
+.km-modal-close:hover,
+.km-modal-close:focus-visible {
+  background: var(--bg-input);
+  border-color: var(--border);
+  color: var(--fg);
+}
 .km-modal-body { overflow: auto; min-height: 0; flex: 1 1 auto; }
 
 @media (max-width: 768px) {
-  .km-conn-btn { min-height: 36px; }
-  .km-conn-select { min-height: 36px; }
-  .km-conn .km-conn-icon { min-height: 36px; min-width: 36px; }
+  .km-conn-btn { min-height: var(--ctl-h-touch); }
+  .km-conn-select { min-height: var(--ctl-h-touch); }
+  .km-conn .km-conn-icon { min-height: var(--ctl-h-touch); min-width: var(--ctl-h-touch); }
   .km-modal-overlay { padding: 3vh 6px; }
 }
 
@@ -140,4 +180,51 @@
 .dv-tab-ico {
   flex: 0 0 auto;
   color: var(--fg-muted);
+}
+
+/* ============================================================
+   MOBILE TAB-STRIP overflow affordance (W-K / Area 6 HIGH).
+   The base `.mobile-tabs` strip (in globals.css) scrolls horizontally but gives
+   NO visual cue that more tabs exist past the edges, never snaps, and never
+   centers the active tab. These additive rules layer an edge-fade mask + scroll
+   snap on the existing strip (markup unchanged), and give inactive pills a
+   resting border + pressed state so "selected" reads clearly. JS in
+   MobileShell.tsx scrolls the active tab into view (inline:'center').
+   ============================================================ */
+.mobile-tabs {
+  /* Edge fade: the strip dims toward both edges so partially-hidden tabs read as
+     "scroll for more". Pure presentation — does not clip interaction. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+  scroll-snap-type: x proximity;
+  scroll-behavior: smooth;
+}
+.mobile-tab {
+  scroll-snap-align: center;
+  /* Inactive pills get a 1px border so they read as discrete targets (not floating
+     fills) and a pressed state for touch feedback (W-K). The active pill keeps its
+     accent fill from globals.css. */
+  border: 1px solid var(--border);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.mobile-tab:active { transform: translateY(0.5px); }
+.mobile-tab:not(.active):active { background: var(--bg-elev); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-tabs { scroll-behavior: auto; }
+  .mobile-tab { transition: none; }
 }

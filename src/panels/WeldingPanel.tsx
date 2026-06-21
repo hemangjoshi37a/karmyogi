@@ -8,7 +8,7 @@ import { Icon } from '../components/Icons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamEmpty, CamStatus } from '../components/cam/CamUI'
 import '../styles/cam.css'
 import {
   WeavePattern,
@@ -661,36 +661,32 @@ export function WeldingPanel() {
         </div>
       </header>
 
-      {/* Live status strip: object + length + line counts, synced to Program. */}
+      {/* Live status strip: object + length + line counts, synced to Program.
+          Uses the shared <CamStatus> kit so it reads identically to every tab. */}
       <div className="wp-status">
-        <span className="wp-status-pill">
-          <b>{objects.length}</b> {t('weld.status.objects', 'objects')}
-        </span>
-        <span className="wp-status-sep" aria-hidden="true">·</span>
-        <span
-          className="wp-status-pill"
-          title={t('weld.status.lineObjects.title', 'Number of LINE objects (circles are counted separately).')}
-        >
-          <b>{nLines}</b> {t('weld.status.lineObjects', 'line objects')}
-        </span>
-        <span className="wp-status-sep" aria-hidden="true">·</span>
-        <span className="wp-status-pill">
-          <b>{weldLen.toFixed(1)}</b> {t('weld.status.mm', 'mm weld')}
-        </span>
-        <span className="wp-status-sep" aria-hidden="true">·</span>
-        <span className="wp-status-pill">
-          <b>{effectiveLines}</b> {t('weld.status.gcode', 'G-code lines')}
-        </span>
-        <span className="wp-status-sep" aria-hidden="true">·</span>
-        <span
-          className="wp-status-pill"
-          title={t('weld.status.est.title', 'Estimated cycle time (woven-path travel + gas pre/post-flow; rapids ignored)')}
-        >
-          <b>{fmtDuration(estSeconds, t)}</b> {t('weld.status.est', 'est.')}
-        </span>
-        <span className="wp-status-sync" title={t('weld.live.title', 'Lines auto-synced to the Program tab')}>
-          → {t('weld.status.program', 'Program')}
-        </span>
+        <CamStatus
+          items={[
+            { value: objects.length, unit: t('weld.status.objects', 'objects') },
+            {
+              value: nLines,
+              unit: t('weld.status.lineObjects', 'line objects'),
+              title: t(
+                'weld.status.lineObjects.title',
+                'Number of LINE objects (circles are counted separately).',
+              ),
+            },
+            { value: weldLen.toFixed(1), unit: t('weld.status.mm', 'mm weld') },
+            { value: effectiveLines, unit: t('weld.status.gcode', 'G-code lines') },
+            {
+              value: fmtDuration(estSeconds, t),
+              unit: t('weld.status.est', 'est.'),
+              title: t(
+                'weld.status.est.title',
+                'Estimated cycle time (woven-path travel + gas pre/post-flow; rapids ignored)',
+              ),
+            },
+          ]}
+        />
       </div>
 
       {loadError && <p className="wp-warn">{loadError}</p>}

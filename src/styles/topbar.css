@@ -1,28 +1,52 @@
 /* Top-bar additions: icon-only buttons, notification bell, panel launcher.
    Owned by the app-shell agent; do not put density tokens here. */
 
-/* Slim top bar: tighten gaps so the icon buttons cluster tightly on the right.
-   Desktop keeps everything on a SINGLE row (no wrap) at common widths. */
+/* Slim top bar: the action area reads as information-architected clusters
+   (layout+zoom · language+theme · status+account) separated by hairline
+   dividers, not a flat undifferentiated run of 14 controls (W-G). Each cluster
+   keeps its members tight; the ~10px gap + .topbar-sep does the grouping. */
 .topbar .topbar-actions {
   display: inline-flex;
   align-items: center;
   flex-wrap: nowrap;
+  gap: 10px;
+}
+/* Members inside a single cluster sit tight together. */
+.topbar .topbar-group {
+  display: inline-flex;
+  align-items: center;
   gap: 3px;
 }
+/* Cluster dividers removed per request — the hairline lines ate horizontal
+   space and pushed the right-hand controls into overflow. Grouping now reads
+   purely from the gap rhythm (10px between clusters vs 3px within a cluster).
+   Kept as a no-op so existing .topbar-sep markup collapses to zero width. */
+.topbar-sep {
+  display: none;
+}
 
-/* Icon-only button: square-ish, glyph centered, native title tooltip. Tightened
-   horizontal padding so the row of SVG buttons clusters compactly while keeping
-   a 30px+ tap target. */
+/* Icon-only button: square, glyph centered, native title tooltip. Unified to the
+   --ctl-h baseline so it matches the connection pill + every other top-bar
+   control (was 30px, the lone outlier). Resting border is NEUTRAL — accent only
+   on hover / active / focus (the global ring), so no icon ever reads "selected"
+   at rest (W-G/W-M Reset-border fix). */
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0;
-  min-width: 30px;
-  min-height: 30px;
+  min-width: var(--ctl-h);
+  min-height: var(--ctl-h);
   padding: 4px;
   line-height: 1;
   position: relative;
+  border-radius: var(--radius-sm);
+}
+/* Resting state: neutral, not accent. The base `button` rule gives the border;
+   we only re-affirm the neutral resting colour so a momentary toggle / active
+   data-attribute is what carries accent, never a plain Reset button. */
+.topbar .topbar-actions .icon-btn:not(:hover):not(:active):not([data-active='true']) {
+  border-color: var(--border);
 }
 .icon-btn-glyph {
   display: inline-flex;
@@ -69,10 +93,10 @@
   max-height: min(60vh, 420px);
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
 }
 .notif-head {
@@ -80,11 +104,11 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
@@ -127,19 +151,19 @@
   max-height: min(60vh, 420px);
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
 }
 .launcher-head {
   padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
@@ -154,7 +178,7 @@
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .launcher-item:hover { background: var(--bg-input); }
 .launcher-item-ico { flex: 0 0 auto; color: var(--fg-muted); }
@@ -199,19 +223,19 @@
   width: min(320px, 94vw);
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
 }
 .km-farm-head {
   padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   border-bottom: 1px solid var(--border);
 }
 .km-farm-list { max-height: 240px; overflow: auto; padding: 4px; }
@@ -220,7 +244,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .km-farm-item[data-active='true'] { background: var(--bg-input); }
 .km-farm-pick {
@@ -233,7 +257,7 @@
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .km-farm-pick:hover { background: var(--bg-input); }
 .km-farm-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
@@ -249,8 +273,11 @@
 .km-farm-dot[data-status='connected'] { background: var(--ok); border-color: var(--ok); }
 .km-farm-dot[data-status='connecting'] { background: var(--warn); border-color: var(--warn); }
 .km-farm-dot[data-status='error'] { background: var(--danger); border-color: var(--danger); }
-.km-farm-del { padding: 4px 7px; font-size: 11px; flex: 0 0 auto; background: transparent; border: 1px solid transparent; border-radius: 6px; }
-.km-farm-del:hover { background: var(--bg-input); color: var(--danger); }
+.km-farm-del { padding: 4px 7px; font-size: 11px; flex: 0 0 auto; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--fg-muted); }
+/* Remove = destructive: danger color + danger-tinted border on hover/focus so
+   it reads as a delete, not a neutral icon (W-H). */
+.km-farm-del:hover,
+.km-farm-del:focus-visible { background: color-mix(in srgb, var(--danger) 12%, transparent); border-color: var(--border-danger); color: var(--danger); }
 
 .km-farm-add {
   display: flex;
@@ -259,7 +286,7 @@
   padding: 10px;
   border-top: 1px solid var(--border);
 }
-.km-farm-add-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.km-farm-add-title { font-size: var(--fs-label); font-weight: var(--fw-label); color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg)); text-transform: uppercase; letter-spacing: 0.5px; }
 .km-farm-add-row { display: flex; gap: 6px; }
 .km-farm-input {
   flex: 1 1 auto;
@@ -268,7 +295,7 @@
   font-size: 12px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--fg);
 }
 .km-farm-hint { font-size: 10px; color: var(--fg-muted); line-height: 1.4; }
@@ -372,11 +399,11 @@
   right: 0;
   z-index: 60;
   width: min(340px, calc(100vw - 16px));
-  padding: 12px;
-  background: var(--bg-elev);
+  padding: var(--sp-4);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
 }
 /* Re-flow the reused ConnectionControl: wrap, with the primary controls each
    taking a full row and the small action icons clustering on the final row. */
@@ -430,10 +457,10 @@
   flex-direction: column;
   gap: 3px;
   padding: 8px;
-  background: var(--bg-elev);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
 }
 .topbar-more-item {
   display: flex;
@@ -445,7 +472,7 @@
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   color: var(--fg);
   font-size: 13px;
 }
@@ -461,11 +488,11 @@
 .topbar-more-user .km-userchip,
 .topbar-more-user .km-userchip-signin { width: 100%; }
 .topbar-overflow-head {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-label);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
 }
 .topbar-overflow-zoom { justify-content: space-between; }
 /* Inside the popover the zoom controls get comfortable touch sizing. */
@@ -480,8 +507,8 @@
    every tap target clears the recommended minimum, with a slimmer gap so the
    icon-only action strip stays compact. */
 @media (max-width: 768px) {
-  .icon-btn { min-width: 40px; min-height: 40px; }
-  .launcher-item { min-height: 40px; }
+  .icon-btn { min-width: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
+  .launcher-item { min-height: var(--ctl-h-touch); }
   .notif-clear { min-height: 34px; }
   /* The action cluster can be wider than a phone; let it wrap to a new row
      (right-aligned) instead of forcing horizontal page overflow. */
@@ -491,9 +518,6 @@
     justify-content: flex-end;
     row-gap: 4px;
   }
-  /* The brand subtitle ("CAD/CAM workbench") is redundant on phones — the
-     wordmark + About modal already carry it; drop it to reclaim width. */
-  .topbar .brand-subtitle { display: none; }
   .km-farm-toggle { max-width: 120px; }
   .km-farm-pick, .km-farm-del { min-height: 40px; }
   /* The connection cluster may gain extra connect buttons (USB / WiFi / BT);

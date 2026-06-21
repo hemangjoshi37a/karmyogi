@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
@@ -270,11 +271,19 @@ export function useT(): (
   const lang = useLocale((s) => s.lang)
   // Subscribe to `version` so that when the active locale's chunk finishes
   // loading asynchronously, this component re-renders with the translations.
-  useLocale((s) => s.version)
-  return (key, english, vars) => {
-    if (lang === 'en') return interpolate(english, vars)
-    const map = translations[lang]
-    const translated = (map && map[key]) ?? english
-    return interpolate(translated, vars)
-  }
+  const version = useLocale((s) => s.version)
+  // STABLE across renders (memoized on lang+version). Returning a fresh closure
+  // every render made every `useEffect(…, [t])` re-fire on each render — which
+  // caused, e.g., the Writing panel to re-fetch /fonts/index.json hundreds of
+  // times and needlessly churn the whole app. The identity now only changes when
+  // the language or the loaded-translations version actually changes.
+  return useCallback(
+    (key: string, english: string, vars?: Record<string, string | number>) => {
+      if (lang === 'en') return interpolate(english, vars)
+      const map = translations[lang]
+      const translated = (map && map[key]) ?? english
+      return interpolate(translated, vars)
+    },
+    [lang, version],
+  )
 }

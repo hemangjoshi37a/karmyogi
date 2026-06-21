@@ -83,7 +83,7 @@
 .cam-sec {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--fg) 2%, var(--bg-panel));
+  background: var(--bg-card);
   overflow: hidden;
 }
 .cam-sec-head {
@@ -95,7 +95,8 @@
   padding: var(--sp-2) var(--sp-3);
   border: none;
   background: transparent;
-  color: var(--fg-muted);
+  /* §2.8 section-header treatment: raised contrast so the label doesn't recede. */
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   font: inherit;
   cursor: pointer;
   text-align: left;
@@ -103,8 +104,11 @@
 .cam-sec-head:hover {
   color: var(--fg);
 }
+/* Optional leading glyph (the chevron): muted, fixed 14px, never accent. */
 .cam-sec-head > svg {
   flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
   color: var(--fg-muted);
 }
 .cam-sec[data-open='true'] > .cam-sec-head {
@@ -113,7 +117,8 @@
 .cam-sec-title {
   flex: 1 1 auto;
   font-size: var(--fs-section);
-  font-weight: 600;
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
@@ -137,7 +142,7 @@
   grid-column: 1 / -1;
 }
 
-/* ---- bordered card sections ---- */
+/* ---- bordered card sections (§2.8 card: canonical fill + border edge) ---- */
 .cam-card {
   display: flex;
   flex-direction: column;
@@ -145,7 +150,7 @@
   padding: var(--sp-2) var(--pad-card-x);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--fg) 3%, var(--bg-panel));
+  background: var(--bg-card);
   min-width: 0;
 }
 .cam-card-head {
@@ -160,11 +165,21 @@
   margin: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   font-size: var(--fs-section);
-  font-weight: 600;
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
   letter-spacing: 0.5px;
   text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+}
+/* §2.8: a section header's leading glyph is muted + fixed-size, never accent
+   (the shared .cam-card-ico defaults to accent — neutralize it inside headers
+   so every card head reads the same calm way). */
+.cam-card-head > h4 > .cam-card-ico,
+.cam-sec-head > .cam-card-ico {
+  width: 14px;
+  height: 14px;
   color: var(--fg-muted);
 }
 
@@ -172,15 +187,15 @@
 .cam-subhead {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   margin-top: var(--sp-1);
   padding-top: var(--sp-1);
   border-top: 1px solid var(--border);
   font-size: var(--fs-section);
-  font-weight: 600;
+  font-weight: var(--fw-label);
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
 }
 
 /* ---- tiny inline "ⓘ" info affordance (relocates long hints to a tooltip) ---- */
@@ -275,15 +290,17 @@
 .cam-btn:hover:not(:disabled) {
   border-color: var(--accent);
 }
-/* Primary / recommended action. */
+/* Primary / recommended action — §2.8: SOLID accent fill (not a translucent
+   tint), --ctl-h-lg height, accent foreground for AA contrast. */
 .cam-btn.cam-primary {
   min-height: var(--ctl-h-lg);
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
-  color: var(--fg);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
 }
 .cam-btn.cam-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 26%, var(--bg-input));
+  filter: brightness(1.08);
 }
 .cam-btn.danger {
   border-color: var(--danger);
@@ -683,6 +700,9 @@
   color: var(--fg-muted);
   min-width: 54px;
 }
+/* §2.8 canonical segmented control: inactive = --bg-input/--fg, 1px --border
+   seam; active = SOLID --accent/--accent-fg (no translucent tint); --ctl-h;
+   --radius-sm corner. Eased state transitions ride the shared motion tokens. */
 .cam-seg {
   display: inline-flex;
   border: 1px solid var(--border);
@@ -690,26 +710,28 @@
   overflow: hidden;
 }
 .cam-seg-btn {
-  min-height: var(--ctl-h-lg);
+  min-height: var(--ctl-h);
   padding: 0 var(--sp-3);
   border: none;
   border-left: 1px solid var(--border);
   background: var(--bg-input);
-  color: var(--fg-muted);
+  color: var(--fg);
   font: inherit;
   font-size: var(--fs-ctl);
   cursor: pointer;
   white-space: nowrap;
+  /* State transitions ride the shared global button transition (globals.css),
+     which is reduced-motion gated — no local transition needed. */
 }
 .cam-seg-btn:first-child {
   border-left: none;
 }
-.cam-seg-btn:hover:not(:disabled) {
-  color: var(--fg);
+.cam-seg-btn:hover:not(:disabled):not(.on) {
+  background: var(--accent-soft);
 }
 .cam-seg-btn.on {
-  background: color-mix(in srgb, var(--accent) 22%, var(--bg-input));
-  color: var(--fg);
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 .cam-seg-btn:disabled {
   opacity: 0.4;

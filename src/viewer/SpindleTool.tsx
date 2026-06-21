@@ -56,6 +56,9 @@ export function SpindleTool({
   const dark = theme === 'dark'
   const spinRef = useRef<THREE.Group>(null)
   const rootRef = useRef<THREE.Group>(null)
+  // Last finite sim position, so a transient non-finite `position` sample holds
+  // the cone in place instead of flinging it to a garbage coordinate.
+  const lastGoodRef = useRef<[number, number, number]>([0, 0, 0])
 
   // When `position` is omitted, this marker is a LIVE tracker: it follows the
   // machine's work position itself, reading the stores imperatively each frame
@@ -83,13 +86,14 @@ export function SpindleTool({
     const shankR = Math.max(bitR, 1.5875) // 1/8" collet shank floor
     const shankLen = Math.max(8, dia * 2)
     // Collet nut + nose + spindle body are sized to read as a real router, but
-    // capped so they never dominate a tiny job. Bed-relative, in mm.
-    const nutR = Math.max(5, shankR * 2.4)
+    // capped so they never dominate a tiny job — and kept SLIM so the spindle
+    // occludes less of the scene (less PBR overdraw = less GPU cost). Bed-rel, mm.
+    const nutR = Math.max(4, shankR * 2.0)
     const nutLen = Math.max(7, shankR * 3)
     const noseR = nutR * 0.8
     const noseLen = nutLen * 0.7
-    const bodyR = nutR * 1.18
-    const bodyLen = Math.max(26, bodyR * 2.4)
+    const bodyR = nutR * 1.06
+    const bodyLen = Math.max(24, bodyR * 2.4)
     return {
       bitR,
       fluteLen,
@@ -164,7 +168,11 @@ export function SpindleTool({
   // offset and drive the root group imperatively (no setState → no re-render).
   useFrame((_, delta) => {
     if (spinRef.current && spinning && !reduceMotion) {
-      spinRef.current.rotation.y += delta * 22 // rad/s — a believable idle whirr
+      // Spin about the TOOL axis (+Z, vertical in this Z-up frame) — NOT Y, which
+      // would whirl the bit sideways. The bit/shank are radially symmetric, so
+      // about Z the cutter reads as a steady running tool (physically correct),
+      // never tumbling. (delta in s; ~3.5 rev/s reads as a believable idle whirr.)
+      spinRef.current.rotation.z += delta * 22
     }
     if (live && rootRef.current) {
       const w = useMachine.getState().wpos
@@ -182,7 +190,15 @@ export function SpindleTool({
   if (!visible) return null
 
   // In live mode the tip sits at local origin and the group is moved each frame.
-  const [x, y, z] = position ?? [0, 0, 0]
+  // In SIM mode `position` is supplied by the playback timeline. Guard against a
+  // non-finite component (NaN/Infinity): without this, three.js writes the garbage
+  // straight into the group transform and the cone "flies" all over the scene.
+  // Hold the last finite position instead so the tip stays put on a bad sample.
+  const raw = position ?? [0, 0, 0]
+  const finite =
+    Number.isFinite(raw[0]) && Number.isFinite(raw[1]) && Number.isFinite(raw[2])
+  if (finite) lastGoodRef.current = raw as [number, number, number]
+  const [x, y, z] = finite ? raw : lastGoodRef.current
   const d = dims
 
   // Stack everything along +Z from the tip (z=0 local) upward. coneGeometry's
@@ -205,7 +221,7 @@ export function SpindleTool({
           rotation={[-Math.PI / 2, 0, 0]}
           material={mats.bit}
         >
-          <coneGeometry args={[d.bitR, d.fluteLen, 24]} />
+          <coneGeometry args={[d.bitR, d.fluteLen, 12]} />
         </mesh>
         {/* Shank above the flutes. */}
         <mesh
@@ -213,7 +229,7 @@ export function SpindleTool({
           rotation={[-Math.PI / 2, 0, 0]}
           material={mats.body}
         >
-          <cylinderGeometry args={[d.shankR, d.shankR, d.shankLen, 24]} />
+          <cylinderGeometry args={[d.shankR, d.shankR, d.shankLen, 12]} />
         </mesh>
       </group>
 
@@ -223,7 +239,7 @@ export function SpindleTool({
         rotation={[-Math.PI / 2, 0, 0]}
         material={mats.nut}
       >
-        <cylinderGeometry args={[d.noseR, d.nutR * 0.95, d.noseLen, 28]} />
+        <cylinderGeometry args={[d.noseR, d.nutR * 0.95, d.noseLen, 14]} />
       </mesh>
       {/* Collet NUT — a hex prism (6-sided cylinder) for the wrench flats. */}
       <mesh
@@ -239,12 +255,12 @@ export function SpindleTool({
         rotation={[-Math.PI / 2, 0, 0]}
         material={mats.body}
       >
-        <cylinderGeometry args={[d.bodyR, d.bodyR, d.bodyLen, 32]} />
+        <cylinderGeometry args={[d.bodyR, d.bodyR, d.bodyLen, 16]} />
       </mesh>
       {/* A subtle contact halo on the work plane, tinted to the variant accent,
           so the exact XY tip is readable even when the body occludes it. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[d.bitR * 0.9, d.bitR * 1.5 + 0.4, 32]} />
+        <ringGeometry args={[d.bitR * 0.9, d.bitR * 1.5 + 0.4, 20]} />
         <meshBasicMaterial
           color={mats.accent}
           transparent

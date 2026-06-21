@@ -625,6 +625,220 @@
   line-height: 1.5;
 }
 
+/* ───────────────── column header + bulk "apply to all" ─────────────────
+   Each bulk-editable header holds its label plus a tiny "fill down" trigger.
+   The trigger opens a compact popover anchored under the header with a value
+   editor matching the column (number / segmented pills / select) and an
+   "Apply to N" button that writes the value to EVERY existing point. */
+.sp-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+}
+.sp-th-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.sp-bulk {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.sp-bulk-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.sp-bulk-trigger:hover:not(:disabled),
+.sp-bulk-trigger.is-open {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
+}
+.sp-bulk-trigger:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* the popover floats under the header trigger */
+.sp-bulk-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 160px;
+  padding: var(--sp-2);
+  background: var(--bg-elev);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 22px color-mix(in srgb, #000 32%, transparent);
+  /* headers are upper-cased + letter-spaced; reset for the popover body */
+  text-transform: none;
+  letter-spacing: normal;
+}
+.sp-bulk-pop-title {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.sp-bulk-num {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--ctl-h);
+  padding: 0 6px;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.sp-bulk-num:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.sp-bulk-num input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: right;
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg);
+  -moz-appearance: textfield;
+}
+.sp-bulk-num input:focus { outline: none; }
+.sp-bulk-num input::-webkit-outer-spin-button,
+.sp-bulk-num input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.sp-bulk-unit {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.sp-bulk-seg {
+  display: inline-flex;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-input);
+}
+.sp-bulk-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ctl-h);
+  padding: 0 8px;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sp-bulk-seg-btn:first-child { border-left: none; }
+.sp-bulk-seg-btn:hover { color: var(--fg); }
+.sp-bulk-seg-btn.active {
+  color: var(--accent-fg);
+  background: var(--accent);
+  font-weight: 600;
+}
+.sp-bulk-select {
+  height: var(--ctl-h);
+  padding: 0 6px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.sp-bulk-select:focus { outline: none; border-color: var(--accent); }
+.sp-bulk-apply {
+  min-height: var(--ctl-h);
+  padding: 0 10px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.sp-bulk-apply:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+@media (pointer: coarse) {
+  .sp-bulk-trigger { width: 26px; height: 26px; }
+  .sp-bulk-num,
+  .sp-bulk-seg-btn,
+  .sp-bulk-select,
+  .sp-bulk-apply { height: var(--ctl-h-touch); }
+}
+
+/* mobile/card layout: the "set for all" bar of column chips above the cards */
+.sp-cards-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+.sp-cards-bulk-lbl {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-right: auto;
+}
+.sp-cards-bulk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  font-size: var(--fs-label);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.sp-cards-bulk-chip .sp-bulk-pop {
+  /* keep the popover inside the panel on small screens */
+  left: auto;
+  right: 0;
+}
+
 /* row action buttons — compact square icon buttons */
 .sp-actions-col {
   width: 92px;
@@ -881,5 +1095,139 @@
     .sp-row-ico {
       height: var(--ctl-h-touch);
     }
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Camera pad-detection review (Phase 1): a reviewable list of detected pads,
+   each ＋-addable, plus "Add all" and detection tunables. Matches the Gerber
+   layer-picker card styling.
+   ───────────────────────────────────────────────────────────────────────── */
+.sp-detected {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.sp-detect-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+.sp-detected .sp-card-count {
+  margin-left: var(--sp-2);
+}
+.sp-detect-addall {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sp-detect-addall:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.sp-detect-tune {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.sp-detect-tune-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.sp-detect-tune-field input {
+  width: 4.5em;
+  height: var(--ctl-h);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-body);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.sp-detect-unit {
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
+}
+.sp-detect-tune-invert {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.sp-detect-redo {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.sp-detect-redo:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sp-detect-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.sp-detect-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.sp-detect-item:last-child {
+  border-bottom: none;
+}
+.sp-detect-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  flex: none;
+  font-size: 1.1em;
+  line-height: 1;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.sp-detect-add:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+}
+.sp-detect-xy {
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.sp-detect-r {
+  color: var(--fg-muted);
+}
+
+@media (max-width: 560px) {
+  .sp-detect-add {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
   }
 }

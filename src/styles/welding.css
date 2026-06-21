@@ -130,33 +130,8 @@
   color: var(--danger);
 }
 
-/* ───────────────────────── status strip ───────────────────────── */
-.wp-status {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-variant-numeric: tabular-nums;
-}
-.wp-status-pill b {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-.wp-status-sep {
-  color: var(--border);
-}
-.wp-status-sync {
-  margin-left: auto;
-  color: var(--accent);
-  font-weight: 600;
-  white-space: nowrap;
-}
+/* ───────────────────────── status strip ─────────────────────────
+   Adopts the shared <CamStatus> kit (.cam-status in cam.css) — no bespoke strip. */
 
 .wp-warn {
   margin: 0;
@@ -176,10 +151,11 @@
   gap: var(--sp-3);
   align-content: start;
 }
+/* §2.8 card surface: --bg-card fill, border-only, no resting drop shadow. */
 .wp-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--bg-card);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -191,16 +167,25 @@
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border);
 }
+/* §2.8 section header: raised-contrast muted micro-label. */
 .wp-card-head h4 {
   margin: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   font-size: var(--fs-section);
-  font-weight: 600;
-  color: var(--fg-muted);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+/* Leading glyph: muted 14px, never accent (the .cam-card-ico is applied to the
+   <Icon> directly here — override its accent default — §2.8). */
+.wp-card-head h4 .cam-card-ico {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
 }
 .wp-card-count {
   margin-left: auto;
@@ -537,9 +522,12 @@
 .wp-seg-btn:not(.is-on):hover {
   color: var(--accent);
 }
+/* Active (Arc On/Off, weave pattern) is a mode switch → tonal accent-soft fill
+   so only true primaries are full-accent (§2.8 segmented). */
 .wp-seg-btn.is-on {
-  color: var(--accent-fg);
-  background: var(--accent);
+  color: var(--fg);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
   font-weight: 600;
 }
 /* The pattern selector spans the full card width and wraps its 4 options. */
@@ -580,11 +568,11 @@
   line-height: 1.5;
 }
 
-/* one object card */
+/* one object card (§2.8 card surface) */
 .wp-ocard {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-elev);
+  background: var(--bg-card);
   padding: var(--sp-2) var(--sp-3) var(--sp-3);
   display: flex;
   flex-direction: column;
@@ -629,9 +617,11 @@
 .wp-kind-btn:last-child {
   border-right: 0;
 }
+/* Kind toggle (Line/Circle) is a mode switch → tonal accent-soft (§2.8). */
 .wp-kind-btn.is-on {
-  color: var(--accent-fg);
-  background: var(--accent);
+  color: var(--fg);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
   font-weight: 600;
 }
 .wp-kind-btn:not(.is-on):hover {
@@ -766,6 +756,11 @@
 .wp-row-ico:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+/* Row delete is destructive: persistent danger-tinted edge + filled hover (W-H). */
+.wp-row-ico.wp-del:not(:disabled) {
+  border-color: var(--border-danger);
+  color: var(--danger);
 }
 .wp-row-ico.wp-del:not(:disabled):hover {
   border-color: var(--danger);

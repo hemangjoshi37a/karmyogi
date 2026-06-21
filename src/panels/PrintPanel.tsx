@@ -336,7 +336,7 @@ export function PrintPanel() {
     'karmyogi.print.settings',
     DEFAULTS,
   )
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAdvanced, setShowAdvanced] = usePersistentState<boolean>('karmyogi.print.showAdvanced', false)
 
   // ---- colour-coded setting PRESETS (slicing/print params, NOT the model) ----
   // Snapshot the current resolved print settings into a serializable preset, and

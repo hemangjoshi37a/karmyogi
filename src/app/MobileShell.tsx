@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { IDockviewPanelProps } from 'dockview'
 import { panelComponents, availablePanels } from './panelRegistry'
 import { PanelIcon } from './panelIcons'
@@ -39,6 +39,15 @@ export function MobileShell() {
 
   const tabId = (id: string) => `mobile-tab-${id}`
   const panelDomId = 'mobile-tabpanel'
+
+  // Keep the active tab centered in the (horizontally-scrolling) strip so a tab
+  // selected beyond the visible edge is brought into view — pairing with the
+  // edge-fade affordance in shell-extra.css (W-K). `inline:'center'` scrolls only
+  // the strip, never the page; `block:'nearest'` avoids vertical jumps.
+  useEffect(() => {
+    const el = tabRefs.current[activeId]
+    el?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
+  }, [activeId])
 
   // Roving-tabindex arrow-key navigation across the tab strip. Moving focus also
   // activates the tab (automatic activation) so the panel below follows along.

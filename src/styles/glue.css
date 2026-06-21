@@ -71,31 +71,19 @@
   background: var(--border);
 }
 
-/* --- live status strip: pill counters + auto-sync destination --- */
-.gp-status {
+/* --- live status strip ---
+   Adopts the shared <CamStatus> kit (.cam-status in cam.css) so the strip reads
+   identically to every other workbench tab. A flush wrapper drops the kit's own
+   card border in favour of the panel's header divider, keeping the slim look. */
+.gp-status-wrap {
   flex: 0 0 auto;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
   padding: var(--sp-1) var(--pad-card-x);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
   border-bottom: 1px solid var(--border);
-  font-variant-numeric: tabular-nums;
 }
-.gp-status-pill b {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-.gp-status-sep {
-  color: var(--border);
-}
-.gp-status-sync {
-  margin-left: auto;
-  color: var(--accent);
-  font-weight: 600;
-  white-space: nowrap;
+.gp-status-wrap .cam-status {
+  border: none;
+  background: transparent;
+  padding: 0;
 }
 
 /* --- inline status banners (load error / degenerate-Z warning) --- */
@@ -199,9 +187,11 @@
 .gp-tool-svg {
   display: block;
 }
+/* Active tool: tonal accent-soft fill (a tool-palette selection is a mode
+   switch, not a primary CTA — §2.8 segmented "mode switches use --accent-soft"). */
 .gp-tool.gp-tool-on {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--accent-soft);
   color: var(--fg);
 }
 /* Undo / Clear are compact header icon buttons, sized to match the save/load
@@ -219,8 +209,15 @@
   border-color: var(--accent);
   color: var(--fg);
 }
+/* Clear is destructive: a persistent danger-tinted edge + filled-danger hover so
+   it reads as "danger" at rest, not only on hover (W-H / §2.3). */
+.gp-clear.icon-btn:not(:disabled) {
+  border-color: var(--border-danger);
+  color: var(--danger);
+}
 .gp-clear.icon-btn:hover:not(:disabled) {
   border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
 .gp-undo.icon-btn:disabled,
@@ -342,7 +339,8 @@
   color: var(--fg-muted);
 }
 
-/* --- cards in the controls column --- */
+/* --- cards in the controls column ---
+   §2.8 card surface: --bg-card fill + 1px border edge, NO resting drop shadow. */
 .gp-card {
   flex: 0 0 auto;
   display: flex;
@@ -350,19 +348,29 @@
   gap: var(--sp-2);
   padding: var(--pad-card-y) var(--pad-card-x);
   min-width: 0; /* allow children to shrink rather than force horizontal scroll */
-  background: var(--bg-input);
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/* §2.8 section header: raised-contrast muted micro-label, no bottom border. */
 .gp-card-title {
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   font-size: var(--fs-section);
-  font-weight: 600;
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+}
+/* Leading glyph: muted 14px, NEVER accent (overrides the accent .cam-card-ico
+   default for card titles in this panel — §2.8). */
+.gp-card-title .cam-card-ico {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
   color: var(--fg-muted);
 }
 .gp-empty {
@@ -424,17 +432,18 @@
   text-align: center;
 }
 
-/* --- delete button (compact icon button in the list) --- */
+/* --- delete button (compact icon button in the list) — destructive (W-H) --- */
 .gp-del.icon-btn {
   flex: 0 0 auto;
   min-width: var(--icon-btn);
   min-height: var(--icon-btn);
   padding: 0;
-  border: 1px solid var(--danger);
+  border: 1px solid var(--border-danger);
   color: var(--danger);
   background: transparent;
 }
 .gp-del.icon-btn:hover {
+  border-color: var(--danger);
   background: var(--danger);
   color: var(--bg);
 }

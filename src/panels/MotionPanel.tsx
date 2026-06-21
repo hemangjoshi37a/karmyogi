@@ -25,7 +25,7 @@ import {
   type GrblSettingGroup,
 } from './grblSettingsMeta'
 import { Icon } from '../components/Icons'
-import { Modal } from '../components/Modal'
+import { Modal, ModalFootSpacer } from '../components/Modal'
 import { useT } from '../i18n'
 import '../styles/motion.css'
 
@@ -701,35 +701,54 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
         </div>
       </section>
 
-      {/* Factory-reset confirmation (replaces native window.confirm). */}
+      {/* Factory-reset confirmation (replaces native window.confirm). Sticky
+          footer (§2.8): secondary Cancel LEFT, destructive Reset RIGHT. */}
       <Modal
         open={confirmKind !== null}
         title={t('motion.confirm.title', 'Confirm factory reset')}
         onClose={() => setConfirmKind(null)}
-        width={460}
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="mo-btn" onClick={() => setConfirmKind(null)}>
+              {t('motion.confirm.cancel', 'Cancel')}
+            </button>
+            <ModalFootSpacer />
+            <button
+              type="button"
+              className="mo-btn danger"
+              onClick={() => confirmKind && executeReset(confirmKind)}
+            >
+              {t('motion.confirm.confirm', 'Reset')}
+            </button>
+          </>
+        }
       >
         <p className="mo-confirm-msg">{confirmKind ? resetMessages[confirmKind] : ''}</p>
-        <div className="mo-row mo-confirm-actions">
-          <button type="button" className="mo-btn" onClick={() => setConfirmKind(null)}>
-            {t('motion.confirm.cancel', 'Cancel')}
-          </button>
-          <span className="mo-grow" />
-          <button
-            type="button"
-            className="mo-btn danger"
-            onClick={() => confirmKind && executeReset(confirmKind)}
-          >
-            {t('motion.confirm.confirm', 'Reset')}
-          </button>
-        </div>
       </Modal>
 
-      {/* Import / paste config dialog. */}
+      {/* Import / paste config dialog. Sticky footer: Cancel LEFT, primary RIGHT. */}
       <Modal
         open={importOpen}
         title={t('motion.import.dialogTitle', 'Import / paste config')}
         onClose={() => setImportOpen(false)}
-        width={520}
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="mo-btn" onClick={() => setImportOpen(false)}>
+              {t('motion.confirm.cancel', 'Cancel')}
+            </button>
+            <ModalFootSpacer />
+            <button
+              type="button"
+              className="mo-btn primary"
+              disabled={importText.trim().length === 0}
+              onClick={applyImport}
+            >
+              {t('motion.import.apply', 'Stage edits')}
+            </button>
+          </>
+        }
       >
         <p className="mo-note">
           {t(
@@ -745,20 +764,6 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
           aria-label={t('motion.import.aria', 'Paste $$ config')}
           rows={10}
         />
-        <div className="mo-row mo-confirm-actions">
-          <button type="button" className="mo-btn" onClick={() => setImportOpen(false)}>
-            {t('motion.confirm.cancel', 'Cancel')}
-          </button>
-          <span className="mo-grow" />
-          <button
-            type="button"
-            className="mo-btn primary"
-            disabled={importText.trim().length === 0}
-            onClick={applyImport}
-          >
-            {t('motion.import.apply', 'Stage edits')}
-          </button>
-        </div>
       </Modal>
     </div>
   )

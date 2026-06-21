@@ -30,6 +30,32 @@ export type { JobPlacement }
 // Back-compat alias: the program/visualizer "placement" is now a full-3D JobPlacement.
 export type { JobPlacement as Placement }
 
+/**
+ * One emitted OPERATION within a section (the carving per-op breakdown). Carries
+ * its OWN G-code so the Program tab can expand a section into readable per-op
+ * blocks, and a preset `color` so the Visualizer can tint that op's toolpath.
+ * Purely ADDITIVE metadata — `rawLines`/`lines` remain the source of truth for
+ * streaming, so a section with or without `operations` streams identically.
+ */
+export interface ProgramOperation {
+  /** Stable id (React key + reference). */
+  id: string
+  /** Human label (e.g. "Profile-outside · Loop 1 (closed)"). */
+  label: string
+  /** This operation's own G-code (its slice of the section program). */
+  gcode: string
+  /** Preset color for Visualizer tinting (hex). Optional. */
+  color?: string
+}
+
+/** Optional additive per-section display metadata passed to `setProgram`. */
+export interface ProgramSectionMeta {
+  /** Ordered per-operation breakdown (carving). */
+  operations?: ProgramOperation[]
+  /** Preset section color (hex) for Visualizer tinting; '' / undefined clears. */
+  color?: string
+}
+
 /** One named program section (the output of a single source/tab). */
 export interface ProgramSection {
   /** Stable unique id (for React keys + delete). */
@@ -51,6 +77,14 @@ export interface ProgramSection {
    * tell different program toolpaths apart at a glance.
    */
   color?: string
+  /**
+   * Optional ordered per-operation breakdown (carving sections). Each entry
+   * carries its own label + G-code + preset color so the Program tab can render
+   * an EXPANDABLE section (one block per op) and the Visualizer can tint each
+   * op's toolpath by its preset color. Purely additive: sections pushed by
+   * other tabs (soldering / PCB / …) omit this and stream exactly as before.
+   */
+  operations?: ProgramOperation[]
 }
 
 interface ProgramStore {
@@ -74,10 +108,33 @@ interface ProgramStore {
    * the Program panel so the user knows the app is working.
    */
   generating: boolean
+  /**
+   * Optional human-readable detail for the current background generation —
+   * e.g. "Reading model… 42%", "Parsing model…", "Generating toolpath… 70%".
+   * Drives a staged status line + progress bar in the Program panel so a slow
+   * read/parse/carve doesn't look frozen. Purely additive: tabs that only call
+   * `setGenerating(bool)` leave this null and behave exactly as before.
+   */
+  generatingStatus: string | null
+  /** 0..1 progress for the current stage, or null when indeterminate. */
+  generatingProgress: number | null
   /** Set the background-generation indicator. */
   setGenerating: (b: boolean) => void
-  /** Upsert a section keyed by `name` (replace its body, or append if new). */
-  setProgram: (name: string, gcode: string) => void
+  /**
+   * Set the staged status text + optional 0..1 progress shown in the Program
+   * panel. Passing `null` clears the detail (a bare spinner / "Generating…").
+   */
+  setGeneratingStatus: (status: string | null, progress?: number | null) => void
+  /**
+   * Upsert a section keyed by `name` (replace its body, or append if new).
+   *
+   * The optional `meta` carries ADDITIVE per-section display metadata (carving's
+   * per-operation breakdown + a preset section color). Callers that omit `meta`
+   * (soldering / PCB / writing / AI / …) behave EXACTLY as before — the section
+   * keeps no operations and no preset color. When provided, `meta.operations`
+   * and `meta.color` are stored on the section (and refreshed on every re-push).
+   */
+  setProgram: (name: string, gcode: string, meta?: ProgramSectionMeta) => void
   /**
    * Replace the ENTIRE program with a single edited section (used by the
    * combined-text editor). Collapses all sections into one named `name`.
@@ -199,7 +256,27 @@ function cloneSection(s: ProgramSection): ProgramSection {
     rawLines: s.rawLines.slice(),
     placement: { ...s.placement },
     color: s.color,
+    operations: s.operations ? s.operations.map((o) => ({ ...o })) : undefined,
   }
+}
+
+/** Whether a section's stored metadata already equals the given color + ops. */
+function sameMeta(
+  s: ProgramSection,
+  color: string | undefined,
+  ops: ProgramOperation[] | undefined,
+): boolean {
+  if ((s.color || undefined) !== color) return false
+  const a = s.operations
+  if (!a && !ops) return true
+  if (!a || !ops || a.length !== ops.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = ops[i]
+    if (x.id !== y.id || x.label !== y.label || x.gcode !== y.gcode || x.color !== y.color)
+      return false
+  }
+  return true
 }
 
 /** Recompute the derived combined fields from a section list (per-section placement). */
@@ -221,8 +298,15 @@ export const useProgram = create<ProgramStore>((set, get) => ({
   cursor: -1,
   streaming: false,
   generating: false,
-  setGenerating: (generating) => set({ generating }),
-  setProgram: (name, gcode) => {
+  generatingStatus: null,
+  generatingProgress: null,
+  setGenerating: (generating) =>
+    // When generation ends, also clear the staged detail so a stale status
+    // line can't linger after the indicator turns off.
+    set(generating ? { generating } : { generating, generatingStatus: null, generatingProgress: null }),
+  setGeneratingStatus: (generatingStatus, generatingProgress = null) =>
+    set({ generatingStatus, generatingProgress }),
+  setProgram: (name, gcode, meta) => {
     const { sections, selectedSectionId } = get()
     const idx = sections.findIndex((s) => s.name === name)
 
@@ -257,7 +341,24 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     //     → don't resurrect the deleted section.
     //  2. The section still exists and the gcode is identical → nothing to do
     //     (avoids needless re-renders / stream resets during streaming).
-    if (unchanged && (dismissedNames.has(name) || idx >= 0)) return
+    if (unchanged && (dismissedNames.has(name) || idx >= 0)) {
+      // The gcode is identical, but a carving re-push may carry CHANGED display
+      // metadata (per-op breakdown / preset color) — e.g. the user retinted a
+      // preset without changing geometry. Refresh just the metadata in place
+      // (no re-bake, no stream reset) when it actually differs. Non-carving
+      // callers pass no `meta`, so this stays a true no-op for them.
+      if (meta && idx >= 0 && !dismissedNames.has(name)) {
+        const cur = sections[idx]
+        const nextColor = meta.color || undefined
+        const nextOps = meta.operations
+        if (!sameMeta(cur, nextColor, nextOps)) {
+          const next = sections.slice()
+          next[idx] = { ...cur, color: nextColor, operations: nextOps }
+          set({ sections: next })
+        }
+      }
+      return
+    }
 
     // Genuine load/edit → snapshot BEFORE mutating any tracking or sections.
     recordHistory()
@@ -267,15 +368,32 @@ export const useProgram = create<ProgramStore>((set, get) => ({
     dismissedNames.delete(name)
 
     const rawLines = gcode.split(/\r?\n/)
+    // Additive display metadata. When `meta` is omitted (non-carving callers),
+    // BOTH stay undefined so nothing changes vs. the old behavior. When present,
+    // they overwrite the section's prior metadata (a fresh generation replaces
+    // the breakdown). `'' ` color clears.
+    const metaColor = meta ? meta.color || undefined : undefined
+    const metaOps = meta ? meta.operations : undefined
     let next: ProgramSection[]
     if (idx >= 0) {
       // Replace this named section's body in place (keep its id, position AND
       // its current placement — regenerating a tab must not move the job).
       next = sections.slice()
-      next[idx] = { ...next[idx], rawLines }
+      next[idx] = meta
+        ? { ...next[idx], rawLines, color: metaColor, operations: metaOps }
+        : { ...next[idx], rawLines }
     } else {
       // New source → append a section with an identity placement.
-      next = [...sections, { id: nextSectionId(), name, rawLines, placement: { ...IDENTITY_JOB_PLACEMENT } }]
+      next = [
+        ...sections,
+        {
+          id: nextSectionId(),
+          name,
+          rawLines,
+          placement: { ...IDENTITY_JOB_PLACEMENT },
+          ...(meta ? { color: metaColor, operations: metaOps } : {}),
+        },
+      ]
     }
     set({
       ...deriveFrom(next),

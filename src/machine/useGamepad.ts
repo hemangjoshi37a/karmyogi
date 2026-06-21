@@ -63,6 +63,13 @@ export const Btn = {
 export type GamepadAction = GamepadActionId
 
 export interface GamepadHandlers {
+  /**
+   * Continuous combined jog: a single direction-preserving X/Y/Z vector at one
+   * vector feed. Issuing all axes in ONE `$J=` is what lets Z and XY move
+   * together — GRBL runs one jog at a time, so two separate jogXY/jogZ commands
+   * made Z lose the race. `jogXY`/`jogZ` remain for any non-gamepad callers.
+   */
+  jog3: (dx: number, dy: number, dz: number, feed: number) => void
   jogXY: (dx: number, dy: number, feed: number) => void
   jogZ: (dz: number, feed: number) => void
   cancelJog: () => void
@@ -128,8 +135,10 @@ export interface GamepadState {
   rumble: (pattern: RumblePattern) => void
 }
 
-/** Stick deadzone — below this magnitude is treated as centered. */
-const DEADZONE = 0.15
+/** Stick deadzone — below this magnitude is treated as centered. Small enough
+ * that a gentle push picks up promptly (snappy), large enough to absorb a
+ * resting stick's drift on cheap pads so motion never creeps on its own. */
+const DEADZONE = 0.12
 /** Analog press threshold (axis-half discrete bindings). */
 const PRESS_THRESHOLD = 0.5
 /**
@@ -143,14 +152,39 @@ const PRESS_THRESHOLD = 0.5
  */
 const TRIGGER_ON = 0.6
 const JOG_FEED_FLOOR = 30
-/** Min interval (ms) between jog RE-ISSUES, so a fast stick sweep can't storm GRBL
- * with cancel+re-issue every frame. A steady hold never re-issues at all. */
-const REISSUE_MIN_MS = 110
+/**
+ * Min interval (ms) between jog RE-ISSUES. This is the dominant knob for how
+ * SNAPPY the analog stick feels: it caps how fast a stick change (direction or
+ * feed) reaches the machine. Too coarse and motion lags / steps behind the
+ * stick; too fine and a fast sweep storms GRBL with cancel+re-issue. ~55 ms
+ * (~18 Hz) tracks the stick fluidly while staying well under GRBL's planner /
+ * RX-buffer limits (each re-issue is a single `force` jog + one `0x85`). A
+ * steady-magnitude hold mostly coasts on its in-flight move and only refreshes
+ * lazily (see REFRESH_MS) so we don't thrash a stick the operator isn't moving.
+ */
+const REISSUE_MIN_MS = 55
+/**
+ * Lazy refresh interval (ms) for a stick held at a STEADY deflection. The
+ * continuous jog is a single finite `$J=` move (distance ≈ continuousJogMm), so
+ * a long steady hold would eventually drain it and stutter to a stop. Re-issuing
+ * (cancel + fresh jog) a few times a second keeps the move alive seamlessly —
+ * GRBL blends the new jog into the running one — without depending on the stick
+ * actually moving. Kept long enough that a still stick is mostly coasting.
+ */
+const REFRESH_MS = 220
 
+/**
+ * Stick → feed response. A MILD expo (blend of linear + cubic) keeps the
+ * response proportional and lively near center (no quadratic dead band that
+ * makes small pushes feel laggy) while still giving fine control at low
+ * deflection. `norm` is the post-deadzone magnitude rescaled to 0..1.
+ */
 function responseCurve(mag: number): number {
   if (mag <= DEADZONE) return 0
   const norm = Math.min(1, (mag - DEADZONE) / (1 - DEADZONE))
-  return norm * norm
+  // 70% linear + 30% cubic: ~0.72 of full feed at half-stick (vs 0.5 quad),
+  // so a gentle push already moves perceptibly while a hard push still maxes.
+  return 0.7 * norm + 0.3 * norm * norm * norm
 }
 
 function scaledFeed(response: number, jogFeed: number): number {
@@ -322,12 +356,15 @@ export function useGamepad(
   // Previous-frame deflection of each axis-token (for axis edge detection).
   const prevAxisDefl = useRef<Map<ControlToken, boolean>>(new Map())
   const jogActive = useRef(false)
-  const lastJog = useRef<{ x: number; y: number; z: number; feedXY: number; feedZ: number }>({
+  // The last commanded jog VECTOR (per-axis amplitude, direction-preserving) plus
+  // its single vector feed. One combined `$J=` covers all three axes at once, so
+  // XY and Z never fight over GRBL's single jog slot (the old split jogXY+jogZ
+  // issued two competing moves and Z routinely lost — see jog issuance below).
+  const lastJog = useRef<{ x: number; y: number; z: number; feed: number }>({
     x: 0,
     y: 0,
     z: 0,
-    feedXY: 0,
-    feedZ: 0,
+    feed: 0,
   })
   const lastReissueAt = useRef(0)
 
@@ -479,7 +516,7 @@ export function useGamepad(
         handlersRef.current.cancelJog()
         jogActive.current = false
       }
-      lastJog.current = { x: 0, y: 0, z: 0, feedXY: 0, feedZ: 0 }
+      lastJog.current = { x: 0, y: 0, z: 0, feed: 0 }
       prevPressed.current = []
       setButtonsPressed([])
       setAxes([])
@@ -497,7 +534,7 @@ export function useGamepad(
       if (jogActive.current) {
         handlersRef.current.cancelJog()
         jogActive.current = false
-        lastJog.current = { x: 0, y: 0, z: 0, feedXY: 0, feedZ: 0 }
+        lastJog.current = { x: 0, y: 0, z: 0, feed: 0 }
       }
     }
 
@@ -608,73 +645,82 @@ export function useGamepad(
       const rawY = jogComp('jogYplus', 'jogYminus')
       const rawZ = jogComp('jogZplus', 'jogZminus')
 
+      // Deadzone XY (as a unit) and Z SEPARATELY — so a little resting drift on
+      // the XY stick can never bleed a stray X/Y component into a pure Z jog (and
+      // vice versa). Each surviving group contributes its response amplitude to a
+      // SINGLE combined vector; the vector feed is the dominant group's feed.
       const xyMag = Math.hypot(rawX, rawY)
       let nx = 0
       let ny = 0
-      let feedXY = 0
+      let xyResp = 0
       if (Number.isFinite(xyMag) && xyMag > DEADZONE) {
         nx = rawX / xyMag
         ny = rawY / xyMag
-        feedXY = scaledFeed(responseCurve(Math.min(1, xyMag)), optionsRef.current.jogFeed)
+        xyResp = responseCurve(Math.min(1, xyMag))
       }
       const zMag = Math.abs(rawZ)
-      let dz = 0
-      let feedZ = 0
+      let zResp = 0
       if (Number.isFinite(zMag) && zMag > DEADZONE) {
-        dz = Math.sign(rawZ)
-        feedZ = scaledFeed(responseCurve(Math.min(1, zMag)), optionsRef.current.jogFeed)
+        zResp = responseCurve(Math.min(1, zMag))
       }
+      // Combined jog vector: each axis component carries its group's amplitude so
+      // `doJogHold` (which scales the LARGEST component to the configured
+      // continuous distance) preserves the true 3D direction — push Z harder than
+      // XY and you travel proportionally more in Z. The feed is the stronger
+      // group's, so speed always tracks whichever stick is pushed hardest.
+      let vx = nx * xyResp
+      let vy = ny * xyResp
+      let vz = Math.sign(rawZ) * zResp
+      let feed = Math.max(xyResp, zResp) > 0 ? scaledFeed(Math.max(xyResp, zResp), optionsRef.current.jogFeed) : 0
       // NaN guard: never let a bad axis value reach GRBL.
-      if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(feedXY)) {
-        nx = ny = feedXY = 0
-      }
-      if (!Number.isFinite(dz) || !Number.isFinite(feedZ)) {
-        dz = feedZ = 0
+      if (!Number.isFinite(vx) || !Number.isFinite(vy) || !Number.isFinite(vz) || !Number.isFinite(feed)) {
+        vx = vy = vz = feed = 0
       }
 
-      const movingXY = feedXY > 0
-      const movingZ = feedZ > 0
-      const moving = movingXY || movingZ
-      // SMOOTH continuous jog, snappy on change. Hold the stick steady → ONE long
-      // move runs at constant speed (no per-increment chunking). We ONLY touch the
-      // machine when the stick actually MOVES: a direction/feed change past a small
-      // hysteresis cancels the current move (0x85, so the change is instant — no
-      // waiting for it to drain) and re-issues in the new direction/speed. Centering
-      // cancels. A steady hold therefore sends NOTHING and stays perfectly smooth.
-      // Re-issues are throttled so a fast sweep can't storm GRBL.
-      const feedHyst = Math.max(20, (optionsRef.current.jogFeed || 1000) * 0.06)
-      const xyChanged =
-        Math.abs(nx - lastJog.current.x) > 0.06 ||
-        Math.abs(ny - lastJog.current.y) > 0.06 ||
-        Math.abs(feedXY - lastJog.current.feedXY) > feedHyst
-      const zChanged =
-        Math.abs(dz - lastJog.current.z) > 0.06 ||
-        Math.abs(feedZ - lastJog.current.feedZ) > feedHyst
+      const moving = feed > 0
+      // SNAPPY continuous jog that tracks the stick. The hook commands a single
+      // finite combined `$J=` move (X+Y+Z in ONE command) and keeps it current by
+      // cancelling (0x85, instant — no waiting for it to drain) + re-issuing
+      // whenever the commanded vector or feed changes meaningfully, throttled to
+      // REISSUE_MIN_MS so a fast sweep can't storm GRBL. A stick held STEADY is
+      // also refreshed lazily (REFRESH_MS) so the finite move never drains out
+      // from under a long hold. Centering cancels immediately for a crisp stop.
+      //
+      // Thresholds are SMALL so the response feels proportional: a little more
+      // push / a little rotation reaches the machine on the next ~55 ms tick
+      // instead of waiting to cross a big dead band. Feed hysteresis is a small
+      // fraction of max feed (with a low floor) so speed tracks the stick.
+      const now = nowMs()
+      const feedHyst = Math.max(8, (optionsRef.current.jogFeed || 1000) * 0.02)
+      const vecChanged =
+        Math.abs(vx - lastJog.current.x) > 0.02 ||
+        Math.abs(vy - lastJog.current.y) > 0.02 ||
+        Math.abs(vz - lastJog.current.z) > 0.02 ||
+        Math.abs(feed - lastJog.current.feed) > feedHyst
+      // A steady hold still needs an occasional refresh so the finite jog move
+      // doesn't run dry and stutter to a stop on a long deflection.
+      const stale = now - lastReissueAt.current >= REFRESH_MS
       if (moving) {
         if (!jogActive.current) {
-          // First deflection → start the continuous move.
-          if (movingXY) handlersRef.current.jogXY(nx, ny, feedXY)
-          if (movingZ) handlersRef.current.jogZ(dz, feedZ)
+          // First deflection → start the combined continuous move.
+          handlersRef.current.jog3(vx, vy, vz, feed)
           jogActive.current = true
-          lastJog.current = { x: nx, y: ny, z: dz, feedXY, feedZ }
-          lastReissueAt.current = nowMs()
-        } else if (
-          ((movingXY && xyChanged) || (movingZ && zChanged)) &&
-          nowMs() - lastReissueAt.current >= REISSUE_MIN_MS
-        ) {
-          // Stick moved → flush the running move (0x85) and re-issue immediately.
+          lastJog.current = { x: vx, y: vy, z: vz, feed }
+          lastReissueAt.current = now
+        } else if ((vecChanged && now - lastReissueAt.current >= REISSUE_MIN_MS) || stale) {
+          // Stick moved (or the move went stale) → flush the running move (0x85)
+          // and re-issue the whole vector immediately in the current direction/speed.
           handlersRef.current.cancelJog()
-          if (movingXY) handlersRef.current.jogXY(nx, ny, feedXY)
-          if (movingZ) handlersRef.current.jogZ(dz, feedZ)
-          lastJog.current = { x: nx, y: ny, z: dz, feedXY, feedZ }
-          lastReissueAt.current = nowMs()
+          handlersRef.current.jog3(vx, vy, vz, feed)
+          lastJog.current = { x: vx, y: vy, z: vz, feed }
+          lastReissueAt.current = now
         }
-        // else: steady hold (or change still within the throttle window) → do NOTHING.
+        // else: steady hold within the refresh window → coast on the in-flight move.
       } else if (jogActive.current) {
         // Stick returned to center → cancel the continuous move (0x85).
         handlersRef.current.cancelJog()
         jogActive.current = false
-        lastJog.current = { x: 0, y: 0, z: 0, feedXY: 0, feedZ: 0 }
+        lastJog.current = { x: 0, y: 0, z: 0, feed: 0 }
       }
 
       // --- Edge-triggered discrete actions (fire once per press) ---
@@ -737,7 +783,7 @@ export function useGamepad(
         handlersRef.current.cancelJog()
         jogActive.current = false
       }
-      lastJog.current = { x: 0, y: 0, z: 0, feedXY: 0, feedZ: 0 }
+      lastJog.current = { x: 0, y: 0, z: 0, feed: 0 }
       prevPressed.current = []
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

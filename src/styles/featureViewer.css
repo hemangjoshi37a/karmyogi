@@ -1,0 +1,408 @@
+/* Per-file feature picker / mini-viewer (components/cam/FeatureViewer.tsx).
+   Matches the CAD/CAM panel tokens (--border / --accent / --bg-card / --radius …)
+   and is touch-usable (≥36px targets) + reflows on narrow widths. */
+
+.fv-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  margin-top: var(--sp-3);
+  overflow: hidden;
+}
+
+/* Collapsible header — also the toggle. */
+.fv-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 11px;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.fv-head:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.fv-caret {
+  flex: 0 0 auto;
+  transition: transform var(--dur-fast) var(--ease);
+  /* Disclosure caret is a quiet, muted affordance — never accent (§2.7/§2.8). */
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.fv-caret.open {
+  transform: rotate(90deg);
+}
+.fv-title {
+  /* Reads as the section title for this collapsible card (§2.8 W-F). */
+  font-weight: var(--fw-label);
+  font-size: var(--fs-section);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+  flex: 0 0 auto;
+}
+.fv-file {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.65;
+  font-size: 12px;
+}
+.fv-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* The preview body now renders directly inside an expanded model card (no
+   collapsible fv-card wrapper) — it carries its own padding + gap. */
+.fv-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* U7: a small ⓘ hover-tip pinned to the preview's UPPER-LEFT corner, replacing
+   the old permanent explainer/stat lines. */
+.fv-help {
+  position: absolute;
+  z-index: 5;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 75%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Right-click quick-add menu (R9): a small floating list of presets anchored at
+   the click point inside the preview body. */
+.fv-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 160px;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elev) 97%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-2);
+}
+.fv-menu-head {
+  font-size: 10px;
+  font-weight: var(--fw-label);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  padding: 3px 8px 5px;
+}
+.fv-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+.fv-menu-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.fv-menu-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.fv-menu-sw {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+}
+.fv-menu-lbl {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The clickable mini drawing. */
+.fv-svg {
+  width: 100%;
+  height: clamp(120px, 24vh, 220px);
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 11px, color-mix(in srgb, var(--border) 30%, transparent) 11px, color-mix(in srgb, var(--border) 30%, transparent) 12px),
+    repeating-linear-gradient(90deg, transparent, transparent 11px, color-mix(in srgb, var(--border) 30%, transparent) 11px, color-mix(in srgb, var(--border) 30%, transparent) 12px),
+    var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: block;
+}
+.fv-loop {
+  fill: none;
+  stroke-width: 1.6;
+  cursor: pointer;
+  transition: stroke-width 0.1s ease;
+}
+.fv-loop:hover {
+  stroke-width: 3;
+}
+.fv-loop.sel {
+  stroke-width: 3.2;
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+/* Feature chips (mirror selection; usable when loops overlap on screen). */
+.fv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+}
+.fv-chip:hover {
+  border-color: var(--accent);
+}
+.fv-chip.sel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.fv-chip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.fv-chip-badge {
+  font-size: 10px;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  padding: 0 3px;
+}
+
+/* Selected-feature editor. */
+.fv-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fv-editor-head {
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fv-tag {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn, #f59e0b) 22%, transparent);
+  color: var(--warn, #f59e0b);
+}
+
+/* Color-preset palette. */
+.fv-palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
+}
+.fv-preset {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--fv-c, var(--accent));
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+.fv-preset:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--fv-c, var(--accent)) 12%, transparent);
+}
+.fv-preset:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.fv-preset-sw {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+}
+.fv-preset-lbl {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fv-preset-plus {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Operation stack. */
+.fv-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.fv-op {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-size: 12px;
+}
+.fv-op-sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.fv-op-lbl {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fv-op-actions {
+  display: flex;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.fv-op-btn {
+  min-width: var(--icon-btn);
+  height: var(--icon-btn);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 11px;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.fv-op-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.fv-op-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.fv-op-btn.danger:hover:not(:disabled) {
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+}
+
+.fv-empty,
+.fv-hint {
+  font-size: 12px;
+  opacity: 0.7;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.fv-clear {
+  align-self: flex-start;
+  min-height: var(--ctl-h);
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--danger, #ef4444);
+  cursor: pointer;
+  font-size: 12px;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.fv-clear:hover {
+  border-color: var(--danger, #ef4444);
+  background: color-mix(in srgb, var(--danger, #ef4444) 10%, transparent);
+}
+
+/* Whole-file Operation section, dimmed while per-feature ops override it. */
+.cc-op-overridden {
+  opacity: 0.62;
+}
+.cc-op-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+/* ── 3D SurfaceViewer (per-surface picker) ─────────────────────────────────
+   Mirrors the 2D FeatureViewer but hosts a react-three-fiber canvas instead of
+   an SVG. The canvas needs an explicit height so the WebGL viewport sizes. */
+.sv-body {
+  gap: 8px;
+}
+.sv-canvas {
+  position: relative;
+  width: 100%;
+  height: clamp(220px, 38vh, 420px);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #15181c;
+  border: 1px solid var(--border, #2a2f37);
+}
+.sv-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-dim, #8a93a0);
+  font-size: 0.85rem;
+}

@@ -62,24 +62,26 @@
   grid-column: 1 / -1;
 }
 
-/* --- bordered card sections --- */
+/* --- bordered card sections (canonical card surface, §2.8/W-F) --- */
 .wr-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--bg-card);
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
+/* Canonical section header (§2.8): uppercase micro-label, raised contrast, no
+   bottom border (the card already carries the edge). */
 .wr-card > h3 {
   margin: 0;
-  padding: var(--sp-1) var(--pad-card-x);
+  padding: var(--sp-2) var(--pad-card-x);
   font-size: var(--fs-section);
-  font-weight: 600;
-  color: var(--fg-muted);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--border);
 }
 .wr-card > h3.wr-card-head {
   display: flex;
@@ -87,10 +89,15 @@
   justify-content: space-between;
   gap: var(--sp-1);
 }
-/* P1: small leading accent glyph before a section title (shared `cam-card-ico`). */
+/* Canonical leading glyph (§2.8/W-F): muted + 14px, NEVER accent (overrides the
+   shared `.cam-card-ico` accent color within Writing card headers). */
 .wr-card > h3 .cam-card-ico {
   margin-right: 6px;
   vertical-align: -2px;
+  color: var(--fg-muted);
+}
+.wr-card > h3 .cam-card-ico.wr-glyph {
+  font-size: 13px;
 }
 .wr-card > h3.wr-card-head > span:first-child {
   display: inline-flex;
@@ -197,7 +204,7 @@
   padding: 0 6px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   min-width: 0;
   transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
 }
@@ -393,7 +400,10 @@
   opacity: 0.7;
 }
 
-/* ---- Stroke | Outline segmented control (sits inline on the font row) ---- */
+/* ---- Stroke | Outline segmented control (sits inline on the font row) ----
+   Canonical segmented control (§2.8/W-C): inactive = --bg-input/--fg; 1px seam;
+   --radius-sm. This is a MODE SWITCH, so the active segment uses the tonal
+   --accent-soft tint (reserving full-accent for the true primary CTA). */
 .wr-mode {
   display: inline-flex;
   border: 1px solid var(--border);
@@ -410,22 +420,24 @@
   padding: 0 var(--sp-2);
   font: inherit;
   font-size: var(--fs-ctl);
-  color: var(--fg-muted);
-  background: transparent;
+  color: var(--fg);
+  background: var(--bg-input);
   border: none;
   border-right: 1px solid var(--border);
   cursor: pointer;
   white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .wr-seg:last-child {
   border-right: none;
 }
 .wr-seg:hover:not(:disabled):not(.is-active) {
-  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 6%, var(--bg-input));
 }
 .wr-seg.is-active {
-  color: var(--accent-fg);
-  background: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
 }
 .wr-seg:disabled {
   opacity: 0.45;
@@ -458,12 +470,13 @@
   padding: 0 var(--sp-2);
   font: inherit;
   font-size: var(--fs-ctl);
-  color: var(--fg-muted);
-  background: transparent;
+  color: var(--fg);
+  background: var(--bg-input);
   border: none;
   border-right: 1px solid var(--border);
   cursor: pointer;
   white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .wr-modeseg:last-child {
   border-right: none;
@@ -472,12 +485,12 @@
   flex: 0 0 auto;
 }
 .wr-modeseg:hover:not(:disabled):not(.is-active) {
-  color: var(--fg);
-  background: var(--bg-hover, rgba(127, 127, 127, 0.08));
+  background: color-mix(in srgb, var(--fg) 6%, var(--bg-input));
 }
 .wr-modeseg.is-active {
-  color: var(--accent-fg);
-  background: var(--accent);
+  color: var(--fg);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
 }
 .wr-modeseg:disabled {
   opacity: 0.45;
@@ -537,9 +550,9 @@
   transform: translateY(1px);
 }
 .wr-tgl.is-active {
-  color: var(--accent-fg);
-  background: var(--accent);
-  border-color: var(--accent);
+  color: var(--fg);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
 }
 .wr-tgl-b {
   font-weight: 800;

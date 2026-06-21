@@ -1,0 +1,129 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   ui-kit.css — shared, low-specificity helper classes for the UI/UX upgrade.
+
+   This is the canonical kit the per-area workstreams (Controller, CAM tabs,
+   point tabs, modals, …) converge their bespoke classes ONTO. Everything here
+   is token-driven (theme.css) so it recolors with the theme and re-tunes from
+   one place. Keep specificity low (single class) so panel CSS can still tweak.
+
+   Canonical recipes pinned by plan §2.8:
+   - .ui-sec-head  — the one section-header treatment
+   - .ui-card      — the one card surface
+   - .ui-caret     — the one disclosure caret (rotates open/closed)
+   Plus the async-state chrome (.cam-busy / .cam-error) backing <CamBusy> /
+   <CamError> in src/components/cam/CamUI.tsx (cam.css is owned elsewhere, so
+   their styling lives here next to the rest of the kit).
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── Section header (§2.8) ───────────────────────────────────────────────────
+   Uppercase micro-label that titles a card/section. NO bottom border (the card
+   already carries the edge — a border would double up). Optional leading glyph
+   is muted and 14px, NEVER accent. Raised contrast vs plain --fg-muted so it
+   doesn't recede. */
+.ui-sec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+}
+/* Optional leading glyph: muted, fixed 14px, never accent (overrides any
+   accent-colored icon a panel might place inside). */
+.ui-sec-head > svg,
+.ui-sec-head .ui-sec-head-ico {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
+}
+
+/* ── Card (§2.8) ─────────────────────────────────────────────────────────────
+   The one card surface: canonical fill, 1px border edge, --radius corner, and
+   NO drop shadow on resting cards (elevation comes from the border + bg step).
+   Uses the existing card padding tokens. */
+.ui-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--pad-card-y) var(--pad-card-x);
+}
+
+/* ── Disclosure caret (§2.7/§6) ──────────────────────────────────────────────
+   A single caret glyph for every "expand/collapse" affordance — rotates from
+   collapsed (►, pointing right) to open (▼) when its [data-open] / [open] /
+   .ui-caret--open state is set. Transition rides the shared motion tokens and
+   is neutralized by the prefers-reduced-motion: reduce block in globals.css. */
+.ui-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  transition: transform var(--dur-fast) var(--ease);
+  transform: rotate(0deg);
+}
+.ui-caret--open,
+[data-open='true'] > .ui-caret,
+[open] > summary .ui-caret {
+  transform: rotate(90deg);
+}
+
+/* ── Busy / loading chrome (§2.8 — backs <CamBusy>) ──────────────────────────
+   A compact in-flight state: a small accent spinner + a one-line label. The
+   container carries aria-busy="true" (set by the component). Mirrors the
+   .cam-empty rhythm so static-empty and busy states feel like the same kit. */
+.cam-busy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-3);
+  color: var(--fg-muted);
+}
+.cam-busy-spinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--accent);
+  animation: cam-busy-spin 0.8s linear infinite;
+}
+.cam-busy-label {
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+}
+@keyframes cam-busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Honor reduced motion: slow the spin to a near-static crawl rather than a
+   distracting whirl (matches the .km-panel-spinner treatment in globals.css). */
+@media (prefers-reduced-motion: reduce) {
+  .cam-busy-spinner {
+    animation-duration: 1.8s;
+  }
+}
+
+/* ── Error chrome (§2.8 — backs <CamError>) ──────────────────────────────────
+   A <CamEmpty> variant: a danger-tinted glyph, a message, and a retry CTA.
+   Reuses the .cam-empty layout primitives; only the glyph chip recolors to
+   danger so a failed state reads unmistakably as an error, not "nothing here". */
+.cam-error {
+  /* layout shared with .cam-empty (column, centered, gap) */
+}
+.cam-error .cam-empty-ico {
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-elev));
+  color: var(--danger);
+}
+.cam-error-retry {
+  margin-top: var(--sp-1);
+}

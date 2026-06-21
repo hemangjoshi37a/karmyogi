@@ -26,7 +26,7 @@ export function ProgramProgressBar({ progress, color }: Props) {
           aria-valuenow={done}
         />
       </div>
-      <span className="pp-progress-label">
+      <span className="pp-progress-label" aria-live="polite">
         {t('prog.progressLabel', '{done} / {total} ({percent}%)', {
           done,
           total,

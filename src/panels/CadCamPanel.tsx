@@ -2,6 +2,37 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } 
 import { importDxfString } from '../core/dxf'
 import { Drawing } from '../core/entity'
 import { engrave, profileContours, pocket, ProfileSide, type CamParams } from '../core/cam'
+import {
+  composeFeatureToolpaths,
+  composeMultiFileToolpaths,
+  deriveFeatures,
+  featureKey,
+  parseFeatureKey,
+  parseSurfaceKey,
+  surfaceKey,
+  loopLabel,
+  opFromPreset,
+  orderOpsSafe,
+  BUILTIN_PRESETS,
+  type DrawingFeature,
+  type FeatureOp,
+  type FeatureOpMap,
+  type FileGeometry,
+  type OrderableOp,
+} from '../core/featureCam'
+import {
+  CARVE_PRESETS_KEY,
+  type CarvePreset,
+  CARVE_PRESETS_3D_KEY,
+  type Carve3DPreset,
+} from '../store/carvePresets'
+import { type FeaturePreset } from '../core/featureCam'
+import { usePresets, type PresetSlot } from '../components/presets/usePresets'
+import { PresetRail } from '../components/presets/PresetRail'
+import { PresetSaveBar } from '../components/presets/PresetSaveBar'
+import { FeatureViewer } from '../components/cam/FeatureViewer'
+import { SurfaceViewer } from '../components/cam/SurfaceViewer'
+import { segmentSurfaces, regionOutlineXY, type SurfaceRegion } from '../core/meshSegment'
 import { vCarveContours, type VCarveParams } from '../core/vcarve'
 import { orderLoopsInsideOut } from '../core/geometry'
 import { defaultTool, type Tool, Toolpath } from '../core/toolpath'
@@ -14,6 +45,7 @@ import {
   parseEpsPaths,
   defaultCarve3DParams,
   autoCarveParams,
+  placeToolpath,
   type Carve3DParams,
   type ToolType,
   type CarveJobSpec,
@@ -22,6 +54,14 @@ import {
   type CarveWorkerOutbound,
 } from '../core/carve3d'
 import { defaultCutoutParams, type CutoutParams } from '../core/cutout'
+import {
+  buildCarveSessionZip,
+  parseCarveSessionZip,
+  meshToBinaryStl,
+  CarveSessionError,
+  CARVE_SESSION_EXT,
+  type CarveSessionSource,
+} from '../core/carveSession'
 import {
   buildTwoSidedProgram,
   defaultTwoSidedParams,
@@ -32,6 +72,7 @@ import {
   type FlipCorner,
 } from '../core/twoSided'
 import { useProgram, usePersistentState } from '../store'
+import { useHover } from '../store/hover'
 import { usePlayback } from '../store/playback'
 import { grbl } from '../serial/controller'
 import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
@@ -40,7 +81,6 @@ import {
   useCarveJobs,
   type CarveJob,
   type ApplyAllKey,
-  type JobDefaults,
   type GlobalCarveSettings,
 } from '../store/carveJobs'
 import { useBed } from '../store/bed'
@@ -86,11 +126,14 @@ import {
   Triangle,
   Spline,
   Eraser,
+  Pencil,
+  Plus,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  Wand2,
 } from 'lucide-react'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
-import { PresetRail } from '../components/presets/PresetRail'
-import { PresetSaveBar } from '../components/presets/PresetSaveBar'
-import { usePresets } from '../components/presets/usePresets'
 import { CamEmpty } from '../components/cam/CamUI'
 import { useT } from '../i18n'
 import '../styles/cadcam.css'
@@ -102,29 +145,32 @@ type Mode = 'none' | '3d' | '2d' | 'step' | 'cdr'
 
 type Op = 'Engrave' | 'Profile' | 'Pocket' | 'VCarve'
 
-// ============================================================================
-// Color-coded SETTING PRESETS for the carving tab
-// ----------------------------------------------------------------------------
-// The floating rail on the left edge loads a slot's settings; the footer
-// save-bar writes the CURRENT settings into the slot whose colour is selected.
-// The generic slot machinery (10 colour slots, persistence, capture/apply
-// wiring) lives in components/presets/usePresets; here we only define the
-// carving snapshot shape and the capture/apply callbacks. A preset is a full
-// snapshot of the tunable carving parameters (NOT the loaded geometry/jobs): 2D
-// op + vector params + cutout, the chosen bit, the material, and the 3D carve
-// global + job defaults.
-// ============================================================================
-interface CarvePreset {
-  op: Op
-  side: ProfileSide
-  p2d: Params2D
-  vcarve?: VCarveUiParams
-  cutout: CutoutParams
-  bitId: string
-  bitLength: number
-  materialId: string
-  carveGlobal: GlobalCarveSettings
-  carveDefaults: JobDefaults
+/**
+ * One uploaded 2D vector file (U8). Holds its own parsed geometry: a DXF parses
+ * to a {@link Drawing} (flattened lazily); EPS/AI parse to ready polylines. The
+ * stable `id` keys this file's loops in the shared FeatureOpMap.
+ */
+interface LoadedFile {
+  id: string
+  name: string
+  kind: 'dxf' | 'eps'
+  drawing: Drawing | null
+  polylines: Polyline[] | null
+  /** Per-file import warnings, surfaced under the model card. */
+  warnings: string[]
+  /**
+   * The ORIGINAL imported file text (DXF / EPS / AI is text-based). Retained so a
+   * carving SESSION export can re-pack the raw source bytes and an upload can
+   * re-import the exact same drawing. Undefined for clones whose source isn't
+   * tracked (the clone still shares the parsed geometry).
+   */
+  sourceText?: string
+}
+
+let loadedFileCounter = 0
+function newFileId(): string {
+  loadedFileCounter += 1
+  return `f${Date.now().toString(36)}-${loadedFileCounter}`
 }
 
 /** Per-axis colours mirror the Visualizer's axis gizmo (X red, Y green, Z blue). */
@@ -540,6 +586,74 @@ function meshCenter(mesh: StlMesh): { x: number; y: number } {
   }
 }
 
+/** Human-readable file size, e.g. 4823000 → "4.6 MB". */
+function humanSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
+  const mb = kb / 1024
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
+}
+
+/**
+ * Split the worker's SINGLE combined 3D-carve program back into one safe,
+ * standalone program PER JOB (U-PER-FILE). `buildCarveProgram` (core/carve3d)
+ * delimits each job's cutting body with a `(<job name>)` comment line; we walk
+ * those markers, group each job's body, and re-wrap it in its own safe header
+ * (G21/G90/G94/G17 + safe-Z + M3) and footer (safe-Z + M5 + M30) so every
+ * returned section is an independently-streamable safe program. Matching is by
+ * the known active job names (order-preserving). Returns [] when no markers are
+ * found (the caller then falls back to a single combined section).
+ */
+function splitCarveProgramByJob(
+  combined: string,
+  jobNames: string[],
+  safeZ: number,
+  spindleRPM: number,
+): Array<{ name: string; gcode: string }> {
+  const lines = combined.split(/\r?\n/)
+  const markerSet = new Set(jobNames.map((n) => `(${n})`))
+  const out: Array<{ name: string; body: string[] }> = []
+  let cur: { name: string; body: string[] } | null = null
+  for (const raw of lines) {
+    const s = raw.trim()
+    if (markerSet.has(s)) {
+      // Start of a new job's body — the marker is `(<name>)`.
+      cur = { name: s.slice(1, -1), body: [] }
+      out.push(cur)
+      continue
+    }
+    if (!cur) continue // still in the shared header (before the first marker)
+    // Stop collecting at the shared footer (the last safe-Z / M5 / M30).
+    if (/^M5\b/.test(s) || /^M30\b/.test(s)) continue
+    if (s === '') continue
+    cur.body.push(raw)
+  }
+  if (out.length === 0) return []
+  const safe = safeZ.toFixed(3)
+  return out
+    .filter((j) => j.body.length > 0)
+    .map((j) => ({
+      name: j.name,
+      gcode:
+        [
+          `(${j.name} — 3D Carving)`,
+          '(Generated by karmyogi 3D Carving)',
+          'G21',
+          'G90',
+          'G94',
+          'G17',
+          `G0 Z${safe}`,
+          `M3 S${spindleRPM.toFixed(3)}`,
+          ...j.body,
+          `G0 Z${safe}`,
+          'M5',
+          'M30',
+        ].join('\n') + '\n',
+    }))
+}
+
 /**
  * Build the Carve3DParams for one job from its own settings + the GLOBAL tool.
  * Cut/free speeds are stored mm/s in the job and converted to mm/min here.
@@ -592,7 +706,12 @@ function jobCarveParams(
 export function CadCamPanel() {
   const t = useT()
   const setProgram = useProgram((s) => s.setProgram)
+  // Cross-panel hover link: hovering an op row shimmers its toolpath in the 3D
+  // viewer and highlights the matching Program-tab row (and vice-versa).
+  const hoveredOpId = useHover((s) => s.hoveredOpId)
+  const setHoveredOp = useHover((s) => s.setHoveredOp)
   const setGenerating = useProgram((s) => s.setGenerating)
+  const setGeneratingStatus = useProgram((s) => s.setGeneratingStatus)
   const bed = useBed()
 
   // ---- multi-job carving store -------------------------------------------
@@ -613,7 +732,6 @@ export function CadCamPanel() {
   const setDefaults = useCarveJobs((s) => s.setDefaults)
   const renest = useCarveJobs((s) => s.renest)
   const clearJobs = useCarveJobs((s) => s.clear)
-  const carveDefaults = useCarveJobs((s) => s.defaults)
 
   const selectedJob = useMemo(
     () => jobs.find((j) => j.id === selectedId) ?? null,
@@ -640,16 +758,64 @@ export function CadCamPanel() {
   const [dragOver, setDragOver] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  // Live import status shown IN the panel (name + size + stage + 0..1 fraction).
+  // `frac` is null for the indeterminate parsing stage. Cleared when the model
+  // is loaded (or on error). Distinct from `importing` (the STEP spinner flag).
+  const [importStatus, setImportStatus] = useState<{
+    label: string
+    stage: string
+    frac: number | null
+  } | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [nestWarn, setNestWarn] = useState<string[]>([])
 
-  // 2D state (DXF / EPS / AI)
-  const [drawing, setDrawing] = useState<Drawing | null>(null)
-  const [epsPolys, setEpsPolys] = useState<Polyline[] | null>(null)
+  // 2D state (DXF / EPS / AI) — MULTI-FILE (U8). Each uploaded vector file is a
+  // LoadedFile holding its own parsed geometry; placement (offset/scale, in p2d)
+  // is applied uniformly to all files. Loops are keyed by fileId+loopIndex so two
+  // files' loops never collide.
+  const [files, setFiles] = useState<LoadedFile[]>([])
   const [op, setOp] = useState<Op>('Profile')
   const [side, setSide] = useState<ProfileSide>(ProfileSide.Outside)
   const [p2d, setP2d] = usePersistentState<Params2D>('karmyogi.carve.2d', DEFAULT_2D)
+  // ── PER-FEATURE toolpaths ────────────────────────────────────────────────
+  // Map of feature key (`${fileId}#${loopIndex}`) → ordered list of operations
+  // stacked on that loop. Empty map → the legacy whole-file flow (the single
+  // Operation chosen below applies to everything, across every file). The mini
+  // feature viewer below each file writes this map. NOT persisted: keyed by
+  // file id + polyline index, which only makes sense against loaded geometry.
+  const [featureOpMap, setFeatureOpMap] = useState<FeatureOpMap>({})
+  // The currently SELECTED loop, as a composite `${fileId}#${loopIndex}` key.
+  const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
+  // Which model cards are EXPANDED (their preview + loop table visible). U5: the
+  // card TITLE is the disclosure (caret). Keyed by file id.
+  const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({})
+  // The ADDED-SEQUENCE order of the per-loop operations: a flat list of op ids in
+  // the order the user added them (across ALL loops/files). The operations list
+  // (U4) renders in THIS order; the featureOpMap keeps the per-loop grouping the
+  // composer needs. Both are kept in lock-step by the add/remove/reorder helpers.
+  const [featureOpOrder, setFeatureOpOrder] = useState<string[]>([])
+  // The per-loop preset SELECTION for the loop→preset→+ table (R3): composite
+  // loop key → chosen preset id (defaults to the first preset for unset rows).
+  const [loopPresetSel, setLoopPresetSel] = useState<Record<string, string>>({})
+  // Per-SURFACE preset dropdown selection (3D), keyed by surface key.
+  const [surfacePresetSel, setSurfacePresetSel] = useState<Record<string, string>>({})
+
+  // ---- carve PRESETS — full param SNAPSHOTS (shared rail + save-bar) -------
+  // A CARVE PRESET captures the WHOLE bottom-section cutting setup (op + side,
+  // bit & material, tool & cut, Z mode, advanced, V-carve). Selecting a slot
+  // LOADS it into the bottom sections (applyPreset); editing those sections edits
+  // the active preset; Save persists it. Wired exactly like Soldering / Writing
+  // via the shared `usePresets<CarvePreset>` hook + `<PresetRail>`/`<PresetSaveBar>`.
+  // The 7 defaults are seeded into the slot list on first use (see carvePresets.ts).
+  // (capturePreset / applyPreset are defined AFTER the bottom-param state below.)
+
+  // ---- two-section split (top = files/loops, bottom = ops/params) (R6) ----
+  // Persisted split position as a TOP-section height percentage (10–80%).
+  // Top section now holds the model cards + the operations list, so give it a
+  // bit under half by default. Key bumped to .v2 so a stale tiny value from the
+  // previous layout can't collapse the top section to a sliver.
+  const [splitPct, setSplitPct] = usePersistentState<number>('karmyogi.carve.split.v2', 44)
   // V-carve knobs (V-bit angle/tip + max depth + optional flat-bit cleanup),
   // persisted so the operator's V-carve setup survives reloads.
   const [vcarveRaw, setVcarve] = usePersistentState<VCarveUiParams>(
@@ -695,6 +861,201 @@ export function CadCamPanel() {
   // choice. It doesn't change the toolpath, but it's the safe limit on how deep
   // the bit can reach, so we surface it and use it as a sanity hint for depth.
   const [bitLength, setBitLength] = usePersistentState<number>('karmyogi.carve.bitLen', 16)
+
+  // ---- carve presets: snapshot ⇄ restore the bottom-section params ---------
+  // Snapshot EVERY bottom-section cutting param (NOT the per-file placement) into
+  // a serializable CarvePreset — the same pattern Soldering/Writing use.
+  const capturePreset = (): CarvePreset => ({
+    op,
+    side,
+    bitId,
+    bitLength,
+    materialId: stock.materialId,
+    diameter: p2d.diameter,
+    cutDepth: p2d.cutDepth,
+    stepdown: p2d.stepdown,
+    stepover: p2d.stepover,
+    surfaceZ: p2d.surfaceZ,
+    safeZ: p2d.safeZ,
+    zMode: p2d.zMode,
+    spindleRPM: p2d.spindleRPM,
+    penUpZ: p2d.penUpZ,
+    penDownZ: p2d.penDownZ,
+    feedXY: p2d.feedXY,
+    feedZ: p2d.feedZ,
+    decimals: p2d.decimals,
+    lineNumbers: p2d.lineNumbers,
+    vcarve: { ...vcarve },
+  })
+  // Restore a captured preset into the live bottom-section state. Bit / material
+  // are restored only when they still resolve to a real library entry (a stale id
+  // is ignored, keeping the current choice). Placement (offset/scale) is left
+  // untouched — it's per-file, not part of a preset.
+  const applyPreset = (p: CarvePreset) => {
+    // The bottom-section op selector only offers the whole-file ops; the per-loop
+    // 'Cutout' kind has no whole-file equivalent, so it maps to Profile here (its
+    // real Cutout intent lives on the placed loop op, snapshotted at add time).
+    setOp(p.op === 'VCarve' ? 'VCarve' : p.op === 'Cutout' ? 'Profile' : p.op)
+    setSide(p.side)
+    if (getBit(p.bitId)) setBitId(p.bitId)
+    setBitLength(p.bitLength >= 1 ? p.bitLength : 1)
+    if (getMaterial(p.materialId)) stock.setMaterial(p.materialId)
+    setP2d((prev) => ({
+      ...prev,
+      diameter: p.diameter,
+      cutDepth: p.cutDepth,
+      stepdown: p.stepdown,
+      stepover: p.stepover,
+      surfaceZ: p.surfaceZ,
+      safeZ: p.safeZ,
+      zMode: p.zMode,
+      spindleRPM: p.spindleRPM,
+      penUpZ: p.penUpZ,
+      penDownZ: p.penDownZ,
+      feedXY: p.feedXY,
+      feedZ: p.feedZ,
+      decimals: p.decimals,
+      lineNumbers: p.lineNumbers,
+    }))
+    setVcarve(() => ({ ...p.vcarve }))
+  }
+  const presets = usePresets<CarvePreset>({
+    storageKey: CARVE_PRESETS_KEY,
+    capture: capturePreset,
+    onApply: applyPreset,
+  })
+
+  // ---- 3D carve presets — full snapshot of the 3D relief-carving params ----
+  // Captured from the carve-jobs GLOBAL (tool/RPM/plunge) + the selected job (or
+  // the new-job defaults when no job is selected) for the per-job cut params.
+  // Applying writes GLOBAL + the new-job defaults + every existing job, so the
+  // combined carve regenerates with the preset — i.e. the 3D set is WIRED into
+  // generation (not just UI-stored).
+  const capture3DPreset = (): Carve3DPreset => {
+    const j = selectedJob
+    return {
+      toolDiameter: carveGlobal.toolDiameter,
+      toolType: carveGlobal.toolType,
+      spindleRPM: carveGlobal.spindleRPM,
+      stepover: j ? j.stepover : carveGlobal.toolDiameter * 0.16,
+      roughStepover: Math.max(j ? j.stepover : 0.5, carveGlobal.toolDiameter * 0.45),
+      stepdown: j ? j.speeds.cutDepthMm : 1.0,
+      maxDepth: j ? j.maxDepth : 10,
+      cutSpeedMmS: j ? j.speeds.cutSpeedMmS : 10,
+      freeSpeedMmS: j ? j.speeds.freeSpeedMmS : 20,
+      feedZ: carveGlobal.feedZ,
+      doRoughing: j ? j.roughing : true,
+      doFinishing: j ? j.finishing : true,
+      finishDir: j ? j.finishDir : 'x',
+      finishPattern: 'serpentine',
+      cutout: cutout.enabled,
+    }
+  }
+  /** Pick the bit whose type matches + diameter is nearest to the preset's tool. */
+  const applyToolFromPreset = (diameter: number, type: ToolType) => {
+    // Map the carver's flat/ball onto a library bit type, then nearest size.
+    const libType: BitType = type === 'ball' ? 'ball' : 'flat'
+    const candidates = bitsOfType(libType)
+    if (candidates.length) {
+      let best = candidates[0]
+      for (const b of candidates)
+        if (Math.abs(b.diameter - diameter) < Math.abs(best.diameter - diameter)) best = b
+      setBitId(best.id)
+    } else {
+      // No matching library bit — still drive the carver tool directly.
+      setGlobal({ toolDiameter: diameter, toolType: type })
+    }
+  }
+  const apply3DPreset = (p: Carve3DPreset) => {
+    applyToolFromPreset(p.toolDiameter, p.toolType)
+    setGlobal({ spindleRPM: p.spindleRPM, feedZ: p.feedZ })
+    // Flip the part-separation cutout pass on when the preset enables it (the
+    // "Cutout" preset) so generate3D emits the part-free cut with tabs. Other
+    // presets leave whatever the user has configured.
+    if (p.cutout && !cutout.enabled) setCutout((c) => ({ ...defaultCutoutParams(c), enabled: true }))
+    const speeds = { cutSpeedMmS: p.cutSpeedMmS, freeSpeedMmS: p.freeSpeedMmS, cutDepthMm: p.stepdown }
+    // New jobs inherit these; existing jobs are updated in place below.
+    setDefaults({
+      speeds,
+      roughing: p.doRoughing,
+      finishing: p.doFinishing,
+      finishDir: p.finishDir,
+      maxDepth: p.maxDepth,
+      stepover: p.stepover,
+    })
+    for (const j of jobs) {
+      updateJob(j.id, {
+        roughing: p.doRoughing,
+        finishing: p.doFinishing,
+        finishDir: p.finishDir,
+        maxDepth: p.maxDepth,
+        stepover: p.stepover,
+      })
+      setJobSpeeds(j.id, speeds)
+    }
+  }
+  const presets3d = usePresets<Carve3DPreset>({
+    storageKey: CARVE_PRESETS_3D_KEY,
+    capture: capture3DPreset,
+    onApply: apply3DPreset,
+  })
+
+  // 2D / 3D preset SET switch. Which preset set the rail + save-bar drive. It
+  // DEFAULTS to match the loaded mode (3D when a mesh job is loaded, else 2D) but
+  // the user can flip it independently of the file family.
+  const [presetMode, setPresetMode] = useState<'2d' | '3d'>(mode === '3d' ? '3d' : '2d')
+  // Track the LAST file-driven mode so loading a new file family snaps the
+  // switch to it (a flip the user made stays until the next load).
+  const lastFileModeRef = useRef<Mode>(mode)
+  useEffect(() => {
+    if (mode === lastFileModeRef.current) return
+    lastFileModeRef.current = mode
+    if (mode === '3d') setPresetMode('3d')
+    else if (mode === '2d') setPresetMode('2d')
+    // 'none' / 'cdr' / 'step' leave the user's current choice alone.
+  }, [mode])
+  // The active preset set the rail + save-bar bind to (2D feature presets vs 3D).
+  // The shared PresetRail / PresetSaveBar only read each slot's colour/name/fill
+  // and call back by INDEX — they don't touch the preset payload shape — so the
+  // two differently-typed sets project onto one index-driven view for the UI.
+  const activePresets: {
+    slots: PresetSlot<unknown>[]
+    selected: number
+    load: (i: number) => void
+    save: (i: number) => void
+    clear: (i: number) => void
+    rename: (i: number, name: string) => void
+    select: (i: number) => void
+  } = presetMode === '3d' ? presets3d : presets
+
+  // The loop→preset table + FeatureViewer pick from the FILLED preset slots. Map
+  // each into the light per-loop op intent (a {@link FeaturePreset}): the slot's
+  // colour + name become the op's identity, the preset's op/side/cut overrides
+  // become the op's intent. V-carve has no per-loop equivalent → Engrave intent.
+  const presetPalette = useMemo<FeaturePreset[]>(
+    () =>
+      presets.slots
+        .map((s, i) =>
+          s.preset
+            ? ({
+                id: `carve-${i}`,
+                name: s.name || t('presets.slotN', 'Preset {n}', { n: i + 1 }),
+                color: s.color,
+                op: s.preset.op === 'VCarve' ? 'Engrave' : s.preset.op,
+                side:
+                  s.preset.op === 'Profile' || s.preset.op === 'Cutout'
+                    ? s.preset.side
+                    : undefined,
+                cutDepth: s.preset.cutDepth,
+                stepdown: s.preset.stepdown,
+                stepover: s.preset.stepover,
+                diameter: s.preset.diameter,
+              } as FeaturePreset)
+            : null,
+        )
+        .filter((p): p is FeaturePreset => p !== null),
+    [presets.slots, t],
+  )
 
   // ---- mount reconcile: keep the restored `mode` consistent with live data ---
   // On a tab-switch remount the persisted `mode` is restored, but the heavy 2D
@@ -819,62 +1180,6 @@ export function CadCamPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bit.id, material.id])
 
-  // ---- preset capture / apply ---------------------------------------------
-  /** Snapshot every tunable carving setting (NOT the loaded geometry/jobs). */
-  const captureSettings = (): CarvePreset => ({
-    op,
-    side,
-    p2d: { ...p2d },
-    vcarve: { ...vcarve },
-    cutout: { ...cutoutRaw },
-    bitId,
-    bitLength,
-    materialId: stock.materialId,
-    carveGlobal: { ...carveGlobal },
-    carveDefaults: { ...carveDefaults, speeds: { ...carveDefaults.speeds } },
-  })
-
-  /** Restore a captured preset into all the live settings. */
-  const applyPreset = (p: CarvePreset) => {
-    // If the bit or material actually changes, the auto-derive effect (above)
-    // will fire — disarm it ONCE (same guard it uses on remount) so it doesn't
-    // re-derive speeds/feeds from {bit,material} and stomp the preset's tuned
-    // numbers. When bit+material are unchanged the effect won't fire, so we
-    // leave the guard alone (avoids skipping a later genuine re-derive).
-    if (p.bitId !== bitId || p.materialId !== stock.materialId) {
-      autoComputeMounted.current = false
-    }
-    setOp(p.op)
-    setSide(p.side)
-    setP2d(p.p2d)
-    if (p.vcarve) setVcarve(p.vcarve)
-    setCutout(p.cutout)
-    setBitId(p.bitId)
-    setBitLength(p.bitLength)
-    stock.setMaterial(p.materialId)
-    setGlobal(p.carveGlobal)
-    setDefaults(p.carveDefaults)
-    // Reflect the preset on the currently-selected 3D job so the visible
-    // speed/depth/strategy fields (bound to that job) update too.
-    if (selectedJob) {
-      setJobSpeeds(selectedJob.id, p.carveDefaults.speeds)
-      updateJob(selectedJob.id, {
-        stepover: p.carveDefaults.stepover,
-        maxDepth: p.carveDefaults.maxDepth,
-        roughing: p.carveDefaults.roughing,
-        finishing: p.carveDefaults.finishing,
-        finishDir: p.carveDefaults.finishDir,
-      })
-    }
-  }
-
-  // Named, colour-coded slots (persisted) wired to the carving capture/apply.
-  const presets = usePresets<CarvePreset>({
-    storageKey: 'karmyogi.carve.presets',
-    capture: captureSettings,
-    onApply: applyPreset,
-  })
-
   // ---- file import --------------------------------------------------------
   /**
    * Import ONE file. `renestAfter` lets a multi-file drop add every model first
@@ -918,25 +1223,80 @@ export function CadCamPanel() {
     // assist (no-op when unconfigured / signed out; never blocks the import).
     void uploadUserFile(file, 'carve-import')
     const kind = classify(file.name)
+
+    // Unsupported file type picked (e.g. via "All files" in the picker, or a
+    // stray drag-drop). Tell the user plainly which types work instead of
+    // falling through to a confusing "couldn't parse" error.
+    if (kind === 'none') {
+      setImportStatus(null)
+      setImportError(
+        t(
+          'cc.errUnsupported',
+          '“{name}” isn’t a supported model file. Use a 2D vector (DXF, EPS/AI) or a 3D model (STL, OBJ, STEP).',
+          { name: file.name },
+        ),
+      )
+      return
+    }
     setFileName(file.name)
 
     if (kind === 'cdr') {
       setMode('cdr')
-      setDrawing(null)
-      setEpsPolys(null)
+      setFiles([])
       return
     }
 
     if (kind === '3d') {
       setMode('3d')
-      setDrawing(null)
-      setEpsPolys(null)
+      setFiles([])
+      // Immediate feedback the moment the file is picked: name + human size, so
+      // even a slow read/parse never looks frozen. Mirror it to the Program tab.
+      const sizeLabel = humanSize(file.size)
+      const baseLabel = sizeLabel ? `${file.name} · ${sizeLabel}` : file.name
+      setImportStatus({
+        label: baseLabel,
+        stage: t('cc.stageReading', 'Reading model…'),
+        frac: 0,
+      })
+      setGeneratingStatus(
+        t('cc.statusLoading', 'Loading {name}', { name: baseLabel }),
+        0,
+      )
       // STEP/STP need the heavy async WASM (OpenCascade) parse — show a spinner.
       const heavy = isHeavyMeshFile(file.name)
       if (heavy) setImporting(true)
       try {
-        const mesh = await importMesh(file)
+        const mesh = await importMesh(file, (stage, fraction, loaded, total) => {
+          if (stage === 'reading') {
+            const pct = Math.round((fraction ?? 0) * 100)
+            // Real byte readout ("2.1 / 4.6 MB") so the user sees how much of the
+            // file has loaded and how much remains, not just a percent.
+            const bytes =
+              loaded != null && total != null ? `${humanSize(loaded)} / ${humanSize(total)}` : sizeLabel
+            setImportStatus({
+              label: baseLabel,
+              stage: t('cc.stageReadingBytes', 'Reading {bytes} · {pct}%', { bytes, pct }),
+              frac: fraction ?? 0,
+            })
+            setGeneratingStatus(
+              t('cc.statusReadingBytes', 'Reading {name} · {bytes} ({pct}%)', {
+                name: file.name,
+                bytes,
+                pct,
+              }),
+              fraction ?? 0,
+            )
+          } else {
+            setImportStatus({
+              label: baseLabel,
+              stage: t('cc.stageParsing', 'Parsing model…'),
+              frac: null,
+            })
+            setGeneratingStatus(t('cc.statusParsing', 'Parsing model…'), null)
+          }
+        })
         if (mesh.triangleCount === 0) {
+          setImportStatus(null)
           setImportError(t('cc.errNoTriangles', 'Model parsed but contained no triangles.'))
           return
         }
@@ -950,6 +1310,7 @@ export function CadCamPanel() {
           setNestWarn(res.warnings)
         }
       } catch (err) {
+        setImportStatus(null)
         setImportError(
           t('cc.errMesh', 'Failed to import model: {msg}', {
             msg: err instanceof Error ? err.message : String(err),
@@ -957,38 +1318,46 @@ export function CadCamPanel() {
         )
       } finally {
         if (heavy) setImporting(false)
+        // Do NOT clear the status here: on success the carve worker (generate3D)
+        // takes over and the carve-progress effect KEEPS this same bar visible
+        // (file name + size + "Generating toolpath… NN%") through the whole carve,
+        // clearing it only when the carve finishes — so the file label never
+        // vanishes mid-load. The error/no-triangle paths clear it explicitly.
       }
       return
     }
 
-    // 2D family — DXF or EPS/AI.
+    // 2D family — DXF or EPS/AI. Each file is ADDED to the multi-file list (U8).
     setMode('2d')
     setGcode('')
     setLineCount(0)
     const text = await file.text()
+    const id = newFileId()
 
     if (kind === 'dxf') {
-      setEpsPolys(null)
       const res = importDxfString(text)
-      setWarnings(res.warnings ?? [])
       if (!res.ok) {
-        setDrawing(null)
         setImportError(res.error ?? t('cc.errDxf', 'Failed to parse DXF'))
         return
       }
-      setDrawing(res.drawing)
+      setFiles((fs) => [
+        ...fs,
+        { id, name: file.name, kind: 'dxf', drawing: res.drawing, polylines: null, warnings: res.warnings ?? [], sourceText: text },
+      ])
+      setExpandedFiles((m) => ({ ...m, [id]: true }))
       return
     }
 
-    setDrawing(null)
     const res = parseEpsPaths(text)
-    setWarnings(res.warnings ?? [])
     if (!res.ok) {
-      setEpsPolys(null)
       setImportError(res.error ?? t('cc.errEps', 'Couldn’t parse this EPS/AI — export as DXF.'))
       return
     }
-    setEpsPolys(res.polylines)
+    setFiles((fs) => [
+      ...fs,
+      { id, name: file.name, kind: 'eps', drawing: null, polylines: res.polylines, warnings: res.warnings ?? [], sourceText: text },
+    ])
+    setExpandedFiles((m) => ({ ...m, [id]: true }))
   }
 
   /**
@@ -1036,57 +1405,394 @@ export function CadCamPanel() {
     if (e.currentTarget === e.target) setDragOver(false)
   }
 
-  // ---- 2D: flatten + closed-loop bookkeeping ------------------------------
-  // Raw (as-imported) flattened geometry. The placed `polylines` below applies
-  // the user's offset + uniform scale on top of this.
-  const rawPolylines = useMemo<Polyline[]>(() => {
+  // ---- 2D: multi-file flatten + closed-loop bookkeeping (U8) --------------
+  // Per-file RAW (as-imported) flattened geometry, in the file list's order.
+  const rawByFile = useMemo<{ id: string; name: string; raw: Polyline[] }[]>(() => {
     if (mode !== '2d') return []
-    if (drawing) return drawing.flatten()
-    if (epsPolys) return epsPolys
-    return []
-  }, [mode, drawing, epsPolys])
-  // Center each newly-imported 2D drawing on the bed. Keyed on the drawing / eps
-  // IDENTITY so it fires once per NEW import (any load path) — re-importing or
-  // switching files re-centers, while manual Offset X/Y edits afterward stick
-  // (those don't change the drawing identity). Solved from the drawing's bbox so
-  // it lands on the bed centre instead of wherever the file's own coordinates sit.
+    return files.map((f) => ({
+      id: f.id,
+      name: f.name,
+      raw: f.drawing ? f.drawing.flatten() : f.polylines ?? [],
+    }))
+  }, [mode, files])
+  // Combined raw polylines across all files (for bbox / stats / centering).
+  const rawPolylines = useMemo<Polyline[]>(
+    () => rawByFile.flatMap((f) => f.raw),
+    [rawByFile],
+  )
+  // Center the COMBINED 2D geometry on the bed whenever the set of files changes
+  // (a new import re-centers the whole arrangement; manual Offset X/Y afterward
+  // sticks because it doesn't change the file identity list).
+  const filesIdKey = useMemo(() => files.map((f) => f.id).join(','), [files])
   useEffect(() => {
     if (mode !== '2d') return
-    const polys = drawing ? drawing.flatten() : epsPolys
-    if (polys && polys.length) centerDrawingOnBed(polys)
+    if (rawPolylines.length) centerDrawingOnBed(rawPolylines)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawing, epsPolys])
+  }, [filesIdKey])
   // Natural (unscaled) bounds — drives the Width/Height fields + scale-about-corner.
   const naturalBounds = useMemo(() => {
     const b = new BBox()
     for (const pl of rawPolylines) for (const p of pl.points) b.expand(p)
     return b.isValid() ? b : null
   }, [rawPolylines])
-  // Placed geometry: scale about the drawing's lower-left corner, then translate
-  // by the offset. Identity placement returns the raw polylines untouched.
-  const polylines = useMemo<Polyline[]>(() => {
-    if (rawPolylines.length === 0) return []
-    // Non-uniform: independent X/Y scale about the drawing's lower-left corner.
+  // Place one file's raw polylines: scale about the COMBINED lower-left corner,
+  // then translate by the offset (so all files keep their relative arrangement).
+  const placePolys = useMemo(() => {
     const sx = p2d.scaleX > 0 ? p2d.scaleX : 1
     const sy = p2d.scaleY > 0 ? p2d.scaleY : 1
     const ox = p2d.offsetX || 0
     const oy = p2d.offsetY || 0
-    if (sx === 1 && sy === 1 && ox === 0 && oy === 0) return rawPolylines
     const minx = naturalBounds ? naturalBounds.min.x : 0
     const miny = naturalBounds ? naturalBounds.min.y : 0
-    return rawPolylines.map((pl) => {
-      const c = pl.clone()
-      for (const p of c.points) {
-        p.x = (p.x - minx) * sx + minx + ox
-        p.y = (p.y - miny) * sy + miny + oy
-      }
-      return c
-    })
-  }, [rawPolylines, naturalBounds, p2d.scaleX, p2d.scaleY, p2d.offsetX, p2d.offsetY])
+    const identity = sx === 1 && sy === 1 && ox === 0 && oy === 0
+    return (raw: Polyline[]): Polyline[] => {
+      if (identity) return raw
+      return raw.map((pl) => {
+        const c = pl.clone()
+        for (const p of c.points) {
+          p.x = (p.x - minx) * sx + minx + ox
+          p.y = (p.y - miny) * sy + miny + oy
+        }
+        return c
+      })
+    }
+  }, [naturalBounds, p2d.scaleX, p2d.scaleY, p2d.offsetX, p2d.offsetY])
+  // Per-file PLACED geometry + derived features (one feature per loop).
+  const fileGeos = useMemo<FileGeometry[]>(
+    () => rawByFile.map((f) => ({ fileId: f.id, name: f.name, polylines: placePolys(f.raw) })),
+    [rawByFile, placePolys],
+  )
+  const featuresByFile = useMemo<Record<string, DrawingFeature[]>>(() => {
+    const out: Record<string, DrawingFeature[]> = {}
+    for (const g of fileGeos) out[g.fileId] = deriveFeatures(g.polylines)
+    return out
+  }, [fileGeos])
+  // Combined placed polylines (for stats + bed-fit + V-carve whole-file ops).
+  const polylines = useMemo<Polyline[]>(
+    () => fileGeos.flatMap((g) => g.polylines),
+    [fileGeos],
+  )
   const closedCount = useMemo(
     () => polylines.filter((p) => p.closed && p.points.length >= 3).length,
     [polylines]
   )
+  // True once the user has assigned at least one per-feature op — switches the
+  // 2D generator from the whole-file path to the per-feature compositor.
+  const hasFeatureOps = useMemo(
+    () =>
+      Object.entries(featureOpMap).some(
+        ([k, ops]) => parseSurfaceKey(k) === null && ops && ops.length > 0,
+      ),
+    [featureOpMap]
+  )
+  // Drop per-feature ops / selections that point at loops no longer present
+  // (a file was removed, or its loop count shrank). Keys are `${fileId}#index`.
+  // SURFACE keys (`${jobId}#s${regionId}`) are pruned by a SEPARATE effect keyed
+  // on the 3D jobs/regions — they must survive a 2D-files change untouched.
+  useEffect(() => {
+    const valid = new Set<string>()
+    for (const g of fileGeos)
+      g.polylines.forEach((_, i) => valid.add(featureKey(g.fileId, i)))
+    setFeatureOpMap((m) => {
+      let changed = false
+      const next: FeatureOpMap = {}
+      for (const [k, ops] of Object.entries(m)) {
+        // Preserve surface keys (pruned elsewhere) and any still-valid loop keys.
+        if (parseSurfaceKey(k) !== null || valid.has(k)) next[k] = ops
+        else changed = true
+      }
+      return changed ? next : m
+    })
+    setSelectedFeature((s) => (s && (parseSurfaceKey(s) !== null || valid.has(s)) ? s : null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesIdKey])
+
+  // ---- flat operations list (U4) across ALL files+loops, in added order ---
+  // Each list entry pairs an op with the loop (file + loop index + name) it
+  // belongs to. The displayed ORDER is `featureOpOrder` (added sequence); the
+  // COMPOSE order stays containment-aware (in the composer) so cuts stay safe.
+  interface OpListEntry {
+    op: FeatureOp
+    fileId: string
+    fileName: string
+    loopIndex: number
+    closed: boolean
+  }
+  const opList = useMemo<OpListEntry[]>(() => {
+    const fileById = new Map(fileGeos.map((g) => [g.fileId, g]))
+    const byId = new Map<string, OpListEntry>()
+    for (const [key, ops] of Object.entries(featureOpMap)) {
+      // Skip 3D surface keys — they're listed in the separate Surface ops list.
+      if (parseSurfaceKey(key) !== null) continue
+      const { fileId, loopIndex } = parseFeatureKey(key)
+      const g = fileById.get(fileId)
+      const pl = g?.polylines[loopIndex]
+      const closed = !!(pl && pl.closed && pl.points.length >= 3)
+      for (const o of ops ?? [])
+        byId.set(o.id, { op: o, fileId, fileName: g?.name ?? '', loopIndex, closed })
+    }
+    const out: OpListEntry[] = []
+    for (const id of featureOpOrder) {
+      const e = byId.get(id)
+      if (e) {
+        out.push(e)
+        byId.delete(id)
+      }
+    }
+    for (const e of byId.values()) out.push(e)
+    return out
+  }, [featureOpMap, featureOpOrder, fileGeos])
+
+  // ── 3D SURFACE segmentation (auto flat/planar regions) ────────────────────
+  // For each ENABLED 3D job, segment its mesh into connected near-coplanar face
+  // regions so the user can stack a per-surface preset (mirroring 2D loop ops).
+  // Cached by job id + mesh identity so it only recomputes when the mesh changes.
+  // Segmentation is allocation-bounded (decimates a too-dense mesh) so it never
+  // hangs the UI; see core/meshSegment.ts.
+  const surfaceCacheRef = useRef<Map<string, { mesh: StlMesh; regions: SurfaceRegion[] }>>(new Map())
+  const surfaceRegionsByJob = useMemo<Record<string, SurfaceRegion[]>>(() => {
+    if (mode !== '3d') return {}
+    const out: Record<string, SurfaceRegion[]> = {}
+    for (const job of jobs) {
+      const cached = surfaceCacheRef.current.get(job.id)
+      if (cached && cached.mesh === job.mesh) {
+        out[job.id] = cached.regions
+        continue
+      }
+      const regions = segmentSurfaces(job.mesh)
+      surfaceCacheRef.current.set(job.id, { mesh: job.mesh, regions })
+      out[job.id] = regions
+    }
+    // Drop cache entries for removed jobs.
+    for (const id of Array.from(surfaceCacheRef.current.keys()))
+      if (!jobs.some((j) => j.id === id)) surfaceCacheRef.current.delete(id)
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, jobs])
+
+  // Prune SURFACE ops / selection for jobs or regions that no longer exist (a job
+  // removed, or its mesh re-segmented into fewer regions). Surface keys are
+  // `${jobId}#s${regionId}`.
+  useEffect(() => {
+    if (mode !== '3d') return
+    const valid = new Set<string>()
+    for (const [jobId, regions] of Object.entries(surfaceRegionsByJob))
+      for (const r of regions) valid.add(surfaceKey(jobId, r.id))
+    setFeatureOpMap((m) => {
+      let changed = false
+      const next: FeatureOpMap = {}
+      for (const [k, ops] of Object.entries(m)) {
+        if (parseSurfaceKey(k) === null || valid.has(k)) next[k] = ops
+        else changed = true
+      }
+      return changed ? next : m
+    })
+    setSelectedFeature((s) => (s && parseSurfaceKey(s) !== null && !valid.has(s) ? null : s))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, surfaceRegionsByJob])
+
+  // The per-SURFACE preset palette. 3D surface presets reuse the shared built-in
+  // 2D-op presets (Clear-out/Pocket/Profile/Engrave/Cutout) — a surface op runs
+  // the SAME 2D CAM on the surface's XY outline, so the same intents apply.
+  const surfacePalette = useMemo<FeaturePreset[]>(
+    () =>
+      BUILTIN_PRESETS.filter((p) =>
+        ['clearout', 'pocket', 'engrave', 'profile-out', 'profile-in', 'cutout'].includes(p.id),
+      ),
+    [],
+  )
+
+  // Flat list of SURFACE ops (one row per stacked op across all jobs' surfaces),
+  // in added order — the 3D analogue of `opList`. Keyed by `${jobId}#s${regionId}`.
+  interface SurfaceOpEntry {
+    op: FeatureOp
+    jobId: string
+    jobName: string
+    regionId: number
+    region: SurfaceRegion | null
+  }
+  const surfaceOpList = useMemo<SurfaceOpEntry[]>(() => {
+    const jobById = new Map(jobs.map((j) => [j.id, j]))
+    const byId = new Map<string, SurfaceOpEntry>()
+    for (const [key, ops] of Object.entries(featureOpMap)) {
+      const parsed = parseSurfaceKey(key)
+      if (!parsed) continue
+      const job = jobById.get(parsed.fileId)
+      const region = (surfaceRegionsByJob[parsed.fileId] ?? []).find((r) => r.id === parsed.regionId) ?? null
+      for (const o of ops ?? [])
+        byId.set(o.id, {
+          op: o,
+          jobId: parsed.fileId,
+          jobName: job?.name ?? '',
+          regionId: parsed.regionId,
+          region,
+        })
+    }
+    const out: SurfaceOpEntry[] = []
+    for (const id of featureOpOrder) {
+      const e = byId.get(id)
+      if (e) {
+        out.push(e)
+        byId.delete(id)
+      }
+    }
+    for (const e of byId.values()) out.push(e)
+    return out
+  }, [featureOpMap, featureOpOrder, jobs, surfaceRegionsByJob])
+
+  const hasSurfaceOps = surfaceOpList.length > 0
+
+  /** Add an operation (from a preset) onto a loop, appending to the added-order list. */
+  function addLoopOp(key: string, preset: FeaturePreset) {
+    const fresh = opFromPreset(preset)
+    // Idempotent against a double-invoked updater (React StrictMode): only append
+    // `fresh` if its id isn't already present (else the same op id would render
+    // twice → duplicate React keys + a doubled op).
+    setFeatureOpMap((m) => {
+      const cur = m[key] ?? []
+      if (cur.some((o) => o.id === fresh.id)) return m
+      return { ...m, [key]: [...cur, fresh] }
+    })
+    setFeatureOpOrder((o) => (o.includes(fresh.id) ? o : [...o, fresh.id]))
+  }
+
+  /** Remove a single operation by id from whichever loop holds it. */
+  function removeLoopOp(opId: string) {
+    setFeatureOpMap((m) => {
+      const next: FeatureOpMap = {}
+      for (const [key, ops] of Object.entries(m)) {
+        const kept = (ops ?? []).filter((o) => o.id !== opId)
+        if (kept.length) next[key] = kept
+      }
+      return next
+    })
+    setFeatureOpOrder((o) => o.filter((id) => id !== opId))
+  }
+
+  /** Reorder the flat operations list by moving one op earlier/later. */
+  function moveLoopOp(opId: string, dir: -1 | 1) {
+    setFeatureOpOrder((o) => {
+      const idx = o.indexOf(opId)
+      const j = idx + dir
+      if (idx < 0 || j < 0 || j >= o.length) return o
+      const next = o.slice()
+      ;[next[idx], next[j]] = [next[j], next[idx]]
+      return next
+    })
+  }
+
+  /**
+   * Reorder the visible ops list into a SAFE machining order, reusing
+   * {@link orderOpsSafe} (containment-aware inside-out via orderLoopsInsideOut,
+   * with any Cutout op forced to the very end). After this the visible list
+   * matches the order the generator already emits in. A no-op when <2 ops.
+   */
+  function optimizeOps() {
+    const fileById = new Map(fileGeos.map((g) => [g.fileId, g]))
+    const orderable: OrderableOp[] = []
+    opList.forEach((entry, seq) => {
+      const poly = fileById.get(entry.fileId)?.polylines[entry.loopIndex]
+      if (!poly) return
+      orderable.push({ opId: entry.op.id, poly, op: entry.op.op, seq })
+    })
+    if (orderable.length < 2) return
+    setFeatureOpOrder(orderOpsSafe(orderable))
+  }
+
+  /**
+   * Optimize the SURFACE ops order (3D): order each planar region's ops by its
+   * outline containment (inner surfaces first, cutout last) via the same
+   * {@link orderOpsSafe}. Non-planar regions carry no outline → appended after.
+   */
+  function optimizeSurfaceOps() {
+    const orderable: OrderableOp[] = []
+    surfaceOpList.forEach((entry, seq) => {
+      const job = jobs.find((j) => j.id === entry.jobId)
+      if (!job || !entry.region) return
+      const outline = entry.region.planar ? regionOutlineXY(job.mesh, entry.region) : []
+      const poly = outline[0] ?? new Polyline()
+      orderable.push({ opId: entry.op.id, poly, op: entry.op.op, seq })
+    })
+    if (orderable.length < 2) return
+    setFeatureOpOrder(orderOpsSafe(orderable))
+  }
+
+  /** Clear EVERY per-loop operation (back to the whole-file fallback). */
+  function clearAllLoopOps() {
+    setFeatureOpMap({})
+    setFeatureOpOrder([])
+  }
+
+  /** Toggle a model card's expanded (preview-visible) state. */
+  function toggleFileExpanded(id: string) {
+    setExpandedFiles((m) => ({ ...m, [id]: !(m[id] ?? false) }))
+  }
+
+  /**
+   * Duplicate one uploaded 2D file (DXF/EPS/AI). The clone gets a FRESH id (so
+   * its loops key into the shared FeatureOpMap independently — it does NOT share
+   * the original's ops) and a "(copy)" suffix on its name, mirroring the 3D
+   * "Duplicate this job" affordance. The user can then assign different
+   * operations to the copy than the original drawing.
+   */
+  function duplicateFile(id: string) {
+    const newId = newFileId()
+    setFiles((fs) => {
+      const idx = fs.findIndex((f) => f.id === id)
+      if (idx < 0) return fs
+      const src = fs[idx]
+      const copy: LoadedFile = {
+        // Re-parsing isn't needed: a Drawing/polyline set is immutable here (the
+        // panel only ever reads it), so we share the parsed geometry reference.
+        // Placement/scale is panel-global (p2d), and ops are keyed by the NEW id,
+        // so the clone is fully independent for op assignment (it does NOT share
+        // the original's per-loop ops).
+        id: newId,
+        name: src.name.replace(/\s*\(copy( \d+)?\)$/i, '') + ' (copy)',
+        kind: src.kind,
+        drawing: src.drawing,
+        polylines: src.polylines,
+        warnings: src.warnings.slice(),
+        sourceText: src.sourceText,
+      }
+      const next = fs.slice()
+      next.splice(idx + 1, 0, copy)
+      return next
+    })
+    // Expand the new card so the user sees it (mirrors a fresh import).
+    setExpandedFiles((m) => ({ ...m, [newId]: true }))
+  }
+
+  /** Remove one uploaded 2D file (and its loops' ops). */
+  function removeFile(id: string) {
+    setFiles((fs) => {
+      const next = fs.filter((f) => f.id !== id)
+      // Last file gone → drop back to the import screen.
+      if (next.length === 0) {
+        setMode('none')
+        setFileName(null)
+        setGcode('')
+        setWarnings([])
+      }
+      return next
+    })
+    // The geometry-change effect prunes this file's ops/selection by key.
+  }
+
+  // Keep the persisted `fileName` summary in sync with the 2D file list (used for
+  // the program name + the mode-restore on remount). 0 files → null; 1 → its
+  // name; N → "N files".
+  useEffect(() => {
+    if (mode !== '2d') return
+    const name =
+      files.length === 0
+        ? null
+        : files.length === 1
+          ? files[0].name
+          : t('cc.nFiles', '{n} files', { n: files.length })
+    setFileName(name)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, mode])
 
   // ---- 2D: build CamParams / emitter --------------------------------------
   function build2DTool(): Tool {
@@ -1102,11 +1808,39 @@ export function CadCamPanel() {
   function build2DCamParams(): CamParams {
     return { tool: build2DTool(), safeZ: p2d.safeZ, surfaceZ: p2d.surfaceZ, cutDepth: p2d.cutDepth }
   }
-  function build2DToolpaths(p: CamParams): Toolpath[] {
-    if (polylines.length === 0) return []
-    if (op === 'Engrave') return [engrave(polylines, p)]
-    const closed = polylines.filter((pl) => pl.closed && pl.points.length >= 3)
-    if (closed.length === 0) return []
+  /**
+   * Build the 2D toolpaths PLUS the per-operation breakdown (R11/R12 contract)
+   * for ONE file's placed polylines. `operations` is the ComposedOperation list
+   * when per-feature ops are active (each carries its own toolpath + preset
+   * color + loop label) and EMPTY in the whole-file fallback (single Operation
+   * over this file — today's behavior, now scoped per file so each loaded file
+   * emits its OWN program section).
+   *
+   * U-PER-FILE: this is the per-file builder; the per-feature path composes via
+   * {@link composeMultiFileToolpaths} on a SINGLE-file list so each file keeps
+   * its own containment-aware inside-out ordering + cutout-last guarantee, and
+   * the whole-file ops (Engrave/Profile/Pocket/VCarve) run over THIS file only.
+   */
+  function build2DToolpathsForFile(file: FileGeometry, p: CamParams): {
+    toolpaths: Toolpath[]
+    operations: ReturnType<typeof composeMultiFileToolpaths>['operations']
+    vcarveStats?: { paths: number; segs: number; maxDepth: number; cleanupNeeded: boolean }
+    warnings?: string[]
+  } {
+    const polys = file.polylines
+    if (polys.length === 0) return { toolpaths: [], operations: [] }
+    // PER-FEATURE mode: when the user has stacked any per-feature operation in
+    // the mini viewer, the chosen-per-feature presets (each possibly several
+    // passes) replace the single whole-file Operation. Compose this file's ops
+    // (containment-ordered, cutout-last) via the multi-file composer fed a
+    // one-file list so it shares the exact same ordering guarantees.
+    if (hasFeatureOps) {
+      const res = composeMultiFileToolpaths([file], featureOpMap, build2DTool(), p)
+      return { toolpaths: res.toolpaths, operations: res.operations }
+    }
+    if (op === 'Engrave') return { toolpaths: [engrave(polys, p)], operations: [] }
+    const closed = polys.filter((pl) => pl.closed && pl.points.length >= 3)
+    if (closed.length === 0) return { toolpaths: [], operations: [] }
     if (op === 'VCarve') {
       // Variable-depth groove from the medial axis of the closed contours.
       const vp: VCarveParams = {
@@ -1123,14 +1857,17 @@ export function CadCamPanel() {
         cleanupStepoverFrac: vcarve.cleanupStepoverFrac,
       }
       const res = vCarveContours(closed, vp)
-      setVcarveStats({
-        paths: res.pathCount,
-        segs: res.segmentCount,
-        maxDepth: res.maxReachedDepthMm,
-        cleanupNeeded: res.cleanupNeeded,
-      })
-      if (res.warnings.length) setWarnings((w) => Array.from(new Set([...w, ...res.warnings])))
-      return res.toolpath.isEmpty() ? [] : [res.toolpath]
+      return {
+        toolpaths: res.toolpath.isEmpty() ? [] : [res.toolpath],
+        operations: [],
+        vcarveStats: {
+          paths: res.pathCount,
+          segs: res.segmentCount,
+          maxDepth: res.maxReachedDepthMm,
+          cleanupNeeded: res.cleanupNeeded,
+        },
+        warnings: res.warnings,
+      }
     }
     if (op === 'Profile') {
       // Cut nested closed loops INNERMOST-FIRST: an inner cutout must be cut
@@ -1139,7 +1876,7 @@ export function CadCamPanel() {
       // containment tree and emits children before parents (travel-minimised
       // among siblings).
       const tp = profileContours(closed, side, p)
-      return tp.isEmpty() ? [] : [tp]
+      return { toolpaths: tp.isEmpty() ? [] : [tp], operations: [] }
     }
     // Pocket: clear each closed region, innermost-first for the same reason.
     const out: Toolpath[] = []
@@ -1147,22 +1884,29 @@ export function CadCamPanel() {
       const tp = pocket(closed[idx], p)
       if (!tp.isEmpty()) out.push(tp)
     }
-    return out
+    return { toolpaths: out, operations: [] }
   }
 
-  // The last program NAME this panel pushed for the 2D drawing. The name encodes
-  // the operation (e.g. "drawing — Profile Outside"), so switching operation
-  // changes the name. We track the previous name and remove that section before
-  // pushing the new one, so changing the op UPDATES the single drawing toolpath
-  // in place instead of STACKING a fresh section for every op/side switch.
-  const last2DNameRef = useRef<string | null>(null)
+  // The SET of program section NAMES this panel last pushed for the 2D files.
+  // PER-FILE sections (U-PER-FILE): each loaded file emits its OWN section named
+  // "<file> — <op>". The name encodes the operation, so switching operation/side
+  // (or removing a file) renames/drops sections; we track every name we pushed
+  // and clear any that are no longer emitted, so stale sections never linger.
+  const last2DNamesRef = useRef<Set<string>>(new Set())
 
-  /** Drop our previously-pushed 2D section (used when the drawing has nothing to emit). */
+  /** Drop EVERY previously-pushed 2D section (nothing to emit / left 2D mode). */
   function clear2DSection() {
-    if (last2DNameRef.current) {
-      setProgram(last2DNameRef.current, '') // clear-on-empty removes the section
-      last2DNameRef.current = null
-    }
+    for (const n of last2DNamesRef.current) setProgram(n, '') // clear-on-empty removes it
+    last2DNamesRef.current = new Set()
+  }
+
+  /** The op label suffix for a 2D section's name (per-feature / profile-side / plain). */
+  function op2DLabel(): string {
+    return hasFeatureOps
+      ? t('cc.perFeature', 'Per-feature')
+      : op === 'Profile'
+        ? `${opLabelText(t, op)} ${profileSideLabel(t, side)}`
+        : opLabelText(t, op)
   }
 
   function generate2D(): string {
@@ -1173,46 +1917,91 @@ export function CadCamPanel() {
       return ''
     }
     const camParams = build2DCamParams()
-    const toolpaths = build2DToolpaths(camParams)
-    if (toolpaths.length === 0) {
-      clear2DSection()
+    const opLabel = op2DLabel()
+    // V-carving is a variable-Z milling operation — it cannot be plotted with a
+    // pen (the depth IS the result), so it always emits in Spindle Z mode.
+    // Per-feature mode never uses the V-carve op, so honor the chosen Z mode.
+    const vCarveZMode = !hasFeatureOps && op === 'VCarve' ? ZMode.Spindle : p2d.zMode
+
+    // Build + emit ONE section PER loaded file. Each file keeps its own
+    // containment-aware inside-out ordering + cutout-last guarantee internally;
+    // ACROSS files we push in the file list's order (stable). The combined
+    // program is the Program tab's concatenation of these sections.
+    const pushedNames = new Set<string>()
+    const combined: string[] = []
+    let totalCount = 0
+    let lastVStats: typeof vcarveStats = null
+    const vWarnings: string[] = []
+
+    for (const file of fileGeos) {
+      const { toolpaths, operations, vcarveStats: vs, warnings: ws } =
+        build2DToolpathsForFile(file, camParams)
+      if (vs) lastVStats = vs
+      if (ws && ws.length) for (const w of ws) vWarnings.push(w)
+      if (toolpaths.length === 0) continue
+      const progName = `${file.name} — ${opLabel}`
+      // Disambiguate duplicate file names (e.g. a file and its "(copy)" sharing
+      // a name) so two sections never collide on one upsert key.
+      let uniqueName = progName
+      let n = 2
+      while (pushedNames.has(uniqueName)) uniqueName = `${progName} (${n++})`
+      const emitOpts = {
+        programName: uniqueName,
+        safeZ: p2d.safeZ,
+        feedXY: p2d.feedXY,
+        feedZ: p2d.feedZ,
+        zMode: vCarveZMode,
+        useSpindle: vCarveZMode === ZMode.Spindle,
+        spindleRPM: p2d.spindleRPM,
+        penUpZ: p2d.penUpZ,
+        penDownZ: p2d.penDownZ,
+        decimals: p2d.decimals,
+        lineNumbers: p2d.lineNumbers,
+      }
+      const out = new GcodeEmitter(emitOpts).emitProgram(toolpaths)
+      const count = out.split('\n').filter((l) => l.length > 0).length
+      totalCount += count
+      combined.push(out)
+      // Per-OPERATION breakdown (R11/R12): when per-feature ops drove this file's
+      // toolpath, emit each op's OWN safe gcode + preset color + loop label, so
+      // the Program tab can expand the section per op and the Visualizer tints
+      // each op by its preset color. Whole-file fallback emits no operations[].
+      const programOps =
+        operations.length > 0
+          ? operations.map((co) => ({
+              id: co.opId,
+              label: co.label,
+              gcode: new GcodeEmitter({ ...emitOpts, programName: co.label }).emitProgram(
+                co.toolpath,
+              ),
+              color: co.color,
+            }))
+          : undefined
+      setProgram(uniqueName, out, programOps ? { operations: programOps } : undefined)
+      pushedNames.add(uniqueName)
+    }
+
+    // Surface VCarve stats (last file) + warnings (deduped across files).
+    if (op === 'VCarve' && !hasFeatureOps) {
+      setVcarveStats(lastVStats)
+      if (vWarnings.length) setWarnings((w) => Array.from(new Set([...w, ...vWarnings])))
+    }
+
+    // Drop any section we pushed previously but no longer emit (op/side switch,
+    // a removed file, a now-empty file) so stale sections never linger.
+    for (const n of last2DNamesRef.current) {
+      if (!pushedNames.has(n)) setProgram(n, '')
+    }
+    last2DNamesRef.current = pushedNames
+
+    if (pushedNames.size === 0) {
       setGcode('')
       setLineCount(0)
       return ''
     }
-    const opLabel =
-      op === 'Profile'
-        ? `${opLabelText(t, op)} ${profileSideLabel(t, side)}`
-        : opLabelText(t, op)
-    const progName = `${fileName ?? t('cc.drawing', 'drawing')} — ${opLabel}`
-    // V-carving is a variable-Z milling operation — it cannot be plotted with a
-    // pen (the depth IS the result), so it always emits in Spindle Z mode.
-    const vCarveZMode = op === 'VCarve' ? ZMode.Spindle : p2d.zMode
-    const emitter = new GcodeEmitter({
-      programName: progName,
-      safeZ: p2d.safeZ,
-      feedXY: p2d.feedXY,
-      feedZ: p2d.feedZ,
-      zMode: vCarveZMode,
-      useSpindle: vCarveZMode === ZMode.Spindle,
-      spindleRPM: p2d.spindleRPM,
-      penUpZ: p2d.penUpZ,
-      penDownZ: p2d.penDownZ,
-      decimals: p2d.decimals,
-      lineNumbers: p2d.lineNumbers,
-    })
-    const out = emitter.emitProgram(toolpaths)
-    const count = out.split('\n').filter((l) => l.length > 0).length
-    // Switching operation/side changes progName; remove the prior-named section
-    // first so we replace (update) the single drawing toolpath rather than leave
-    // the old operation's section stacked alongside the new one.
-    if (last2DNameRef.current && last2DNameRef.current !== progName) {
-      setProgram(last2DNameRef.current, '')
-    }
-    setProgram(progName, out)
-    last2DNameRef.current = progName
+    const out = combined.join('\n')
     setGcode(out)
-    setLineCount(count)
+    setLineCount(totalCount)
     return out
   }
 
@@ -1229,8 +2018,31 @@ export function CadCamPanel() {
   // store, so the Program panel can show a "Generating…" indicator. Covers a
   // heavy model import, the 3D carve worker, and the 2D regen (busy).
   useEffect(() => {
-    setGenerating(importing || busy || carveProgress !== null)
-  }, [importing, busy, carveProgress, setGenerating])
+    // `importStatus !== null` covers the read/parse phase of a LIGHT mesh (STL/
+    // OBJ) where `importing` (the STEP-only WASM spinner flag) stays false — so
+    // the Program tab still shows the staged "Reading…/Parsing…" status.
+    setGenerating(importing || busy || carveProgress !== null || importStatus !== null)
+  }, [importing, busy, carveProgress, importStatus, setGenerating])
+
+  // Keep the file-load status bar (name + size) VISIBLE through the carve, so the
+  // user always sees WHICH model is processing and HOW FAR along it is — not a
+  // size-less generic bar. The carve runs right after the mesh is added; mirror
+  // its progress into the same status block, and clear it only once the carve
+  // that actually ran has finished. (During read/parse, carveProgress is null but
+  // `carveRan` is false, so this never disturbs the read/parse status.)
+  const carveRan = useRef(false)
+  useEffect(() => {
+    if (carveProgress !== null) {
+      carveRan.current = true
+      const pct = Math.round(carveProgress * 100)
+      setImportStatus((s) =>
+        s ? { ...s, stage: t('cc.stageGenPct', 'Generating toolpath… {pct}%', { pct }), frac: carveProgress } : s,
+      )
+    } else if (carveRan.current && !importing) {
+      carveRan.current = false
+      setImportStatus(null)
+    }
+  }, [carveProgress, importing, t])
   // On unmount, clear the indicator so a closed panel can't leave it stuck on.
   useEffect(() => () => setGenerating(false), [setGenerating])
 
@@ -1240,8 +2052,11 @@ export function CadCamPanel() {
   const carveWorkerRef = useRef<Worker | null>(null)
   const carveJobIdRef = useRef(0)
   // The last program NAME this panel pushed to the store, so removing all jobs
-  // (or the worker producing nothing) can remove the stale carve section.
-  const lastCarveNameRef = useRef<string | null>(null)
+  // (or the worker producing nothing) can remove the stale carve section(s).
+  // PER-FILE (U-PER-FILE): each enabled job emits its OWN section ("<model> — 3D
+  // Carving"), so this tracks the SET of names we last pushed and clears any that
+  // are no longer emitted. Two-sided mode pushes one combined section instead.
+  const lastCarveNamesRef = useRef<Set<string>>(new Set())
 
   function teardownCarveWorker() {
     if (carveWorkerRef.current) {
@@ -1250,15 +2065,111 @@ export function CadCamPanel() {
     }
   }
 
-  // Remove our previously-pushed carve section from the shared program store
+  // Remove our previously-pushed carve section(s) from the shared program store
   // (called when there is nothing to carve, so a stale section can't linger).
   function clearCarveProgram() {
-    const name = lastCarveNameRef.current
-    if (!name) return
-    const st = useProgram.getState()
-    const sec = st.sections.find((s) => s.name === name)
-    if (sec) st.removeSection(sec.id)
-    lastCarveNameRef.current = null
+    for (const name of lastCarveNamesRef.current) setProgram(name, '')
+    lastCarveNamesRef.current = new Set()
+  }
+
+  // The SET of per-surface program section names we last pushed (so we can clear
+  // stale ones when a surface op is removed / a job toggled off).
+  const lastSurfaceNamesRef = useRef<Set<string>>(new Set())
+
+  /**
+   * Generate per-SURFACE toolpaths for the enabled 3D jobs and push them as their
+   * OWN program sections — additive on top of the whole-mesh relief carve.
+   *
+   * PLANAR (roughly horizontal, up-facing) regions: the surface's XY boundary
+   * (regionOutlineXY) feeds the existing 2D CAM (Clear-out → pocket, Cutout →
+   * cutout-with-tabs, Profile/Engrave likewise) at the region's top Z, referenced
+   * to the MESH TOP (Z=0) so it shares the carve worker's Z convention. The
+   * job's XY placement (dx/dy) is baked in so it aligns with the relief toolpath
+   * and the Visualizer.
+   *
+   * NON-PLANAR (sloped/curved) regions: an XY-projected area op is meaningless, so
+   * these are LEFT to the existing whole-mesh relief carve (which already covers
+   * the entire model). Only Engrave (a centreline trace of the outline) is offered
+   * for them; the Surfaces UI disables area ops on non-planar regions.
+   *
+   * Each op runs through composeFeatureToolpaths so it inherits the SAME
+   * containment-aware ordering + cutout-last safety, and is emitted with the
+   * `{id,label,gcode,color}` ProgramOperation contract (operation.id ===
+   * FeatureOp.id) so the hover cross-highlight + per-op Visualizer tint work.
+   */
+  function generateSurfaceOps(activeJobs: CarveJob[]): void {
+    const pushed = new Set<string>()
+    if (hasSurfaceOps) {
+      for (const job of activeJobs) {
+        const regions = surfaceRegionsByJob[job.id] ?? []
+        if (regions.length === 0) continue
+        const zRef = job.mesh.bbox.max[2]
+        // surfaceZ is baked per op via a tailored CamParams, so we group ops by
+        // region and compose/emit each region's outline separately.
+        const tool = defaultTool({
+          diameter: carveGlobal.toolDiameter,
+          stepdown: job.speeds.cutDepthMm,
+          stepover: job.stepover,
+          feedXY: job.speeds.cutSpeedMmS * 60,
+          feedZ: carveGlobal.feedZ,
+          spindleRPM: carveGlobal.spindleRPM,
+        })
+        const operations: { id: string; label: string; gcode: string; color: string }[] = []
+        const allToolpaths: Toolpath[] = []
+        for (const region of regions) {
+          const ops = featureOpMap[surfaceKey(job.id, region.id)]
+          if (!ops || ops.length === 0) continue
+          // Planar regions get a real XY outline; non-planar fall back to relief
+          // (skip area ops, keep only Engrave which traces a line).
+          const outline = region.planar ? regionOutlineXY(job.mesh, region) : []
+          const usable = outline.filter((pl) => pl.points.length >= 3)
+          if (usable.length === 0) continue
+          // Reference the surface top to the mesh top (Z=0), so it shares the carve
+          // worker's convention and the result lands at the right depth.
+          const surfaceZ = region.z - zRef
+          const camP: CamParams = { tool, safeZ: carveGlobal.safeZ, surfaceZ, cutDepth: p2d.cutDepth }
+          // Apply the region's ops to its OUTER boundary loop only (the outline is
+          // sorted largest-first). One op → one ComposedOperation → one unique op
+          // id, so the Program-tab per-op breakdown + hover ids stay 1:1 with the
+          // surface ops list. (A flat region's holes are left to the relief path.)
+          const outer = usable[0]
+          const regionMap: FeatureOpMap = { '0': ops }
+          const res = composeFeatureToolpaths([outer], regionMap, tool, camP)
+          for (const co of res.operations) {
+            // Bake the job placement (XY) so it aligns with the relief toolpath.
+            const placed = placeToolpath(co.toolpath, job.placement, meshCenter(job.mesh))
+            placed.name = `${job.name} · S${region.id + 1} · ${co.label}`
+            allToolpaths.push(placed)
+            const emit = new GcodeEmitter({
+              programName: placed.name,
+              safeZ: carveGlobal.safeZ,
+              feedXY: job.speeds.cutSpeedMmS * 60,
+              feedZ: carveGlobal.feedZ,
+              zMode: ZMode.Spindle,
+              useSpindle: true,
+              spindleRPM: carveGlobal.spindleRPM,
+            }).emitProgram(placed)
+            operations.push({ id: co.opId, label: placed.name, gcode: emit, color: co.color })
+          }
+        }
+        if (allToolpaths.length === 0) continue
+        const sectionGcode = new GcodeEmitter({
+          programName: `${job.name} — Surfaces`,
+          safeZ: carveGlobal.safeZ,
+          feedXY: job.speeds.cutSpeedMmS * 60,
+          feedZ: carveGlobal.feedZ,
+          zMode: ZMode.Spindle,
+          useSpindle: true,
+          spindleRPM: carveGlobal.spindleRPM,
+        }).emitProgram(allToolpaths)
+        const name = t('cc.progNameSurfaces', '{name} — Surfaces', { name: job.name })
+        setProgram(name, sectionGcode, { operations })
+        pushed.add(name)
+      }
+    }
+    // Drop any per-surface section we pushed before but no longer emit.
+    for (const n of lastSurfaceNamesRef.current) if (!pushed.has(n)) setProgram(n, '')
+    lastSurfaceNamesRef.current = pushed
   }
 
   function generate3D(): string {
@@ -1315,12 +2226,18 @@ export function CadCamPanel() {
     }
     carveWorkerRef.current = worker
     setCarveProgress(0)
+    setGeneratingStatus(t('cc.statusCarving', 'Generating toolpath… {pct}%', { pct: 0 }), 0)
 
     worker.onmessage = (e: MessageEvent<CarveWorkerOutbound>) => {
       const msg = e.data
       if (msg.jobId !== carveJobIdRef.current) return // a superseded request
       if (msg.type === 'progress') {
-        setCarveProgress(msg.total > 0 ? msg.done / msg.total : 0)
+        const frac = msg.total > 0 ? msg.done / msg.total : 0
+        setCarveProgress(frac)
+        setGeneratingStatus(
+          t('cc.statusCarving', 'Generating toolpath… {pct}%', { pct: Math.round(frac * 100) }),
+          frac,
+        )
         return
       }
       if (msg.type === 'done') {
@@ -1334,24 +2251,64 @@ export function CadCamPanel() {
           clearCarveProgram()
           return
         }
+
+        // PER-FILE (U-PER-FILE) — DEFAULT path (two-sided OFF): split the worker's
+        // single combined program back into one safe standalone program PER JOB
+        // and push each as its OWN program section named "<model> — 3D Carving".
+        // The worker delimits each job's body with a `(<job name>)` comment; we
+        // re-wrap each body in its own safe header/footer so every section is a
+        // valid, independently-streamable safe program. Across files we keep the
+        // job list order (which already encodes the safe nesting/placement).
+        if (!twoSided.enabled) {
+          const perJob = splitCarveProgramByJob(
+            msg.gcode,
+            active.map((j) => j.name),
+            carveGlobal.safeZ,
+            carveGlobal.spindleRPM,
+          )
+          const pushed = new Set<string>()
+          if (perJob.length > 0) {
+            for (const seg of perJob) {
+              const progName = t('cc.progName3dOne', '{name} — 3D Carving', { name: seg.name })
+              let uniqueName = progName
+              let n = 2
+              while (pushed.has(uniqueName)) uniqueName = `${progName} (${n++})`
+              setProgram(uniqueName, seg.gcode)
+              pushed.add(uniqueName)
+            }
+          } else {
+            // Parser found no per-job markers (older/edge output) → fall back to a
+            // single combined section so the program is never lost.
+            const baseName =
+              active.length === 1
+                ? t('cc.progName3dOne', '{name} — 3D Carving', { name: active[0].name })
+                : t('cc.progName3dMany', '{n} jobs — 3D Carving', { n: active.length })
+            setProgram(baseName, msg.gcode)
+            pushed.add(baseName)
+          }
+          for (const nm of lastCarveNamesRef.current) if (!pushed.has(nm)) setProgram(nm, '')
+          lastCarveNamesRef.current = pushed
+          setGcode(msg.gcode)
+          setLineCount(msg.lineCount)
+          return
+        }
+
+        // ADVANCED · double-sided: post-process the front program into a combined
+        // front+back program (pure core transform) — emitted as ONE section (the
+        // flip instructions stitch the two sides into one program, so it can't be
+        // split per job).
         const baseName =
           active.length === 1
             ? t('cc.progName3dOne', '{name} — 3D Carving', { name: active[0].name })
             : t('cc.progName3dMany', '{n} jobs — 3D Carving', { n: active.length })
-        // ADVANCED · double-sided: post-process the front program into a combined
-        // front+back program (pure core transform). Disabled → returns it as-is.
         const twoSidedRes = buildTwoSidedProgram(msg.gcode, twoSided)
         const finalGcode = twoSidedRes.gcode
         if (twoSidedRes.warnings.length) setWarnings((w) => [...w, ...twoSidedRes.warnings])
-        const name = twoSided.enabled ? `${baseName} (two-sided)` : baseName
-        // If the program name changed (job count crossed 1↔many, a renamed single
-        // job, or the two-sided toggle), remove the previous section so it doesn't
-        // linger.
-        if (lastCarveNameRef.current && lastCarveNameRef.current !== name) clearCarveProgram()
-        lastCarveNameRef.current = name
-        const lineCount = twoSided.enabled
-          ? finalGcode.split('\n').filter((l) => l.length > 0).length
-          : msg.lineCount
+        const name = `${baseName} (two-sided)`
+        // Remove any previously-pushed carve section(s) not equal to this one.
+        for (const nm of lastCarveNamesRef.current) if (nm !== name) setProgram(nm, '')
+        lastCarveNamesRef.current = new Set([name])
+        const lineCount = finalGcode.split('\n').filter((l) => l.length > 0).length
         setProgram(name, finalGcode)
         setGcode(finalGcode)
         setLineCount(lineCount)
@@ -1426,16 +2383,24 @@ export function CadCamPanel() {
       const ts = twoSided.enabled
         ? `1|${twoSided.stockThicknessMm}|${twoSided.flipAxis}|${twoSided.flipCorner}`
         : '0'
+      // NOTE: per-SURFACE ops are intentionally NOT in this key — they regenerate
+      // in their OWN lightweight effect (generateSurfaceOps), so editing a surface
+      // preset never re-spins the heavy async relief-carve worker.
       return `3d|${carveRev}|${c}|${ts}`
     }
     if (mode === '2d') {
       const v = op === 'VCarve' ? `|${JSON.stringify(vcarve)}` : ''
-      return `2d|${op}|${side}|${JSON.stringify(p2d)}${v}`
+      // The per-feature op map is part of the signature so stacking/removing a
+      // feature pass live-regenerates the program just like a slider drag. The
+      // added-order list is folded in too so REORDERING ops re-emits the section
+      // metadata in the new order (the Program tab + Visualizer follow it).
+      const f = `|${JSON.stringify(featureOpMap)}|${featureOpOrder.join(',')}`
+      return `2d|${op}|${side}|${JSON.stringify(p2d)}${v}${f}`
     }
     return mode
     // polylines/drawing/epsPolys identity is folded in via the separate dep below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, carveRev, cutout, twoSided, op, side, p2d, vcarve])
+  }, [mode, carveRev, cutout, twoSided, op, side, p2d, vcarve, featureOpMap, featureOpOrder])
 
   // ---- clobber guard: only own the Visualizer when this panel is VISIBLE --
   // Several CAM panels write the shared program store via live-generate effects;
@@ -1497,6 +2462,20 @@ export function CadCamPanel() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, genKey, polylines])
+
+  // SURFACE ops (3D): a SEPARATE, lightweight live-regenerate. Editing a surface
+  // preset only re-runs the synchronous per-surface CAM + program-section push —
+  // it never re-spins the heavy async relief-carve worker (which is keyed on
+  // `genKey` above, intentionally without surface state). Always-fresh handle so
+  // the effect can depend on stable keys yet run the latest closure.
+  const generateSurfaceOpsRef = useRef(generateSurfaceOps)
+  generateSurfaceOpsRef.current = generateSurfaceOps
+  useEffect(() => {
+    if (mode !== '3d') return
+    if (panelRef.current && panelRef.current.offsetParent === null) return // hidden tab
+    generateSurfaceOpsRef.current(jobs.filter((j) => j.enabled))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, featureOpMap, featureOpOrder, surfaceRegionsByJob, carveRev])
 
   // When the panel becomes visible again (tab re-selected) and we have carve
   // jobs, re-assert our program so a sibling panel can't leave a stale program
@@ -1573,6 +2552,276 @@ export function CadCamPanel() {
     setNestWarn([])
     setMode('none')
     setFileName(null)
+  }
+
+  // ---- carving SESSION export / import (.karmyogi-carve.zip) --------------
+  // A SESSION captures everything needed to reconstruct the panel after a reload
+  // / power-cycle: every loaded source file's RAW bytes (DXF/EPS text, or a
+  // binary STL for each 3D job) + a versioned manifest with all operations,
+  // params, placement and presets. Download writes the zip; Upload restores it.
+  const sessionFileRef = useRef<HTMLInputElement>(null)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+
+  /** The WHOLE-session restore payload (everything not tied to a single file). */
+  function captureSessionGlobals() {
+    return {
+      p2d,
+      op,
+      side,
+      vcarve,
+      cutout,
+      twoSided,
+      bitId,
+      bitLength,
+      materialId: stock.materialId,
+      carveGlobal,
+      carveDefaults: useCarveJobs.getState().defaults,
+      featureOpMap,
+      featureOpOrder,
+      loopPresetSel,
+      expandedFiles,
+      presets2d: presets.slots,
+      presets3d: presets3d.slots,
+    }
+  }
+
+  function downloadCarveSession() {
+    setSessionError(null)
+    const entries: Array<{
+      id: string
+      name: string
+      kind: 'dxf' | 'eps' | 'mesh'
+      payload?: unknown
+    }> = []
+    const sources: CarveSessionSource[] = []
+
+    if (mode === '2d') {
+      for (const f of files) {
+        entries.push({ id: f.id, name: f.name, kind: f.kind })
+        if (f.sourceText != null)
+          sources.push({ id: f.id, name: f.name, bytes: new TextEncoder().encode(f.sourceText) })
+      }
+    } else if (mode === '3d') {
+      for (const j of jobs) {
+        entries.push({
+          id: j.id,
+          name: `${j.name}.stl`,
+          kind: 'mesh',
+          payload: {
+            name: j.name,
+            enabled: j.enabled,
+            material: j.material,
+            stock: j.stock,
+            speeds: j.speeds,
+            placement: j.placement,
+            roughing: j.roughing,
+            finishing: j.finishing,
+            finishDir: j.finishDir,
+            maxDepth: j.maxDepth,
+            stepover: j.stepover,
+          },
+        })
+        // Re-derive a binary STL from the in-memory mesh (the original bytes
+        // aren't retained; the parsed triangle soup round-trips faithfully).
+        sources.push({
+          id: j.id,
+          name: `${j.name}.stl`,
+          bytes: meshToBinaryStl(j.mesh.triangles, j.mesh.triangleCount),
+        })
+      }
+    }
+
+    if (entries.length === 0) {
+      setSessionError(t('cc.sessionEmpty', 'Nothing to export — load a file first.'))
+      return
+    }
+    try {
+      const zip = buildCarveSessionZip({
+        mode,
+        entries,
+        sources,
+        globals: captureSessionGlobals(),
+      })
+      const base = (fileName ?? 'carve-session')
+        .replace(/\.[^.]+$/, '')
+        .replace(/[^\w.-]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'carve-session'
+      // Copy into a fresh ArrayBuffer so the Blob owns its bytes (avoids a
+      // SharedArrayBuffer / detached-buffer edge under some bundlers).
+      const blob = new Blob([zip.slice()], { type: 'application/zip' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${base}.${CARVE_SESSION_EXT}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+    } catch (err) {
+      setSessionError(
+        t('cc.sessionExportFail', 'Could not build the session: {msg}', {
+          msg: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    }
+  }
+
+  /** Restore EVERY whole-session global param from a manifest's `globals` blob. */
+  function restoreSessionGlobals(g: Record<string, unknown> | undefined) {
+    if (!isRecord(g)) return
+    if (isRecord(g.p2d)) setP2d(parseP2d(g.p2d, DEFAULT_2D))
+    if (g.op === 'Engrave' || g.op === 'Profile' || g.op === 'Pocket' || g.op === 'VCarve')
+      setOp(g.op)
+    if (
+      g.side === ProfileSide.Inside ||
+      g.side === ProfileSide.Outside ||
+      g.side === ProfileSide.On
+    )
+      setSide(g.side as ProfileSide)
+    setVcarve(parseVcarve(g.vcarve, DEFAULT_VCARVE))
+    setCutout(parseCutout(g.cutout, defaultCutoutParams()))
+    setTwoSided(defaultTwoSidedParams(isRecord(g.twoSided) ? (g.twoSided as Partial<TwoSidedParams>) : undefined))
+    if (typeof g.bitId === 'string' && getBit(g.bitId)) setBitId(g.bitId)
+    if (typeof g.bitLength === 'number' && g.bitLength >= 1) setBitLength(g.bitLength)
+    if (typeof g.materialId === 'string' && getMaterial(g.materialId)) stock.setMaterial(g.materialId)
+    if (isRecord(g.carveGlobal)) setGlobal(g.carveGlobal as Partial<GlobalCarveSettings>)
+    if (g.featureOpMap && isRecord(g.featureOpMap)) setFeatureOpMap(g.featureOpMap as FeatureOpMap)
+    if (Array.isArray(g.featureOpOrder)) setFeatureOpOrder(g.featureOpOrder as string[])
+    if (isRecord(g.loopPresetSel)) setLoopPresetSel(g.loopPresetSel as Record<string, string>)
+    if (isRecord(g.expandedFiles)) setExpandedFiles(g.expandedFiles as Record<string, boolean>)
+    // Presets persist to localStorage; write them so the rail reflects them on
+    // its next (re)mount (usePresets re-reads localStorage on mount).
+    try {
+      if (Array.isArray(g.presets2d))
+        localStorage.setItem(CARVE_PRESETS_KEY, JSON.stringify(g.presets2d))
+      if (Array.isArray(g.presets3d))
+        localStorage.setItem(CARVE_PRESETS_3D_KEY, JSON.stringify(g.presets3d))
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async function uploadCarveSession(file: File) {
+    setSessionError(null)
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const { manifest, sources } = parseCarveSessionZip(bytes)
+
+      if (manifest.mode === '3d') {
+        // Rebuild the 3D jobs: clear, re-import each mesh, then patch its saved
+        // settings + placement so the relief regenerates exactly as saved.
+        clearJobs()
+        teardownCarveWorker()
+        clearCarveProgram()
+        setFiles([])
+        for (const entry of manifest.entries) {
+          const src = sources.get(entry.id)
+          if (!src) continue
+          const meshFile = new File([src.slice()], entry.name, { type: 'model/stl' })
+          let mesh
+          try {
+            mesh = await importMesh(meshFile)
+          } catch {
+            continue
+          }
+          if (mesh.triangleCount === 0) continue
+          const p = isRecord(entry.payload) ? entry.payload : {}
+          const niceName = typeof p.name === 'string' ? p.name : entry.name.replace(/\.stl$/i, '')
+          const id = addJob(mesh, niceName)
+          const patch: Partial<Omit<CarveJob, 'id' | 'mesh'>> = {}
+          if (typeof p.enabled === 'boolean') patch.enabled = p.enabled
+          if (typeof p.material === 'string') patch.material = p.material
+          if (typeof p.roughing === 'boolean') patch.roughing = p.roughing
+          if (typeof p.finishing === 'boolean') patch.finishing = p.finishing
+          if (p.finishDir === 'x' || p.finishDir === 'y') patch.finishDir = p.finishDir
+          if (typeof p.maxDepth === 'number') patch.maxDepth = p.maxDepth
+          if (typeof p.stepover === 'number') patch.stepover = p.stepover
+          if (Object.keys(patch).length) updateJob(id, patch)
+          if (isRecord(p.speeds)) setJobSpeeds(id, p.speeds as Partial<CarveJob['speeds']>)
+          if (isRecord(p.stock)) setJobStock(id, p.stock as Partial<CarveJob['stock']>)
+          if (isRecord(p.placement)) setJobPlacement(id, p.placement)
+        }
+        restoreSessionGlobals(manifest.globals as Record<string, unknown> | undefined)
+        setMode('3d')
+        const res = renest(bed.width, bed.depth)
+        setNestWarn(res.warnings)
+      } else {
+        // 2D: rebuild the file list (RE-USING the manifest's ids so the restored
+        // featureOpMap keys — `${fileId}#loop` — still resolve to these files).
+        clearJobs()
+        const restored: LoadedFile[] = []
+        const expand: Record<string, boolean> = {}
+        for (const entry of manifest.entries) {
+          const src = sources.get(entry.id)
+          if (!src) continue
+          const text = new TextDecoder().decode(src)
+          if (entry.kind === 'dxf') {
+            const res = importDxfString(text)
+            if (!res.ok) continue
+            restored.push({
+              id: entry.id,
+              name: entry.name,
+              kind: 'dxf',
+              drawing: res.drawing,
+              polylines: null,
+              warnings: res.warnings ?? [],
+              sourceText: text,
+            })
+          } else if (entry.kind === 'eps') {
+            const res = parseEpsPaths(text)
+            if (!res.ok) continue
+            restored.push({
+              id: entry.id,
+              name: entry.name,
+              kind: 'eps',
+              drawing: null,
+              polylines: res.polylines,
+              warnings: res.warnings ?? [],
+              sourceText: text,
+            })
+          }
+          expand[entry.id] = true
+        }
+        if (restored.length === 0) {
+          setSessionError(t('cc.sessionNoFiles', 'No usable source files found in the session.'))
+          return
+        }
+        // Restore globals FIRST (sets featureOpMap/order, which key by file id),
+        // then the files. expandedFiles from globals is merged with the fresh set.
+        restoreSessionGlobals(manifest.globals as Record<string, unknown> | undefined)
+        setExpandedFiles((m) => ({ ...m, ...expand }))
+        setFiles(restored)
+        setMode('2d')
+      }
+    } catch (err) {
+      const msg =
+        err instanceof CarveSessionError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err)
+      setSessionError(t('cc.sessionImportFail', 'Could not open the session: {msg}', { msg }))
+    }
+  }
+
+  function onSessionFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) {
+      if (!/\.zip$/i.test(file.name)) {
+        // Wrong file for the Ops slot — point them at the .zip the Download
+        // button makes, rather than failing inside the unzip with a cryptic error.
+        setSessionError(
+          t(
+            'cc.sessionWrongType',
+            '“{name}” isn’t a carving session. Upload the .zip you saved with the Download (Ops) button.',
+            { name: file.name },
+          ),
+        )
+      } else {
+        void uploadCarveSession(file)
+      }
+    }
+    e.target.value = ''
   }
 
   // ---- param input helpers ------------------------------------------------
@@ -1752,6 +3001,35 @@ export function CadCamPanel() {
     },
   })
 
+  // ---- draggable horizontal separator between the two split sections (R6) --
+  // Pointer-drag updates the persisted TOP-section height percentage; clamped so
+  // both sections always keep a usable minimum. Pointer capture keeps the drag
+  // tracking even if the cursor leaves the thin handle.
+  const splitDragRef = useRef<{ startY: number; startPct: number } | null>(null)
+  function onSplitPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    const host = panelRef.current?.querySelector('.cc-split') as HTMLElement | null
+    if (!host) return
+    splitDragRef.current = { startY: e.clientY, startPct: splitPct }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    const total = host.getBoundingClientRect().height
+    const onMove = (ev: PointerEvent) => {
+      const st = splitDragRef.current
+      if (!st || total <= 0) return
+      const dPct = ((ev.clientY - st.startY) / total) * 100
+      setSplitPct(Math.max(24, Math.min(80, st.startPct + dPct)))
+    }
+    const onUp = () => {
+      splitDragRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // The whole-file vs per-loop "Operation" sections + the loop table are 2D-only.
+  const is2D = mode === '2d'
+
   return (
     <div
       ref={panelRef}
@@ -1760,25 +3038,32 @@ export function CadCamPanel() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
     >
-      <PresetRail
-        slots={presets.slots}
-        selected={presets.selected}
-        onLoad={presets.load}
-        onSelect={presets.select}
-        ariaLabel={t('cc.presets.aria', 'Carving setting presets')}
-      />
-      <div className="cc-scroll">
+      {/* Sticky LEFT colour-slot rail (2D only) — each slot is a full carve-param
+          preset. Clicking a filled slot loads it into the bottom sections; the
+          footer save-bar writes the current params back. Same shared components
+          the Soldering / Writing tabs use. */}
+      <div className="cc-split">
+        {/* ───────────────────────── TOP: files + loop→preset table ─────── */}
+        <div className="cc-split-top" style={{ height: `${Math.max(24, Math.min(80, splitPct))}%` }}>
         {/* The panel heading + its explainer InfoTip were removed; the same
             explainer now shows as a tooltip when hovering the "2D/3D Carving"
             dock TAB (see the dock tab component in shell.tsx). */}
         <div className="cc-cards">
           {/* ================= 1 · IMPORT / DROP ================= */}
-          <section className="cc-section cc-span">
-            <h3>
-              <span className="cam-card-ico"><Icon name="upload" size={15} /></span>
-              {mode === '3d' ? t('cc.models', 'Models') : t('cc.model', 'Model')}
+          {/* ── PLAIN top row (NOT a card): a "Models" label + the Upload button
+              + accepted file-types hint. The upload affordance is deliberately
+              OUTSIDE any model card. 3D's re-nest / clear-all live here too. ── */}
+          <div className="cc-modelbar">
+            <span className="cc-modelbar-lbl">
+              <Icon name="upload" size={14} />
+              {mode === '3d' ? t('cc.models', 'Models') : t('cc.modelsLbl', 'Models')}
+            </span>
+            <span className="cc-modelbar-exts" title={t('cc.dropHintMulti', 'or drop a file anywhere — each model adds a job')}>
+              .stl / .obj / .step / .dxf / .eps / .ai
+            </span>
+            <span className="cc-modelbar-actions">
               {mode === '3d' && (
-                <span className="cc-h3-actions">
+                <>
                   <button
                     className="cc-iconbtn"
                     onClick={doRenest}
@@ -1797,91 +3082,83 @@ export function CadCamPanel() {
                   >
                     <Icon name="trash" size={14} />
                   </button>
-                </span>
+                </>
               )}
-            </h3>
-            <div className={'cc-section-body' + (dragOver ? ' cc-dragover' : '')}>
-              {/* Compact upload row: accepted extensions + a rectangular upload
-                  icon button (drag-drop onto the panel still works too). */}
-              <div className="cc-uploadrow">
-                <span className="cc-uploadrow-exts" title={t('cc.dropHintMulti', 'or drop a file anywhere — each model adds a job')}>
-                  .stl / .obj / .step / .dxf / .eps / .ai
-                </span>
+              {/* SESSION export / import — pack every loaded source + all ops /
+                  params / presets into one .karmyogi-carve.zip, and restore it.
+                  Download appears once something is loaded; Upload is always
+                  available so a fresh session can be restored from the zip. */}
+              {(mode === '2d' || mode === '3d') && (
                 <button
                   type="button"
-                  className="cc-uploadrow-btn"
-                  onClick={() => fileRef.current?.click()}
-                  title={t('cc.upload', 'Upload')}
-                  aria-label={t('cc.uploadAria', 'Upload model file(s)')}
+                  className="cc-iconbtn"
+                  onClick={downloadCarveSession}
+                  disabled={mode === '2d' ? files.length === 0 : jobs.length === 0}
+                  title={t('cc.sessionDownload', 'Download this carving session (.zip) — sources + operations + presets')}
+                  aria-label={t('cc.sessionDownloadAria', 'Download carving session')}
                 >
-                  <Icon name="upload" size={16} />
+                  <Icon name="download" size={15} />
                 </button>
-                <input
-                  ref={fileRef}
-                  className="cc-load-input"
-                  type="file"
-                  multiple
-                  accept=".stl,.obj,.step,.stp,.dxf,.eps,.ai,.cdr"
-                  onChange={onFileChange}
-                />
-              </div>
-
-              {/* Uploaded model files / jobs, listed right here in the Model
-                  section. In 3D this is the single canonical models list with
-                  per-model visibility, select-to-edit, duplicate & remove. */}
-              <ModelFilesList
-                mode={mode}
-                jobs={jobs}
-                selectedId={selectedId}
-                fileName={fileName}
-                onSelect={selectJob}
-                onToggleJob={(id, enabled) => updateJob(id, { enabled })}
-                onDuplicateJob={(id) => {
-                  duplicateJob(id)
-                  const res = renest(bed.width, bed.depth)
-                  setNestWarn(res.warnings)
-                }}
-                onRemoveJob={(id, name) => {
-                  if (!window.confirm(t('cc.jobRemoveConfirm', 'Remove “{name}”?', { name }))) return
-                  removeJob(id)
-                  const res = renest(bed.width, bed.depth)
-                  setNestWarn(res.warnings)
-                }}
-                onRemove2D={() => {
-                  setMode('none')
-                  setFileName(null)
-                  setDrawing(null)
-                  setEpsPolys(null)
-                  setGcode('')
-                  setWarnings([])
-                }}
-                t={t}
-              />
-
-              {/* 3D multi-model: empty-state, nesting warnings & bed hint —
-                  moved here from the old standalone "Jobs" section. */}
-              {mode === '3d' && jobs.length === 0 && (
-                <CamEmpty
-                  icon={<Icon name="upload" size={22} />}
-                  title={t('cc.empty.title', 'No models yet')}
-                  hint={t('cc.empty.hint', 'Import a model to add a job — import again to nest more side-by-side.')}
-                  action={
-                    <button type="button" className="cam-primary" onClick={() => fileRef.current?.click()}>
-                      <Icon name="upload" size={15} /> {t('cc.upload', 'Upload')}
-                    </button>
-                  }
-                />
               )}
-              {mode === '3d' && nestWarn.length > 0 && (
-                <ul className="cc-warnings">
-                  {nestWarn.slice(0, 4).map((w, i) => (
-                    <li key={i}>
-                      <Icon name="warning" size={12} /> {w}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {mode === '3d' && jobs.length > 0 && (
+              <button
+                type="button"
+                className="cc-iconbtn cc-iconbtn--labeled"
+                onClick={() => sessionFileRef.current?.click()}
+                title={t('cc.sessionUpload', 'Upload a saved operations session (.zip) — restores your files, operations, params & presets')}
+                aria-label={t('cc.sessionUploadAria', 'Upload operations session (.zip)')}
+              >
+                <Icon name="upload" size={15} /> {t('cc.opsBtn', 'Ops')}
+              </button>
+              <button
+                type="button"
+                className="cc-uploadrow-btn cc-uploadrow-btn--labeled"
+                onClick={() => fileRef.current?.click()}
+                title={t('cc.uploadModel', 'Upload a model file — 2D vector (DXF, EPS/AI) or 3D model (STL, OBJ, STEP)')}
+                aria-label={t('cc.uploadAria', 'Upload model file(s)')}
+              >
+                <Icon name="upload" size={16} /> {t('cc.modelBtn', 'Model')}
+              </button>
+            </span>
+            <input
+              ref={fileRef}
+              className="cc-load-input"
+              type="file"
+              multiple
+              accept=".stl,.obj,.step,.stp,.dxf,.eps,.ai,.cdr"
+              onChange={onFileChange}
+            />
+            <input
+              ref={sessionFileRef}
+              className="cc-load-input"
+              type="file"
+              accept=".zip"
+              onChange={onSessionFileChange}
+            />
+          </div>
+
+          {/* 3D: the single canonical models list, in its own card (per-model
+              visibility, select-to-edit, duplicate & remove). */}
+          {mode === '3d' && jobs.length > 0 && (
+            <section className="cc-section cc-span">
+              <div className="cc-section-body">
+                <ModelFilesList
+                  jobs={jobs}
+                  selectedId={selectedId}
+                  onSelect={selectJob}
+                  onToggleJob={(id, enabled) => updateJob(id, { enabled })}
+                  onDuplicateJob={(id) => {
+                    duplicateJob(id)
+                    const res = renest(bed.width, bed.depth)
+                    setNestWarn(res.warnings)
+                  }}
+                  onRemoveJob={(id, name) => {
+                    if (!window.confirm(t('cc.jobRemoveConfirm', 'Remove “{name}”?', { name }))) return
+                    removeJob(id)
+                    const res = renest(bed.width, bed.depth)
+                    setNestWarn(res.warnings)
+                  }}
+                  t={t}
+                />
                 <span className="cc-hint">
                   {t('cc.bedHint', 'Bed {w}×{d}mm — jobs auto-nest with a {m}mm gap.', {
                     w: bed.width,
@@ -1889,53 +3166,500 @@ export function CadCamPanel() {
                     m: carveGlobal.nestMargin,
                   })}
                 </span>
-              )}
+              </div>
+            </section>
+          )}
 
-              {importError && <div className="cc-error">{importError}</div>}
+          {/* 3D: per-surface preset assignment. Segment the SELECTED job's mesh
+              into flat/planar regions; click a region to select, pick a preset
+              per surface (mirrors the 2D loop table). Additive on top of the
+              whole-model relief carve. */}
+          {mode === '3d' && selectedJob && (surfaceRegionsByJob[selectedJob.id]?.length ?? 0) > 0 && (
+            <section className="cc-section cc-span cc-surfcard">
+              <h3>
+                <Layers className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                {t('cc.surfaces', 'Surfaces')} · <span className="cc-jobcard-name">{selectedJob.name}</span>
+              </h3>
+              <div className="cc-section-body">
+                <SurfaceViewer
+                  fileId={selectedJob.id}
+                  mesh={selectedJob.mesh}
+                  regions={surfaceRegionsByJob[selectedJob.id] ?? []}
+                  opMap={featureOpMap}
+                  presets={surfacePalette}
+                  onQuickAdd={addLoopOp}
+                  selected={selectedFeature}
+                  setSelected={setSelectedFeature}
+                  t={t}
+                />
+                <table className="cc-looptable">
+                  <thead>
+                    <tr>
+                      <th>{t('cc.surface', 'Surface')}</th>
+                      <th>{t('cc.preset', 'Preset')}</th>
+                      <th aria-label={t('cc.add', 'Add')} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(surfaceRegionsByJob[selectedJob.id] ?? []).map((region) => {
+                      const key = surfaceKey(selectedJob.id, region.id)
+                      const ops = featureOpMap[key]
+                      const sel = surfacePalette.find((p) => p.id === (surfacePresetSel[key] ?? surfacePalette[0]?.id))
+                        ?? surfacePalette[0]
+                      const isSel = key === selectedFeature
+                      return (
+                        <tr
+                          key={region.id}
+                          className={isSel ? 'is-sel' : ''}
+                          onClick={() => setSelectedFeature(isSel ? null : key)}
+                        >
+                          <td>
+                            <span className="cc-loop-name">
+                              {t('cc.surfaceN', 'Surface {n}', { n: region.id + 1 })}
+                              {' · '}
+                              {region.planar
+                                ? t('cc.flatAtZ', 'flat @ Z{z}', { z: region.z.toFixed(1) })
+                                : t('cc.slopedLbl', 'sloped')}
+                            </span>
+                            {ops && ops.length > 0 && (
+                              <span className="cc-loop-count">{ops.length}</span>
+                            )}
+                          </td>
+                          <td>
+                            <select
+                              value={surfacePresetSel[key] ?? surfacePalette[0]?.id ?? ''}
+                              onChange={(e) =>
+                                setSurfacePresetSel((m) => ({ ...m, [key]: e.target.value }))
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {surfacePalette.map((p) => {
+                                const incompatible = p.op !== 'Engrave' && !region.planar
+                                return (
+                                  <option key={p.id} value={p.id} disabled={incompatible}>
+                                    {p.name}
+                                    {incompatible ? ` (${t('cc.needsFlat', 'needs flat')})` : ''}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="cc-loop-add"
+                              disabled={!sel || (sel.op !== 'Engrave' && !region.planar)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (sel) addLoopOp(key, sel)
+                              }}
+                              title={t('cc.addOpToSurface', 'Add this preset to the surface')}
+                              aria-label={t('cc.addOpToSurface', 'Add this preset to the surface')}
+                            >
+                              <Plus size={15} strokeWidth={2.2} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
-              {importing && (
-                <div className="cc-hint">
-                  {t('cc.importingStep', 'Importing STEP model… (tessellating B-rep — this may take a moment)')}
-                </div>
-              )}
-              {mode === 'cdr' && (
-                <div className="cc-error">
-                  {t(
-                    'cc.cdrUnsupported',
-                    'CorelDRAW .cdr is a proprietary binary format with no reliable in-browser parser. In CorelDRAW choose File → Export → DXF (or SVG/EPS) and import that — karmyogi fully supports DXF, including splines & ellipses.'
-                  )}
-                </div>
-              )}
+          {/* 2D: ONE expandable CARD per uploaded file (U5/U6/U8/U9/U10). The
+              card TITLE is the disclosure → expands to the preview + this file's
+              loops→preset→+ table. Close ✕ sits in the card's upper-right. */}
+          {mode === '2d' &&
+            fileGeos.map((g) => (
+              <ModelFileCard
+                key={g.fileId}
+                fileId={g.fileId}
+                name={g.name}
+                polylines={g.polylines}
+                features={featuresByFile[g.fileId] ?? []}
+                expanded={expandedFiles[g.fileId] ?? false}
+                onToggle={() => toggleFileExpanded(g.fileId)}
+                onDuplicate={() => duplicateFile(g.fileId)}
+                onRemove={() => removeFile(g.fileId)}
+                opMap={featureOpMap}
+                presets={presetPalette}
+                onQuickAdd={addLoopOp}
+                loopPresetSel={loopPresetSel}
+                setLoopPresetSel={setLoopPresetSel}
+                selected={selectedFeature}
+                setSelected={setSelectedFeature}
+                t={t}
+              />
+            ))}
 
-              {/* 2D stats */}
-              {mode === '2d' && hasGeometry && (
-                <div className="cc-import-stats">
-                  {drawing && (
-                    <span className="cc-stat" title={t('cc.entitiesTip', 'Raw DXF entities')}>
-                      {t('cc.entities', 'Entities')} <b>{drawing.size()}</b>
-                    </span>
-                  )}
-                  <span className="cc-stat" title={t('cc.polylinesTip', 'Flattened polylines (curves → segments)')}>
-                    {t('cc.polylines', 'Polylines')} <b>{polylines.length}</b>
-                  </span>
-                  <span className="cc-stat" title={t('cc.closedTip', 'Closed loops — needed for Profile / Pocket')}>
-                    {t('cc.closed', 'Closed')} <b>{closedCount}</b>
-                  </span>
-                </div>
-              )}
-
-              {warnings.length > 0 && (
-                <ul className="cc-warnings">
-                  {warnings.slice(0, 20).map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                  {warnings.length > 20 && (
-                    <li>… {t('cc.moreWarnings', '{n} more', { n: warnings.length - 20 })}</li>
-                  )}
-                </ul>
+          {/* 3D multi-model empty-state + import status / errors / warnings. */}
+          {mode === '3d' && jobs.length === 0 && (
+            <CamEmpty
+              icon={<Icon name="upload" size={22} />}
+              title={t('cc.empty.title', 'No models yet')}
+              hint={t('cc.empty.hint', 'Import a model to add a job — import again to nest more side-by-side.')}
+              action={
+                <button type="button" className="cam-primary" onClick={() => fileRef.current?.click()}>
+                  <Icon name="upload" size={15} /> {t('cc.upload', 'Upload')}
+                </button>
+              }
+            />
+          )}
+          {mode === '3d' && nestWarn.length > 0 && (
+            <ul className="cc-warnings">
+              {nestWarn.slice(0, 4).map((w, i) => (
+                <li key={i}>
+                  <Icon name="warning" size={12} /> {w}
+                </li>
+              ))}
+            </ul>
+          )}
+          {importError && <div className="cc-error">{importError}</div>}
+          {sessionError && <div className="cc-error">{sessionError}</div>}
+          {/* Staged LOAD status: file name + size + reading/parsing stage with a
+              determinate (reading) or indeterminate (parsing) progress bar. Shown
+              the instant a model is picked so a slow read never looks frozen. */}
+          {importStatus && (
+            <div className="cc-loadstatus" role="status" aria-live="polite">
+              <div className="cc-loadstatus-row">
+                <span className="cc-loadstatus-name">{importStatus.label}</span>
+                <span className="cc-loadstatus-stage">{importStatus.stage}</span>
+              </div>
+              <div
+                className={'cc-loadbar' + (importStatus.frac === null ? ' is-indet' : '')}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={
+                  importStatus.frac === null ? undefined : Math.round(importStatus.frac * 100)
+                }
+              >
+                <span
+                  className="cc-loadbar-fill"
+                  style={
+                    importStatus.frac === null
+                      ? undefined
+                      : { width: `${Math.round(importStatus.frac * 100)}%` }
+                  }
+                />
+              </div>
+            </div>
+          )}
+          {/* 3D carve progress — ONLY when there's no active file-load status (a
+              standalone re-carve from a param/preset change). During a file load
+              the importStatus bar above already shows the carve %, so this avoids
+              rendering TWO progress bars at once. */}
+          {carveProgress !== null && !importStatus && (
+            <div className="cc-loadstatus" role="status" aria-live="polite">
+              <div className="cc-loadstatus-row">
+                <span className="cc-loadstatus-name">
+                  {t('cc.stageCarving', 'Generating toolpath…')}
+                </span>
+                <span className="cc-loadstatus-stage">{Math.round(carveProgress * 100)}%</span>
+              </div>
+              <div
+                className="cc-loadbar"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(carveProgress * 100)}
+              >
+                <span className="cc-loadbar-fill" style={{ width: `${Math.round(carveProgress * 100)}%` }} />
+              </div>
+            </div>
+          )}
+          {importing && (
+            <div className="cc-hint">
+              {t('cc.importingStep', 'Importing STEP model… (tessellating B-rep — this may take a moment)')}
+            </div>
+          )}
+          {mode === 'cdr' && (
+            <div className="cc-error">
+              {t(
+                'cc.cdrUnsupported',
+                'CorelDRAW .cdr is a proprietary binary format with no reliable in-browser parser. In CorelDRAW choose File → Export → DXF (or SVG/EPS) and import that — karmyogi fully supports DXF, including splines & ellipses.'
               )}
             </div>
-          </section>
+          )}
+          {warnings.length > 0 && (
+            <ul className="cc-warnings">
+              {warnings.slice(0, 20).map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+              {warnings.length > 20 && (
+                <li>… {t('cc.moreWarnings', '{n} more', { n: warnings.length - 20 })}</li>
+              )}
+            </ul>
+          )}
+
+          {/* ============ OPERATIONS LIST (R2/R4/U4) — every op across ALL loops
+                & files in added order, with edit / reorder / delete. Lives in the
+                TOP section (with the model cards), per request. ============ */}
+          {is2D && hasFeatureOps && (
+            <section className="cc-section cc-span">
+              <h3>
+                <Layers className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                {t('cc.operations', 'Operations')}
+                <span className="cc-h3-actions">
+                  <button
+                    type="button"
+                    className="cc-iconbtn cc-optimize"
+                    onClick={optimizeOps}
+                    disabled={opList.length < 2}
+                    title={t('cc.optimizeOps', 'Reorder for safe machining (inner loops first, cutout last)')}
+                    aria-label={t('cc.optimizeOps', 'Optimize machining order')}
+                  >
+                    <Wand2 size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-iconbtn danger"
+                    onClick={clearAllLoopOps}
+                    title={t('cc.clearOps', 'Clear all operations')}
+                    aria-label={t('cc.clearOps', 'Clear all operations')}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </span>
+              </h3>
+              <div className="cc-section-body">
+                <ul className="cc-oplist">
+                  {opList.map((entry, i) => (
+                    <li
+                      key={entry.op.id}
+                      className={
+                        'cc-oprow' +
+                        (hoveredOpId === entry.op.id ? ' cc-oprow--hover' : '')
+                      }
+                      onMouseEnter={() => setHoveredOp(entry.op.id)}
+                      onMouseLeave={() => setHoveredOp(null)}
+                      onTouchStart={() => setHoveredOp(entry.op.id)}
+                    >
+                      <span className="cc-op-sw" style={{ background: entry.op.color }} />
+                      <span className="cc-op-info">
+                        <span className="cc-op-name">
+                          {entry.op.label}
+                          {entry.op.op === 'Profile' && entry.op.side ? ` · ${entry.op.side}` : ''}
+                        </span>
+                        <span className="cc-op-loop">
+                          {files.length > 1 && entry.fileName ? `${entry.fileName} · ` : ''}
+                          {loopLabel(entry.loopIndex, entry.closed)}
+                        </span>
+                      </span>
+                      <span className="cc-op-actions">
+                        <button
+                          type="button"
+                          className="cc-op-btn"
+                          onClick={() => {
+                            // Load this op's source preset into the bottom sections
+                            // for tuning (presetId is `carve-<slotIndex>`).
+                            const slot = Number(entry.op.presetId.replace(/^carve-/, ''))
+                            if (Number.isInteger(slot)) presets.load(slot)
+                            setSelectedFeature(featureKey(entry.fileId, entry.loopIndex))
+                          }}
+                          title={t('cc.editOp', 'Edit this operation’s preset below')}
+                          aria-label={t('cc.editOp', 'Edit this operation’s preset')}
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="cc-op-btn"
+                          disabled={i === 0}
+                          onClick={() => moveLoopOp(entry.op.id, -1)}
+                          title={t('fv.up', 'Move earlier')}
+                          aria-label={t('fv.up', 'Move earlier')}
+                        >
+                          <ChevronUp size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="cc-op-btn"
+                          disabled={i === opList.length - 1}
+                          onClick={() => moveLoopOp(entry.op.id, 1)}
+                          title={t('fv.down', 'Move later')}
+                          aria-label={t('fv.down', 'Move later')}
+                        >
+                          <ChevronDown size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="cc-op-btn danger"
+                          onClick={() => removeLoopOp(entry.op.id)}
+                          title={t('fv.remove', 'Remove this operation')}
+                          aria-label={t('fv.remove', 'Remove this operation')}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          )}
+
+          {/* SURFACE OPERATIONS LIST (3D) — every per-surface op across all jobs
+              in added order, with edit / reorder / delete. Mirrors the 2D ops
+              list; cross-highlights via the same hover store + op ids. */}
+          {mode === '3d' && hasSurfaceOps && (
+            <section className="cc-section cc-span">
+              <h3>
+                <Layers className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                {t('cc.surfaceOps', 'Surface operations')}
+                <span className="cc-h3-actions">
+                  <button
+                    type="button"
+                    className="cc-iconbtn cc-optimize"
+                    onClick={optimizeSurfaceOps}
+                    disabled={surfaceOpList.length < 2}
+                    title={t('cc.optimizeOps', 'Reorder for safe machining (inner loops first, cutout last)')}
+                    aria-label={t('cc.optimizeOps', 'Optimize machining order')}
+                  >
+                    <Wand2 size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="cc-iconbtn danger"
+                    onClick={clearAllLoopOps}
+                    title={t('cc.clearOps', 'Clear all operations')}
+                    aria-label={t('cc.clearOps', 'Clear all operations')}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </span>
+              </h3>
+              <div className="cc-section-body">
+                <ul className="cc-oplist">
+                  {surfaceOpList.map((entry, i) => (
+                    <li
+                      key={entry.op.id}
+                      className={'cc-oprow' + (hoveredOpId === entry.op.id ? ' cc-oprow--hover' : '')}
+                      onMouseEnter={() => setHoveredOp(entry.op.id)}
+                      onMouseLeave={() => setHoveredOp(null)}
+                      onTouchStart={() => setHoveredOp(entry.op.id)}
+                    >
+                      <span className="cc-op-sw" style={{ background: entry.op.color }} />
+                      <span className="cc-op-info">
+                        <span className="cc-op-name">
+                          {entry.op.label}
+                          {entry.op.op === 'Profile' && entry.op.side ? ` · ${entry.op.side}` : ''}
+                        </span>
+                        <span className="cc-op-loop">
+                          {jobs.length > 1 && entry.jobName ? `${entry.jobName} · ` : ''}
+                          {t('cc.surfaceN', 'Surface {n}', { n: entry.regionId + 1 })}
+                        </span>
+                      </span>
+                      <span className="cc-op-actions">
+                        <button
+                          type="button"
+                          className="cc-op-btn"
+                          disabled={i === 0}
+                          onClick={() => moveLoopOp(entry.op.id, -1)}
+                          title={t('fv.up', 'Move earlier')}
+                          aria-label={t('fv.up', 'Move earlier')}
+                        >
+                          <ChevronUp size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="cc-op-btn"
+                          disabled={i === surfaceOpList.length - 1}
+                          onClick={() => moveLoopOp(entry.op.id, 1)}
+                          title={t('fv.down', 'Move later')}
+                          aria-label={t('fv.down', 'Move later')}
+                        >
+                          <ChevronDown size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="cc-op-btn danger"
+                          onClick={() => removeLoopOp(entry.op.id)}
+                          title={t('fv.remove', 'Remove this operation')}
+                          aria-label={t('fv.remove', 'Remove this operation')}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          )}
+          </div>{/* /cc-cards (top) */}
+        </div>{/* /cc-split-top */}
+
+        {/* ───── draggable horizontal separator between the two sections ── */}
+        <div
+          className="cc-split-handle"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t('cc.resizeSections', 'Drag to resize the two sections')}
+          onPointerDown={onSplitPointerDown}
+          title={t('cc.resizeSections', 'Drag to resize the two sections')}
+        >
+          <span className="cc-split-grip" aria-hidden />
+        </div>
+
+        {/* ─────────── BOTTOM: preset rail + params + preset editor ─── */}
+        {/* The preset color rail is sticky on the LEFT of THIS (bottom) section
+            only — the top section is purely for files/models/operations. The
+            rail sits in .cc-split-bottom (position:relative, non-scrolling) while
+            .cc-cards scrolls, so the rail never scrolls away or bleeds into the
+            top section. */}
+        <div className="cc-split-bottom">
+          {/* The preset color rail shows in BOTH modes now. A 2D/3D toggle on
+              top of it switches which preset SET the rail drives: the 2D feature
+              presets or the 3D relief-carve presets. */}
+          <div className="cc-presets-railwrap">
+            <div
+              className="cc-presetmode"
+              role="radiogroup"
+              aria-label={t('cc.presetMode.aria', '2D or 3D preset set')}
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={presetMode === '2d'}
+                className={'cc-presetmode-opt' + (presetMode === '2d' ? ' is-on' : '')}
+                onClick={() => setPresetMode('2d')}
+                title={t('cc.presetMode.2d', 'Show 2D feature presets')}
+              >
+                2D
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={presetMode === '3d'}
+                className={'cc-presetmode-opt' + (presetMode === '3d' ? ' is-on' : '')}
+                onClick={() => setPresetMode('3d')}
+                title={t('cc.presetMode.3d', 'Show 3D relief-carve presets')}
+              >
+                3D
+              </button>
+              <span
+                className={'cc-presetmode-thumb' + (presetMode === '3d' ? ' is-3d' : '')}
+                aria-hidden="true"
+              />
+            </div>
+            <PresetRail
+              slots={activePresets.slots}
+              selected={activePresets.selected}
+              onLoad={activePresets.load}
+              onSelect={activePresets.select}
+              ariaLabel={
+                presetMode === '3d'
+                  ? t('cc.presets3d.aria', '3D carving setting presets')
+                  : t('cc.presets.aria', 'Carving setting presets')
+              }
+            />
+          </div>
+          <div className="cc-cards">
+
+          {/* OPERATIONS LIST moved to the TOP section (see /cc-split-top). */}
 
           {/* ============ 2 · BIT + MATERIAL (the only choices a beginner
                 makes — everything else is auto-computed below) ============ */}
@@ -2029,12 +3753,22 @@ export function CadCamPanel() {
           {/* ================= 2D CONTROLS ================= */}
           {mode === '2d' && (
             <>
-              <section className="cc-section">
+              <section className={'cc-section' + (hasFeatureOps ? ' cc-op-overridden' : '')}>
                 <h3>
                   <Layers className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
                   {t('cc.operation', 'Operation')}
+                  {hasFeatureOps && (
+                    <span className="cc-op-badge">
+                      {t('cc.perFeatureActive', 'Per-feature active')}
+                    </span>
+                  )}
                 </h3>
                 <div className="cc-section-body">
+                  {hasFeatureOps && (
+                    <span className="cc-hint">
+                      {t('cc.perFeatureNote', 'Per-feature operations (in the Features panel above) are driving the toolpath. Clear them to use this whole-file operation instead.')}
+                    </span>
+                  )}
                   <div className="cc-opseg" role="group" aria-label={t('cc.operation', 'Operation')}>
                     {(['Engrave', 'Profile', 'Pocket', 'VCarve'] as Op[]).map((o) => (
                       <button
@@ -2068,7 +3802,7 @@ export function CadCamPanel() {
                     </div>
                   )}
                   <span className="cc-hint">{opHelp(t, op)}</span>
-                  {op !== 'Engrave' && closedCount === 0 && hasGeometry && (
+                  {!hasFeatureOps && op !== 'Engrave' && closedCount === 0 && hasGeometry && (
                     <span className="cc-warn-line">
                       ⚠ {t('cc.needClosed', '{op} needs a closed contour — none found in this file.', { op: opLabelText(t, op) })}
                     </span>
@@ -2215,6 +3949,7 @@ export function CadCamPanel() {
                       min={-bedW}
                       max={bedW}
                       step={1}
+                      title={t('cc.offsetXTip', 'Shift the drawing left/right on the bed (mm). 0 = centred on the work origin.')}
                       {...slider2d('offsetX')}
                     />
                     <SliderField
@@ -2225,6 +3960,7 @@ export function CadCamPanel() {
                       min={-bedH}
                       max={bedH}
                       step={1}
+                      title={t('cc.offsetYTip', 'Shift the drawing forward/back on the bed (mm). 0 = centred on the work origin.')}
                       {...slider2d('offsetY')}
                     />
                     <div className="cc-linkpair">
@@ -2329,6 +4065,7 @@ export function CadCamPanel() {
                         max={25}
                         step={0.1}
                         hint={<>{t('cc.fromBit', 'from bit')}: {bit.diameter}</>}
+                        title={t('cc.toolDiaTip', 'Cutting tool diameter (mm). Drives profile/pocket offsets — defaults to the chosen bit’s width.')}
                         {...slider2d('diameter')}
                       />
                     )}
@@ -2341,6 +4078,7 @@ export function CadCamPanel() {
                         min={0}
                         max={60}
                         step={0.1}
+                        title={t('cc.cutDepthTip', 'Total depth below the stock surface to cut (mm), reached over one or more passes.')}
                         {...slider2d('cutDepth')}
                       />
                     )}
@@ -2353,6 +4091,7 @@ export function CadCamPanel() {
                       max={10}
                       step={0.05}
                       hint={<>{t('common.recommended', 'Recommended')}: {rec.stepdown}</>}
+                      title={t('cc.stepdownTip', 'How much deeper each pass goes (mm). Smaller = gentler on the bit; the cut is split into passes until it reaches Cut depth.')}
                       {...slider2d('stepdown')}
                     />
                     <SliderField
@@ -2374,6 +4113,7 @@ export function CadCamPanel() {
                       min={0}
                       max={50}
                       step={0.5}
+                      title={t('cc.safeZTip', 'Retract height (mm above the surface) the tool lifts to before any rapid travel — keeps it clear of clamps and the work.')}
                       {...slider2d('safeZ')}
                     />
                     {op === 'Pocket' && (
@@ -2432,6 +4172,7 @@ export function CadCamPanel() {
                         max={30000}
                         step={500}
                         hint={<>{t('common.recommended', 'Recommended')}: {rec.spindleRPM}</>}
+                        title={t('cc.spindleRPMTip', 'Spindle speed (M3 Sxxxx) emitted at the start of the program. Set per material + bit; 0 leaves the spindle off.')}
                         {...slider2d('spindleRPM')}
                       />
                     )}
@@ -2445,6 +4186,7 @@ export function CadCamPanel() {
                           min={0}
                           max={50}
                           step={0.5}
+                          title={t('cc.penUpZTip', 'Z the pen lifts to for travel moves (no drawing) — high enough to clear the paper.')}
                           {...slider2d('penUpZ')}
                         />
                         <SliderField
@@ -2455,6 +4197,7 @@ export function CadCamPanel() {
                           min={-20}
                           max={20}
                           step={0.1}
+                          title={t('cc.penDownZTip', 'Z the pen drops to while drawing — just touching the paper (slightly negative presses harder).')}
                           {...slider2d('penDownZ')}
                         />
                       </>
@@ -2490,6 +4233,7 @@ export function CadCamPanel() {
                         max={6000}
                         step={50}
                         hint={<>{t('common.recommended', 'Recommended')}: {rec.feedXY}</>}
+                        title={t('cc.feedXYTip', 'Horizontal cutting feed rate (mm/min) for G1 moves in the material.')}
                         {...slider2d('feedXY')}
                       />
                       <SliderField
@@ -2501,6 +4245,7 @@ export function CadCamPanel() {
                         max={3000}
                         step={10}
                         hint={<>{t('common.recommended', 'Recommended')}: {rec.feedZ}</>}
+                        title={t('cc.feedZTip', 'Vertical plunge feed rate (mm/min) as the tool drives down into the stock — usually slower than Feed XY.')}
                         {...slider2d('feedZ')}
                       />
                       <SliderField
@@ -2528,21 +4273,32 @@ export function CadCamPanel() {
             </>
           )}
 
+          {/* The preset list moved OUT of the bottom card stack: the colour-slot
+              rail is the sticky LEFT bar and the name/save/delete/load controls
+              live in the full-width footer save-bar (see below) — exactly like
+              the Soldering / Writing tabs. The bottom param sections above ARE
+              the active preset's params. */}
+
           {/* ---- output / live preview (streaming lives in the Program tab) ---- */}
           {/* The Output section was removed: regenerate is automatic (live), the
-              Frame button + G-code copy/download moved to the Program tab, and the
-              carve-settings Save/Load moved into the preset bar below. Only the
-              carve-settings load error surfaces here. */}
+              Frame button + G-code copy/download moved to the Program tab. Only
+              the carve-settings load error surfaces here. */}
           {loadError && <div className="cc-error cc-loaderr">{loadError}</div>}
-        </div>
-      </div>
+          </div>{/* /cc-cards (bottom) */}
+        </div>{/* /cc-split-bottom */}
+      </div>{/* /cc-split */}
+      {/* ── Full-width FOOTER save-bar ──────────────────────────────────────
+          The shared preset save-bar (name + colour slot + save + delete) binds
+          to the ACTIVE preset set (2D feature presets or the 3D relief presets,
+          per the rail's 2D/3D switch), with the carve-settings document Save /
+          Load (download / upload) in its `extra` slot. */}
       <PresetSaveBar
-        slots={presets.slots}
-        selected={presets.selected}
-        onSelect={presets.select}
-        onSave={presets.save}
-        onClear={presets.clear}
-        onRename={presets.rename}
+        slots={activePresets.slots}
+        selected={activePresets.selected}
+        onSelect={activePresets.select}
+        onSave={activePresets.save}
+        onClear={activePresets.clear}
+        onRename={activePresets.rename}
         extra={
           <SaveLoadButtons
             value={carveDoc}
@@ -2859,40 +4615,29 @@ function fileExt(name: string): string {
 }
 
 /**
- * The list of uploaded model files shown directly in the Model section. For 3D
- * it lists every imported job (click to select for placement, ✕ to remove); for
- * 2D it shows the single loaded vector file. Empty → a friendly hint.
+ * The 3D models list shown directly in the Model section: every imported job
+ * (eye = visibility, click name = select for placement, duplicate, ✕ remove).
+ * 2D files render as expandable {@link ModelFileCard}s instead.
  */
 function ModelFilesList({
-  mode,
   jobs,
   selectedId,
-  fileName,
   onSelect,
   onToggleJob,
   onDuplicateJob,
   onRemoveJob,
-  onRemove2D,
   t,
 }: {
-  mode: Mode
   jobs: CarveJob[]
   selectedId: string | null
-  fileName: string | null
   onSelect: (id: string) => void
   onToggleJob: (id: string, enabled: boolean) => void
   onDuplicateJob: (id: string) => void
   onRemoveJob: (id: string, name: string) => void
-  onRemove2D: () => void
   t: ReturnType<typeof useT>
 }) {
-  const has3D = mode === '3d' && jobs.length > 0
-  const has2D = (mode === '2d' || mode === 'cdr' || mode === 'step') && !!fileName
-  // Nothing uploaded yet → render nothing (no placeholder text).
-  if (!has3D && !has2D) return null
-  // 3D — the single canonical models list: per-model visibility (eye),
-  // select-to-edit, duplicate & remove. (Merged from the old "Jobs" section.)
-  if (has3D) {
+  if (jobs.length === 0) return null
+  {
     return (
       <ul className="cc-joblist">
         {jobs.map((job) => (
@@ -2945,26 +4690,188 @@ function ModelFilesList({
       </ul>
     )
   }
+}
+
+// ============================================================================
+// 2D model file CARD (U5/U6/U8/U9/U10)
+// ----------------------------------------------------------------------------
+// One uploaded vector file = one card. The TITLE is an expand/collapse
+// disclosure (caret + ext badge + file name); the REMOVE ✕ sits in the
+// card's upper-right. Expanding reveals the file's PREVIEW (FeatureViewer loop
+// picker) and, below it, this file's LOOPS table (loop · preset · +).
+// ============================================================================
+function ModelFileCard({
+  fileId,
+  name,
+  polylines,
+  features,
+  expanded,
+  onToggle,
+  onDuplicate,
+  onRemove,
+  opMap,
+  presets,
+  onQuickAdd,
+  loopPresetSel,
+  setLoopPresetSel,
+  selected,
+  setSelected,
+  t,
+}: {
+  fileId: string
+  name: string
+  polylines: Polyline[]
+  features: DrawingFeature[]
+  expanded: boolean
+  onToggle: () => void
+  onDuplicate: () => void
+  onRemove: () => void
+  opMap: FeatureOpMap
+  presets: FeaturePreset[]
+  onQuickAdd: (key: string, preset: FeaturePreset) => void
+  loopPresetSel: Record<string, string>
+  setLoopPresetSel: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  selected: string | null
+  setSelected: (key: string | null) => void
+  t: ReturnType<typeof useT>
+}) {
+  const totalOps = features.reduce(
+    (n, f) => n + (opMap[featureKey(fileId, f.index)]?.length ?? 0),
+    0,
+  )
   return (
-    <ul className="cc-modelfiles">
-      {has2D && fileName && (
-        <li className="cc-modelfile is-sel">
-          <span className="cc-modelfile-pick" title={fileName}>
-            <span className="cc-modelfile-ext" aria-hidden="true">{fileExt(fileName)}</span>
-            <span className="cc-modelfile-name">{fileName}</span>
+    <section className={'cc-section cc-span cc-mfcard' + (expanded ? ' is-open' : '')}>
+      <h3 className="cc-mfcard-head">
+        <button
+          type="button"
+          className="cc-mfcard-toggle"
+          aria-expanded={expanded}
+          onClick={onToggle}
+          title={t('cc.togglePreview', 'Show / hide this file’s preview & loops')}
+        >
+          <span className={'cc-mfcard-caret' + (expanded ? ' open' : '')} aria-hidden>
+            ▸
           </span>
-          <button
-            type="button"
-            className="cc-modelfile-x"
-            onClick={onRemove2D}
-            title={t('cc.removeFile', 'Remove this file')}
-            aria-label={t('cc.removeFileAria', 'Remove {name}', { name: fileName })}
-          >
-            ✕
-          </button>
-        </li>
+          <span className="cc-mfcard-ext" aria-hidden="true">{fileExt(name)}</span>
+          <span className="cc-mfcard-name" title={name}>{name}</span>
+          {totalOps > 0 && <span className="cc-loop-badge">{totalOps}</span>}
+        </button>
+        <button
+          type="button"
+          className="cc-mfcard-dup"
+          onClick={onDuplicate}
+          title={t('cc.dupFile', 'Duplicate this file (run different operations on a copy)')}
+          aria-label={t('cc.dupFileAria', 'Duplicate {name}', { name })}
+        >
+          <Icon name="duplicate" size={14} />
+        </button>
+        <button
+          type="button"
+          className="cc-mfcard-x"
+          onClick={onRemove}
+          title={t('cc.removeFile', 'Remove this file')}
+          aria-label={t('cc.removeFileAria', 'Remove {name}', { name })}
+        >
+          ✕
+        </button>
+      </h3>
+      {expanded && (
+        <div className="cc-section-body">
+          {/* Preview: pick a loop (right-click to quick-add a preset). */}
+          <FeatureViewer
+            fileId={fileId}
+            polylines={polylines}
+            features={features}
+            opMap={opMap}
+            presets={presets}
+            onQuickAdd={onQuickAdd}
+            selected={selected}
+            setSelected={setSelected}
+            t={t}
+          />
+          {/* This file's loops table (loop · preset · +). */}
+          {features.length > 0 && (
+            <table className="cc-looptable">
+              <thead>
+                <tr>
+                  <th>{t('cc.loop', 'Loop')}</th>
+                  <th>{t('cc.preset', 'Preset')}</th>
+                  <th aria-label={t('cc.add', 'Add')}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {features.map((f) => {
+                  const key = featureKey(fileId, f.index)
+                  const ops = opMap[key]
+                  const opCount = ops?.length ?? 0
+                  const selId = loopPresetSel[key] ?? presets[0]?.id ?? ''
+                  const chosen = presets.find((p) => p.id === selId) ?? presets[0]
+                  const incompatible =
+                    chosen != null &&
+                    chosen.op !== 'Engrave' &&
+                    chosen.side !== ProfileSide.On &&
+                    !f.closed
+                  return (
+                    <tr
+                      key={f.index}
+                      className={key === selected ? 'is-sel' : undefined}
+                      onClick={() => setSelected(key === selected ? null : key)}
+                    >
+                      <td>
+                        <span
+                          className="cc-loop-dot"
+                          style={{ background: opCount ? ops![0].color : f.color }}
+                        />
+                        {loopLabel(f.index, f.closed)}
+                        {opCount > 0 && <span className="cc-loop-badge">{opCount}</span>}
+                      </td>
+                      <td>
+                        <select
+                          className="cc-prim-select"
+                          value={selId}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) =>
+                            setLoopPresetSel((m) => ({ ...m, [key]: e.target.value }))
+                          }
+                          aria-label={t('cc.preset', 'Preset')}
+                        >
+                          {presets.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="cc-loop-add"
+                          disabled={!chosen || incompatible}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (chosen) onQuickAdd(key, chosen)
+                          }}
+                          title={
+                            incompatible
+                              ? t('fv.needClosed', '{name} needs a closed loop', {
+                                  name: chosen?.name ?? '',
+                                })
+                              : t('cc.addOp', 'Add this preset as an operation on this loop')
+                          }
+                          aria-label={t('cc.addOp', 'Add operation')}
+                        >
+                          <Plus size={15} strokeWidth={2.2} />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
-    </ul>
+    </section>
   )
 }
 

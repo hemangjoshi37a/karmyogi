@@ -94,7 +94,7 @@
   font-size: var(--fs-ctl);
   font-weight: 600;
   cursor: pointer;
-  transition: filter 0.12s ease, opacity 0.12s ease;
+  transition: filter var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
 }
 .cam-primary:hover:not(:disabled) {
   filter: brightness(1.08);

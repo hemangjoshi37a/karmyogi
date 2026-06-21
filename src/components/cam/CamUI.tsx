@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useT } from '../../i18n'
 import '../../styles/cam.css'
+import '../../styles/ui-kit.css'
 
 /**
  * Shared CAM-panel UI primitives — one consistent look across every workbench
@@ -77,6 +78,70 @@ export function CamEmpty({
       <span className="cam-empty-title">{title}</span>
       {hint && <span className="cam-empty-hint">{hint}</span>}
       {action && <span className="cam-empty-action">{action}</span>}
+    </div>
+  )
+}
+
+/**
+ * In-flight / busy state: a small accent spinner and a one-line label, for work
+ * like a DXF/Gerber parse, a lens solve, or a stream start. The container is
+ * marked `aria-busy` so assistive tech announces the wait. Mirrors the
+ * <CamEmpty> rhythm so static-empty and busy states read as one kit.
+ */
+export function CamBusy({ label }: { label?: ReactNode }) {
+  const t = useT()
+  const text = label ?? t('cam.busy.label', 'Working…')
+  return (
+    <div className="cam-busy" aria-busy="true" role="status" aria-live="polite">
+      <span className="cam-busy-spinner" aria-hidden="true" />
+      <span className="cam-busy-label">{text}</span>
+    </div>
+  )
+}
+
+/**
+ * Error state: a <CamEmpty> variant with a danger-tinted glyph, a message, and
+ * an optional retry CTA. Use for a failed parse, a dropped serial connection
+ * mid-stream, or a lost controller — anywhere a step failed and the user can
+ * try again.
+ */
+export function CamError({
+  icon,
+  title,
+  message,
+  onRetry,
+  retryLabel,
+  action,
+}: {
+  /** Leading danger glyph (optional — falls back to "!"). */
+  icon?: ReactNode
+  title: string
+  /** One-line explanation of what failed. */
+  message?: string
+  /** When provided, renders a built-in retry button wired to this handler. */
+  onRetry?: () => void
+  /** Label for the built-in retry button (default localized "Retry"). */
+  retryLabel?: string
+  /** A fully custom CTA, used instead of the built-in retry button. */
+  action?: ReactNode
+}) {
+  const t = useT()
+  return (
+    <div className="cam-empty cam-error" role="alert">
+      <span className="cam-empty-ico" aria-hidden="true">
+        {icon ?? '!'}
+      </span>
+      <span className="cam-empty-title">{title}</span>
+      {message && <span className="cam-empty-hint">{message}</span>}
+      {action ? (
+        <span className="cam-empty-action cam-error-retry">{action}</span>
+      ) : onRetry ? (
+        <span className="cam-empty-action cam-error-retry">
+          <button type="button" onClick={onRetry}>
+            {retryLabel ?? t('cam.error.retry', 'Retry')}
+          </button>
+        </span>
+      ) : null}
     </div>
   )
 }

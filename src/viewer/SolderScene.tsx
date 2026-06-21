@@ -28,6 +28,7 @@ export function SolderScene({ dark }: SolderSceneProps) {
   const points = useSolderViz((s) => s.points)
   const selected = useSolderViz((s) => s.selected)
   const fromDrill = useSolderViz((s) => s.fromDrill)
+  const detected = useSolderViz((s) => s.detected)
   // The soldering section's placement (the gizmo edits it). We apply the SAME
   // transform to the board so it tracks the toolpath when the job is moved /
   // rotated / scaled. (Updates on gizmo release — the live drag previews the
@@ -107,11 +108,47 @@ export function SolderScene({ dark }: SolderSceneProps) {
     g.matrixWorldNeedsUpdate = true
   }, [placeMatrix])
 
-  if (!board || points.length === 0) return null
+  // Camera-detected candidate pads: faint ＋ ring markers on the bed (z just above
+  // the surface) so the operator sees where the vision detector found pads BEFORE
+  // adding them as real solder points. Drawn OUTSIDE the placement group (they are
+  // raw bed-mm detections, not part of the placed job) and shown even when there
+  // are no solder points yet. Z comes from the Z-datum, so these sit at the work
+  // surface (≈0).
+  const detColor = dark ? '#a78bfa' : '#7c3aed' // violet — distinct from copper/cyan
+  const detMarkers =
+    detected.length > 0 ? (
+      <group>
+        {detected.map((d, i) => {
+          const r = d.rMm > 0.05 ? Math.min(Math.max(d.rMm, 0.5), 4) : 1
+          return (
+            <group key={`det-${i}`} position={[d.x, d.y, 0.12]}>
+              {/* Ring around the detected pad. */}
+              <mesh rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[r, r * 0.16, 8, 24]} />
+                <meshStandardMaterial color={detColor} emissive={detColor} emissiveIntensity={0.5} />
+              </mesh>
+              {/* A small ＋ cross at the centre (two thin bars). */}
+              <mesh>
+                <boxGeometry args={[r * 1.5, r * 0.22, 0.05]} />
+                <meshStandardMaterial color={detColor} emissive={detColor} emissiveIntensity={0.6} />
+              </mesh>
+              <mesh>
+                <boxGeometry args={[r * 0.22, r * 1.5, 0.05]} />
+                <meshStandardMaterial color={detColor} emissive={detColor} emissiveIntensity={0.6} />
+              </mesh>
+            </group>
+          )
+        })}
+      </group>
+    ) : null
+
+  if (!board || points.length === 0) return detMarkers
 
   const sel = selected >= 0 && selected < points.length ? points[selected] : null
 
   return (
+    <>
+      {detMarkers}
     <group ref={transformRef}>
       {/* ---- Board: an FR-4 substrate (slightly larger → a thin tan edge rim)
           with a green soldermask layer on top whose face sits at Z=0 (the work
@@ -214,5 +251,6 @@ export function SolderScene({ dark }: SolderSceneProps) {
         </group>
       )}
     </group>
+    </>
   )
 }

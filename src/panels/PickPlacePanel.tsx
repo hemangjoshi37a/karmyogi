@@ -34,7 +34,7 @@ import {
   type PnpOp,
   type PnpParams,
 } from '../core/pickPlace'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamEmpty, CamStatus } from '../components/cam/CamUI'
 import '../styles/pickplace.css'
 import '../styles/cam.css'
 
@@ -330,7 +330,7 @@ export function PickPlacePanel() {
   )
 
   const [selected, setSelected] = useState(-1)
-  const [showSettings, setShowSettings] = useState(false)
+  const [showSettings, setShowSettings] = usePersistentState<boolean>('karmyogi.pnp.showSettings', false)
   const [loadError, setLoadError] = useState('')
 
   const labels = headLabels(params.headType, t)
@@ -596,41 +596,35 @@ export function PickPlacePanel() {
           </div>
         </header>
 
-        {/* Live status strip: op/line counts · connection · Visualizer sync. */}
+        {/* Live status strip: op/line counts · connection · program sync.
+            Uses the shared <CamStatus> kit so it reads identically to every tab. */}
         <div className="pp-status">
-          <span className="pp-status-pill">
-            <b>{ops.length}</b>{' '}
-            {ops.length === 1 ? t('pnp.status.op', 'op') : t('pnp.status.ops', 'ops')}
-          </span>
-          <span className="pp-status-sep" aria-hidden="true">·</span>
-          <span className="pp-status-pill">
-            <b>{effectiveLines}</b> {t('pnp.status.lines', 'lines')}
-          </span>
-          <span className="pp-status-sep" aria-hidden="true">·</span>
-          {connected ? (
-            <span
-              className="pp-status-pill"
-              title={t('pnp.status.wpos.title', 'Live machine work position (X, Y)')}
-            >
-              {t('pnp.status.wpos', 'WPos')}{' '}
-              <b>
-                {wpos.x.toFixed(2)}, {wpos.y.toFixed(2)}
-              </b>
-            </span>
-          ) : (
-            <span
-              className="pp-status-pill pp-status-warn"
-              title={t('pnp.status.conn.title', 'Connect to a machine to set positions and send')}
-            >
-              {t('pnp.status.notConnected', 'Not connected')}
-            </span>
-          )}
-          <span
-            className="pp-status-sync"
-            title={t('pnp.live.title', 'The program auto-syncs to the Visualizer as you edit')}
-          >
-            → {t('pnp.status.visualizer', 'Visualizer')}
-          </span>
+          <CamStatus
+            items={[
+              {
+                value: ops.length,
+                unit: ops.length === 1 ? t('pnp.status.op', 'op') : t('pnp.status.ops', 'ops'),
+              },
+              { value: effectiveLines, unit: t('pnp.status.lines', 'lines') },
+              connected
+                ? {
+                    label: t('pnp.status.wpos', 'WPos'),
+                    value: `${wpos.x.toFixed(2)}, ${wpos.y.toFixed(2)}`,
+                    title: t('pnp.status.wpos.title', 'Live machine work position (X, Y)'),
+                  }
+                : {
+                    value: (
+                      <span className="pp-status-warn">
+                        {t('pnp.status.notConnected', 'Not connected')}
+                      </span>
+                    ),
+                    title: t(
+                      'pnp.status.conn.title',
+                      'Connect to a machine to set positions and send',
+                    ),
+                  },
+            ]}
+          />
         </div>
 
         {loadError && (

@@ -190,14 +190,17 @@ export function ScrewFittingPanel() {
   const removeSection = useProgram((s) => s.removeSection)
   const notify = useNotifications((s) => s.notify)
 
-  const [points, setPoints] = useState<ScrewDrivePoint[]>([])
+  const [points, setPoints] = usePersistentState<ScrewDrivePoint[]>('karmyogi.screwdrive.points', [])
   const [selected, setSelected] = useState(-1)
   const [showSettings, setShowSettings] = usePersistentState<boolean>(
     'karmyogi.screwdrive.showSettings',
     true,
   )
 
-  const [params, setParams] = useState<EditableParams>(() => {
+  // Persisted loader/driver/motion params so they survive a reload. The plain
+  // initial is the fully-shaped default (usePersistentState reads localStorage
+  // first, so the initial is only used when nothing was saved yet).
+  const [params, setParams] = usePersistentState<EditableParams>('karmyogi.screwdrive.params', (() => {
     const d = defaultScrewDrivingParams()
     return {
       pickupX: d.pickupX,
@@ -212,7 +215,7 @@ export function ScrewFittingPanel() {
       defaultDepth: d.defaultDepth,
       decimals: clampDecimals(d.decimals),
     }
-  })
+  })())
 
   // ---- color-coded setting PRESETS (loader/driver/motion params only) -------
   // Restore the editable params from an (untrusted) snapshot, coercing every

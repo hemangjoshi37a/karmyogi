@@ -16,7 +16,7 @@ import {
   type GlueParams,
   type GlueShape,
 } from '../core/glue'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamEmpty, CamStatus } from '../components/cam/CamUI'
 import '../styles/glue.css'
 import '../styles/cam.css'
 
@@ -556,7 +556,7 @@ export function GluePanel() {
   const [drag, setDrag] = useState<Drag | null>(null)
   const [moveDrag, setMoveDrag] = useState<MoveDrag | null>(null)
   const [showRaw, setShowRaw] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAdvanced, setShowAdvanced] = usePersistentState<boolean>('karmyogi.glue.showAdvanced', false)
   const [loadError, setLoadError] = useState<string | null>(null)
   // Snapshot of the shapes that existed before the last Clear / Load, so a single
   // Undo button can restore them. `null` once nothing is undoable.
@@ -851,22 +851,21 @@ export function GluePanel() {
         </div>
       </header>
 
-      {/* Live status strip: shape + line counts, auto-synced to the Program tab. */}
-      <div className="gp-status">
-        <span className="gp-status-pill">
-          <b>{shapes.length}</b>{' '}
-          {shapes.length === 1 ? t('glue.status.shape', 'shape') : t('glue.status.shapes', 'shapes')}
-        </span>
-        <span className="gp-status-sep" aria-hidden="true">·</span>
-        <span className="gp-status-pill">
-          <b>{liveLines}</b> {t('glue.status.lines', 'G-code lines')}
-        </span>
-        <span
-          className="gp-status-sync"
-          title={t('glue.live.title', 'Lines auto-synced to the Program tab')}
-        >
-          → {t('glue.status.program', 'Program')}
-        </span>
+      {/* Live status strip: shape + line counts, auto-synced to the Program tab.
+          Uses the shared <CamStatus> kit so it reads identically to every tab. */}
+      <div className="gp-status-wrap">
+        <CamStatus
+          items={[
+            {
+              value: shapes.length,
+              unit:
+                shapes.length === 1
+                  ? t('glue.status.shape', 'shape')
+                  : t('glue.status.shapes', 'shapes'),
+            },
+            { value: liveLines, unit: t('glue.status.lines', 'G-code lines') },
+          ]}
+        />
       </div>
       {loadError && (
         <p className="gp-banner gp-banner-error" role="alert">
@@ -937,18 +936,9 @@ export function GluePanel() {
               {/* Origin marker (bottom-left = machine [0,0]) */}
               <circle className="gp-origin" cx={0} cy={sy(0)} r={2.5} />
 
-              {/* In-place empty-state prompt; gone the moment a drag starts. */}
-              {shapes.length === 0 && !drag && (
-                <text
-                  className="gp-canvas-empty"
-                  x={BED.w / 2}
-                  y={sy(BED.h / 2)}
-                  textAnchor="middle"
-                  pointerEvents="none"
-                >
-                  {t('glue.canvas.empty', 'Pick a tool and drag here to draw')}
-                </text>
-              )}
+              {/* (Empty-bed guidance lives once, below the canvas in .gp-hint, and
+                  in the Shapes card's <CamEmpty> — no duplicate faint canvas text,
+                  per §Area4 "show one". The hint line always states what to drag.) */}
 
               {/* Existing shapes. In select mode the path itself starts a
                   move-drag (and is a fat invisible hit-target for easy grabbing). */}

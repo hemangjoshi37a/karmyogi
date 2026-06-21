@@ -225,10 +225,10 @@
 }
 .ai-connect-title {
   font-size: var(--fs-section);
-  font-weight: 600;
+  font-weight: var(--fw-label);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
 }
 .ai-connect-chip {
   margin-left: auto;
@@ -272,10 +272,11 @@
 
 .ai-label {
   font-size: var(--fs-section);
-  font-weight: 600;
+  font-weight: var(--fw-label);
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--fg-muted);
+  /* §2.8 section header: raised contrast over plain muted. */
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
 }
 .ai-label-row {
   display: inline-flex;
@@ -345,12 +346,15 @@
   color: var(--accent);
 }
 
-/* ───────────────────────── segmented toggles ───────────────────────── */
+/* ───────────────────────── segmented toggles (§2.8) ─────────────────────────
+   Provider / auth-method pickers are MODE switches, so the active segment uses
+   the tonal `--accent-soft` tint with accent text (full `--accent` stays reserved
+   for true primaries). Inactive fills `--bg-input`/`--fg`; 1px `--border` seam. */
 .ai-seg {
   display: flex;
   gap: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 .ai-seg-btn {
@@ -358,8 +362,8 @@
   min-height: var(--ctl-h-lg);
   padding: 0 var(--sp-3);
   border: none;
-  background: var(--bg-panel);
-  color: var(--fg-muted);
+  background: var(--bg-input);
+  color: var(--fg);
   font-size: var(--fs-ctl);
   font-weight: 600;
   cursor: pointer;
@@ -369,11 +373,11 @@
   border-left: 1px solid var(--border);
 }
 .ai-seg-btn[data-on='true'] {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .ai-seg-btn:hover:not([data-on='true']) {
-  background: color-mix(in srgb, var(--fg) 6%, var(--bg-panel));
+  background: color-mix(in srgb, var(--fg) 6%, var(--bg-input));
   color: var(--fg);
 }
 .ai-seg-sub .ai-seg-btn {

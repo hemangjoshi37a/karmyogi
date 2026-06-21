@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToolMask, type MaskRect } from '../store/toolMask'
+import '../styles/cam.css'
+import '../styles/camera.css'
 
 /**
  * Tool-mask editor: draws the live head-camera view and overlays a
@@ -142,16 +144,18 @@ export function ToolMaskEditor({ video, className }: ToolMaskEditorProps) {
     }
   }, [])
 
-  // ── inline styles (no external deps) ────────────────────────────────────────
+  // ── inline styles (theme-token driven where it overlays app chrome; the
+  // selection handles keep a fixed white ring so they stay legible over ANY
+  // camera frame regardless of theme) ──────────────────────────────────────────
   const pct = (v: number) => `${(v * 100).toFixed(3)}%`
   const handleSize = 14
   const handleStyle: React.CSSProperties = {
     position: 'absolute',
     width: handleSize,
     height: handleSize,
-    background: '#4ea1ff',
+    background: 'var(--accent)',
     border: '2px solid #fff',
-    borderRadius: 3,
+    borderRadius: 'var(--radius-sm)',
     boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
     touchAction: 'none',
   }
@@ -163,25 +167,27 @@ export function ToolMaskEditor({ video, className }: ToolMaskEditorProps) {
   }
 
   return (
-    <div className={className} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: 36 }}>
+    <div className={className} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+        <label
+          className="cam-switch"
+          style={{ minHeight: 36 }}
+        >
           <input
             type="checkbox"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
-            style={{ width: 18, height: 18 }}
           />
           <span>Enable tool mask</span>
         </label>
         <button
           type="button"
+          className="cam-btn"
           onClick={reset}
-          style={{ minHeight: 36, padding: '6px 12px', cursor: 'pointer' }}
         >
           Reset
         </button>
-        <span style={{ opacity: 0.7, fontSize: 12 }}>
+        <span style={{ color: 'var(--fg-muted)', fontSize: 'var(--fs-body)' }}>
           Drag the box over the tool to exclude it from the bed mosaic.
         </span>
       </div>
@@ -196,8 +202,9 @@ export function ToolMaskEditor({ video, className }: ToolMaskEditorProps) {
           width: '100%',
           aspectRatio: '4 / 3',
           maxWidth: 640,
-          background: '#111',
-          borderRadius: 6,
+          background: '#000',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
           overflow: 'hidden',
           touchAction: 'none',
           userSelect: 'none',
@@ -215,8 +222,10 @@ export function ToolMaskEditor({ video, className }: ToolMaskEditorProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#888',
-              fontSize: 13,
+              textAlign: 'center',
+              padding: 'var(--sp-4)',
+              color: 'var(--fg-muted)',
+              fontSize: 'var(--fs-body)',
               pointerEvents: 'none',
             }}
           >
@@ -232,8 +241,10 @@ export function ToolMaskEditor({ video, className }: ToolMaskEditorProps) {
             top: pct(rect.y),
             width: pct(rect.w),
             height: pct(rect.h),
-            border: `2px dashed ${enabled ? '#4ea1ff' : '#888'}`,
-            background: enabled ? 'rgba(78,161,255,0.18)' : 'rgba(136,136,136,0.12)',
+            border: `2px dashed ${enabled ? 'var(--accent)' : 'var(--fg-muted)'}`,
+            background: enabled
+              ? 'color-mix(in srgb, var(--accent) 18%, transparent)'
+              : 'color-mix(in srgb, var(--fg-muted) 14%, transparent)',
             boxSizing: 'border-box',
             cursor: 'move',
             touchAction: 'none',
@@ -246,6 +257,8 @@ export function ToolMaskEditor({ video, className }: ToolMaskEditorProps) {
               top: 2,
               left: 4,
               fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: '0.5px',
               color: '#fff',
               textShadow: '0 0 3px #000',
               pointerEvents: 'none',
@@ -263,7 +276,14 @@ export function ToolMaskEditor({ video, className }: ToolMaskEditorProps) {
         </div>
       </div>
 
-      <div style={{ fontSize: 12, opacity: 0.6, fontVariantNumeric: 'tabular-nums' }}>
+      <div
+        style={{
+          fontSize: 'var(--fs-label)',
+          fontFamily: 'ui-monospace, monospace',
+          color: 'var(--fg-muted)',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
         rect uv: x={rect.x.toFixed(3)} y={rect.y.toFixed(3)} w={rect.w.toFixed(3)} h={rect.h.toFixed(3)}
       </div>
     </div>

@@ -196,14 +196,20 @@ export function DrillingPanel() {
   const removeSection = useProgram((s) => s.removeSection)
   const notify = useNotifications((s) => s.notify)
 
-  const [points, setPoints] = useState<ScrewPoint[]>([])
+  const [points, setPoints] = usePersistentState<ScrewPoint[]>('karmyogi.drilling.points', [])
   const [selected, setSelected] = useState(-1)
   const [showSettings, setShowSettings] = usePersistentState<boolean>(
     'karmyogi.drilling.showSettings',
     true,
   )
 
-  const [params, setParams] = useState<EditableParams>(() => toParams(undefined))
+  // Persisted drilling params so hole size/depth/feeds survive a reload. The
+  // plain initial is the fully-shaped default (usePersistentState reads
+  // localStorage first, so the initial is only used when nothing was saved).
+  const [params, setParams] = usePersistentState<EditableParams>(
+    'karmyogi.drilling.params',
+    toParams(undefined),
+  )
 
   // ---- color-coded setting PRESETS (the drilling params, NOT the hole list) --
   // Snapshot the current settings (hole size/type/depth, recess, feeds, Safe-Z…).

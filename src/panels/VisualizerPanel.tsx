@@ -5,7 +5,7 @@ import { gcodeToPolylines, type Segment } from '../viewer/gcodeToPolylines'
 import { reemitSafe, inferEmitOptions } from '../core/toolpathEdit'
 import { useProgram, useMachine, useCameraCalib, usePersistentState, useSettings } from '../store'
 import { useBed } from '../store/bed'
-import { useCarveJobs } from '../store/carveJobs'
+import { useCarveJobs, type CarveJob } from '../store/carveJobs'
 import { buildTimeline } from '../core/simulation'
 import { usePlayback } from '../store/playback'
 import { PlaybackTimeline } from '../components/PlaybackTimeline'
@@ -19,6 +19,7 @@ import {
 
 import { sectionColor } from '../viewer/sectionColors'
 import { useViewportShapes, type ShapeKind } from '../store/viewportShapes'
+import { useHover } from '../store/hover'
 import { useSpringViz } from '../store/springViz'
 import { getActiveTab, subscribeActiveTab } from '../track/activity'
 import { useTabCommands } from '../machine/tabCommands'
@@ -209,10 +210,59 @@ const IconCamera = (
  * bounds box, and fit-check all react live to edits.
  */
 
+/**
+ * Axis-aligned bounding box of a carve job's mesh AFTER its placement is applied
+ * (the job's TRUE position / size on the bed). Mirrors `placeToolpath` (carve3d):
+ *   XY → translate to the mesh XY-bbox centre, uniform scale, rotate by rotDeg,
+ *        translate back, add (dx, dy); take the rotated rectangle's extent.
+ *   Z  → untouched (carve depth is independent of XY placement).
+ * Returns min/max in work-mm, ready to feed a per-job bounding cube.
+ */
+function placedJobBounds(job: CarveJob): {
+  min: [number, number, number]
+  max: [number, number, number]
+} {
+  const b = job.mesh.bbox
+  const p = job.placement
+  const s = Number.isFinite(p.scale) && p.scale > 0 ? p.scale : 1
+  const rad = ((p.rotDeg || 0) * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const cx = (b.min[0] + b.max[0]) / 2
+  const cy = (b.min[1] + b.max[1]) / 2
+  const corners: [number, number][] = [
+    [b.min[0], b.min[1]],
+    [b.max[0], b.min[1]],
+    [b.max[0], b.max[1]],
+    [b.min[0], b.max[1]],
+  ]
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const [px, py] of corners) {
+    const vx = (px - cx) * s
+    const vy = (py - cy) * s
+    const rx = vx * cos - vy * sin + cx + p.dx
+    const ry = vx * sin + vy * cos + cy + p.dy
+    if (rx < minX) minX = rx
+    if (ry < minY) minY = ry
+    if (rx > maxX) maxX = rx
+    if (ry > maxY) maxY = ry
+  }
+  return {
+    min: [minX, minY, b.min[2]],
+    max: [maxX, maxY, b.max[2]],
+  }
+}
+
 export function VisualizerPanel() {
   const t = useT()
   const ref = useRef<ViewerHandle>(null)
   const lines = useProgram((s) => s.lines)
+  // Cross-panel hover link: the carving / Program-tab op rows publish the hovered
+  // op id; the viewer shimmers that op's toolpath line.
+  const hoveredOpId = useHover((s) => s.hoveredOpId)
   const wpos = useMachine((s) => s.wpos)
   const connected = useMachine((s) => s.connection === 'connected')
 
@@ -298,15 +348,38 @@ export function VisualizerPanel() {
   const theme = useSettings((s) => s.theme)
   const sectionData = useMemo(() => {
     return sections.map((s, i) => {
+      const identity = isIdentityJob(s.placement)
+      const bake = (raw: string) => (identity ? raw : applyJobPlacement(raw, s.placement))
       const raw = s.rawLines.join('\n')
-      const baked = isIdentityJob(s.placement) ? raw : applyJobPlacement(raw, s.placement)
-      const parsed = gcodeToPolylines(baked)
+      const parsed = gcodeToPolylines(bake(raw))
+      // Per-operation breakdown (carving ops linked to presets): parse + bake
+      // each op's OWN gcode so it can render in its preset colour. Only kicks in
+      // when at least one op carries an explicit preset `color`; ops without one
+      // fall back to the section colour. If no op has a colour, leave
+      // `operations` undefined so the single section-coloured path is drawn (the
+      // legacy look, unchanged for every non-carving tab).
+      const ops = s.operations
+      let operations:
+        | { id: string; segments: Segment[]; color: string }[]
+        | undefined
+      if (ops && ops.length > 0 && ops.some((o) => !!o.color)) {
+        const sectionFallback = sectionColor(i, theme === 'dark', s.color)
+        operations = ops.map((o) => ({
+          id: o.id,
+          segments: gcodeToPolylines(bake(o.gcode)).segments,
+          color: o.color || sectionFallback,
+        }))
+      }
       return {
         id: s.id,
         segments: parsed.segments,
         bounds: parsed.bounds,
-        // Explicit per-section colour (set in the Program tab) wins; else auto.
-        color: sectionColor(i, theme === 'dark', s.color),
+        // Preset-coloured carving section → the section's representative colour
+        // (used by the Layers swatch + as the per-op fallback) is the preset
+        // colour, so the legend matches the rendered lines + the Program tab.
+        // Otherwise: explicit per-section colour (Program-tab picker) wins, else auto.
+        color: operations ? operations[0].color : sectionColor(i, theme === 'dark', s.color),
+        operations,
       }
     })
   }, [sections, theme])
@@ -321,9 +394,27 @@ export function VisualizerPanel() {
   const sectionPaths = useMemo(
     () =>
       sectionData.flatMap((d) =>
-        d.segments.length ? [{ id: d.id, segments: d.segments, color: d.color }] : [],
+        d.segments.length
+          ? [{ id: d.id, segments: d.segments, color: d.color, operations: d.operations }]
+          : [],
       ),
     [sectionData],
+  )
+
+  // 3D-carving per-job bounding cubes. For a 3D carve job the combined program is
+  // ONE gcode section whose extent (and the old sectionBox) spans the work origin
+  // → the model — the wrong box. Instead compute ONE tight cube PER carve job from
+  // its MESH bbox transformed by its PLACEMENT (the same XY-translate / Z-rotation-
+  // about-the-XY-bbox-centre / uniform-XY-scale the carve bakes in placeToolpath),
+  // giving each model its own axis-aligned box at its true position/size on the
+  // bed. Z is left untouched by the placement (carve depth is independent of XY
+  // placement), so the cube spans the mesh's real minZ→maxZ — a flat-bottom part
+  // sits from its true bottom, not from 0. Only enabled jobs contribute.
+  const carveJobs = useCarveJobs((s) => s.jobs)
+  const jobBoxes = useMemo(
+    () =>
+      carveJobs.flatMap((j) => (j.enabled ? [{ id: j.id, ...placedJobBounds(j) }] : [])),
+    [carveJobs],
   )
 
   // Turning the gizmo on with nothing selected picks the first section so the
@@ -747,7 +838,9 @@ export function VisualizerPanel() {
           gizmo={gizmoOn && hasProgram && !!selectedSectionId}
           onGizmoChange={setGizmoOn}
           sectionBoxes={sectionBoxes}
+          jobBoxes={jobBoxes}
           sectionPaths={sectionPaths}
+          hoveredOpId={hoveredOpId}
           selectedSectionId={selectedSectionId}
           onSelectSection={selectSection}
           showJobBoxes={showJobBoxes}
@@ -1658,18 +1751,21 @@ const OVERLAY_CSS = `
   max-width: calc(100% - 16px);
   pointer-events: auto;
 }
+/* Icon button (§2.8): --icon-btn square, neutral resting border, accent only on
+   hover/active/focus. The translucent glass fill stays (these float over the 3D
+   scene) but the border no longer reads as a persistent "selected" state. */
 .vz-toolbar-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
   backdrop-filter: blur(4px);
-  color: var(--fg);
+  color: var(--fg-muted);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -1677,7 +1773,8 @@ const OVERLAY_CSS = `
 .vz-toolbar-btn svg { display: block; }
 .vz-toolbar-btn:hover {
   background: color-mix(in srgb, var(--bg-elev) 95%, transparent);
-  border-color: var(--accent, var(--fg-muted));
+  border-color: var(--accent);
+  color: var(--fg);
 }
 .vz-toolbar-btn:active {
   transform: translateY(1px);
@@ -1693,10 +1790,12 @@ const OVERLAY_CSS = `
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* Cluster divider between functional groups of toolbar controls (view │ scene │
+   edit). One hairline token, matched to the topbar separator rhythm. */
 .vz-toolbar-sep {
   width: 1px;
   align-self: stretch;
-  margin: 3px 1px;
+  margin: 3px var(--sp-1);
   background: var(--border);
   flex: 0 0 auto;
 }
@@ -1711,10 +1810,11 @@ const OVERLAY_CSS = `
   align-items: center;
   gap: 10px;
   padding: 5px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
   backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-1);
   color: var(--fg);
   font-size: 11px;
   line-height: 1.2;
@@ -1737,7 +1837,7 @@ const OVERLAY_CSS = `
   color: var(--fg);
   background: var(--bg-input, var(--bg-elev));
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 3px;
   text-align: right;
   -moz-appearance: textfield;
@@ -1759,11 +1859,11 @@ const OVERLAY_CSS = `
   flex-direction: column;
   gap: 5px;
   padding: 7px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
   backdrop-filter: blur(6px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-2);
 }
 .vz-bed-field {
   display: flex;
@@ -1783,7 +1883,7 @@ const OVERLAY_CSS = `
   max-width: 64px;
   height: 24px;
   padding: 1px 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
@@ -1807,11 +1907,11 @@ const OVERLAY_CSS = `
   max-height: min(60vh, 360px);
   overflow-y: auto;
   padding: 5px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
   backdrop-filter: blur(6px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-2);
 }
 /* Portaled to <body>: fixed to the viewport (JS supplies top/left) so it floats
    above every panel instead of being clipped/stacked under the one below. */
@@ -1838,7 +1938,7 @@ const OVERLAY_CSS = `
   min-height: 30px;
   padding: 4px 8px;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg);
   font-size: 12px;
@@ -1875,7 +1975,7 @@ const OVERLAY_CSS = `
   flex: 0 0 auto;
   height: 24px;
   padding: 1px 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg, var(--bg-elev));
   color: var(--fg);
@@ -1928,11 +2028,11 @@ const OVERLAY_CSS = `
   max-height: min(60vh, 360px);
   overflow-y: auto;
   padding: 5px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
   backdrop-filter: blur(6px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-2);
 }
 .vz-layer-group {
   padding: 5px 6px 2px;
@@ -1955,7 +2055,7 @@ const OVERLAY_CSS = `
   min-height: 30px;
   padding: 4px 8px;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg);
   font-size: 12px;
@@ -1976,7 +2076,7 @@ const OVERLAY_CSS = `
   flex: 0 0 auto;
   width: 11px;
   height: 11px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   border: 1px solid color-mix(in srgb, var(--fg) 30%, transparent);
 }
 .vz-layer-row--off .vz-layer-swatch { opacity: 0.45; }
@@ -1999,10 +2099,11 @@ const OVERLAY_CSS = `
   flex-direction: column;
   gap: 2px;
   padding: 5px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
   backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-1);
   color: var(--fg);
   font-size: 10px;
   line-height: 1.3;
@@ -2020,10 +2121,11 @@ const OVERLAY_CSS = `
   flex-direction: column;
   gap: 2px;
   padding: 6px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
   backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-1);
   color: var(--fg);
   font-size: 11px;
   line-height: 1.3;

@@ -633,12 +633,21 @@ export function ControllerPanel() {
   // when the sticks recenter. Unlike the keyboard hold (one long move), the stick
   // tracks live and direction changes need no 0x85 thrash.
   const gamepadHandlers = useRef<GamepadHandlers>({
+    jog3: () => {},
     jogXY: () => {},
     jogZ: () => {},
     cancelJog: () => {},
     onAction: () => {},
   })
   gamepadHandlers.current = {
+    jog3: (dx, dy, dz, feed) => {
+      if (!grbl.isConnected) return
+      // Combined X/Y/Z stick vector → ONE continuous `$J=` so all three axes move
+      // together (doJogHold preserves the vector angle). A single command means Z
+      // and XY never compete for GRBL's one jog slot — the old split jogXY+jogZ
+      // issued two moves and Z routinely lost the race / didn't move at all.
+      doJogHold({ x: dx, y: dy, z: dz }, feed)
+    },
     jogXY: (dx, dy, feed) => {
       if (!grbl.isConnected) return
       // dx,dy is the normalized stick vector; feed is magnitude-scaled. One long
@@ -709,6 +718,7 @@ export function ControllerPanel() {
   // Stable handlers object that always delegates to the latest closures (the
   // hook keeps its own ref; this avoids restarting its rAF loop on re-render).
   const stableGamepadHandlers = useRef<GamepadHandlers>({
+    jog3: (dx, dy, dz, feed) => gamepadHandlers.current.jog3(dx, dy, dz, feed),
     jogXY: (dx, dy, feed) => gamepadHandlers.current.jogXY(dx, dy, feed),
     jogZ: (dz, feed) => gamepadHandlers.current.jogZ(dz, feed),
     cancelJog: () => gamepadHandlers.current.cancelJog(),

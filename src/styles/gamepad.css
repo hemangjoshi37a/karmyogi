@@ -256,12 +256,13 @@
   padding: 3px 6px;
   background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
   border: 1px solid var(--accent);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   font-size: 10px;
   line-height: 1.15;
   white-space: nowrap;
   pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  /* theme-aware overlay elevation (was a dark-tuned rgba shadow). */
+  box-shadow: var(--shadow-2);
 }
 .gp3d-callout b { color: var(--accent); font-size: 10px; }
 .gp3d-callout span { color: var(--fg-muted); }
@@ -347,8 +348,10 @@
   line-height: 1.2;
   min-width: 0;
   padding: 3px 9px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+  /* theme-aware glass elevation so the chip lifts off the 3D stage in both themes. */
+  box-shadow: var(--shadow-1);
   backdrop-filter: blur(5px);
 }
 .gp-ov-status-txt strong {
@@ -420,8 +423,9 @@
   font-size: 11px;
   color: var(--warn);
   padding: 4px 10px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--warn) 16%, color-mix(in srgb, var(--bg-elev) 70%, transparent));
+  box-shadow: var(--shadow-1);
   backdrop-filter: blur(5px);
 }
 .gp-space-note {
@@ -495,24 +499,28 @@
   .gp-tabedit-glyph.is-pressed::after { animation: none; }
 }
 
-/* ---- Per-tab editor: horizontal tab STRIP (replaces the dropdown) ---- */
+/* ---- Per-tab editor: horizontal tab STRIP (segmented MODE switch) ----
+   §2.8: this picks which workbench tab to customize — a mode switch, not a
+   primary CTA — so the active pill uses the tonal `--accent-soft` tint with
+   accent text (full `--accent` is reserved for true primaries). Container fills
+   `--bg-input` with a `--border` seam; controls round to `--radius-sm`. */
 .gp-tabedit-tabs {
   display: flex; flex-wrap: wrap; gap: 4px;
-  padding: 4px; border-radius: 9px;
+  padding: 4px; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--bg-input);
   overflow-x: auto;
 }
 .gp-tabedit-tab {
   flex: 0 0 auto;
-  font-size: 11.5px; min-height: 28px; padding: 4px 11px;
-  border: 1px solid transparent; border-radius: 6px;
+  font-size: 11.5px; min-height: var(--ctl-h); padding: 4px 11px;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
   background: transparent; color: var(--fg-muted); cursor: pointer;
   white-space: nowrap;
 }
 .gp-tabedit-tab:hover { color: var(--fg); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .gp-tabedit-tab.is-active {
-  color: var(--accent-fg); background: var(--accent);
-  border-color: var(--accent); font-weight: 700;
+  color: var(--accent); background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); font-weight: 700;
 }
 
 /* ---- Per-tab editor: fully-programmable command rows ---- */

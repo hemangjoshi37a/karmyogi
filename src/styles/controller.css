@@ -29,15 +29,17 @@
   padding: var(--sp-2, 6px) 7px;
   border: 1px solid var(--border);
   border-radius: var(--radius, 6px);
-  background: var(--bg-elev);
+  background: var(--bg-card);
 }
+/* Section header — the canonical §2.8 micro-label: uppercase, 600 weight,
+   raised contrast (so it doesn't recede), .5px tracking, no bottom border. */
 .mc-section > h4 {
   margin: 0 0 1px;
   font-size: var(--fs-section, 10.5px);
-  font-weight: 600;
-  letter-spacing: 0.6px;
+  font-weight: var(--fw-label, 600);
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
 }
 /* ---- Controller-only "bare" sections (Position / Machine) ----
    Strip the card chrome (border/background/title) from JUST these two sections
@@ -52,7 +54,7 @@
      left edge, uniform 8px gaps. (Inherits the card chrome from .mc-section; the
      values are restated explicitly so the modifier never accidentally strips it.) */
   border: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: var(--bg-card);
   padding: var(--sp-2, 6px) 7px;
 }
 .mc-row {
@@ -160,6 +162,20 @@
 .mc-field > .mc-label { flex: 0 0 auto; min-width: 40px; }
 .mc-input-grow { width: auto; flex: 1 1 auto; min-width: 56px; }
 .mc-unit { font-size: 10px; color: var(--fg-muted); flex: 0 0 auto; }
+
+/* ---- slider+number row (§2.8) ----
+   The slider field needs a usable track: a fixed-basis label that WRAPS to two
+   lines (never ellipsis), a slider that holds a 72px minimum track, and a
+   compact ~64px number frame. Sizing the label/number this way stops the
+   oversized stub the audit flagged. */
+.mc-sliderfield > .mc-label {
+  flex: 0 0 auto;
+  flex-basis: 66px;
+  min-width: 0;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
 /* Adobe-style compact control: draggable slider + small typable number.
    Fully themed (track + thumb use theme vars, so it follows light/dark), with an
    accent-filled track to the left of the thumb. The fill % comes from the inline
@@ -167,7 +183,7 @@
    ::-moz-range-progress automatically. */
 .mc-slider {
   flex: 1 1 auto;
-  min-width: 60px;
+  min-width: 72px;
   height: 18px;
   margin: 0;
   cursor: pointer;
@@ -183,14 +199,14 @@
   background: linear-gradient(
     to right,
     var(--accent) 0 var(--mc-pct, 0%),
-    var(--bg-elev) var(--mc-pct, 0%) 100%
+    var(--bg-input) var(--mc-pct, 0%) 100%
   );
 }
 .mc-slider::-moz-range-track {
   height: 5px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: var(--bg-input);
 }
 .mc-slider::-moz-range-progress {
   height: 5px;
@@ -237,7 +253,7 @@
 }
 .mc-slider-num {
   flex: 0 0 auto;
-  width: 58px;
+  width: 64px;
   text-align: right;
   -moz-appearance: textfield;
 }
@@ -1201,4 +1217,87 @@
   .gp-modal--v2 .gp-space { height: clamp(180px, 30vh, 260px); }
   .gp-modal--v2 .gp-remap-sub,
   .gp-modal--v2 .gp-tabedit-sub { border-left: none; padding-left: 0; flex-basis: 100%; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   GAMEPAD MODAL — COMPACT / SLEEK OVERHAUL
+   Kill the wasted space + edge-to-edge eye-tracking: the Button-names list
+   becomes a responsive multi-column grid of tight, self-contained cells, and
+   every mapping/per-tab/analog row gets a denser, enterprise-grade rhythm.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ---- Button names → multi-column grid of compact cells ---- */
+.gp-modal--v2 .gp-labels .gp-remap-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(208px, 1fr));
+  gap: 4px 8px;
+}
+.gp-modal--v2 .gp-labels .gp-remap-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 5px;
+  padding: 2px 4px 2px 9px;
+  min-height: 29px;
+  border: 1px solid color-mix(in srgb, var(--border) 42%, transparent);
+  border-radius: 7px;
+}
+.gp-modal--v2 .gp-labels .gp-remap-row:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.gp-modal--v2 .gp-labels .gp-remap-label {
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gp-modal--v2 .gp-labels .gp-remap-glyph-wrap { min-width: 0; text-align: right; }
+.gp-modal--v2 .gp-labels .gp-remap-unbound { font-size: 10px; }
+.gp-modal--v2 .gp-labels .gp-remap-glyph { font-size: 11.5px; padding: 1px 7px; min-width: 22px; }
+.gp-modal--v2 .gp-labels .gp-remap-acts { gap: 3px; }
+.gp-modal--v2 .gp-labels .gp-remap-btn {
+  min-height: 24px; padding: 2px 9px; font-size: 10.5px; border-radius: 6px;
+}
+.gp-modal--v2 .gp-labels .gp-remap-clear { min-width: 24px; padding: 2px 5px; }
+
+/* ---- Mapping + per-tab rows: denser rhythm (shorter, tighter) ---- */
+.gp-modal--v2 .gp-remap-row { min-height: 32px; padding: 4px 8px; }
+.gp-modal--v2 .gp-remap-glyph-wrap { min-width: 72px; }
+.gp-modal--v2 .gp-remap-btn { min-height: 26px; padding: 3px 9px; }
+.gp-modal--v2 .gp-remap-clear { min-width: 26px; padding: 3px 6px; }
+.gp-modal--v2 .gp-tabedit-row { min-height: 32px; padding: 4px 6px; }
+
+/* Tighten the whole modal's vertical rhythm a touch. */
+.gp-modal.gp-modal--v2 { gap: 10px; }
+.gp-modal--v2 .gp-remap { padding: 10px 12px; gap: 8px; }
+
+/* ---- Buttons & commands list: 2-up grid, single-line compact rows ---- */
+.gp-modal--v2 .gp-remap:not(.gp-labels) .gp-remap-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 3px 12px;
+}
+.gp-modal--v2 .gp-remap:not(.gp-labels) .gp-remap-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 7px;
+  padding: 3px 8px;
+  min-height: 33px;
+  border: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
+  border-radius: 7px;
+}
+.gp-modal--v2 .gp-remap:not(.gp-labels) .gp-remap-list .gp-remap-label {
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gp-modal--v2 .gp-remap:not(.gp-labels) .gp-remap-glyph-wrap { min-width: 30px; }
+/* Controls stay on ONE line (no wrapping the dropdown / × onto extra rows). */
+.gp-modal--v2 .gp-remap-acts { flex-wrap: nowrap; gap: 4px; align-items: center; }
+.gp-modal--v2 .gp-remap-picker { max-width: 120px; min-height: 26px; font-size: 11px; }
+
+/* ---- Per-tab rows: same compact 2-up grid + single line ---- */
+.gp-modal--v2 .gp-tabedit-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 3px 12px;
+}
+.gp-modal--v2 .gp-tabedit-row {
+  min-height: 32px; padding: 3px 8px; flex-wrap: nowrap;
+  border: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
+  border-radius: 7px;
 }

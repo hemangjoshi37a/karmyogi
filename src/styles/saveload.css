@@ -17,9 +17,11 @@
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  /* Canonical icon-button radius (§2.8). */
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .km-io-btn:hover:not(:disabled) {
   border-color: var(--accent);

@@ -20,7 +20,7 @@ import {
   type ChatTurn,
 } from '../store/aiGcode'
 import { useBed } from '../store/bed'
-import { useProgram } from '../store'
+import { useProgram, usePersistentState } from '../store'
 import { useT } from '../i18n'
 import { IconButton } from '../components/IconButton'
 import { InfoTip } from '../components/InfoTip'
@@ -1185,7 +1185,7 @@ function AiHeader({ children }: { children?: ReactNode }) {
 
 export function AiGcodePanel() {
   const t = useT()
-  const [showSettings, setShowSettings] = useState(false)
+  const [showSettings, setShowSettings] = usePersistentState<boolean>('karmyogi.ai.showSettings', false)
   return (
     <div className="ai-panel" aria-label={t('ai.aria.panel', 'AI G-code generator')}>
       <AiHeader>

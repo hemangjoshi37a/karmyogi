@@ -220,10 +220,11 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
         onChange={setBaudOverride}
       />
       <span className="km-conn-dot" data-conn={connection} />
-      <span className="km-conn-state">
+      <span className="km-conn-state" data-conn={connection}>
         {/* Connection status only (Connected / Connecting / Disconnected) — the
             live Idle/Run/busy machine STATE is intentionally not shown here per
-            the operator's request. */}
+            the operator's request. Disconnected is rendered at full --fg presence
+            (CSS) since it is the most safety-relevant status. */}
         {t(`conn.status.${connection}`, connection)}
       </span>
       {!connected ? (
@@ -241,7 +242,7 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
         </>
       ) : (
         <button
-          className="km-conn-btn"
+          className="km-conn-btn danger"
           onClick={() => void grbl.disconnect()}
           title={t('conn.disconnect', 'Disconnect')}
         >

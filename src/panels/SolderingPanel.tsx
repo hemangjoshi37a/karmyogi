@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useMachine, useProgram, useNotifications, usePersistentState } from '../store'
+import {
+  useMachine,
+  useProgram,
+  useNotifications,
+  usePersistentState,
+  useCameraCalib,
+  useCameraLive,
+} from '../store'
 import { useSolderViz } from '../store/solderViz'
 import { useProgramOwner } from '../store/programOwner'
 import { useTabCommands } from '../machine/tabCommands'
+import { grbl } from '../serial/controller'
+import { detectPadsFromVideo, type MappedPad } from '../camera/padDetect'
+import { runIronTouchZ } from '../camera/ironTouchZ'
+import { videoToGray } from '../camera/bedTracking'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
@@ -300,6 +311,157 @@ function SegField<T extends string>(props: {
   )
 }
 
+/** The per-point columns that support bulk "apply to all". X/Y are excluded —
+ *  they are per-point coordinates, never sensibly the same across the board. */
+type BulkField = 'freeZ' | 'touchZ' | 'feedSeconds' | 'type' | 'approach'
+
+/**
+ * A small "apply to all" affordance that lives inside a column header. It shows a
+ * tiny "fill down" icon button; clicking it opens a compact popover with a value
+ * editor (number input, segmented pills, or a select — matching the column's
+ * native editor) and an "Apply to N" button that writes that value to every
+ * existing point's that-column. Closes on apply, Escape, or outside click. This
+ * edits the EXISTING points only — the new-point defaults are untouched.
+ */
+function ColumnBulkEdit(props: {
+  field: BulkField
+  /** Column label (e.g. "Touch-Z") for the popover title + aria. */
+  label: string
+  /** Number of points the action will affect (0 disables the trigger). */
+  count: number
+  /** Render the value editor for this column; calls back with the chosen value. */
+  apply: (patch: Partial<SolderPoint>) => void
+  t: ReturnType<typeof useT>
+  approachOpts: { value: SolderApproach; label: string }[]
+  unit?: string
+  step?: number
+}) {
+  const { field, label, count, apply, t, approachOpts, unit, step = 0.1 } = props
+  const [open, setOpen] = useState(false)
+  const [numVal, setNumVal] = useState('0')
+  const [feedType, setFeedType] = useState<SolderFeedType>(SolderFeedType.TouchDown)
+  const [approach, setApproach] = useState<SolderApproach>('plunge')
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  const firstRef = useRef<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(null)
+
+  // Close on outside-click / Escape while open; focus the first field on open.
+  useEffect(() => {
+    if (!open) return
+    firstRef.current?.focus()
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const isNumber = field === 'freeZ' || field === 'touchZ' || field === 'feedSeconds'
+
+  function commit() {
+    if (field === 'type') apply({ type: feedType })
+    else if (field === 'approach') apply({ approach })
+    else {
+      const n = num(numVal, 0)
+      const v = field === 'feedSeconds' ? Math.max(0, n) : n
+      apply({ [field]: v } as Partial<SolderPoint>)
+    }
+    setOpen(false)
+  }
+
+  return (
+    <span className="sp-bulk" ref={wrapRef}>
+      <button
+        type="button"
+        className={`sp-bulk-trigger${open ? ' is-open' : ''}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        disabled={count === 0}
+        aria-expanded={open}
+        aria-label={t('solder.bulk.aria', 'Set {label} for all points', { label })}
+        title={t('solder.bulk.title', 'Set {label} for all {n} points at once', { label, n: count })}
+      >
+        {/* "fill down" glyph: a value dripping to the rows below */}
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 3v9" />
+          <path d="m8 9 4 4 4-4" />
+          <path d="M5 18h14" />
+          <path d="M5 21h14" />
+        </svg>
+      </button>
+      {open && (
+        <div className="sp-bulk-pop" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('solder.bulk.aria', 'Set {label} for all points', { label })}>
+          <div className="sp-bulk-pop-title">
+            {t('solder.bulk.popTitle', 'Set {label} on all points', { label })}
+          </div>
+          {isNumber && (
+            <label className="sp-bulk-num">
+              <input
+                ref={firstRef as React.RefObject<HTMLInputElement>}
+                type="number"
+                step={step}
+                min={field === 'feedSeconds' ? 0 : undefined}
+                value={numVal}
+                onChange={(e) => setNumVal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commit()
+                }}
+                aria-label={label}
+              />
+              {unit && <span className="sp-bulk-unit">{unit}</span>}
+            </label>
+          )}
+          {field === 'type' && (
+            <div className="sp-bulk-seg" role="group" aria-label={label}>
+              <button
+                ref={firstRef as React.RefObject<HTMLButtonElement>}
+                type="button"
+                className={`sp-bulk-seg-btn${feedType === SolderFeedType.PreSolder ? ' active' : ''}`}
+                aria-pressed={feedType === SolderFeedType.PreSolder}
+                onClick={() => setFeedType(SolderFeedType.PreSolder)}
+              >
+                {t('solder.feedType.preSolder', 'pre-solder')}
+              </button>
+              <button
+                type="button"
+                className={`sp-bulk-seg-btn${feedType === SolderFeedType.TouchDown ? ' active' : ''}`}
+                aria-pressed={feedType === SolderFeedType.TouchDown}
+                onClick={() => setFeedType(SolderFeedType.TouchDown)}
+              >
+                {t('solder.feedType.touchDown', 'touch-down')}
+              </button>
+            </div>
+          )}
+          {field === 'approach' && (
+            <select
+              ref={firstRef as React.RefObject<HTMLSelectElement>}
+              className="sp-bulk-select"
+              value={approach}
+              onChange={(e) => setApproach(e.target.value as SolderApproach)}
+              aria-label={label}
+            >
+              {approachOpts.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          )}
+          <button type="button" className="sp-bulk-apply" onClick={commit}>
+            {t('solder.bulk.apply', 'Apply to {n}', { n: count })}
+          </button>
+        </div>
+      )}
+    </span>
+  )
+}
+
 /**
  * Auto-soldering panel (W9). An editable table of soldering points drives the
  * pure `generateSoldering` core, which emits a safe program where the spindle
@@ -320,13 +482,20 @@ export function SolderingPanel() {
   const setSolderViz = useSolderViz((s) => s.set)
   const selectSolderViz = useSolderViz((s) => s.select)
   const clearSolderViz = useSolderViz((s) => s.clear)
+  const setDetectedViz = useSolderViz((s) => s.setDetected)
+  // Camera calibration + live video for vision pad-detection and the iron-touch
+  // Z calibration (Phase 1/2). We use the PRIMARY camera slot (index 0), the
+  // same slot the 3D overlay renders, so detected pads land where the operator
+  // sees the live video pinned on the bed.
+  const cameraSlot = useCameraCalib((s) => s.cameras[0])
+  const liveVideo = useCameraLive((s) => s.videoEls[0])
   // Shared-program ownership (last writer wins): we claim it whenever we have
   // points, and yield (drop our section + 3D board) when another CAM panel claims.
   const programOwner = useProgramOwner((s) => s.owner)
   const claimOwner = useProgramOwner((s) => s.claim)
   const releaseOwner = useProgramOwner((s) => s.release)
 
-  const [defaults, setDefaults] = useState<RowDefaults>({
+  const [defaults, setDefaults] = usePersistentState<RowDefaults>('karmyogi.soldering.defaults', {
     freeZ: 5.0,
     touchZ: -1.0,
     feedSeconds: 0.5,
@@ -352,8 +521,27 @@ export function SolderingPanel() {
   // solder pads (best candidate — usually the paste layer — pre-highlighted).
   const [gerberLayers, setGerberLayers] = useState<SolderLayerCandidate[] | null>(null)
 
+  // ── Camera pad-detection (Phase 1) review state ────────────────────────────
+  // `detectedPads` holds the camera-detected candidate pads (bed-mm) awaiting the
+  // operator's review; each can be ＋-added to the points list, or "Add all".
+  const [detectedPads, setDetectedPads] = useState<MappedPad[]>([])
+  const [detecting, setDetecting] = useState(false)
+  // Min/max pad DIAMETER (mm) the detector keeps — exposed so the operator can
+  // tune for their board (fine 0402 pads vs big through-hole pads).
+  const [padMinMm, setPadMinMm] = usePersistentState<number>('karmyogi.soldering.padMinMm', 0.5)
+  const [padMaxMm, setPadMaxMm] = usePersistentState<number>('karmyogi.soldering.padMaxMm', 5)
+  // Detect dark pads on a light board (inverts the threshold polarity).
+  const [padInvert, setPadInvert] = usePersistentState<boolean>('karmyogi.soldering.padInvert', false)
+
+  // ── Iron-touch Z calibration (Phase 2) state ───────────────────────────────
+  const [zCalBusy, setZCalBusy] = useState(false)
+  const zCalAbortRef = useRef<AbortController | null>(null)
+
   // Global generator params (programName is fixed here; metric stays mm/G21).
-  const [params, setParams] = useState<SolderParams>(() => {
+  // Persisted so feeder/motion tuning survives a reload. The plain initial is
+  // computed from the core defaults (usePersistentState reads localStorage first,
+  // so this initial is only used when nothing was saved yet).
+  const [params, setParams] = usePersistentState<SolderParams>('karmyogi.soldering.params', (() => {
     const d = defaultSolderingParams()
     return {
       safeZ: d.safeZ,
@@ -363,7 +551,7 @@ export function SolderingPanel() {
       // Clamp on load so an out-of-range value can never reach toFixed().
       decimals: clampDecimals(d.decimals),
     }
-  })
+  })())
 
   // ---- color-coded setting PRESETS (feeder/motion + new-point defaults) -----
   // Snapshot the current feeder/motion + new-point defaults (NOT the points).
@@ -413,18 +601,18 @@ export function SolderingPanel() {
   }
 
   function addRow() {
-    // Prefill X/Y/Z from the LIVE machine work-position when connected so the
-    // new point lands where the tip currently is (the operator jogs to the pad,
-    // then clicks Add). Z maps to the touch-down height. When disconnected (no
-    // live position) fall back to the plain defaults — never crash.
+    // Prefill X/Y from the LIVE machine work-position when connected so the new
+    // point lands where the tip currently is (the operator jogs to the pad, then
+    // clicks Add). Touch-Z / Free-Z come from the DEFAULTS (the board is flat — one
+    // touch depth for all pads; the operator only positions X/Y per point). Edit a
+    // row to override its Z. When disconnected, X/Y fall back to 0.
     const x = connected ? wpos.x : 0
     const y = connected ? wpos.y : 0
-    const touchZ = connected ? wpos.z : defaults.touchZ
     // Compute the new index from the functional updater so it never reads a
     // stale `points` from this closure (which would select the wrong row).
     setPoints((p) => {
       setSelected(p.length)
-      return [...p, newRow(x, y, touchZ)]
+      return [...p, newRow(x, y)]
     })
   }
 
@@ -446,6 +634,16 @@ export function SolderingPanel() {
 
   function updatePoint(i: number, patch: Partial<SolderPoint>) {
     setPoints((p) => p.map((pt, idx) => (idx === i ? { ...pt, ...patch } : pt)))
+  }
+
+  // Bulk "apply to all": set ONE field on EVERY existing point in one action, so
+  // an operator who imported/recorded a long list doesn't have to retype the same
+  // Touch-Z (etc.) row by row. This edits only the ALREADY-ADDED points; it does
+  // NOT touch the new-point defaults above (those still drive freshly-added rows).
+  // It flows through the same setPoints path as a manual edit, so the live G-code
+  // + 3D regenerate exactly as they do for a single-row change.
+  function applyToAll(patch: Partial<SolderPoint>) {
+    setPoints((p) => p.map((pt) => ({ ...pt, ...patch })))
   }
 
   // Download the current point list as a CSV the operator can re-load later.
@@ -644,14 +842,152 @@ export function SolderingPanel() {
   // otherwise append a new row at that position.
   function recordPosition() {
     if (!connected) return
-    // ALWAYS append a new point per press (X/Y + touch-down Z) and select it.
-    // Record = "teach a new point"; reposition an existing one by editing its row.
-    // (Previously it overwrote the selected point, and each capture auto-selects,
-    // so repeated presses just rewrote the same point instead of building a list.)
+    // ALWAYS append a new point per press (live X/Y) and select it. Touch-Z /
+    // Free-Z come from the DEFAULTS, NOT the live head Z — the head's Z while
+    // jogging X/Y isn't the touch depth, and the operator sets one default
+    // Touch-Z for the flat board. Edit a row to override its Z. Record = "teach a
+    // new point"; repeated presses build the list (it no longer overwrites).
     setPoints((p) => {
       setSelected(p.length)
-      return [...p, newRow(wpos.x, wpos.y, wpos.z)]
+      return [...p, newRow(wpos.x, wpos.y)]
     })
+  }
+
+  // ── Camera pad-detection (Phase 1) ─────────────────────────────────────────
+  // Grab the current PRIMARY-camera frame, run the pure pad detector, map each
+  // detected pad's pixel centroid to bed-mm via the camera calibration, and show
+  // the result as a reviewable list (each ＋-addable, plus "Add all"). The camera
+  // must be calibrated (a fixed-mount homography, or a head-mount map) so pixels
+  // map to bed-mm — otherwise we can't place the pads. Z for every added point
+  // comes from the new-point default Touch-Z (the board is flat; the Z-datum / the
+  // iron-touch calibration sets the actual zero).
+  function detectPads() {
+    if (detecting) return
+    setDetecting(true)
+    // Run on a microtask so the "detecting…" state paints first (detection is a
+    // synchronous full-frame scan — a few ms at typical webcam resolutions).
+    setTimeout(() => {
+      try {
+        const out = detectPadsFromVideo(
+          liveVideo,
+          cameraSlot,
+          { x: wpos.x, y: wpos.y },
+          { minPadMm: Math.max(0, padMinMm), maxPadMm: Math.max(padMinMm, padMaxMm), invert: padInvert },
+        )
+        if (!out.ok) {
+          const msg =
+            out.reason === 'no-video'
+              ? t('solder.detect.noVideo', 'No live camera. Open a camera in the Camera tab first.')
+              : out.reason === 'tainted'
+                ? t('solder.detect.tainted', 'Camera frame is not readable (cross-origin). Re-open the camera.')
+                : out.reason === 'not-calibrated'
+                  ? t('solder.detect.notCalibrated', 'Camera is not calibrated. Calibrate the camera (Camera tab) so pixels map to bed mm.')
+                  : out.reason === 'no-pads'
+                    ? t('solder.detect.noPads', 'No pads detected. Adjust the pad-size range or the bright/dark setting and retry.')
+                    : t('solder.detect.noFrame', 'Could not grab a camera frame. Make sure the camera is live.')
+          notify('warn', msg)
+          setDetectedPads([])
+          setDetectedViz([])
+          return
+        }
+        setDetectedPads(out.pads)
+        setDetectedViz(out.pads.map((p) => ({ x: p.x, y: p.y, rMm: p.rMm })))
+        notify('success', t('solder.detect.found', 'Detected {n} candidate pad(s). Review and ＋-add them below.', { n: out.pads.length }))
+      } finally {
+        setDetecting(false)
+      }
+    }, 0)
+  }
+
+  // Add ONE detected pad to the soldering points (using the new-point defaults
+  // for Z/feed/approach), and drop it from the review list.
+  function addDetectedPad(i: number) {
+    const pad = detectedPads[i]
+    if (!pad) return
+    setPoints((p) => [...p, newRow(pad.x, pad.y)])
+    setDetectedPads((d) => {
+      const next = d.filter((_, idx) => idx !== i)
+      setDetectedViz(next.map((q) => ({ x: q.x, y: q.y, rMm: q.rMm })))
+      return next
+    })
+  }
+
+  // Add EVERY detected pad as a solder point, then clear the review list. The
+  // resulting list is travel-optimized so a freshly detected board streams an
+  // efficient path immediately (same treatment as a Gerber import).
+  function addAllDetectedPads() {
+    if (detectedPads.length === 0) return
+    const added = detectedPads.map((pad) => newRow(pad.x, pad.y))
+    setPoints((p) => orderSolderPointsForTravel([...p, ...added]))
+    setFromDrill(false)
+    setSelected(-1)
+    notify('success', t('solder.detect.addedAll', 'Added {n} detected pad(s) (travel-optimized).', { n: added.length }))
+    setDetectedPads([])
+    setDetectedViz([])
+  }
+
+  // Dismiss the detected-pad review list without adding any.
+  function clearDetectedPads() {
+    setDetectedPads([])
+    setDetectedViz([])
+  }
+
+  // ── Iron-touch Z calibration (Phase 2) ─────────────────────────────────────
+  // ⚠️ NEEDS LIVE-HARDWARE VERIFICATION (see ironTouchZ.ts). Steps Z DOWN in
+  // small increments; after each step it compares the camera frame to the last
+  // one. While the spring-loaded iron tip is descending freely the frame keeps
+  // changing; the instant the tip touches the board it stops moving (gantry keeps
+  // going) — when the inter-frame motion drops below the threshold for a couple
+  // of steps we STOP and set work Z0 there. Strictly gated on a connected machine
+  // + a live camera; aborts safely if no contact within the travel limit.
+  function calibrateZByIronTouch() {
+    if (zCalBusy) {
+      // A second press cancels an in-progress calibration.
+      zCalAbortRef.current?.abort()
+      return
+    }
+    if (!grbl.isConnected) {
+      notify('warn', t('solder.zcal.notConnected', 'Connect to a machine before calibrating Z.'))
+      return
+    }
+    if (!liveVideo) {
+      notify('warn', t('solder.zcal.noCamera', 'Open a live camera (Camera tab) so the tip motion can be seen.'))
+      return
+    }
+    const ac = new AbortController()
+    zCalAbortRef.current = ac
+    setZCalBusy(true)
+    void runIronTouchZ(
+      {
+        jogDownZ: (step) => grbl.jog({ z: -Math.abs(step), feed: 60 }, { force: false }),
+        grabGray: () => videoToGray(liveVideo),
+        setWorkZeroZ: () => grbl.send('G10 L20 P0 Z0'),
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        signal: ac.signal,
+        jogCancel: () => grbl.jogCancel(),
+      },
+      { stepMm: 0.1, maxTravelMm: 8, settleMs: 220 },
+    )
+      .then((res) => {
+        if (res.ok) {
+          notify('success', t('solder.zcal.done', 'Iron touched the board after {mm} mm — work Z zeroed.', { mm: res.travelMm.toFixed(2) }))
+        } else if (res.reason === 'no-contact') {
+          notify('warn', t('solder.zcal.noContact', 'No contact detected within {mm} mm — aborted (no Z change). Lower the start height or tune the motion threshold.', { mm: res.travelMm.toFixed(1) }))
+        } else if (res.reason === 'aborted') {
+          notify('info', t('solder.zcal.aborted', 'Z calibration cancelled.'))
+        } else if (res.reason === 'no-frame') {
+          notify('warn', t('solder.zcal.noFrame', 'Lost the camera frame during calibration — aborted.'))
+        } else {
+          notify('warn', t('solder.zcal.failed', 'Z calibration failed to set zero — aborted.'))
+        }
+      })
+      .catch((err) => {
+        notify('warn', t('solder.zcal.error', 'Z calibration error: {detail}', { detail: err instanceof Error ? err.message : String(err) }))
+      })
+      .finally(() => {
+        setZCalBusy(false)
+        zCalAbortRef.current = null
+      })
   }
 
   // Live G-code preview, recomputed whenever points/params change. The core
@@ -734,6 +1070,16 @@ export function SolderingPanel() {
   useEffect(() => {
     selectSolderViz(selected)
   }, [selected, selectSolderViz])
+
+  // On unmount: clear the detected-pad markers from the Viewer and abort any
+  // in-flight iron-touch Z calibration so it can't keep jogging after the panel
+  // is gone.
+  useEffect(() => {
+    return () => {
+      setDetectedViz([])
+      zCalAbortRef.current?.abort()
+    }
+  }, [setDetectedViz])
 
   // ── Gamepad command bus: teach a point, navigate / delete points, optimize. ──
   // addPoint records the live machine position (or appends a default row); next/
@@ -870,6 +1216,40 @@ export function SolderingPanel() {
             }}
           />
           <span className="sp-tools-sep" aria-hidden="true" />
+          {/* Phase 1: detect pads from the live camera frame. */}
+          <ToolButton
+            className={detecting ? 'is-active' : ''}
+            glyph={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M2 7V5a2 2 0 0 1 2-2h2" />
+                <path d="M18 3h2a2 2 0 0 1 2 2v2" />
+                <path d="M22 17v2a2 2 0 0 1-2 2h-2" />
+                <path d="M6 21H4a2 2 0 0 1-2-2v-2" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            }
+            onClick={detectPads}
+            disabled={detecting}
+            title={t('solder.toolbar.detect', 'Detect pads (camera)')}
+            body={t('solder.toolbar.detect.body', 'Find solder pads in the live camera frame and list them as candidates you can ＋-add (needs a calibrated camera open in the Camera tab).')}
+          />
+          {/* Phase 2: vision iron-touch Z zero. */}
+          <ToolButton
+            className={zCalBusy ? 'is-active' : ''}
+            glyph={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 2v9" />
+                <path d="m8 7 4 4 4-4" />
+                <path d="M4 15h16" />
+                <path d="M4 19h16" />
+              </svg>
+            }
+            onClick={calibrateZByIronTouch}
+            disabled={!connected || !liveVideo}
+            title={zCalBusy ? t('solder.toolbar.zcal.cancel', 'Cancel Z calibration') : t('solder.toolbar.zcal', 'Calibrate Z (iron touch)')}
+            body={t('solder.toolbar.zcal.body', 'Step Z down until the camera sees the spring-loaded iron tip stop moving (it touched the board), then set work Z0 there. Needs a connected machine + a live camera. Click again to cancel.')}
+          />
+          <span className="sp-tools-sep" aria-hidden="true" />
           <ToolButton
             className={showSettings ? 'is-active' : ''}
             glyph={<Icon name="settings" />}
@@ -928,6 +1308,94 @@ export function SolderingPanel() {
                 </span>
                 <span className="sp-gerber-layer-role">{solderKindLabel(c.kind)}</span>
               </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Camera-detected pads (Phase 1): a reviewable list. Each row ＋-adds the
+          pad as a solder point (using the new-point defaults for Z/feed); "Add
+          all" adds every one and travel-optimizes. Detection tunables (pad size
+          range + bright/dark) live in the header here so the operator can adjust
+          and re-detect without opening Settings. */}
+      {detectedPads.length > 0 && (
+        <div className="sp-card sp-detected">
+          <div className="sp-card-head">
+            <h4>{t('solder.detect.title', 'Detected pads')}</h4>
+            <span className="sp-card-count">{detectedPads.length}</span>
+            <div className="sp-detect-actions">
+              <button
+                type="button"
+                className="sp-detect-addall"
+                onClick={addAllDetectedPads}
+                title={t('solder.detect.addAll.title', 'Add every detected pad as a solder point (travel-optimized)')}
+              >
+                {t('solder.detect.addAll', 'Add all {n}', { n: detectedPads.length })}
+              </button>
+              <button
+                className="sp-row-ico"
+                title={t('solder.detect.dismiss', 'Dismiss detected pads')}
+                aria-label={t('solder.detect.dismiss', 'Dismiss detected pads')}
+                onClick={clearDetectedPads}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+          </div>
+          <div className="sp-detect-tune" onClick={(e) => e.stopPropagation()}>
+            <label className="sp-detect-tune-field">
+              <span>{t('solder.detect.minMm', 'Min ⌀')}</span>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                value={padMinMm}
+                onChange={(e) => setPadMinMm(Math.max(0, num(e.target.value, padMinMm)))}
+              />
+              <span className="sp-detect-unit">{t('unit.mm', 'mm')}</span>
+            </label>
+            <label className="sp-detect-tune-field">
+              <span>{t('solder.detect.maxMm', 'Max ⌀')}</span>
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                value={padMaxMm}
+                onChange={(e) => setPadMaxMm(Math.max(0, num(e.target.value, padMaxMm)))}
+              />
+              <span className="sp-detect-unit">{t('unit.mm', 'mm')}</span>
+            </label>
+            <label className="sp-detect-tune-invert">
+              <input
+                type="checkbox"
+                checked={padInvert}
+                onChange={(e) => setPadInvert(e.target.checked)}
+              />
+              {t('solder.detect.darkPads', 'Dark pads')}
+            </label>
+            <button type="button" className="sp-detect-redo" onClick={detectPads} disabled={detecting}>
+              {t('solder.detect.redo', 'Re-detect')}
+            </button>
+          </div>
+          <div className="sp-detect-list">
+            {detectedPads.map((p, i) => (
+              <div key={`${p.xPx},${p.yPx},${i}`} className="sp-detect-item">
+                <button
+                  type="button"
+                  className="sp-detect-add"
+                  onClick={() => addDetectedPad(i)}
+                  title={t('solder.detect.add.title', 'Add this pad as a solder point')}
+                  aria-label={t('solder.detect.add', 'Add pad {n}', { n: i + 1 })}
+                >
+                  <span aria-hidden="true">＋</span>
+                </button>
+                <span className="sp-detect-xy">
+                  X {p.x.toFixed(2)} · Y {p.y.toFixed(2)}
+                  {p.rMm > 0 && (
+                    <span className="sp-detect-r"> · ⌀ {(p.rMm * 2).toFixed(2)} {t('unit.mm', 'mm')}</span>
+                  )}
+                </span>
+              </div>
             ))}
           </div>
         </div>
@@ -1181,11 +1649,36 @@ export function SolderingPanel() {
                 <th className="sp-idx">{t('solder.table.num', '#')}</th>
                 <th>{t('solder.table.x', 'X')}</th>
                 <th>{t('solder.table.y', 'Y')}</th>
-                <th>{t('solder.table.freeZ', 'Free-Z')}</th>
-                <th>{t('solder.table.touchZ', 'Touch-Z')}</th>
-                <th>{t('solder.table.feedType', 'Type')}</th>
-                <th>{t('solder.table.approach', 'Approach')}</th>
-                <th>{t('solder.table.feedS', 'Feed s')}</th>
+                <th>
+                  <span className="sp-th">
+                    <span className="sp-th-txt">{t('solder.table.freeZ', 'Free-Z')}</span>
+                    <ColumnBulkEdit field="freeZ" label={t('solder.table.freeZ', 'Free-Z')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.mm', 'mm')} />
+                  </span>
+                </th>
+                <th>
+                  <span className="sp-th">
+                    <span className="sp-th-txt">{t('solder.table.touchZ', 'Touch-Z')}</span>
+                    <ColumnBulkEdit field="touchZ" label={t('solder.table.touchZ', 'Touch-Z')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.mm', 'mm')} />
+                  </span>
+                </th>
+                <th>
+                  <span className="sp-th">
+                    <span className="sp-th-txt">{t('solder.table.feedType', 'Type')}</span>
+                    <ColumnBulkEdit field="type" label={t('solder.table.feedType', 'Type')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} />
+                  </span>
+                </th>
+                <th>
+                  <span className="sp-th">
+                    <span className="sp-th-txt">{t('solder.table.approach', 'Approach')}</span>
+                    <ColumnBulkEdit field="approach" label={t('solder.table.approach', 'Approach')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} />
+                  </span>
+                </th>
+                <th>
+                  <span className="sp-th">
+                    <span className="sp-th-txt">{t('solder.table.feedS', 'Feed s')}</span>
+                    <ColumnBulkEdit field="feedSeconds" label={t('solder.table.feedS', 'Feed s')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.s', 's')} />
+                  </span>
+                </th>
                 <th className="sp-actions-col" aria-label={t('solder.table.actions', 'Actions')} />
               </tr>
             </thead>
@@ -1325,6 +1818,37 @@ export function SolderingPanel() {
                 'No points yet. Press + to add one, or ⌖ to record the machine position.',
               )}
             </p>
+          )}
+          {/* Bulk "apply to all" bar — the mobile equivalent of the per-header
+              affordances (the table headers are hidden in this layout). One chip
+              per bulk-editable column opens the same popover and writes to every
+              point. Shown only when there are points to act on. */}
+          {points.length > 0 && (
+            <div className="sp-cards-bulk" onClick={(e) => e.stopPropagation()}>
+              <span className="sp-cards-bulk-lbl">
+                {t('solder.bulk.barLabel', 'Set for all {n}', { n: points.length })}
+              </span>
+              <span className="sp-cards-bulk-chip">
+                <span>{t('solder.table.freeZ', 'Free-Z')}</span>
+                <ColumnBulkEdit field="freeZ" label={t('solder.table.freeZ', 'Free-Z')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.mm', 'mm')} />
+              </span>
+              <span className="sp-cards-bulk-chip">
+                <span>{t('solder.table.touchZ', 'Touch-Z')}</span>
+                <ColumnBulkEdit field="touchZ" label={t('solder.table.touchZ', 'Touch-Z')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.mm', 'mm')} />
+              </span>
+              <span className="sp-cards-bulk-chip">
+                <span>{t('solder.table.feedType', 'Type')}</span>
+                <ColumnBulkEdit field="type" label={t('solder.table.feedType', 'Type')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} />
+              </span>
+              <span className="sp-cards-bulk-chip">
+                <span>{t('solder.table.approach', 'Approach')}</span>
+                <ColumnBulkEdit field="approach" label={t('solder.table.approach', 'Approach')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} />
+              </span>
+              <span className="sp-cards-bulk-chip">
+                <span>{t('solder.card.feed', 'Feed')}</span>
+                <ColumnBulkEdit field="feedSeconds" label={t('solder.table.feedS', 'Feed s')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.s', 's')} />
+              </span>
+            </div>
           )}
           {points.map((pt, i) => (
             <div

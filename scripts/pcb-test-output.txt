@@ -1,0 +1,52 @@
+PCB CAM harness — 2026-06-21T00:08:53.212Z
+
+========================================================================
+BOARD: gerber.ZIP
+========================================================================
+  files in zip: 8
+  copper layer: devansuh_project_torch - CADCAM Top Copper.GBR
+  drill layer:  (none)
+  outline layer: devansuh_project_torch - CADCAM Mechanical 1.GBR
+
+  Gerber parse: OK
+    copper features: 73  (traces=15, pads=58, regions=0)
+    copper bbox: x[-11.60,4.10] y[-18.90,1.00] (15.70x19.90)
+
+    BEFORE (per-feature)  : 176 loops, 1276 moves, path 2819.4 mm
+    AFTER  (merged-net)   : 54 loops, 1290 moves, path 1642.0 mm
+    passes per ring/feature: 2, stepover 0.1 mm, tool dia 0.2 mm
+    -> merged-net loop reduction: 69.3%  (fewer/cleaner where copper overlaps)
+    isolation non-empty: YES
+    [isolation] gcode safety: OK
+  NO DRILL LAYER.
+
+  Cutout: outline 5 pts, 88 moves, path 264.2 mm
+    [cutout] gcode safety: OK
+
+========================================================================
+BOARD: Gerber_SRP 70_50mm_Release.zip
+========================================================================
+  files in zip: 11
+  copper layer: Gerber_TopLayer.GTL
+  drill layer:  Drill_PTH_Through.DRL
+  outline layer: Gerber_BoardOutlineLayer.GKO
+
+  Gerber parse: OK
+    warnings(13): Layer transform 'LP' ignored | Layer transform 'LP' ignored | Layer transform 'LP' ignored …
+    copper features: 299  (traces=124, pads=79, regions=96)
+    copper bbox: x[0.26,87.74] y[2.00,71.74] (87.49x69.74)
+
+    BEFORE (per-feature)  : 846 loops, 13310 moves, path 22770.0 mm
+    AFTER  (merged-net)   : 106 loops, 11626 moves, path 12211.5 mm
+    passes per ring/feature: 2, stepover 0.1 mm, tool dia 0.2 mm
+    -> merged-net loop reduction: 87.5%  (fewer/cleaner where copper overlaps)
+    isolation non-empty: YES
+    [isolation] gcode safety: OK
+
+  Excellon parse: OK
+    drill hits: 54, tools: 6
+    drill toolpath: 162 moves, path 731.4 mm
+    [drill] gcode safety: OK
+
+  Cutout: outline 19 pts, 95 moves, path 176.1 mm
+    [cutout] gcode safety: OK

@@ -65,24 +65,35 @@
   grid-column: 1 / -1;
 }
 
-/* --- sections --- */
+/* --- sections (canonical card surface, §2.8/W-F: --bg-card fill, 1px border
+   edge, --radius, NO resting drop shadow) --- */
 .print-section {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--bg-card);
   min-width: 0;
 }
+/* Canonical section header (§2.8): uppercase micro-label, raised contrast, no
+   bottom border (the card already carries the edge). Leading glyph is muted. */
 .print-section > h3 {
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: var(--sp-1) var(--pad-card-x);
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--pad-card-x);
   font-size: var(--fs-section);
-  color: var(--fg-muted);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--border);
+}
+/* Canonical leading glyph (§2.8/W-F): muted, never accent (overrides the shared
+   `.cam-card-ico` accent color within Print section headers). */
+.print-section > h3 > svg,
+.print-section > h3 .cam-card-ico {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
 }
 .print-section-body {
   padding: var(--pad-card-y) var(--pad-card-x);
@@ -109,11 +120,17 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Primary button (§2.8): SOLID accent fill, taller (--ctl-h-lg), 600 weight. */
 .print-btn.primary {
+  min-height: var(--ctl-h-lg);
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
-  font-weight: 600;
+  font-weight: var(--fw-title);
+}
+.print-btn.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  filter: brightness(1.08);
 }
 /* Primary slice/send actions are taller than secondary controls. */
 .print-actions .print-btn {
@@ -176,7 +193,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  background: #15181c;
+  background: var(--viewport-bg);
 }
 
 /* --- size / fit readout --- */
@@ -361,9 +378,9 @@
   font-weight: 600;
 }
 
-/* Cancel sits beside Slice while a job runs. */
+/* Cancel sits beside Slice while a job runs — destructive (§2.8). */
 .print-cancel {
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  border-color: var(--border-danger);
   color: var(--danger);
 }
 .print-cancel:hover:not(:disabled) {
@@ -486,7 +503,7 @@
   padding: 0 6px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   min-width: 0;
   transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
 }
@@ -629,7 +646,7 @@
   padding: 2px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
 }
 .pr-seg-btn {
   min-width: 0;
@@ -663,12 +680,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Active segment of a MODE/enum switch (§2.8/W-C): tonal --accent-soft tint,
+   reserving full-accent for the true primary CTA. */
 .pr-seg-btn.is-on {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
 }
 .pr-seg-btn.is-on .pr-seg-ico {
-  color: var(--accent-fg);
+  color: var(--accent);
 }
 
 /* --- narrow panel (≤560px): one column of cards, off PANEL width --- */

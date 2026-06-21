@@ -155,7 +155,15 @@ async function getApp(): Promise<FirebaseApp> {
       // key, so it stays a NO-OP until you configure VITE_RECAPTCHA_SITE_KEY +
       // enable enforcement in the Firebase console (never breaks local dev).
       const siteKey = realValue(import.meta.env.VITE_RECAPTCHA_SITE_KEY)
-      if (siteKey) {
+      // In DEV the App Check debug-token flow only works if the developer has
+      // registered the per-session debug token in the Firebase console; otherwise
+      // `exchangeDebugToken` 403s on every refresh and spams the console for zero
+      // benefit (local dev needs no abuse/cost guard). So only run App Check in dev
+      // when EXPLICITLY opted in via VITE_APPCHECK_DEBUG (after registering the
+      // printed token). Production builds (import.meta.env.DEV === false) always
+      // run App Check normally with the real reCAPTCHA provider.
+      const appCheckOptIn = !import.meta.env.DEV || !!realValue(import.meta.env.VITE_APPCHECK_DEBUG)
+      if (siteKey && appCheckOptIn) {
         try {
           if (import.meta.env.DEV) {
             // Lets localhost / Playwright obtain a debug token (register it in
@@ -189,16 +197,22 @@ export async function getFirebaseAuth(): Promise<Auth | null> {
         getAuth,
         indexedDBLocalPersistence,
         browserLocalPersistence,
+        inMemoryPersistence,
         browserPopupRedirectResolver,
       } = await import('firebase/auth')
       // Use initializeAuth with an explicit persistence chain so the session is
       // restored on reload RELIABLY — `getAuth()` picks a default that can fall
       // back to in-memory (forgetting the user on refresh) if storage probing
-      // races. IndexedDB first (survives more aggressive cookie clearing), then
-      // localStorage. Falls back to getAuth() if auth was already initialized.
+      // races. The chain DEGRADES GRACEFULLY: IndexedDB first (survives more
+      // aggressive cookie clearing), then localStorage, then in-memory. The last
+      // is critical for INCOGNITO / disabled-storage: when both IndexedDB and
+      // localStorage are blocked (so the user can't persist across reloads but
+      // CAN still sign in for this session), Firebase uses in-memory instead of
+      // throwing or hanging during init. Falls back to getAuth() only if auth
+      // was already initialized for this app.
       try {
         return initializeAuth(app, {
-          persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+          persistence: [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
           popupRedirectResolver: browserPopupRedirectResolver,
         })
       } catch {

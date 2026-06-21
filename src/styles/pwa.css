@@ -26,8 +26,7 @@
   border-radius: 14px;
   box-shadow:
     0 1px 0 0 color-mix(in srgb, var(--fg) 6%, transparent) inset,
-    0 18px 48px -12px rgba(0, 0, 0, 0.55),
-    0 4px 12px -6px rgba(0, 0, 0, 0.4);
+    var(--shadow-2);
   padding: 14px;
   font-size: var(--fs-body);
   animation: km-pwa-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);

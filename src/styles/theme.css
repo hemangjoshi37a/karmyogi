@@ -9,16 +9,25 @@
 :root {
   --ctl-h: 28px;          /* compact control height (desktop) */
   --ctl-h-lg: 34px;       /* primary / send action height */
+  --ctl-h-sm: 26px;       /* small control (speed / search / chip) */
   --ctl-h-touch: 38px;    /* ≥ tap target at narrow/mobile widths */
   --fs-section: 10.5px;   /* uppercase section / card label */
   --fs-label: 11px;       /* field label */
   --fs-ctl: 12px;         /* input / button text */
   --fs-body: 12px;        /* body / hint text */
   --fs-mono: 11.5px;      /* monospace (g-code preview, console) */
+  --fs-title: 15px;       /* modal / overlay / popover dialog title */
+  --fs-title-lg: 17px;    /* primary page-level title (optional) */
+  --lh-tight: 1.25;       /* line-height for titles */
+  --lh-body: 1.45;        /* line-height for body / hints */
+  --fw-label: 600;        /* uppercase section labels */
+  --fw-title: 600;        /* dialog / page titles */
   --sp-1: 4px;
   --sp-2: 6px;
   --sp-3: 8px;
   --sp-4: 12px;
+  --sp-5: 16px;           /* modal body gutter, card group gap */
+  --sp-6: 24px;           /* section separation, dialog footer */
   --pad-card-y: 8px;
   --pad-card-x: 10px;
   --radius: 6px;
@@ -26,6 +35,11 @@
   --card-min: 248px;      /* card grid: min card width before it drops a column */
   --field-min: 92px;      /* field grid: min field width before it wraps */
   --icon-btn: 28px;       /* square icon-button side (desktop) */
+  /* Motion — easing + durations (every transition rides these; gated by a
+     prefers-reduced-motion block in globals.css). Theme-independent. */
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --dur-fast: 120ms;      /* hover / border / bg */
+  --dur-mid: 160ms;       /* modal enter, disclosure */
 }
 
 /* Theme tokens — light/dark via [data-theme] on <html>. */
@@ -46,6 +60,16 @@
   --grid: #3a4250;
   --grid-major: #515c6e;
   --viewport-bg: #15181c;
+  /* The ONE canonical card fill — every card/section surface unifies on this. */
+  --bg-card: var(--bg-elev);
+  /* Semantic border tints so destructive/warn controls need no bespoke rule. */
+  --border-danger: color-mix(in srgb, var(--danger) 55%, var(--border));
+  --border-warn: color-mix(in srgb, var(--warn) 50%, var(--border));
+  /* Tonal/secondary fill: mode-switch "active" tint that is NOT a full primary. */
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
+  /* Elevation — theme-aware (dark uses deep rgba(0,0,0,…)). */
+  --shadow-1: 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 18px 48px -12px rgba(0, 0, 0, 0.55), 0 4px 12px -6px rgba(0, 0, 0, 0.4);
   /* Scrollbar tokens (derived from theme colors via color-mix). */
   --scrollbar-track: color-mix(in srgb, var(--bg) 60%, var(--bg-panel) 40%);
   --scrollbar-thumb: color-mix(in srgb, var(--border) 70%, var(--fg-muted) 30%);
@@ -54,12 +78,15 @@
 
 :root[data-theme='light'] {
   --bg: #f4f6f8;
-  --bg-elev: #ffffff;
+  /* Lifted off pure white so light gets a real 3rd elevation step (panel/card)
+     instead of bg-elev == bg-panel == #fff (audit 6). */
+  --bg-elev: #fbfcfd;
   --bg-panel: #ffffff;
   --bg-input: #eef1f4;
   --fg: #1c2128;
   --fg-muted: #5b6675;
-  --border: #d4dae1;
+  /* Crisper card edges in light. */
+  --border: #c9d0d8;
   --accent: #0e7c66;
   --accent-fg: #ffffff;
   --danger: #dc2626;
@@ -68,6 +95,17 @@
   --grid: #d4dae1;
   --grid-major: #aab4c0;
   --viewport-bg: #e7ecf1;
+  /* The ONE canonical card fill — every card/section surface unifies on this. */
+  --bg-card: var(--bg-elev);
+  /* Semantic border tints so destructive/warn controls need no bespoke rule. */
+  --border-danger: color-mix(in srgb, var(--danger) 55%, var(--border));
+  --border-warn: color-mix(in srgb, var(--warn) 50%, var(--border));
+  /* Tonal/secondary fill: mode-switch "active" tint that is NOT a full primary. */
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
+  /* Elevation — theme-aware (light uses soft slate-blue rgba, not dark-tuned
+     black, so cards/popovers don't look muddy on white). */
+  --shadow-1: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-2: 0 12px 32px -8px rgba(16, 24, 40, 0.16);
   /* Scrollbar tokens (derived from theme colors via color-mix). */
   --scrollbar-track: color-mix(in srgb, var(--bg) 55%, var(--bg-panel) 45%);
   --scrollbar-thumb: color-mix(in srgb, var(--border) 60%, var(--fg-muted) 40%);

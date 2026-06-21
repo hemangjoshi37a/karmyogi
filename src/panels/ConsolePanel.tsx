@@ -306,7 +306,7 @@ export function ConsolePanel() {
         </button>
         <button
           type="button"
-          className="chat-icon-btn"
+          className="chat-icon-btn chat-icon-btn--danger"
           onClick={clear}
           disabled={entries.length === 0}
           title={t('console.clear.title', 'Clear the console log')}

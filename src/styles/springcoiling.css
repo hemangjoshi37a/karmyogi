@@ -115,45 +115,23 @@
   background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
 }
 
-/* ───────────────────────── status strip ───────────────────────── */
-.spr-status {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-variant-numeric: tabular-nums;
-}
+/* ───────────────────────── status strip ─────────────────────────
+   Adopts the shared <CamStatus> kit (.cam-status in cam.css). The only bespoke
+   `.spr-status-pill` left is the small "machine (rotary+linear)" tag in the
+   Program card head — keep just that pill recipe. */
 .spr-status-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
 }
 .spr-status-pill b {
   color: var(--fg);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-}
-.spr-status-sep {
-  color: var(--border);
-}
-.spr-status-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: auto;
-  padding: 1px 8px;
-  border-radius: 999px;
-  color: var(--accent);
-  font-weight: 600;
-  white-space: nowrap;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* ---- Production counter ---- */
@@ -212,6 +190,11 @@
 .spr-counter-btn.is-reset {
   color: var(--fg-muted);
 }
+/* Reset zeroes the tally → destructive hover (W-H). */
+.spr-counter-btn.is-reset:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
 .spr-counter-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -260,9 +243,11 @@
 .spr-seg-btn:hover:not(.is-on) {
   color: var(--fg);
 }
+/* Active option (type / direction / axis) is a mode switch → tonal accent-soft
+   fill so only true primaries are full-accent (§2.8 segmented). */
 .spr-seg-btn.is-on {
-  color: var(--accent-fg);
-  background: var(--accent);
+  color: var(--fg);
+  background: var(--accent-soft);
   border-color: var(--accent);
 }
 
@@ -273,10 +258,11 @@
   gap: var(--sp-3);
   align-content: start;
 }
+/* §2.8 card surface: --bg-card fill, border-only, no resting drop shadow. */
 .spr-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--bg-card);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -288,11 +274,13 @@
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border);
 }
+/* §2.8 section header: raised-contrast muted micro-label. */
 .spr-card-head h4 {
   margin: 0;
   font-size: var(--fs-section);
-  font-weight: 600;
-  color: var(--fg-muted);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -550,9 +538,13 @@
   margin-right: auto;
 }
 
-/* ───────────────── section glyphs ───────────────── */
+/* ───────────────── section glyphs ─────────────────
+   §2.8: a section-header leading glyph is MUTED 14px, never accent (so it
+   titles the card without competing with the real accent CTAs). */
 .spr-card-ico {
-  color: var(--accent);
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
   flex-shrink: 0;
 }
 

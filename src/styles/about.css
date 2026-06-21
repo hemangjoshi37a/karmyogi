@@ -18,8 +18,9 @@
 }
 .km-about2-mark {
   flex: none;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius);
+  /* theme-aware elevation (was a dark-tuned rgba shadow). */
+  box-shadow: var(--shadow-1);
 }
 .km-about2-heroText {
   min-width: 0;
@@ -101,14 +102,14 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 38px;
+  min-height: var(--ctl-h-lg);
   padding: 8px 12px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   text-decoration: none;
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease, transform 0.06s ease;
@@ -139,9 +140,10 @@
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  background: var(--bg-elev);
+  /* §2.8 card: canonical card fill, border only (no resting drop shadow). */
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 .km-about2-build {
   display: grid;
@@ -156,11 +158,11 @@
 }
 .km-about2-kv dt {
   margin: 0;
-  font-size: 10.5px;
-  font-weight: 700;
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
 }
 .km-about2-kv dd {
   margin: 0;
@@ -201,14 +203,14 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 36px;
+  min-height: var(--ctl-h-lg);
   padding: 7px 14px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
 }

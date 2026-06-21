@@ -45,3 +45,7 @@ test_stl_files/
 # unreadable, which aborts `git add .`). The real models — controllers_3d/*.step
 # and public/controllers_3d/ — are tracked normally.
 controllers_3d/*.tmp-*
+
+# UI/UX audit scratch screenshots
+ui-audit/
+.ui-serve/

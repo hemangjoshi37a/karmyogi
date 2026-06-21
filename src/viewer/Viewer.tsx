@@ -19,6 +19,7 @@ import { CarvedStock } from './CarvedStock'
 import { PlacementGizmo } from './PlacementGizmo'
 import { CameraBedPlane } from './CameraBedPlane'
 import { JobBox } from './JobBox'
+import { BBoxCube } from './BBoxCube'
 import { ViewportShapes } from './ViewportShapes'
 import { Dimensions, type PerFileDimension } from './Dimensions'
 import { SpringScene } from './SpringScene'
@@ -158,12 +159,40 @@ export interface ViewerProps {
    */
   sectionBoxes?: { id: string; bounds: Bounds }[]
   /**
+   * 3D-carving job boxes: ONE tight bounding cube PER carve job, computed from
+   * each job's MESH bbox transformed by its PLACEMENT (its true position/size on
+   * the bed). When provided AND non-empty, these REPLACE the single combined
+   * gcode-bounds box (which wrongly spans the work origin → the model) — each job
+   * gets its own cube hugging its actual min→max extent on all three axes.
+   * Respects the same `showJobBoxes` visibility toggle as the section boxes.
+   */
+  jobBoxes?: { id: string; min: [number, number, number]; max: [number, number, number] }[]
+  /**
    * Per-section parsed segments + colour. When provided (and not simulating),
    * each toolpath renders in its OWN colour and its OWN group, so distinct jobs
    * are visually separable and the placement gizmo can live-drag ONLY the
    * selected section (not every toolpath).
+   *
+   * `operations` (optional) carries the section's per-operation breakdown: each
+   * carving op's OWN parsed segments + preset colour. When present, the section
+   * draws one coloured line group PER operation (so a profile, a pocket, an
+   * engrave from different presets each show in their preset's colour) instead
+   * of a single section-coloured path. The whole section still lives in one
+   * group (so placement / visibility / live-drag stay per-section).
    */
-  sectionPaths?: { id: string; segments: Segment[]; color: string }[]
+  sectionPaths?: {
+    id: string
+    segments: Segment[]
+    color: string
+    operations?: { id: string; segments: Segment[]; color: string }[]
+  }[]
+  /**
+   * Id of the operation currently hovered in the carving Operations list or the
+   * Program-tab per-op rows. The matching per-op toolpath SHIMMERS (an animated
+   * highlight) so the user can see which line corresponds to which operation.
+   * Null = nothing hovered (every op renders normally).
+   */
+  hoveredOpId?: string | null
   /** The currently selected section id (its box reads as active). */
   selectedSectionId?: string | null
   /** Called with a section id when its toolpath box is clicked. */
@@ -251,7 +280,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     gizmo = false,
     onGizmoChange,
     sectionBoxes,
+    jobBoxes,
     sectionPaths,
+    hoveredOpId = null,
     selectedSectionId,
     onSelectSection,
     lasso = false,
@@ -696,7 +727,30 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
                 matrixAutoUpdate={!isLive}
                 visible={visible}
               >
-                <Toolpath segments={sp.segments} cutColor={sp.color} />
+                {/* When the section carries a per-operation breakdown (carving
+                    ops linked to presets), draw EACH op in its own preset
+                    colour; otherwise fall back to the single section-coloured
+                    path. Either way it's one group, so placement / live-drag /
+                    visibility stay per-section. */}
+                {sp.operations && sp.operations.length > 0 ? (
+                  sp.operations.map((op) => {
+                    const isHovered = hoveredOpId === op.id
+                    // While SOME op is hovered, dim the others a touch so the
+                    // shimmering one pops; nothing hovered → all normal.
+                    const dimmed = hoveredOpId !== null && !isHovered
+                    return (
+                      <Toolpath
+                        key={op.id}
+                        segments={op.segments}
+                        cutColor={op.color}
+                        highlight={isHovered}
+                        dim={dimmed}
+                      />
+                    )
+                  })
+                ) : (
+                  <Toolpath segments={sp.segments} cutColor={sp.color} />
+                )}
               </group>
             )
           })
@@ -714,7 +768,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         <SpringScene dark={theme === 'dark'} simPosition={simPosition} />
       ) : (
         <>
-          {parsed.bounds && <BoundsBox bounds={parsed.bounds} dark={theme === 'dark'} />}
+          {/* In 3D-carving mode (per-job mesh boxes provided) the combined
+              gcode-bounds box is WRONG — it spans the work origin → the model.
+              Suppress it and let the per-job cubes (below) bound each model. */}
+          {parsed.bounds && !(jobBoxes && jobBoxes.length > 0) && (
+            <BoundsBox bounds={parsed.bounds} dark={theme === 'dark'} />
+          )}
           {/* Engineering-style 3D dimension annotations (toggleable from the toolbar).
               Measures the toolpath's actual EXTENT (Δx, Δy, Δz from segment endpoints),
               NOT the origin→extent distance: `gcodeToPolylines` seeds its bounds with
@@ -792,6 +851,23 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
             />
           )
         })}
+      {/* 3D-carving per-job bounding cubes: ONE tight cube per carve job, around
+          its PLACED mesh bbox (true position/size on the bed) — all three axes, so
+          a flat-bottom part's box sits from its real minZ to maxZ, NOT from the
+          work origin. Respects the same show-job-boxes visibility toggle; hidden
+          for a spring program (no 3D job boxes there). The selected section's cube
+          is highlighted so it lines up with the placement gizmo. */}
+      {showJobBoxes &&
+        !isSpringProgram &&
+        jobBoxes?.map((jb) => (
+          <BBoxCube
+            key={jb.id}
+            min={jb.min}
+            max={jb.max}
+            dark={theme === 'dark'}
+            active={jb.id === selectedSectionId}
+          />
+        ))}
       {/* Lasso: project segments enclosed by the drawn polygon → selection. */}
       {lasso && lassoApplyPoly && parsed.segments.length > 0 && (
         <LassoApply

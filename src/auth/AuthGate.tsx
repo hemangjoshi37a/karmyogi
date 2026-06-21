@@ -247,7 +247,7 @@ function SignInScreen({ graceExpired }: { graceExpired?: boolean }) {
           )}
           {error && (
             <p className="auth-error" role="alert">
-              {error}
+              {t(error.key, error.message)}
             </p>
           )}
           <ul className="auth-trust">

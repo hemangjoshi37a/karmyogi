@@ -7,6 +7,15 @@ import { Tool, Toolpath, toolRadius } from './toolpath';
 import { offsetPolygon } from './offset';
 import { GerberData } from './gerber';
 import { ExcellonData } from './excellon';
+import polygonClipping from 'polygon-clipping';
+import type { MultiPolygon, Ring } from 'polygon-clipping';
+
+const COPPER_SNAP = 1e-3; // coordinate snap grid (mm) to defuse near-coincident vertices
+
+/** Snap a coordinate to the COPPER_SNAP grid (kills floating-point near-coincidences). */
+function snapCoord(v: number): number {
+  return Math.round(v / COPPER_SNAP) * COPPER_SNAP;
+}
 
 // Append a closed/open loop cut at depth z, retracting to safeZ after.
 function cutLoop(tp: Toolpath, loop: Polyline, z: number, safeZ: number): void {
@@ -93,30 +102,143 @@ export function offsetOpenPolyline(line: Polyline, dist: number): Polyline {
   return out;
 }
 
+/** A regular n-gon (CCW) approximating a circle of `r` about `c`, as a clip Ring. */
+function circleRing(c: Point, r: number, sides = 24): Ring {
+  const ring: Ring = [];
+  for (let i = 0; i < sides; i++) {
+    const a = (2 * Math.PI * i) / sides;
+    ring.push([snapCoord(c.x + r * Math.cos(a)), snapCoord(c.y + r * Math.sin(a))]);
+  }
+  ring.push([ring[0][0], ring[0][1]]);
+  return ring;
+}
+
+/** Convert a closed Polyline (a pad or region outline) to a clip Ring (snapped, closed). */
+function polylineToRing(pl: Polyline): Ring {
+  const ring: Ring = pl.points.map((p) => [snapCoord(p.x), snapCoord(p.y)] as [number, number]);
+  if (ring.length) ring.push([ring[0][0], ring[0][1]]);
+  return ring;
+}
+
+/** Convert a clip Ring back to a CLOSED Polyline (dropping the repeated last vertex). */
+function ringToPolyline(ring: Ring): Polyline {
+  const pl = new Polyline();
+  const n = ring.length;
+  const end = n > 1 && ring[0][0] === ring[n - 1][0] && ring[0][1] === ring[n - 1][1] ? n - 1 : n;
+  for (let i = 0; i < end; i++) pl.add({ x: ring[i][0], y: ring[i][1] });
+  pl.closed = true;
+  return pl;
+}
+
+/**
+ * Buffer (stroke) an OPEN/CLOSED centreline of width `w` into FILLED polygons:
+ * each segment becomes a width-wide rectangle and each vertex a round cap, all
+ * emitted as separate clip Polygons that the caller unions together (so the
+ * stroke becomes one solid copper body with proper round joins/caps). Mirrors
+ * the proven approach in `textPocket.bufferStrokesToContours`, kept local to
+ * keep `src/core` modules self-contained.
+ */
+function strokeToPolygons(line: Polyline, w: number): MultiPolygon {
+  const hw = Math.max(kEpsilon, w / 2);
+  const out: MultiPolygon = [];
+  const pts = dedupePoints(line.points);
+  if (pts.length === 0) return out;
+  if (pts.length === 1) {
+    out.push([circleRing(pts[0], hw)]);
+    return out;
+  }
+  // Round cap/join circle at every vertex.
+  for (const p of pts) out.push([circleRing(p, hw)]);
+  // Width-wide rectangle along each segment.
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < kEpsilon) continue;
+    const nx = (-dy / len) * hw;
+    const ny = (dx / len) * hw;
+    const ring: Ring = [
+      [snapCoord(a.x + nx), snapCoord(a.y + ny)],
+      [snapCoord(b.x + nx), snapCoord(b.y + ny)],
+      [snapCoord(b.x - nx), snapCoord(b.y - ny)],
+      [snapCoord(a.x - nx), snapCoord(a.y - ny)],
+    ];
+    ring.push([ring[0][0], ring[0][1]]);
+    out.push([ring]);
+  }
+  return out;
+}
+
+/**
+ * UNION all copper geometry described by `gerber` into clean, non-overlapping,
+ * correctly-wound polygons (outer rings CCW + holes CW). Traces are stroked to
+ * their real width first; pads and regions are already filled outlines. The
+ * union is accumulated INCREMENTALLY with a try/catch so one degenerate feature
+ * can't abort the whole merge (polygon-clipping can throw "Unable to complete
+ * output ring" on near-degenerate overlaps); a primitive that still fails is
+ * skipped — its copper area is almost always already covered by an overlapping
+ * neighbour, so the merged outline is preserved.
+ */
+function unionCopper(gerber: GerberData): MultiPolygon {
+  const prims: MultiPolygon = [];
+  for (const t of gerber.traces) {
+    if (t.centreline.points.length < 2) continue;
+    for (const poly of strokeToPolygons(t.centreline, t.width > 0 ? t.width : COPPER_SNAP)) prims.push(poly);
+  }
+  for (const pad of gerber.pads) if (pad.points.length >= 3) prims.push([polylineToRing(pad)]);
+  for (const reg of gerber.regions) if (reg.points.length >= 3) prims.push([polylineToRing(reg)]);
+  if (prims.length === 0) return [];
+
+  let acc: MultiPolygon = [prims[0]];
+  for (let i = 1; i < prims.length; i++) {
+    try {
+      acc = polygonClipping.union(acc, [prims[i]]);
+    } catch {
+      // Skip a degenerate primitive; overlapping neighbours keep the area filled.
+    }
+  }
+  return acc;
+}
+
 /**
  * Isolation-route the copper described by `gerber`.
  *
- * The tool follows a path that clears copper by exactly the tool radius (plus
- * one tool-width per extra pass) away from every copper edge:
+ * APPROACH (merged-net isolation): every copper feature is first turned into a
+ * FILLED polygon — TRACES are stroked to their real width (round joins/caps),
+ * PADS and REGIONS are already filled outlines — and ALL of them are UNIONed
+ * (via `polygon-clipping`) into one set of merged copper polygons. Connected
+ * copper therefore becomes a SINGLE net with one outline, instead of the v1
+ * behaviour of isolating every trace/pad individually (which emitted redundant,
+ * overlapping passes on dense boards and could cut into copper that is really
+ * one net).
  *
- *  - Open TRACES (centreline + width): the isolation cut runs parallel to the
- *    centreline on BOTH sides at distance (width/2 + toolRadius + pass*step).
- *    Each side is a separate open feed path — this is what isolation milling
- *    actually does and what a correct preview shows (twin lines hugging every
- *    track), instead of inflating a zero-area slab (which collapsed to dots).
- *  - Closed PADS / REGIONS (real area): offset OUTWARD by (toolRadius +
- *    pass*step) to mill a ring around the feature.
+ * For each isolation pass `p` we offset the MERGED boundary AWAY from the copper
+ * by (toolRadius + p*step) and emit that loop as a feed-following cut at `cutZ`:
  *
- * Each pass is a feed-following toolpath at `cutZ`. Features are isolated
- * individually (overlapping copper is not merged into single nets in v1).
+ *  - OUTER rings (copper on the inside): offset OUTWARD — the cutter hugs the
+ *    true outer copper outline.
+ *  - HOLE rings (copper voids / clearances): offset INTO the void so the cutter
+ *    isolates the inner copper edge too. `offsetPolygon` normalises any ring to
+ *    the CCW region it encloses and `+delta` grows that region, so passing each
+ *    ring with `+delta` always moves the cut away from copper — correct for both
+ *    outer rings and holes (islands inside voids are handled because the union
+ *    nests them as their own outer rings).
+ *
  *   safeZ   retract height (mm), cutZ engraving depth (negative into copper).
- *   passes  number of isolation passes (>=1); spacing = one tool width (step).
+ *   passes  number of isolation passes (>=1); spacing = `step` (see below).
  *
  * UNIT CONTRACT: the per-pass lateral spacing is taken from `stepoverMm` — an
  * EXPLICIT metric (mm) value. When omitted/non-positive it defaults to one tool
  * radius. This is intentionally NOT `tool.stepover` (which the `Tool` interface
  * documents as a 0..1 fraction of diameter for pocketing); the PCB UI exposes a
  * "Pass stepover (mm)" field, so we keep the contract metric and unambiguous.
+ *
+ * `mergeNets` (default true) selects the unioned approach above. Set it false to
+ * fall back to the legacy per-feature isolation (twin offset lines per trace +
+ * concentric rings per pad/region) — kept as a safety net should the union ever
+ * yield degenerate output for a pathological board.
  */
 export function isolationRoutes(
   gerber: GerberData,
@@ -124,7 +246,8 @@ export function isolationRoutes(
   safeZ: number,
   cutZ: number,
   passes: number,
-  stepoverMm?: number
+  stepoverMm?: number,
+  mergeNets = true
 ): Toolpath {
   const tp = new Toolpath();
   tp.name = 'Isolation';
@@ -137,6 +260,50 @@ export function isolationRoutes(
   let step = stepoverMm != null && Number.isFinite(stepoverMm) ? stepoverMm : 0;
   if (step <= 0.0) step = r > 0 ? r : 0.5;
 
+  if (mergeNets) {
+    // Merged-net isolation: union all copper, then offset the merged boundary.
+    const merged = unionCopper(gerber);
+    // Flatten every ring (outer + holes) of every merged polygon into closed
+    // Polylines; each is a single, non-self-intersecting loop ready to offset.
+    const rings: Polyline[] = [];
+    for (const poly of merged) for (const ring of poly) if (ring.length >= 4) rings.push(ringToPolyline(ring));
+
+    if (rings.length > 0) {
+      for (const ring of rings) {
+        if (ring.points.length < 3) continue;
+        for (let pass = 0; pass < passes; ++pass) {
+          const delta = r + pass * step; // away-from-copper isolation offset
+          const loop = offsetPolygon(ring, +delta);
+          if (loop.points.length < 3) continue;
+          loop.closed = true;
+          cutLoop(tp, loop, cutZ, safeZ);
+        }
+      }
+      return tp;
+    }
+    // Union produced nothing usable — fall through to per-feature isolation.
+  }
+
+  return perFeatureIsolation(gerber, tp, r, step, safeZ, cutZ, passes);
+}
+
+/**
+ * Legacy per-feature isolation (the v1 behaviour), retained as a fallback for
+ * `isolationRoutes`:
+ *  - Open TRACES (centreline + width): the isolation cut runs parallel to the
+ *    centreline on BOTH sides at distance (width/2 + toolRadius + pass*step).
+ *  - Closed PADS / REGIONS: offset OUTWARD by (toolRadius + pass*step).
+ * Features are isolated individually (overlapping copper is NOT merged).
+ */
+function perFeatureIsolation(
+  gerber: GerberData,
+  tp: Toolpath,
+  r: number,
+  step: number,
+  safeZ: number,
+  cutZ: number,
+  passes: number
+): Toolpath {
   // ---- Open traces: offset the centreline to each side. ----
   for (const t of gerber.traces) {
     if (t.centreline.points.length < 2) continue;

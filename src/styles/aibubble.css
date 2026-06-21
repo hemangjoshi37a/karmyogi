@@ -48,8 +48,9 @@
   background: var(--bg-panel);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--radius, 8px);
-  box-shadow: 0 12px 40px color-mix(in srgb, #000 55%, transparent);
+  border-radius: var(--radius);
+  /* theme-aware overlay elevation (was a dark-tuned rgba shadow). */
+  box-shadow: var(--shadow-2);
   overflow: hidden;
 }
 

@@ -23,7 +23,7 @@
   height: auto;
   margin: 0 auto var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius, 8px);
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
   padding: 2px;
 }

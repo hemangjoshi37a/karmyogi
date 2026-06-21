@@ -270,7 +270,10 @@ export function CarvedStock({
     for (let i = 0; i < z.length; i++) arr[i * 3 + 2] = z[i]
     pos.needsUpdate = true
     g.computeVertexNormals()
-    g.computeBoundingSphere()
+    // NOTE: no per-tick computeBoundingSphere — that's a full O(grid) pass every
+    // playback frame, and the carve only lowers Z WITHIN the fixed stock box, so
+    // the sphere never needs refreshing. The mesh is `frustumCulled={false}`
+    // (it's always near the bed centre) so a stale/absent sphere is harmless.
   }, [built, revealIndex, revealPoint, segments, toolRadius])
 
   // Dispose the geometry when it is replaced / on unmount.
@@ -286,7 +289,7 @@ export function CarvedStock({
   const color = materialColor(mat.category, theme === 'dark')
 
   return (
-    <mesh geometry={geom}>
+    <mesh geometry={geom} frustumCulled={false}>
       <meshStandardMaterial
         color={color}
         roughness={0.85}

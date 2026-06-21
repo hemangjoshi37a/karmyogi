@@ -6,9 +6,17 @@
 // does NOT provide polygon *offsetting*. We therefore port the Qt v1 miter
 // offset directly: it is exact for convex polygons and correct for simple
 // (non-self-intersecting) concave polygons, and reproduces the reference unit
-// tests' exact expected values. For production-grade robustness on complex
-// copper pours / nested pockets, swap in a Clipper2-style offsetter behind this
-// same API (offsetPolygon / insetRings).
+// tests' exact expected values.
+//
+// COMPLEX COPPER POURS: for robustness on dense PCBs the right move is to first
+// UNION all copper features (traces, pads, regions) into clean, correctly-wound
+// rings with `polygon-clipping`, then offset that already-simple merged boundary
+// here with `offsetPolygon`. That is exactly how `pcbCam.isolationRoutes` now
+// works (union → offset the merged outline per pass), so each ring fed to
+// `offsetPolygon` is a single non-self-intersecting loop — the case this miter
+// offset handles correctly. For even harder cases (deep nested insets) a
+// Clipper2-style offsetter can be swapped in behind this same API
+// (offsetPolygon / insetRings).
 
 import { Point, Polyline, distance, kEpsilon } from './geometry';
 

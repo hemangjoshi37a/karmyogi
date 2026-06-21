@@ -27,6 +27,8 @@ import {
   CoilGlyph,
 } from '../components/SpringGlyphs'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { CamStatus } from '../components/cam/CamUI'
+import '../styles/cam.css'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
@@ -309,7 +311,14 @@ export function SpringCoilingPanel() {
   const programOwner = useProgramOwner((s) => s.owner)
   const claimOwner = useProgramOwner((s) => s.claim)
 
-  const [params, setParams] = useState<EditableParams>(() => toParams(undefined))
+  // Persisted coiling params so the spring geometry/feeds survive a reload. The
+  // plain initial is the fully-shaped default (usePersistentState reads
+  // localStorage first, so the initial is only used when nothing was saved). The
+  // userTouchedRef guard below still prevents auto-publishing on mount.
+  const [params, setParams] = usePersistentState<EditableParams>(
+    'karmyogi.spring.params',
+    toParams(undefined),
+  )
   // TRUE only after the operator actually edits the coil (any param change /
   // preset / file load). The program section + 3D spring scene are published
   // ONLY once this is set — so merely mounting this panel (page load, or dev
@@ -324,7 +333,7 @@ export function SpringCoilingPanel() {
     },
     [],
   )
-  const [showRaw, setShowRaw] = useState(false)
+  const [showRaw, setShowRaw] = usePersistentState<boolean>('karmyogi.spring.showRaw', false)
   // Which physical GRBL axis the chuck (rotary) and carriage (linear) are wired
   // to. MUST be a real axis on the controller: a standard 3-axis GRBL 1.1 board
   // only has X/Y/Z and rejects an 'A' word with error:20. Default rotary=Y,
@@ -589,26 +598,25 @@ export function SpringCoilingPanel() {
           </div>
         </header>
 
-        {/* Live status strip: turns, free length, wire length, line count, auto-synced. */}
+        {/* Live status strip: turns, free length, wire length, line count, auto-synced.
+            Uses the shared <CamStatus> kit so it reads identically to every tab. */}
         <div className="spr-status">
-          <span className="spr-status-pill">
-            <b>{info.totalTurns.toFixed(2)}</b> {t('spring.status.turns', 'turns')}
-          </span>
-          <span className="spr-status-sep" aria-hidden="true">·</span>
-          <span className="spr-status-pill">
-            {t('spring.status.free', 'free L')} <b>{info.freeLength.toFixed(1)}</b> {t('unit.mm', 'mm')}
-          </span>
-          <span className="spr-status-sep" aria-hidden="true">·</span>
-          <span className="spr-status-pill">
-            {t('spring.status.wire', 'wire')} <b>{info.wireLength.toFixed(0)}</b> {t('unit.mm', 'mm')}
-          </span>
-          <span className="spr-status-sep" aria-hidden="true">·</span>
-          <span className="spr-status-pill">
-            <b>{lineCount}</b> {t('spring.status.lines', 'G-code lines')}
-          </span>
-          <span className="spr-status-sync" title={t('spring.live.title', 'Lines auto-synced to the Program tab')}>
-            → {t('spring.status.program', 'Program')}
-          </span>
+          <CamStatus
+            items={[
+              { value: info.totalTurns.toFixed(2), unit: t('spring.status.turns', 'turns') },
+              {
+                label: t('spring.status.free', 'free L'),
+                value: info.freeLength.toFixed(1),
+                unit: t('unit.mm', 'mm'),
+              },
+              {
+                label: t('spring.status.wire', 'wire'),
+                value: info.wireLength.toFixed(0),
+                unit: t('unit.mm', 'mm'),
+              },
+              { value: lineCount, unit: t('spring.status.lines', 'G-code lines') },
+            ]}
+          />
         </div>
 
         {/* Production counter — tally of springs wound (auto +1 per finished run). */}

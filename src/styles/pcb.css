@@ -53,25 +53,59 @@
   grid-column: 1 / -1;
 }
 
-/* --- sections --- */
+/* --- sections (canonical card surface §2.8/W-F) --- */
 .pcb-section {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--bg-card);
   align-self: start;
 }
+/* Canonical section header (§2.8): uppercase, --fw-label weight, raised
+   contrast, no double edge (the divider below stands in for the card-internal
+   separation between the title and its body). */
 .pcb-section > h3 {
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: var(--sp-1) var(--pad-card-x);
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--pad-card-x);
   font-size: var(--fs-section);
-  color: var(--fg-muted);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
+}
+/* Leading glyph is muted + 14px, never accent (overrides .cam-card-ico accent). */
+.pcb-section > h3 .cam-card-ico {
+  color: var(--fg-muted);
+}
+.pcb-section > h3 .cam-card-ico svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Numbered step badge — makes the Upload → Layers → Operations → Essentials
+   flow read as one clear, always-sequential pipeline (the literal "N · " text
+   numbering was inconsistent and left gaps when steps 2/3 were hidden). A small
+   accent-tinted pill sits ahead of the section glyph + title. */
+.pcb-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 /* A title that itself wraps an icon + text (the pcb-h3-row variant) keeps them inline. */
 .pcb-section > h3 > span {
@@ -166,7 +200,7 @@
 }
 .pcb-error {
   color: var(--danger);
-  border: 1px solid var(--danger);
+  border: 1px solid var(--border-danger);
   border-radius: var(--radius-sm);
   padding: var(--sp-2);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
@@ -186,7 +220,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* --- stage selector (segmented) --- */
+/* --- stage selector (segmented value picker §2.8) — active = full accent
+   because it picks WHICH operation stage to run (a value), not a presentation
+   mode. Inactive inherits the base button (--bg-input/--fg). --- */
 .pcb-stages {
   display: flex;
   flex-wrap: wrap;
@@ -196,6 +232,7 @@
   flex: 1 1 auto;
   min-height: var(--ctl-h);
   min-width: 80px;
+  border-radius: var(--radius-sm);
 }
 .pcb-stage-btn.active {
   background: var(--accent);
@@ -209,7 +246,9 @@
   color: var(--accent-fg);
 }
 
-/* --- z-mode toggle (compact segmented control) --- */
+/* --- z-mode toggle (Spindle / Pen) — a MODE switch, so active uses the tonal
+   --accent-soft tint (only true primaries are full-accent §2.8/W-C). Joined
+   segmented control with a 1px seam and --radius-sm outer corners. --- */
 .pcb-zmode {
   display: flex;
   gap: 0;
@@ -221,15 +260,15 @@
   margin-left: -1px;
 }
 .pcb-zmode button:first-child {
-  border-radius: var(--radius) 0 0 var(--radius);
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
   margin-left: 0;
 }
 .pcb-zmode button:last-child {
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 .pcb-zmode button.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--fg);
   border-color: var(--accent);
   position: relative;
   z-index: 1;
@@ -313,7 +352,7 @@
 .pcb-warnings-inline {
   color: var(--warn);
   font-size: var(--fs-body);
-  border: 1px solid var(--warn);
+  border: 1px solid var(--border-warn);
   border-radius: var(--radius-sm);
   padding: var(--sp-2);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
@@ -509,7 +548,8 @@
 }
 .pcb-clear-btn.icon-btn:hover {
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  border-color: var(--border-danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 /* --- in-row armed run-confirm (styled, replaces window.confirm) --- */
@@ -575,15 +615,17 @@
 .pcb-advanced-toggle {
   display: flex;
   align-items: center;
+  gap: var(--sp-2);
   width: 100%;
   background: transparent;
   border: none;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   font-size: var(--fs-section);
+  font-weight: var(--fw-label);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   min-height: var(--ctl-h);
-  padding: var(--sp-1) var(--pad-card-x);
+  padding: var(--sp-2) var(--pad-card-x);
   cursor: pointer;
   text-align: left;
 }
@@ -597,9 +639,10 @@
 /* sub-group label inside a section body */
 .pcb-subhead {
   font-size: var(--fs-section);
+  font-weight: var(--fw-label);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   margin-top: 2px;
 }
 .pcb-subhead:first-child {
@@ -732,8 +775,8 @@
   padding: var(--sp-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-elev);
-  transition: border-color 0.12s, opacity 0.12s;
+  background: var(--bg-card);
+  transition: border-color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
 }
 .pcb-op-card.pcb-op-disabled {
   opacity: 0.6;
@@ -748,7 +791,7 @@
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  color: var(--accent);
+  color: var(--fg-muted);
 }
 .pcb-op-title {
   font-weight: 600;
@@ -849,16 +892,19 @@
   display: flex;
   align-items: center;
   flex: 0 1 auto;
-  width: 92px;
+  width: 72px;
   min-width: 38px;
   font-size: var(--fs-label);
   font-weight: 500;
   color: var(--fg-muted);
+  /* wrap to 2 lines rather than ellipsing the label to a stub (W-B). */
+  white-space: normal;
+  line-height: 1.2;
 }
 .pcb-op-card .cc-sfield-txt {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* wrap (no ellipsis stub) so the full label reads — W-B. */
+  white-space: normal;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -867,14 +913,14 @@
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  width: 76px;
+  width: 64px;
   height: var(--ctl-h);
   padding: 0 6px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   min-width: 0;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 .pcb-op-card .cc-sfield-num:focus-within {
   border-color: var(--accent);
@@ -890,7 +936,7 @@
 }
 .pcb-op-card .cc-slider {
   flex: 1 1 0;
-  min-width: 34px;
+  min-width: 72px;
   height: 18px;
   margin: 0;
   cursor: pointer;
@@ -905,14 +951,14 @@
   background: linear-gradient(
     to right,
     var(--accent) 0 var(--mc-pct, 0%),
-    var(--bg-elev) var(--mc-pct, 0%) 100%
+    var(--bg-input) var(--mc-pct, 0%) 100%
   );
 }
 .pcb-op-card .cc-slider::-moz-range-track {
   height: 5px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: var(--bg-input);
 }
 .pcb-op-card .cc-slider::-moz-range-progress {
   height: 5px;

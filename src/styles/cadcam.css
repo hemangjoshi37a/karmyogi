@@ -33,6 +33,86 @@
   overflow-x: hidden;
 }
 
+/* ── Two-section vertical split (R6) ──────────────────────────────────────
+   TOP = model upload + loop→preset table; BOTTOM = operations list + params +
+   preset editor. Each section scrolls independently; a draggable horizontal
+   separator (.cc-split-handle) resizes them (its position persists). */
+.cc-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cc-split-top,
+.cc-split-bottom {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+/* The TOP gets an explicit height (% of the split) via inline style; the BOTTOM
+   simply fills the rest. */
+.cc-split-top {
+  flex: 0 0 auto;
+}
+.cc-split-bottom {
+  flex: 1 1 auto;
+}
+.cc-split-handle {
+  flex: 0 0 auto;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  touch-action: none;
+  user-select: none;
+}
+.cc-split-handle:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+}
+.cc-split-grip {
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-muted) 55%, transparent);
+}
+.cc-split-handle:hover .cc-split-grip {
+  background: var(--accent);
+}
+
+/* Footer bar holding the carve-settings Save / Load buttons (replaces the old
+   preset save-bar footer; the preset list moved into the bottom section). */
+.cc-footer-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+}
+
+/* The loaded file name shown in the upload section header (R5). */
+.cc-h3-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Restore normal-case prominence — the header is normally uppercase micro. */
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: var(--fw-medium, 600);
+  color: var(--fg);
+}
+
 /* --- panel heading (with an InfoTip carrying the explainer) --- */
 .cc-heading {
   display: flex;
@@ -59,23 +139,41 @@
 }
 .cc-span { grid-column: 1 / -1; }
 
-/* --- sections (cards) --- */
+/* --- sections (cards) ---
+   Canonical card surface (§2.8): the one --bg-card fill, a 1px --border edge and
+   --radius corner. NO drop shadow on resting cards (elevation comes from the
+   border + bg step). */
 .cc-section {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--bg-card);
   margin: 0;
   overflow: hidden;
   align-self: start;
 }
+/* Canonical section header (§2.8): uppercase micro-label, raised contrast so it
+   doesn't recede, --fw-label weight, .5px tracking. NO bottom border (the card
+   already carries the edge — a border would double up). */
 .cc-section > h3 {
   margin: 0;
-  padding: 4px var(--pad-card-x);
+  padding: var(--sp-2) var(--pad-card-x) var(--sp-1);
   font-size: var(--fs-section);
-  color: var(--fg-muted);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--border);
+}
+/* Leading glyph in a section header: muted + 14px, NEVER accent (§2.8). Overrides
+   the accent-colored .cam-card-ico when it sits inside a carving card header. */
+.cc-section > h3 .cam-card-ico {
+  color: var(--fg-muted);
+  width: 14px;
+  height: 14px;
+}
+.cc-section > h3 .cam-card-ico svg {
+  width: 14px;
+  height: 14px;
 }
 .cc-section-body {
   padding: var(--pad-card-y) var(--pad-card-x);
@@ -146,7 +244,7 @@
 .cc-error {
   color: var(--danger);
   border: 1px solid var(--danger);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   font-size: 12px;
@@ -158,6 +256,60 @@
   overflow: auto;
   margin: 0;
   padding-left: 18px;
+}
+/* Staged LOAD / carve status: file name + size + stage label + a progress bar.
+   Shown the instant a model is picked so a slow read/parse/carve never looks
+   frozen. The bar is determinate while reading/carving, indeterminate while
+   parsing (a sliding sweep). */
+.cc-loadstatus {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.cc-loadstatus-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cc-loadstatus-name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-loadstatus-stage {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.cc-loadbar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.cc-loadbar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.15s ease;
+}
+.cc-loadbar.is-indet .cc-loadbar-fill {
+  width: 35%;
+  animation: cc-loadbar-slide 1.1s ease-in-out infinite;
+}
+@keyframes cc-loadbar-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
 }
 .cc-file-name {
   font-weight: 600;
@@ -272,7 +424,7 @@
   justify-content: center;
   background: var(--bg-elev, #1c1c1c);
   border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
-  border-radius: 10px;
+  border-radius: var(--radius);
   overflow: hidden;
   min-height: 180px;
 }
@@ -369,9 +521,14 @@
    Pocket pack into one tidy row at the docked width (no lone wrap). */
 .cc-opseg {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* All FOUR operations (Engrave / Profile / Pocket / V-carve) fit in ONE row
+     (R10) — compact tiles so the 4th no longer wraps to a second line. */
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--sp-1);
 }
+/* Canonical segmented control (§2.8 / W-C). The operation picker is a MODE
+   switch (it chooses what to compute, not a primary CTA), so its active state is
+   the tonal --accent-soft tint — only true primaries get the full-accent fill. */
 .cc-opseg-btn {
   min-width: 0;
   display: flex;
@@ -382,12 +539,13 @@
   padding: 5px 3px;
   min-height: var(--ctl-h);
   background: var(--bg-input);
-  color: var(--fg-muted);
+  color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   line-height: 1.1;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .cc-opseg-btn:hover { border-color: var(--accent); color: var(--fg); }
 .cc-opseg-ico {
@@ -395,6 +553,7 @@
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  color: var(--fg-muted);
 }
 .cc-opseg-ico svg { width: 15px; height: 15px; }
 .cc-opseg-lbl {
@@ -404,11 +563,11 @@
   white-space: nowrap;
 }
 .cc-opseg-btn.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--fg);
   border-color: var(--accent);
 }
-.cc-opseg-btn.active .cc-opseg-ico { color: var(--accent-fg); }
+.cc-opseg-btn.active .cc-opseg-ico { color: var(--accent); }
 
 /* --- profile-side selector (custom spatial SVGs) ---
    Tight row buttons: the small spatial glyph sits beside its label. */
@@ -428,12 +587,13 @@
   padding: 4px 3px;
   min-height: var(--ctl-h);
   background: var(--bg-input);
-  color: var(--fg-muted);
+  color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   line-height: 1.1;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .cc-sideseg-btn:hover { border-color: var(--accent); color: var(--fg); }
 .cc-sideseg-ico {
@@ -451,11 +611,11 @@
   white-space: nowrap;
 }
 .cc-sideseg-btn.active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--fg);
 }
-.cc-sideseg-btn.active .cc-sideseg-ico { color: var(--fg); }
+.cc-sideseg-btn.active .cc-sideseg-ico { color: var(--accent); }
 .cc-warn-line {
   display: flex;
   align-items: flex-start;
@@ -640,10 +800,13 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  /* Fixed-ish label column so the sliders all start at the same x. Shrinkable so
-     it never pushes the slider/number off the row; truncates with ellipsis. */
+  /* Compact label column so the sliders all start at the same x AND the track
+     keeps real width (§2.8 W-B): a ~68px basis that may shrink, paired with a
+     2-line wrap (no ellipsis) on the text so long labels never truncate or
+     squeeze the slider down to a stub. */
   flex: 0 1 auto;
-  width: 86px;
+  flex-basis: 68px;
+  width: auto;
   min-width: 38px;
   font-size: var(--fs-label);
   font-weight: 500;
@@ -662,11 +825,12 @@
 }
 .cc-sfield:focus-within .cc-sfield-ico { color: var(--accent); opacity: 1; }
 .cc-sfield-txt {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wrap to 2 lines instead of truncating (§2.8 W-B) so the slider keeps its
+     min-width and labels are never clipped to an ellipsis. */
   flex: 1 1 auto;
   min-width: 0;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 /* Optional trailing control (e.g. the "apply to all jobs" ⇄ button) tucked at the
    end of a slider row. Never shrinks; sits after the number frame. */
@@ -682,7 +846,8 @@
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  width: 76px;
+  /* Slimmer number frame (§2.8 W-B ~64px) so the slider track gets its room. */
+  width: 64px;
   height: var(--ctl-h);
   padding: 0 6px;
   background: var(--bg-input);
@@ -757,7 +922,9 @@
      and push the number box onto a 2nd line; it grows to fill instead, keeping
      label + slider + number on ONE row even in a slim docked column. */
   flex: 1 1 0;
-  min-width: 34px;
+  /* The track always stays a usable length (§2.8 W-B): never collapses to a
+     stub even when the label + number frame are at their widest. */
+  min-width: 72px;
   height: 18px;
   margin: 0;
   cursor: pointer;
@@ -913,17 +1080,19 @@
   font-size: var(--fs-ctl);
   line-height: 1.1;
   background: var(--bg-input);
-  color: var(--fg-muted);
+  color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .cc-zmode button:hover { border-color: var(--accent); color: var(--fg); }
+/* Z-mode is a MODE switch — tonal active state (§2.8), not full primary. */
 .cc-zmode button.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--fg);
   border-color: var(--accent);
 }
 
@@ -1153,9 +1322,14 @@
   color: var(--fg-muted);
   cursor: pointer;
 }
+/* Icon button carrying a short text label (e.g. the "Ops" session upload). */
+.cc-iconbtn--labeled { gap: 5px; padding: 0 9px; font-size: 12px; font-weight: 600; }
 .cc-iconbtn:hover { color: var(--fg); border-color: var(--accent); }
 .cc-iconbtn:disabled { opacity: 0.4; cursor: default; }
 .cc-iconbtn.danger:hover { color: var(--danger); border-color: var(--danger); }
+/* Optimize (safe-order) button — accented so it reads as the primary list action. */
+.cc-iconbtn.cc-optimize:not(:disabled) { color: var(--accent); }
+.cc-iconbtn.cc-optimize:not(:disabled):hover { color: var(--fg); border-color: var(--accent); }
 
 /* --- header inline actions (e.g. re-nest button on the Jobs card) --- */
 .cc-section > h3 { display: flex; align-items: center; gap: var(--sp-2); }
@@ -1582,7 +1756,7 @@
   flex: 0 0 auto;
   min-height: 32px;
   padding: 4px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--accent);
   color: var(--accent-fg);
   border: 1px solid var(--accent);
@@ -1597,12 +1771,198 @@
    with the Soldering / Writing tabs). Only the carving-specific scroll gutter
    that keeps the always-on mobile pencils clear of the settings stays here.
    ============================================================================ */
+/* The 2D mode shows the shared floating preset rail on the LEFT edge (absolute,
+   in .cc-panel's positioning context). Reserve a left gutter on BOTH scrolling
+   split sections so the rail never overlaps the settings (mirrors the
+   .cc-presets-host gutter the Soldering/Writing tabs get). The 3D mode has no
+   rail, so the standard padding is fine there. */
+/* The preset rail is confined to the BOTTOM section only (the TOP section is
+   purely files/models/operations). The bottom section becomes the rail's
+   non-scrolling positioning context; its inner .cc-cards scrolls with a left
+   gutter so settings clear the rail. The TOP gets NO gutter (no rail there). */
+.cc-panel:has(.cc-presets-rail) .cc-split-bottom {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+.cc-panel:has(.cc-presets-rail) .cc-split-bottom > .cc-cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3);
+  /* Clears the 52px floating rail/switch column (left:8 + 52 = 60) with margin. */
+  padding-left: calc(var(--sp-3) + 56px);
+}
+/* CRITICAL: the BOTTOM section is a single vertical column of param sections,
+   NOT the multi-column model-card grid that the base `.cc-cards` defines. Left
+   as a grid, the param cards mis-size and OVERLAP each other (they stacked ~31px
+   apart while each was 180–540px tall). Force a plain flex column so they stack
+   by their natural height with a gap. (The TOP section keeps the grid for its
+   model cards.) */
+.cc-split-bottom > .cc-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  align-content: normal;
+}
+.cc-split-bottom > .cc-cards > .cc-section {
+  align-self: stretch;
+  flex: 0 0 auto;
+}
+/* Rail spans only the bottom section's height (the footer save-bar is a sibling
+   below the split, not inside this section). */
+.cc-split-bottom .cc-presets-rail {
+  bottom: 8px;
+  max-height: calc(100% - 16px);
+}
+/* The 2D/3D switch + the rail are stacked in an absolutely-positioned column on
+   the LEFT of the bottom section. The wrapper takes over the absolute placement
+   (the inner rail becomes static within it) so the switch sits directly ON TOP
+   of the swatch rail. */
+.cc-presets-railwrap {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  bottom: 8px;
+  /* FIXED narrow width so the floating column (switch + rail) can't auto-grow to
+     the widest child and overlap the settings on its right. The content gutter
+     (.cc-split-bottom > .cc-cards padding-left) is sized to clear this. */
+  width: 52px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none; /* let the gap pass clicks through; children re-enable */
+}
+.cc-presets-railwrap > * {
+  pointer-events: auto;
+}
+.cc-presets-railwrap .cc-presets-rail {
+  position: static;
+  inset: auto;
+  margin: 0;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  max-width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden; /* vertical scroll only — no stray horizontal scrollbar */
+}
+/* 2D / 3D segmented toggle with the literal labels INSIDE a sliding switch. */
+.cc-presetmode {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--bg-elev) 78%, transparent);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  box-shadow: var(--shadow-2);
+}
+.cc-presetmode-opt {
+  position: relative;
+  z-index: 1;
+  width: 22px;
+  height: 20px;
+  padding: 0; /* no stray padding — text centers cleanly in the flex box */
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--fg-muted);
+  border-radius: 999px;
+  transition: color var(--dur-fast, 120ms) var(--ease, ease);
+}
+.cc-presetmode-opt:hover:not(.is-on) {
+  color: var(--fg);
+}
+.cc-presetmode-opt.is-on {
+  color: var(--accent-fg, #fff);
+}
+/* The sliding pill behind the active label. */
+.cc-presetmode-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: transform var(--dur-mid, 180ms) var(--ease, cubic-bezier(0.2, 0.6, 0.2, 1));
+  z-index: 0;
+}
+.cc-presetmode-thumb.is-3d {
+  transform: translateX(22px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-presetmode-opt,
+  .cc-presetmode-thumb {
+    transition: none;
+  }
+}
 @media (pointer: coarse), (max-width: 768px) {
   .cc-scroll {
     padding-left: calc(var(--sp-3) + 60px);
   }
+  .cc-panel:has(.cc-presets-rail) .cc-split-bottom > .cc-cards {
+    padding-left: calc(var(--sp-3) + 60px);
+  }
 }
 .cc-camstock-apply:hover { filter: brightness(1.06); }
+
+/* ── PLAIN top "Models" row (NOT a card) — label + ext hint + upload/actions.
+   Sits above the model cards; the upload affordance lives here, outside any
+   card (point 1). Quiet, single-row, reflows on narrow widths. */
+.cc-modelbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cc-modelbar-lbl {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: var(--fw-label, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--fg-muted);
+}
+.cc-modelbar-exts {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: -0.2px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 6px 9px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elev) 50%, transparent);
+}
+.cc-modelbar-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 /* ============================================================================
    Model section: compact upload row + uploaded-files list
@@ -1610,7 +1970,7 @@
 .cc-section-body.cc-dragover {
   outline: 2px dashed var(--accent);
   outline-offset: 3px;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .cc-uploadrow {
   display: flex;
@@ -1628,7 +1988,7 @@
   text-overflow: ellipsis;
   padding: 6px 9px;
   border: 1px dashed var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--bg-elev) 50%, transparent);
 }
 .cc-uploadrow-btn {
@@ -1638,14 +1998,16 @@
   justify-content: center;
   width: 42px;
   height: 32px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1px solid var(--accent);
   background: var(--accent);
   color: var(--accent-fg);
   cursor: pointer;
-  transition: filter 0.12s ease;
+  transition: filter var(--dur-fast) var(--ease);
 }
 .cc-uploadrow-btn:hover { filter: brightness(1.08); }
+/* Primary upload button carrying a text label (the "Model" picker). */
+.cc-uploadrow-btn--labeled { width: auto; gap: 6px; padding: 0 13px; font-size: 12px; font-weight: 600; }
 .cc-modelfiles {
   list-style: none;
   margin: 6px 0 0;
@@ -1659,7 +2021,7 @@
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg-elev);
   overflow: hidden;
 }
@@ -1691,7 +2053,7 @@
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .cc-modelfile-name {
   flex: 1 1 auto;
@@ -1706,7 +2068,7 @@
   height: 26px;
   margin-right: 3px;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-muted);
   font-size: 12px;
@@ -1739,7 +2101,7 @@
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: var(--bg-elev);
 }
 .cc-bit-main {
@@ -1891,7 +2253,7 @@
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius);
   background-color: var(--bg-elev);
   background-size: cover;
   background-position: center;
@@ -1930,7 +2292,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.4);
   background: rgba(0, 0, 0, 0.42);
   -webkit-backdrop-filter: blur(3px);
@@ -1954,7 +2316,7 @@
   position: relative;
   height: 112px;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 2px solid var(--border);
   background-color: var(--bg-elev);
   background-size: cover;
@@ -2000,7 +2362,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.45);
   background: rgba(0, 0, 0, 0.45);
   -webkit-backdrop-filter: blur(3px);
@@ -2013,6 +2375,481 @@
 }
 @media (pointer: coarse), (max-width: 768px) {
   .cc-uploadrow-btn { height: 38px; width: 48px; }
+  .cc-uploadrow-btn--labeled { width: auto; padding: 0 14px; }
   .cc-dim-input { height: 30px; width: 52px; font-size: 13px; }
   .cc-modelfile-x { width: 32px; height: 32px; }
+}
+
+/* ============================================================================
+   LOOP → PRESET → + TABLE (R3) — simple table replacing the per-loop "pills"
+   ============================================================================ */
+.cc-looptable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-ctl);
+}
+.cc-looptable th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: var(--fw-label);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  padding: 0 6px 5px;
+}
+.cc-looptable th:last-child { width: 44px; }
+.cc-looptable td {
+  padding: 4px 6px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+.cc-looptable tbody tr { cursor: pointer; }
+.cc-looptable tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.cc-looptable tbody tr.is-sel { background: var(--accent-soft); }
+.cc-looptable td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.cc-loop-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.cc-loop-badge {
+  font-size: 10px;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  padding: 0 4px;
+}
+.cc-looptable .cc-prim-select { width: 100%; min-height: var(--ctl-h); }
+.cc-loop-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+}
+.cc-loop-add:hover:not(:disabled) { filter: brightness(1.08); }
+.cc-loop-add:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============================================================================
+   FLAT OPERATIONS LIST (R2/R4) — every op across ALL loops, in added order
+   ============================================================================ */
+.cc-oplist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.cc-oprow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-size: var(--fs-ctl);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+/* Cross-panel hover link: this row (or its twin in the Program tab) is hovered
+   — its toolpath shimmers in the 3D viewer. */
+.cc-oprow--hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
+}
+.cc-op-sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.cc-op-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.cc-op-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-op-loop {
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+.cc-op-actions {
+  display: flex;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.cc-op-actions .cc-op-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--icon-btn);
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.cc-op-actions .cc-op-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.cc-op-actions .cc-op-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.cc-op-actions .cc-op-btn.danger:hover:not(:disabled) {
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+}
+
+/* ============================================================================
+   PRESET EDITOR (R1/R7) — the merged, tunable feature-preset list
+   ============================================================================ */
+.cc-pe-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cc-pe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--pe-c, var(--accent));
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: var(--fs-ctl);
+}
+.cc-pe-chip:hover { border-color: var(--accent); }
+.cc-pe-chip.is-sel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--pe-c, var(--accent)) 14%, transparent);
+}
+.cc-pe-chip-sw {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+}
+.cc-pe-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.cc-pe-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cc-pe-field {
+  flex: 1 1 120px;
+  min-width: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.cc-pe-field-lbl {
+  font-size: 10px;
+  font-weight: var(--fw-label);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--fg-muted);
+}
+.cc-pe-name { flex: 2 1 160px; }
+.cc-pe-color { flex: 0 0 auto; min-width: 0; }
+.cc-pe-swatch {
+  width: 48px;
+  height: var(--ctl-h);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  cursor: pointer;
+}
+
+/* ============================================================================
+   2D MODEL FILE CARD (U5/U6/U8/U9/U10) — expandable per-file card
+   ============================================================================ */
+.cc-mfcard > h3.cc-mfcard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  /* The title row is interactive (disclosure + close) — keep its own padding. */
+  padding: 4px 6px 4px var(--pad-card-x);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.cc-mfcard-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.cc-mfcard-caret {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 12px;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.cc-mfcard-caret.open { transform: rotate(90deg); }
+.cc-mfcard-ext {
+  flex: 0 0 auto;
+  min-width: 32px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+}
+.cc-mfcard-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--fw-medium, 600);
+}
+/* The close ✕ sits in the card's UPPER-RIGHT corner (U9/U10). */
+.cc-mfcard-x {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.cc-mfcard-x:hover {
+  color: var(--danger, #e5484d);
+  background: color-mix(in srgb, var(--danger, #e5484d) 12%, transparent);
+}
+
+/* Duplicate-file button in the 2D model card header — matches the 3D job list's
+   "Duplicate this job" affordance (a neutral icon button left of the close ✕). */
+.cc-mfcard-dup {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.cc-mfcard-dup:hover {
+  color: var(--accent, #3b82f6);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
+}
+
+/* ============================================================================
+   PRESET EDITOR LAYOUT (U1/U2/U3) — vertical colour-slot bar + tinted tuner
+   ============================================================================ */
+.cc-pe-grid {
+  display: grid;
+  /* Slim slot rail on the left, tuner fills the rest. */
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: stretch;
+}
+/* The floating-style colour-slot rail (mimics the old .cc-presets vertical look). */
+.cc-pe-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 7px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elev) 70%, transparent);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  box-shadow: var(--shadow-2);
+}
+.cc-pe-cap {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 8.5px;
+  letter-spacing: 1.5px;
+  font-weight: var(--fw-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  opacity: 0.7;
+  user-select: none;
+}
+.cc-pe-slots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+}
+.cc-pe-slot {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1.5px solid color-mix(in srgb, #000 22%, var(--slot));
+  background: var(--slot);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.cc-pe-slot:hover { transform: scale(1.14); }
+.cc-pe-slot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cc-pe-slot.is-sel {
+  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--slot), 0 2px 7px rgba(0, 0, 0, 0.3);
+}
+/* Bar footer: add / remove / reset + save / load (the old preset-bar footer). */
+.cc-pe-barfoot {
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.cc-pe-barbtn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.cc-pe-barbtn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.cc-pe-barbtn:disabled { opacity: 0.35; cursor: not-allowed; }
+.cc-pe-barbtn.danger:hover:not(:disabled) {
+  border-color: var(--danger, #e5484d);
+  color: var(--danger, #e5484d);
+}
+/* Stack the Save/Load pair vertically inside the slim bar. */
+.cc-pe-barfoot .km-io {
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* The tuner area — TINTS to the selected preset's colour (U2, low-opacity wash)
+   and hosts the colour RIPPLE (U3). */
+.cc-pe-editarea {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  padding: 10px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--pe-tint, transparent) 9%, transparent),
+      color-mix(in srgb, var(--pe-tint, transparent) 9%, transparent)
+    ),
+    var(--bg-card);
+  transition: background 0.35s var(--ease, ease);
+}
+/* The ripple: a radial wash in the preset's colour spreading from the slot. */
+.cc-pe-ripple {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--ripple-c, var(--accent)) 55%, transparent) 0%,
+    color-mix(in srgb, var(--ripple-c, var(--accent)) 22%, transparent) 45%,
+    transparent 72%
+  );
+  pointer-events: none;
+  z-index: 1;
+  animation: cc-pe-ripple 0.62s var(--ease, ease-out) forwards;
+}
+.cc-pe-edit,
+.cc-pe-editarea > .cc-hint {
+  position: relative;
+  z-index: 2;
+}
+@keyframes cc-pe-ripple {
+  0% { transform: translate(-50%, -50%) scale(0); opacity: 0.85; }
+  100% { transform: translate(-50%, -50%) scale(90); opacity: 0; }
+}
+/* U3: motion-gated — no ripple when the user prefers reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .cc-pe-ripple { display: none; animation: none; }
+  .cc-pe-editarea { transition: none; }
+}
+
+/* Narrow / touch: rail goes full-width on top, slots flow horizontally. */
+@media (max-width: 520px) {
+  .cc-pe-grid { grid-template-columns: 1fr; }
+  .cc-pe-bar { flex-direction: row; flex-wrap: wrap; border-radius: var(--radius); }
+  .cc-pe-cap { writing-mode: horizontal-tb; transform: none; }
+  .cc-pe-slots { flex-direction: row; flex-wrap: wrap; }
+  .cc-pe-barfoot {
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+    margin-left: auto;
+  }
+  .cc-pe-barfoot .km-io { flex-direction: row; }
+}
+@media (pointer: coarse) {
+  .cc-pe-slot { width: 28px; height: 28px; }
+  .cc-pe-barbtn { width: 36px; height: 36px; }
 }

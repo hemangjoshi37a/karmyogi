@@ -24,6 +24,20 @@ export interface SolderVizPoint {
   touchZ: number
 }
 
+/**
+ * A camera-DETECTED candidate pad, mapped to bed-mm (Z comes from the Z-datum,
+ * so only XY + a radius are carried). The Viewer draws these as faint ＋ ring
+ * markers the operator can review before adding them as real solder points.
+ */
+export interface DetectedPadViz {
+  /** Bed X (mm). */
+  x: number
+  /** Bed Y (mm). */
+  y: number
+  /** Pad radius (mm) for sizing the marker; 0 if unknown. */
+  rMm: number
+}
+
 interface SolderVizState {
   /** Whether a soldering preview is active (gates the scene). */
   active: boolean
@@ -33,10 +47,14 @@ interface SolderVizState {
   selected: number
   /** True when the points came from a drill file (render holes vs surface pads). */
   fromDrill: boolean
+  /** Camera-detected candidate pads (bed-mm), shown as reviewable ＋ markers. */
+  detected: DetectedPadViz[]
   /** Publish the current point list (+ source kind). Preserves the selection. */
   set: (points: SolderVizPoint[], fromDrill: boolean) => void
   /** Highlight one point (or -1 to clear the highlight). */
   select: (index: number) => void
+  /** Publish (or clear) the camera-detected candidate pads. */
+  setDetected: (pads: DetectedPadViz[]) => void
   /** Clear everything (panel unmounted). */
   clear: () => void
 }
@@ -46,7 +64,9 @@ export const useSolderViz = create<SolderVizState>((set) => ({
   points: [],
   selected: -1,
   fromDrill: false,
+  detected: [],
   set: (points, fromDrill) => set({ active: true, points, fromDrill }),
   select: (index) => set({ selected: index }),
-  clear: () => set({ active: false, points: [], selected: -1, fromDrill: false }),
+  setDetected: (detected) => set({ detected }),
+  clear: () => set({ active: false, points: [], selected: -1, fromDrill: false, detected: [] }),
 }))

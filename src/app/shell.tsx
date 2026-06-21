@@ -209,7 +209,9 @@ const DEFAULT_LAYOUT: SerializedDockview = {
             activeView: 'cadcam',
             id: '1',
           },
-          size: 323,
+          // The 2D/3D Carving panel is the most content-dense (preset rail + two
+          // split sections + param cards), so it gets a wider default column.
+          size: 430,
         },
         {
           type: 'branch',
@@ -224,7 +226,7 @@ const DEFAULT_LAYOUT: SerializedDockview = {
               size: 305,
             },
           ],
-          size: 705,
+          size: 598,
         },
         { type: 'leaf', data: { views: ['controller'], activeView: 'controller', id: '3' }, size: 338 },
       ],
@@ -291,6 +293,22 @@ function buildDefaultLayout(api: DockviewApi) {
     })
   }
   base.api.setActive()
+}
+
+// Force the panel that is ACTIVE immediately after a layout is applied to mount
+// right away. dockview's default 'onlyWhenVisible' renderer mounts a panel on an
+// activation CHANGE — but the panel that is active straight after fromJSON()/build
+// (default: 2D/3D Carving) never received a change event, so it renders BLANK until
+// the user switches to another tab and back. Switching it to the 'always' renderer
+// mounts it unconditionally (same mechanism the camera panel uses), and as a bonus
+// preserves that tab's state across later tab switches. Best-effort: older dockview
+// without per-panel renderers simply keeps the old behavior.
+function forceActivePanelMount(api: DockviewApi) {
+  try {
+    api.activePanel?.api.setRenderer?.('always')
+  } catch {
+    /* older dockview — no per-panel renderer */
+  }
 }
 
 export function Shell() {
@@ -379,6 +397,9 @@ export function Shell() {
       } catch {
         /* older dockview without per-panel renderer — feed just won't persist */
       }
+      // Mount the initially-active tab (default: 2D/3D Carving) so it isn't blank
+      // until the user switches away and back. See forceActivePanelMount above.
+      forceActivePanelMount(event.api)
       event.api.onDidLayoutChange(scheduleSave)
       // Report the active tab to the activity tracker for per-tab dwell time.
       // (No-ops unless tracking is live.)
@@ -414,6 +435,14 @@ export function Shell() {
     if (!api) return
     api.clear()
     buildDefaultLayout(api)
+    // Re-mount the default-active tab + keep the camera feed alive after a reset
+    // (onReady's setup only runs once, not on a manual reset).
+    try {
+      api.getPanel('camera')?.api.setRenderer?.('always')
+    } catch {
+      /* older dockview */
+    }
+    forceActivePanelMount(api)
   }, [resetLayout])
 
   const isPanelOpen = useCallback((id: string) => !!apiRef.current?.getPanel(id), [])
@@ -493,27 +522,40 @@ export function Shell() {
               onOpenSettings={() => setShowMotion(true)}
               onOpenProbe={() => setShowProbe(true)}
             />
+            <span className="topbar-sep" aria-hidden="true" />
+            {/* Action area, grouped into clusters separated by hairline dividers
+                so the bar reads as information-architected, not a flat run of
+                controls (W-G): [layout + zoom] │ [language + theme] │
+                [status + account]. */}
             <span className="topbar-actions">
-              <PanelLauncher onOpenPanel={onOpenPanel} isPanelOpen={isPanelOpen} />
-              <IconButton icon={<ResetGlyph />} label="Reset dock layout to default" onClick={onReset} />
-              <span className="zoom-group" title="UI zoom">
-                <IconButton icon={<MinusGlyph />} label="Zoom out" onClick={zoomOut} />
-                <button onClick={resetZoom} aria-label="Reset zoom" title="Reset zoom to 100%">
-                  {Math.round(uiScale * 100)}%
-                </button>
-                <IconButton icon={<PlusGlyph />} label="Zoom in" onClick={zoomIn} />
+              <span className="topbar-group">
+                <PanelLauncher onOpenPanel={onOpenPanel} isPanelOpen={isPanelOpen} />
+                <IconButton icon={<ResetGlyph />} label="Reset dock layout to default" onClick={onReset} />
+                <span className="zoom-group" title="UI zoom">
+                  <IconButton icon={<MinusGlyph />} label="Zoom out" onClick={zoomOut} />
+                  <button onClick={resetZoom} aria-label="Reset zoom" title="Reset zoom to 100%">
+                    {Math.round(uiScale * 100)}%
+                  </button>
+                  <IconButton icon={<PlusGlyph />} label="Zoom in" onClick={zoomIn} />
+                </span>
               </span>
-              <LanguageSwitcher />
-              <IconButton
-                icon={<ThemeGlyph theme={theme} />}
-                label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                onClick={toggleTheme}
-              />
+              <span className="topbar-sep" aria-hidden="true" />
+              <span className="topbar-group">
+                <LanguageSwitcher />
+                <IconButton
+                  icon={<ThemeGlyph theme={theme} />}
+                  label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                  onClick={toggleTheme}
+                />
+              </span>
+              <span className="topbar-sep" aria-hidden="true" />
               {/* Storage-pressure guard (only appears when near-full), then the
                   notification bell, then the user profile last. */}
-              <StorageGuard />
-              <NotificationBell />
-              <UserChip />
+              <span className="topbar-group">
+                <StorageGuard />
+                <NotificationBell />
+                <UserChip />
+              </span>
             </span>
           </>
         )}

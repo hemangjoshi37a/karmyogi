@@ -350,7 +350,7 @@ function GamepadModalInner({
   )
 
   return (
-    <Modal open={open} onClose={onClose} title={t('gp.title', 'Game controller')} width={860}>
+    <Modal open={open} onClose={onClose} title={t('gp.title', 'Game controller')} size="xl">
       <div className="gp-modal gp-modal--v2">
         <div className="gp-space">
           <GamepadModel3D detectedType={family === 'playstation' ? 'playstation' : 'xbox'} />

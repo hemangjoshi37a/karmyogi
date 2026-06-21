@@ -59,16 +59,20 @@
   backdrop-filter: blur(10px) saturate(1.1);
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
   border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  /* Theme-aware elevation (W-P / §2.5) — no dark-tuned black on light. */
+  box-shadow: var(--shadow-2);
 }
 .cc-presets-cap {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
-  font-size: 7px;
-  letter-spacing: 2px;
-  font-weight: 800;
+  /* Legible vertical caption (W-P) — bumped from a cramped 7px/2px so "PRESETS"
+     actually reads, while staying quiet against the swatches. */
+  font-size: 8.5px;
+  letter-spacing: 1.5px;
+  font-weight: var(--fw-label);
+  text-transform: uppercase;
   color: var(--fg-muted);
-  opacity: 0.55;
+  opacity: 0.7;
   margin-bottom: 2px;
   user-select: none;
 }
@@ -80,7 +84,7 @@
   width: 22px;
   height: 22px;
   padding: 0;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1.5px solid color-mix(in srgb, #000 22%, var(--slot));
   background: var(--slot);
   cursor: pointer;
@@ -90,19 +94,26 @@
 .cc-preset-slot:hover {
   transform: scale(1.14);
 }
+/* Standard accent focus ring (W-P) — NOT the slot hue, so the first slot no
+   longer shows a red focus ring. */
 .cc-preset-slot:focus-visible {
-  outline: 2px solid var(--slot);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* Empty slots are a NEUTRAL "add here" affordance (W-P): a quiet muted dashed
+   ring + muted "+", NOT the saturated slot hue (which made slot 1 read as a red
+   error ring). The slot's own colour is reserved for the FILLED + selected
+   states below — an empty slot has no colour yet, so it shouldn't pretend to. */
 .cc-preset-slot.is-empty {
   background: transparent;
   border-style: dashed;
-  border-color: color-mix(in srgb, var(--slot) 55%, transparent);
+  border-color: var(--border);
   box-shadow: none;
-  opacity: 0.55;
+  opacity: 0.75;
 }
 .cc-preset-slot.is-empty:hover {
-  opacity: 0.9;
+  opacity: 1;
+  border-color: var(--accent);
 }
 .cc-preset-plus {
   display: flex;
@@ -112,10 +123,23 @@
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
-  color: color-mix(in srgb, var(--slot) 70%, var(--fg));
+  color: var(--fg-muted);
+}
+.cc-preset-slot.is-empty:hover .cc-preset-plus {
+  color: var(--accent);
 }
 .cc-preset-slot.is-sel {
   box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--slot), 0 2px 7px rgba(0, 0, 0, 0.3);
+}
+/* An EMPTY but selected slot is the save TARGET — ring it in the neutral accent
+   (it has no colour of its own yet), keeping the dashed muted edge. */
+.cc-preset-slot.is-empty.is-sel {
+  border-color: var(--accent);
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--accent);
+}
+.cc-preset-slot.is-empty.is-sel .cc-preset-plus {
+  color: var(--accent);
 }
 /* hover/touch flyout — a floating pill to the right of a swatch showing the
    preset NAME (+ an edit button for filled slots). */
@@ -128,12 +152,12 @@
   align-items: center;
   gap: 6px;
   padding: 3px 4px 3px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.34);
+  box-shadow: var(--shadow-2);
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
@@ -161,12 +185,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
   cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
 .cc-preset-edit:hover {
   border-color: var(--accent);
@@ -206,7 +230,7 @@
   min-width: 34px;
   height: 30px;
   padding: 2px 9px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
@@ -226,7 +250,7 @@
   gap: 4px;
   height: 30px;
   padding: 0 6px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
@@ -257,18 +281,18 @@
   grid-template-columns: repeat(5, 26px);
   gap: 7px;
   padding: 9px;
-  border-radius: 11px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 97%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+  box-shadow: var(--shadow-2);
 }
 .cc-presets-cell {
   width: 26px;
   height: 26px;
   padding: 0;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1.5px solid color-mix(in srgb, #000 22%, var(--slot));
   background: var(--slot);
   cursor: pointer;
@@ -306,7 +330,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);

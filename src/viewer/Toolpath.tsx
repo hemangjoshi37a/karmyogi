@@ -1,7 +1,9 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Segment } from './gcodeToPolylines'
 import { useSettings } from '../store'
+import { prefersReducedMotion } from './reducedMotion'
 
 interface ToolpathProps {
   /** Parsed segments (from gcodeToPolylines). */
@@ -25,6 +27,20 @@ interface ToolpathProps {
    * false (processed lines are shown desaturated/dim).
    */
   hideProcessed?: boolean
+  /**
+   * Cross-panel HOVER highlight: when true, this op's cut lines SHIMMER — an
+   * animated pulse toward a bright highlight (via useFrame) so the user can see
+   * which viewer line corresponds to the hovered operation row. Honours
+   * `prefers-reduced-motion`: when reduced, a STATIC brightened highlight (no
+   * animation). Default false. Only meaningful in the static (non-reveal) path.
+   */
+  highlight?: boolean
+  /**
+   * Slightly DIM this op's cut lines (lowered opacity) — used while ANOTHER op
+   * is hovered, so the shimmering one pops. Default false. Ignored while
+   * `highlight` is true. Only meaningful in the static (non-reveal) path.
+   */
+  dim?: boolean
 }
 
 /** Mix a hex colour toward neutral grey by `amount` (0..1) — the "spent" look. */
@@ -67,6 +83,8 @@ export function Toolpath({
   revealIndex,
   revealPoint,
   hideProcessed = false,
+  highlight = false,
+  dim = false,
 }: ToolpathProps) {
   const theme = useSettings((s) => s.theme)
 
@@ -76,34 +94,30 @@ export function Toolpath({
   // saturated colour the operator tracks (V3 progress dimming).
   const cutDone = useMemo(() => desaturate(cut, 0.72), [cut])
 
-  const revealing = revealIndex !== undefined && revealIndex >= 0
-
-  // Split each segment list into "done" (traveled) and "todo" (upcoming) parts.
-  // The active segment is split at `revealPoint` so the line grows smoothly.
-  const split = useMemo(() => {
-    if (!revealing) return null
-    const ri = Math.min(revealIndex, segments.length - 1)
-    const rp = revealPoint
-    const done: Segment[] = []
-    const todo: Segment[] = []
-    for (let i = 0; i < segments.length; i++) {
-      const s = segments[i]
-      if (i < ri) {
-        done.push(s)
-      } else if (i > ri) {
-        todo.push(s)
-      } else {
-        // Active segment: split at the reveal point (fall back to whole-done).
-        if (rp) {
-          done.push({ from: s.from, to: [rp[0], rp[1], rp[2]], kind: s.kind })
-          todo.push({ from: [rp[0], rp[1], rp[2]], to: s.to, kind: s.kind })
-        } else {
-          done.push(s)
-        }
-      }
+  // --- Hover shimmer ---------------------------------------------------------
+  // The base cut colour and a bright highlight to pulse toward. Reused across
+  // frames (no per-frame allocation): useFrame only lerps between these two.
+  const baseColor = useMemo(() => new THREE.Color(cut), [cut])
+  const brightColor = useMemo(() => baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.6), [baseColor])
+  const reduceMotion = useMemo(() => prefersReducedMotion(), [])
+  // Animate ONLY when this op is hovered AND motion is allowed. We mutate the
+  // live material via a ref so the pulse never re-renders React.
+  const matRef = useRef<THREE.LineBasicMaterial>(null)
+  // Scratch colour reused every frame (no allocation in the hot loop).
+  const scratch = useRef(new THREE.Color())
+  useFrame((state) => {
+    const m = matRef.current
+    if (!m) return
+    if (highlight && !reduceMotion) {
+      // 0..1 triangle-ish pulse; mix base→bright and modulate opacity.
+      const p = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 5)
+      scratch.current.copy(baseColor).lerp(brightColor, p)
+      m.color.copy(scratch.current)
+      m.opacity = 0.7 + 0.3 * p
     }
-    return { done, todo }
-  }, [revealing, revealIndex, revealPoint, segments])
+  })
+
+  const revealing = revealIndex !== undefined && revealIndex >= 0
 
   // --- Static path geometries (used when not revealing). -------------------
   const cutGeom = useMemo(
@@ -115,24 +129,6 @@ export function Toolpath({
     [revealing, segments],
   )
 
-  // --- Reveal geometries (used when revealing). ----------------------------
-  const doneCutGeom = useMemo(
-    () => (split ? buildGeometry(split.done, 'cut') : null),
-    [split],
-  )
-  const doneRapidGeom = useMemo(
-    () => (split ? buildGeometry(split.done, 'rapid') : null),
-    [split],
-  )
-  const todoCutGeom = useMemo(
-    () => (split ? buildGeometry(split.todo, 'cut') : null),
-    [split],
-  )
-  const todoRapidGeom = useMemo(
-    () => (split ? buildGeometry(split.todo, 'rapid') : null),
-    [split],
-  )
-
   // Dispose old geometries when they change / on unmount. MUST be useEffect:
   // useMemo never runs its returned cleanup, so the GPU buffers would leak
   // (a contributor to WebGL context loss / the 3D white-screen).
@@ -140,51 +136,233 @@ export function Toolpath({
     return () => {
       cutGeom?.dispose()
       rapidGeom?.dispose()
-      doneCutGeom?.dispose()
-      doneRapidGeom?.dispose()
-      todoCutGeom?.dispose()
-      todoRapidGeom?.dispose()
     }
-  }, [cutGeom, rapidGeom, doneCutGeom, doneRapidGeom, todoCutGeom, todoRapidGeom])
+  }, [cutGeom, rapidGeom])
 
+  // SIMULATION reveal: delegate to a buffer-stable renderer that builds the line
+  // geometry ONCE and only advances a GPU draw-range cursor per frame — so the
+  // 60fps playhead never rebuilds/re-uploads the whole toolpath (the old per-tick
+  // `buildGeometry` x4 was the dominant sim-time FPS sink on large programs).
   if (revealing) {
     return (
-      <group>
-        {/* Executed / traveled cuts: desaturated + dim (the "spent" look), drawn
-            first so the bright remaining work always sits visually on top.
-            Optionally hidden entirely (hideProcessed). */}
-        {!hideProcessed && doneCutGeom && (
-          <lineSegments geometry={doneCutGeom}>
-            <lineBasicMaterial color={cutDone} transparent opacity={0.5} />
-          </lineSegments>
-        )}
-        {!hideProcessed && doneRapidGeom && (
-          <RapidLines geometry={doneRapidGeom} color={rapid} opacity={0.18} />
-        )}
-        {/* Remaining work: full, bright, saturated colour — what the operator
-            watches advance toward completion. */}
-        {todoCutGeom && (
-          <lineSegments geometry={todoCutGeom}>
-            <lineBasicMaterial color={cut} />
-          </lineSegments>
-        )}
-        {todoRapidGeom && (
-          <RapidLines geometry={todoRapidGeom} color={rapid} opacity={0.7} />
-        )}
-      </group>
+      <RevealToolpath
+        segments={segments}
+        cut={cut}
+        cutDone={cutDone}
+        rapid={rapid}
+        revealIndex={revealIndex as number}
+        revealPoint={revealPoint ?? null}
+        hideProcessed={hideProcessed}
+      />
     )
   }
+
+  // Static cut-material props. Hover wins over dim:
+  //  • highlight + reduced motion → STATIC bright, fully opaque (no animation).
+  //  • highlight + motion allowed → useFrame pulses color/opacity (start bright).
+  //  • dim (another op hovered)   → faded so the hovered one pops.
+  //  • normal                     → base colour, opaque.
+  const cutMatColor = highlight ? brightColor : cut
+  const cutTransparent = highlight ? !reduceMotion : dim
+  const cutOpacity = highlight ? 1 : dim ? 0.35 : 1
 
   return (
     <group>
       {cutGeom && (
         <lineSegments geometry={cutGeom}>
-          <lineBasicMaterial color={cut} />
+          <lineBasicMaterial
+            ref={matRef}
+            color={cutMatColor}
+            transparent={cutTransparent}
+            opacity={cutOpacity}
+          />
         </lineSegments>
       )}
       {rapidGeom && (
-        <RapidLines geometry={rapidGeom} color={rapid} />
+        <RapidLines geometry={rapidGeom} color={rapid} opacity={dim && !highlight ? 0.25 : 0.85} />
       )}
+    </group>
+  )
+}
+
+/**
+ * Buffer-stable simulation reveal. The full cut + rapid line buffers are built
+ * ONCE (per `segments`); revealing the path over time only moves a GPU
+ * `drawRange` cursor — an O(1) number change, NOT an O(N) geometry rebuild +
+ * re-upload. The single active segment is split at the reveal point via a tiny
+ * dynamic 2-vertex buffer (12 floats/frame). The "done" and "todo" halves of one
+ * kind share a single position attribute (uploaded once) across two geometries.
+ */
+function RevealToolpath({
+  segments,
+  cut,
+  cutDone,
+  rapid,
+  revealIndex,
+  revealPoint,
+  hideProcessed,
+}: {
+  segments: Segment[]
+  cut: string
+  cutDone: THREE.Color
+  rapid: string
+  revealIndex: number
+  revealPoint: [number, number, number] | null
+  hideProcessed: boolean
+}) {
+  // Build the static buffers + per-kind prefix counts ONCE per program. The
+  // done/todo geometries of each kind share ONE position BufferAttribute, so
+  // three.js uploads each buffer to the GPU a single time.
+  const built = useMemo(() => {
+    const cutPts: number[] = []
+    const rapidPts: number[] = []
+    const n = segments.length
+    // prefix[i] = number of segments of that kind in [0, i).
+    const cutPrefix = new Int32Array(n + 1)
+    const rapidPrefix = new Int32Array(n + 1)
+    let nc = 0
+    let nr = 0
+    for (let i = 0; i < n; i++) {
+      cutPrefix[i] = nc
+      rapidPrefix[i] = nr
+      const s = segments[i]
+      if (s.kind === 'cut') {
+        cutPts.push(s.from[0], s.from[1], s.from[2], s.to[0], s.to[1], s.to[2])
+        nc++
+      } else {
+        rapidPts.push(s.from[0], s.from[1], s.from[2], s.to[0], s.to[1], s.to[2])
+        nr++
+      }
+    }
+    cutPrefix[n] = nc
+    rapidPrefix[n] = nr
+
+    const cutAttr = new THREE.Float32BufferAttribute(cutPts, 3)
+    const rapidAttr = new THREE.Float32BufferAttribute(rapidPts, 3)
+    const share = (attr: THREE.Float32BufferAttribute) => {
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', attr)
+      return g
+    }
+    const doneCut = share(cutAttr)
+    const todoCut = share(cutAttr)
+    const doneRapid = share(rapidAttr)
+    const todoRapid = share(rapidAttr)
+    // Active-segment split: two dynamic 2-vertex lines updated each frame.
+    const activeDone = new THREE.BufferGeometry()
+    activeDone.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3))
+    const activeTodo = new THREE.BufferGeometry()
+    activeTodo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3))
+    return {
+      doneCut,
+      todoCut,
+      doneRapid,
+      todoRapid,
+      activeDone,
+      activeTodo,
+      cutPrefix,
+      rapidPrefix,
+      cutTotalV: nc * 2,
+      rapidTotalV: nr * 2,
+    }
+  }, [segments])
+
+  // Per-tick: advance draw ranges + refresh the active split. All O(1).
+  useLayoutEffect(() => {
+    const n = segments.length
+    if (n === 0) return
+    const ri = Math.max(0, Math.min(revealIndex, n - 1))
+    const active = segments[ri]
+    const activeIsCut = active.kind === 'cut'
+    const {
+      doneCut,
+      todoCut,
+      doneRapid,
+      todoRapid,
+      activeDone,
+      activeTodo,
+      cutPrefix,
+      rapidPrefix,
+      cutTotalV,
+      rapidTotalV,
+    } = built
+
+    const doneCutV = cutPrefix[ri] * 2
+    const doneRapidV = rapidPrefix[ri] * 2
+    doneCut.setDrawRange(0, doneCutV)
+    doneRapid.setDrawRange(0, doneRapidV)
+    // The active segment is drawn by the dynamic split, so SKIP it in the static
+    // "todo" range (advance past it by one segment of its own kind).
+    const todoCutStart = (cutPrefix[ri] + (activeIsCut ? 1 : 0)) * 2
+    const todoRapidStart = (rapidPrefix[ri] + (activeIsCut ? 0 : 1)) * 2
+    todoCut.setDrawRange(todoCutStart, Math.max(0, cutTotalV - todoCutStart))
+    todoRapid.setDrawRange(todoRapidStart, Math.max(0, rapidTotalV - todoRapidStart))
+
+    const ad = (activeDone.getAttribute('position') as THREE.BufferAttribute).array as Float32Array
+    const at = (activeTodo.getAttribute('position') as THREE.BufferAttribute).array as Float32Array
+    if (revealPoint) {
+      ad[0] = active.from[0]; ad[1] = active.from[1]; ad[2] = active.from[2]
+      ad[3] = revealPoint[0]; ad[4] = revealPoint[1]; ad[5] = revealPoint[2]
+      at[0] = revealPoint[0]; at[1] = revealPoint[1]; at[2] = revealPoint[2]
+      at[3] = active.to[0]; at[4] = active.to[1]; at[5] = active.to[2]
+      activeDone.setDrawRange(0, 2)
+      activeTodo.setDrawRange(0, 2)
+    } else {
+      // No partial point → the whole active segment counts as done.
+      ad[0] = active.from[0]; ad[1] = active.from[1]; ad[2] = active.from[2]
+      ad[3] = active.to[0]; ad[4] = active.to[1]; ad[5] = active.to[2]
+      activeDone.setDrawRange(0, 2)
+      activeTodo.setDrawRange(0, 0)
+    }
+    ;(activeDone.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
+    ;(activeTodo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
+  }, [built, segments, revealIndex, revealPoint])
+
+  // Dispose all geometries on change / unmount (shared attributes dispose safely).
+  useLayoutEffect(() => {
+    return () => {
+      built.doneCut.dispose()
+      built.todoCut.dispose()
+      built.doneRapid.dispose()
+      built.todoRapid.dispose()
+      built.activeDone.dispose()
+      built.activeTodo.dispose()
+    }
+  }, [built])
+
+  const n = segments.length
+  const ri = Math.max(0, Math.min(revealIndex, Math.max(0, n - 1)))
+  const activeIsCut = n === 0 || segments[ri].kind === 'cut'
+
+  return (
+    <group>
+      {/* Traveled (done): desaturated + dim, drawn first so remaining work sits on top. */}
+      {!hideProcessed && (
+        <lineSegments geometry={built.doneCut}>
+          <lineBasicMaterial color={cutDone} transparent opacity={0.5} />
+        </lineSegments>
+      )}
+      {!hideProcessed && (
+        <lineSegments geometry={built.doneRapid}>
+          <lineBasicMaterial color={rapid} transparent opacity={0.18} />
+        </lineSegments>
+      )}
+      {/* Remaining work (todo): full bright saturated colour. */}
+      <lineSegments geometry={built.todoCut}>
+        <lineBasicMaterial color={cut} />
+      </lineSegments>
+      <lineSegments geometry={built.todoRapid}>
+        <lineBasicMaterial color={rapid} transparent opacity={0.7} />
+      </lineSegments>
+      {/* Active segment, split at the reveal point. */}
+      {!hideProcessed && (
+        <lineSegments geometry={built.activeDone}>
+          <lineBasicMaterial color={activeIsCut ? cutDone : rapid} transparent opacity={0.5} />
+        </lineSegments>
+      )}
+      <lineSegments geometry={built.activeTodo}>
+        <lineBasicMaterial color={activeIsCut ? cut : rapid} transparent opacity={activeIsCut ? 1 : 0.7} />
+      </lineSegments>
     </group>
   )
 }

@@ -155,36 +155,13 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ───────────────────────── status strip ───────────────────────── */
-.pp-status {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-variant-numeric: tabular-nums;
-}
-.pp-status-pill b {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-.pp-status-sep {
-  color: var(--border);
-}
+/* ───────────────────────── status strip ─────────────────────────
+   Adopts the shared <CamStatus> kit (.cam-status in cam.css). The not-connected
+   value still needs a warn tint — carried by a span passed as the pill value
+   (it sits inside the kit's <b>, and the span's color wins). */
 .pp-status-warn {
   color: var(--warn);
   font-weight: 600;
-}
-.pp-status-sync {
-  margin-left: auto;
-  color: var(--accent);
-  font-weight: 600;
-  white-space: nowrap;
 }
 
 /* ───────────────────────── boxed warnings ───────────────────────── */
@@ -221,27 +198,38 @@
   grid-column: 1 / -1;
 }
 
-/* --- bordered card sections --- */
+/* --- bordered card sections (§2.8: --bg-card fill, border-only, no shadow) --- */
 .pp-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--bg-card);
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
+/* §2.8 section header: raised-contrast muted micro-label. Keeps the divider
+   row (a header is the card's first row, so the rule is a header band here). */
 .pp-card > h3 {
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: var(--sp-1) var(--pad-card-x);
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--pad-card-x);
   font-size: var(--fs-section);
-  font-weight: 600;
-  color: var(--fg-muted);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
+}
+/* Leading glyph: muted 14px, never accent (overrides the accent .cam-card-ico
+   default — §2.8). */
+.pp-card > h3 .cam-card-ico {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
 }
 .pp-card-body {
   padding: var(--pad-card-y) var(--pad-card-x);
@@ -320,13 +308,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Mode switch (head type / rotary toggle): tonal accent-soft fill so only true
+   primaries are full-accent (§2.8 segmented). */
 .pnp-seg-btn.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--fg);
   border-color: var(--accent);
 }
 .pnp-seg-btn.active .pnp-seg-ico {
-  color: var(--accent-fg);
+  color: var(--accent);
 }
 
 /* rotary-axis toggle row: label + Off/Emit segmented pair */
@@ -860,8 +850,9 @@
   margin: 0;
   padding-bottom: var(--sp-1);
   font-size: var(--fs-section);
-  font-weight: 600;
-  color: var(--fg-muted);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);

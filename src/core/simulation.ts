@@ -95,8 +95,18 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
 
   /** Push one straight segment, advancing cumulative time + distance. */
   const pushSeg = (from: Pos, to: Pos, kind: SimKind, feedMmMin: number) => {
+    // Never let a non-finite endpoint into the timeline: a single NaN/Infinity
+    // would poison `cumTime` (NaN propagates through every later tStart/tEnd),
+    // break the binary search in activeIndexAt, and make positionAt return NaN —
+    // which lands the playback cone at a garbage coordinate and makes it "fly"
+    // all over the scene. Skip the move entirely; the tool simply holds position.
+    if (
+      !Number.isFinite(from.x) || !Number.isFinite(from.y) || !Number.isFinite(from.z) ||
+      !Number.isFinite(to.x) || !Number.isFinite(to.y) || !Number.isFinite(to.z)
+    )
+      return
     const d = dist(from, to)
-    if (d <= 0) return
+    if (!Number.isFinite(d) || d <= 0) return
     const clampedFeed = Math.max(minFeed, feedMmMin)
     const mmPerSec = clampedFeed / 60
     const dt = mmPerSec > 0 ? d / mmPerSec : 0
@@ -185,8 +195,14 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
     if (!hasAxisWord && !hasArcWord) continue
 
     const target: Pos = { ...pos }
-    const resolve = (cur: number, v: number | undefined): number =>
-      v === undefined ? cur : absolute ? v : cur + v
+    // Resolve an axis target, carrying the current value when the word is absent
+    // OR non-finite. A non-finite coordinate (e.g. a malformed `XNaN` token) must
+    // never replace a good modal position — otherwise it poisons `pos` and every
+    // later move flies off. Treat it as "axis not commanded": hold the axis.
+    const resolve = (cur: number, v: number | undefined): number => {
+      if (v === undefined || !Number.isFinite(v)) return cur
+      return absolute ? v : cur + v
+    }
     target.x = resolve(pos.x, axis.x)
     target.y = resolve(pos.y, axis.y)
     target.z = resolve(pos.z, axis.z)
@@ -240,11 +256,17 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
     const span = seg.tEnd - seg.tStart
     const f = span > 0 ? (clamped - seg.tStart) / span : 1
     const fc = f < 0 ? 0 : f > 1 ? 1 : f
-    return [
+    const out: [number, number, number] = [
       seg.from[0] + (seg.to[0] - seg.from[0]) * fc,
       seg.from[1] + (seg.to[1] - seg.from[1]) * fc,
       seg.from[2] + (seg.to[2] - seg.from[2]) * fc,
     ]
+    // Defence in depth: segments are already screened for finiteness when built,
+    // but never hand the renderer a NaN/Infinity tool position — fall back to the
+    // segment start (a real, on-path point) so the cone stays put rather than flies.
+    if (!Number.isFinite(out[0]) || !Number.isFinite(out[1]) || !Number.isFinite(out[2]))
+      return [seg.from[0], seg.from[1], seg.from[2]]
+    return out
   }
 
   return { segments, duration, totalDistance, positionAt, activeIndexAt }
@@ -506,7 +528,10 @@ interface Word {
 /** Split a comment-free line into letter/number words. */
 function tokenize(line: string): Word[] {
   const words: Word[] = []
-  const re = /([A-Za-z])\s*([-+]?\d*\.?\d+)/g
+  // letter + signed decimal, with an OPTIONAL exponent so a coordinate emitted in
+  // scientific notation (e.g. `X1e1`) parses as 10, not a truncated 1 (which would
+  // jump the tool). Most G-code is plain decimal; this just stops a silent misread.
+  const re = /([A-Za-z])\s*([-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?)/g
   let m: RegExpExecArray | null
   while ((m = re.exec(line)) !== null) {
     words.push({ letter: m[1].toUpperCase(), value: parseFloat(m[2]) })

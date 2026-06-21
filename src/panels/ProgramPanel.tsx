@@ -7,12 +7,14 @@ import {
   type DragEvent,
 } from 'react'
 import { useProgram, useMachine, useSettings } from '../store'
+import { useHover } from '../store/hover'
 import { sectionColor } from '../viewer/sectionColors'
 import { applyJobPlacement, isIdentityJob } from '../core/transform'
 import { grbl } from '../serial/controller'
 import { ProgramProgressBar } from '../components/ProgramProgressBar'
 import { FrameButton } from '../components/FrameButton'
 import { Icon } from '../components/Icons'
+import { CamEmpty } from '../components/cam/CamUI'
 import {
   computeProgress,
   estimateProgramSeconds,
@@ -43,6 +45,8 @@ export function ProgramPanel() {
   const cursor = useProgram((s) => s.cursor)
   const streaming = useProgram((s) => s.streaming)
   const generating = useProgram((s) => s.generating)
+  const generatingStatus = useProgram((s) => s.generatingStatus)
+  const generatingProgress = useProgram((s) => s.generatingProgress)
   const setProgram = useProgram((s) => s.setProgram)
   const removeSection = useProgram((s) => s.removeSection)
   const setSectionColor = useProgram((s) => s.setSectionColor)
@@ -67,6 +71,20 @@ export function ProgramPanel() {
   const toggleSection = useCallback((id: string) => {
     setOpenSections((m) => ({ ...m, [id]: !m[id] }))
   }, [])
+
+  // Which per-operation blocks are expanded (within an expanded section),
+  // keyed by the operation id. Collapsed by default — clicking an op header
+  // reveals just that op's own G-code (far more readable than one flat blob).
+  const [openOps, setOpenOps] = useState<Record<string, boolean>>({})
+  const toggleOp = useCallback((id: string) => {
+    setOpenOps((m) => ({ ...m, [id]: !m[id] }))
+  }, [])
+
+  // Cross-panel hover link: hovering an op row here shimmers its toolpath in the
+  // 3D viewer and highlights the matching carving row (and vice-versa). Shared
+  // via the tiny hover store; the op id matches the carving FeatureOp id.
+  const hoveredOpId = useHover((s) => s.hoveredOpId)
+  const setHoveredOp = useHover((s) => s.setHoveredOp)
 
   // Map the FULL-program `cursor` to (which section, line-within-section) by
   // replicating combineBaked()'s layout from src/store/program.ts WITHOUT
@@ -235,15 +253,13 @@ export function ProgramPanel() {
   }
 
   // Per-section G-code copy / download (moved here from the carving Output).
-  function copySectionGcode(sec: { rawLines: string[] }) {
-    const text = sec.rawLines.join('\n')
+  function copyGcodeText(text: string) {
     if (navigator.clipboard?.writeText) {
       void navigator.clipboard.writeText(text).catch(() => {})
     }
   }
-  function downloadSectionGcode(sec: { name: string; rawLines: string[] }) {
-    const text = sec.rawLines.join('\n')
-    const base = (sec.name || 'program').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'program'
+  function downloadGcodeText(name: string, text: string) {
+    const base = (name || 'program').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'program'
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -253,6 +269,12 @@ export function ProgramPanel() {
     a.click()
     document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+  function copySectionGcode(sec: { rawLines: string[] }) {
+    copyGcodeText(sec.rawLines.join('\n'))
+  }
+  function downloadSectionGcode(sec: { name: string; rawLines: string[] }) {
+    downloadGcodeText(sec.name, sec.rawLines.join('\n'))
   }
 
   // Per-section BAKED lines (placement applied) for the per-section Frame button,
@@ -481,7 +503,7 @@ export function ProgramPanel() {
             {generating && (
               <span className="pp-generating" role="status">
                 <span className="pp-generating-spin" aria-hidden="true" />
-                {t('prog.generating', 'Generating…')}
+                {generatingStatus ?? t('prog.generating', 'Generating…')}
               </span>
             )}
             {/* Upload a G-code file → adds a NEW section (same copy/download/
@@ -499,12 +521,54 @@ export function ProgramPanel() {
               </button>
             </div>
           </div>
+          {/* Prominent staged status + progress bar while a tab generates a
+              toolpath off the main thread (read → parse → generate). Shows the
+              exact stage + percent so a slow large-file job never looks frozen. */}
+          {generating && (
+            <div className="pp-genstatus" role="status" aria-live="polite">
+              <div className="pp-genstatus-row">
+                <span className="pp-genstatus-spin" aria-hidden="true" />
+                <span className="pp-genstatus-text">
+                  {generatingStatus ?? t('prog.generating', 'Generating…')}
+                </span>
+              </div>
+              <div
+                className={
+                  'pp-genbar' + (generatingProgress == null ? ' is-indet' : '')
+                }
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={
+                  generatingProgress == null
+                    ? undefined
+                    : Math.round(generatingProgress * 100)
+                }
+              >
+                <span
+                  className="pp-genbar-fill"
+                  style={
+                    generatingProgress == null
+                      ? undefined
+                      : { width: `${Math.round(generatingProgress * 100)}%` }
+                  }
+                />
+              </div>
+            </div>
+          )}
           {sections.length > 0 ? (
           <ul className="pp-section-list">
             {sections.map((sec, i) => {
               const open = !!openSections[sec.id]
               const count = sec.rawLines.length
               const color = sectionColor(i, theme === 'dark', sec.color)
+              // A carving section carries an ordered per-operation breakdown
+              // (each op = its own label + G-code + preset colour). When present
+              // we render the section as an EXPANDABLE list of ops (each expands
+              // to ITS OWN G-code) and the toolpath is coloured by its presets —
+              // so the manual per-section colour picker is redundant and hidden.
+              const ops = sec.operations
+              const hasOps = !!ops && ops.length > 0
               // Is THIS section the one currently being streamed? If so, expose
               // the live "line X / Y" position and a subtle shimmer highlight.
               const active = streamPos && streamPos.id === sec.id ? streamPos : null
@@ -514,20 +578,35 @@ export function ProgramPanel() {
                   className={'pp-section' + (active ? ' is-streaming' : '')}
                 >
                   <div className="pp-section-row">
-                    <label
-                      className="pp-section-color"
-                      title={t('prog.sectionColor', 'Toolpath line colour in the 3D viewer')}
-                      style={{ background: color }}
-                    >
-                      <input
-                        type="color"
-                        value={color}
-                        onChange={(e) => setSectionColor(sec.id, e.target.value)}
-                        aria-label={t('prog.sectionColorAria', 'Toolpath colour for section {name}', {
-                          name: sec.name,
-                        })}
+                    {hasOps ? (
+                      // Preset-coloured section: a non-interactive swatch dot
+                      // showing the section's first-op colour (the toolpaths are
+                      // already coloured by their presets in the Visualizer).
+                      <span
+                        className="pp-section-color pp-section-color--preset"
+                        title={t(
+                          'prog.sectionColorPreset',
+                          'Toolpaths are coloured by their operation presets',
+                        )}
+                        style={{ background: ops![0].color || color }}
+                        aria-hidden="true"
                       />
-                    </label>
+                    ) : (
+                      <label
+                        className="pp-section-color"
+                        title={t('prog.sectionColor', 'Toolpath line colour in the 3D viewer')}
+                        style={{ background: color }}
+                      >
+                        <input
+                          type="color"
+                          value={color}
+                          onChange={(e) => setSectionColor(sec.id, e.target.value)}
+                          aria-label={t('prog.sectionColorAria', 'Toolpath colour for section {name}', {
+                            name: sec.name,
+                          })}
+                        />
+                      </label>
+                    )}
                     <button
                       type="button"
                       className="pp-section-disclosure"
@@ -546,9 +625,19 @@ export function ProgramPanel() {
                         {sec.name}
                       </span>
                       <span className="pp-meta pp-section-lines">
-                        {count === 1
-                          ? t('prog.lineCountOne', '{count} line', { count })
-                          : t('prog.lineCount', '{count} lines', { count })}
+                        {hasOps
+                          ? ops!.length === 1
+                            ? t('prog.opCountOne', '{count} op · {lines} lines', {
+                                count: ops!.length,
+                                lines: count,
+                              })
+                            : t('prog.opCount', '{count} ops · {lines} lines', {
+                                count: ops!.length,
+                                lines: count,
+                              })
+                          : count === 1
+                            ? t('prog.lineCountOne', '{count} line', { count })
+                            : t('prog.lineCount', '{count} lines', { count })}
                       </span>
                       {active && (
                         <span
@@ -627,6 +716,86 @@ export function ProgramPanel() {
                           )
                         })}
                       </pre>
+                    ) : hasOps ? (
+                      // Carving section: an expandable list of its operations.
+                      // Each op header shows its preset colour + label + line
+                      // count; clicking it reveals THAT op's own G-code (plus
+                      // per-op copy / download). Far more readable than one blob.
+                      <ul className="pp-op-list">
+                        {ops!.map((op) => {
+                          const opOpen = !!openOps[op.id]
+                          const opLines = op.gcode === '' ? 0 : op.gcode.split(/\r?\n/).length
+                          return (
+                            <li
+                              key={op.id}
+                              className={
+                                'pp-op' +
+                                (opOpen ? ' is-open' : '') +
+                                (hoveredOpId === op.id ? ' pp-op--hover' : '')
+                              }
+                              onMouseEnter={() => setHoveredOp(op.id)}
+                              onMouseLeave={() => setHoveredOp(null)}
+                              onTouchStart={() => setHoveredOp(op.id)}
+                            >
+                              <div className="pp-op-row">
+                                <button
+                                  type="button"
+                                  className="pp-op-disclosure"
+                                  aria-expanded={opOpen}
+                                  onClick={() => toggleOp(op.id)}
+                                  title={
+                                    opOpen
+                                      ? t('prog.opHide', 'Collapse operation')
+                                      : t('prog.opShow', 'Expand operation G-code')
+                                  }
+                                >
+                                  <span className="pp-disclosure-caret">
+                                    {opOpen ? '▾' : '▸'}
+                                  </span>
+                                  <span
+                                    className="pp-op-swatch"
+                                    style={{ background: op.color || color }}
+                                    aria-hidden="true"
+                                  />
+                                  <span className="pp-op-label" title={op.label}>
+                                    {op.label}
+                                  </span>
+                                  <span className="pp-meta pp-op-lines">
+                                    {opLines === 1
+                                      ? t('prog.lineCountOne', '{count} line', {
+                                          count: opLines,
+                                        })
+                                      : t('prog.lineCount', '{count} lines', {
+                                          count: opLines,
+                                        })}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="pp-icon-btn pp-section-io"
+                                  onClick={() => copyGcodeText(op.gcode)}
+                                  title={t('prog.opCopy', 'Copy this operation’s G-code')}
+                                  aria-label={t('prog.opCopyAria', 'Copy G-code for {name}', { name: op.label })}
+                                >
+                                  <Icon name="copy" size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="pp-icon-btn pp-section-io"
+                                  onClick={() => downloadGcodeText(op.label, op.gcode)}
+                                  title={t('prog.opDownload', 'Download this operation’s G-code (.nc)')}
+                                  aria-label={t('prog.opDownloadAria', 'Download G-code for {name}', { name: op.label })}
+                                >
+                                  <Icon name="download" size={13} />
+                                </button>
+                              </div>
+                              {opOpen && (
+                                <pre className="pp-op-body">{op.gcode}</pre>
+                              )}
+                            </li>
+                          )
+                        })}
+                      </ul>
                     ) : (
                       <pre className="pp-section-body">
                         {sec.rawLines.join('\n')}
@@ -637,12 +806,27 @@ export function ProgramPanel() {
             })}
           </ul>
           ) : (
-            <p className="pp-hint pp-sections-empty">
-              {t(
-                'prog.noSections',
-                'No program yet — generate one from a tab (Carving, Writing, PCB…) or ⬆ upload a G-code file.',
-              )}
-            </p>
+            <div className="pp-sections-empty">
+              <CamEmpty
+                icon={<Icon name="upload" size={20} />}
+                title={t('prog.noSectionsTitle', 'No program yet')}
+                hint={t(
+                  'prog.noSections',
+                  'No program yet — generate one from a tab (Carving, Writing, PCB…) or ⬆ upload a G-code file.',
+                )}
+                action={
+                  <button
+                    type="button"
+                    className="pp-empty-cta"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={streaming}
+                  >
+                    <Icon name="upload" size={14} />{' '}
+                    {t('prog.uploadCta', 'Upload G-code')}
+                  </button>
+                }
+              />
+            </div>
           )}
           <input
             ref={fileRef}

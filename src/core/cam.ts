@@ -117,9 +117,15 @@ export function profile(contour: Polyline, side: ProfileSide, p: CamParams): Too
     case ProfileSide.Inside:
       path = offsetPolygon(contour, -toolRadius(p.tool));
       break;
+    default:
+      // Unknown/legacy side value — degrade safely to ON (follow the contour)
+      // rather than leaving `path` undefined and crashing below.
+      path = contour.clone();
+      path.closed = true;
+      break;
   }
 
-  if (path.points.length < 3) return tp; // offset collapsed (tool too big for an inside profile)
+  if (!path || path.points.length < 3) return tp; // offset collapsed (tool too big for an inside profile)
 
   path.closed = true;
   const levels = depthLevels(p);
@@ -193,6 +199,141 @@ function lastXY(tp: Toolpath): Point | null {
   if (tp.moves.length === 0) return null;
   const t = tp.moves[tp.moves.length - 1].target;
   return { x: t.x, y: t.y };
+}
+
+/**
+ * Cut a closed loop at depth `z` but leave `tabCount` uncut gaps of `tabWidth` mm
+ * spaced evenly along the loop perimeter (HOLDING TABS). Tab spans are traversed
+ * at `safeZ` instead of being cut, so the part stays bridged to the stock.
+ *
+ * This is the shared "cut a loop leaving holding tabs" primitive (the same tab
+ * math `pcbCam.boardCutout` uses for board cut-outs); the per-feature Cutout op
+ * reuses it so we don't reinvent the tab spacing / lift-over logic.
+ */
+export function cutLoopWithTabs(
+  tp: Toolpath,
+  loop: Polyline,
+  z: number,
+  safeZ: number,
+  tabCount: number,
+  tabWidth: number,
+): void {
+  if (loop.points.length < 2) return;
+  const perim = loop.length();
+  if (perim <= kEpsilon || tabCount <= 0 || tabWidth <= kEpsilon || tabCount * tabWidth >= perim) {
+    cutLoop(tp, loop, z, safeZ);
+    return;
+  }
+
+  // Tab centre positions as arc-length fractions.
+  const tabCentres: number[] = [];
+  for (let i = 0; i < tabCount; ++i) tabCentres.push((i / tabCount) * perim);
+  const half = tabWidth / 2;
+  const inTab = (s: number): boolean => {
+    for (const c of tabCentres) {
+      let d = Math.abs(s - c);
+      d = Math.min(d, perim - d); // wrap distance around the loop
+      if (d < half) return true;
+    }
+    return false;
+  };
+
+  const pts = loop.points;
+  const np = pts.length;
+  let s = 0;
+  let penDown = !inTab(0);
+  const first = pts[0];
+  tp.rapid({ x: first.x, y: first.y, z: safeZ });
+  if (penDown) tp.plunge({ x: first.x, y: first.y, z });
+
+  for (let i = 0; i < np; ++i) {
+    const a = pts[i];
+    const b = pts[(i + 1) % np];
+    const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+    if (segLen <= kEpsilon) continue;
+
+    const samples = Math.max(1, Math.ceil(segLen / Math.max(half, 0.25)));
+    for (let k = 1; k <= samples; ++k) {
+      const t = k / samples;
+      const px = a.x + (b.x - a.x) * t;
+      const py = a.y + (b.y - a.y) * t;
+      const sAt = s + segLen * t;
+      const tab = inTab(sAt % perim);
+      if (tab && penDown) {
+        tp.rapid({ x: px, y: py, z: safeZ }); // entering a tab: lift over it
+        penDown = false;
+      } else if (!tab && !penDown) {
+        tp.rapid({ x: px, y: py, z: safeZ }); // exiting a tab: drop & resume cutting
+        tp.plunge({ x: px, y: py, z });
+        penDown = true;
+      } else if (penDown) {
+        tp.feed({ x: px, y: py, z });
+      }
+    }
+    s += segLen;
+  }
+
+  tp.rapid({ x: first.x, y: first.y, z: safeZ });
+}
+
+/** Tunable defaults for a {@link cutout} cut (mm). */
+export interface CutoutOptions {
+  /** Number of holding tabs spaced evenly around the perimeter. */
+  tabCount: number;
+  /** Arc width of each holding tab (mm). */
+  tabWidth: number;
+  /** Bridge height left under each tab above the cut floor (mm). */
+  tabHeight: number;
+}
+
+export const DEFAULT_CUTOUT_OPTIONS: CutoutOptions = {
+  tabCount: 4,
+  tabWidth: 2.0,
+  tabHeight: 0.6,
+};
+
+/**
+ * Profile a closed contour OUTSIDE by the tool radius and cut it through the FULL
+ * depth (`surfaceZ - cutDepth`) leaving N evenly-spaced HOLDING TABS at the floor
+ * pass so the freed part stays bridged to the stock. Meant to run LAST. Reuses the
+ * shared {@link cutLoopWithTabs} tab logic and the same outward-offset / multi-pass
+ * descent `pcbCam.boardCutout` uses.
+ *
+ * Open contours can't be offset meaningfully → falls back to following the path.
+ */
+export function cutout(
+  contour: Polyline,
+  p: CamParams,
+  opts: CutoutOptions = DEFAULT_CUTOUT_OPTIONS,
+): Toolpath {
+  const tp = new Toolpath();
+  tp.name = 'Cutout';
+
+  if (!contour.closed || contour.points.length < 3) {
+    tp.name = 'Cutout (follow)';
+    const levels = depthLevels(p);
+    for (const z of levels) cutLoop(tp, contour, z, p.safeZ);
+    return tp;
+  }
+
+  // Profile OUTSIDE so the freed part keeps its nominal dimensions.
+  let path = offsetPolygon(contour, +toolRadius(p.tool));
+  if (path.points.length < 3) path = contour.clone(); // offset collapsed → on-line
+  path.closed = true;
+
+  const levels = depthLevels(p);
+  const tabHeight = Math.max(0, opts.tabHeight);
+  const tabTopZ = (p.surfaceZ - Math.abs(p.cutDepth)) + tabHeight; // floor + bridge height
+  for (let li = 0; li < levels.length; ++li) {
+    const z = levels[li];
+    // Leave tabs only on passes that dip BELOW the tab top (the deepest passes).
+    if (z < tabTopZ - kEpsilon && opts.tabCount > 0 && opts.tabWidth > kEpsilon) {
+      cutLoopWithTabs(tp, path, z, p.safeZ, opts.tabCount, opts.tabWidth);
+    } else {
+      cutLoop(tp, path, z, p.safeZ);
+    }
+  }
+  return tp;
 }
 
 /** Area-clear a closed boundary with concentric offset rings, multi-depth. */

@@ -287,15 +287,78 @@ export interface MeshSource {
   buffer: ArrayBuffer
 }
 
+/** Import lifecycle stages reported through {@link ImportProgress}. */
+export type ImportStage = 'reading' | 'parsing'
+
+/**
+ * Optional progress callback threaded through {@link importMesh}. `fraction` is
+ * 0..1 for the 'reading' stage (driven by `FileReader.onprogress`); for the
+ * 'parsing' stage it's omitted (parsing is synchronous + can't report partials).
+ */
+export type ImportProgress = (
+  stage: ImportStage,
+  fraction?: number,
+  /** Bytes read so far / total bytes — only for the 'reading' stage, so the UI
+   *  can show a real "X.X / Y.Y MB" byte readout, not just a percentage. */
+  loaded?: number,
+  total?: number,
+) => void
+
+/**
+ * Read a File's bytes via `FileReader` so we get an `onprogress` stream (0..1)
+ * for big files — unlike `file.arrayBuffer()` which is opaque until done. A
+ * `MeshSource` already carries its buffer, so that path stays trivial.
+ */
+function readFileBuffer(file: File, onProgress?: ImportProgress): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onprogress = (e) => {
+      if (onProgress && e.lengthComputable && e.total > 0) {
+        onProgress('reading', e.loaded / e.total, e.loaded, e.total)
+      }
+    }
+    reader.onload = () => {
+      onProgress?.('reading', 1, file.size, file.size)
+      resolve(reader.result as ArrayBuffer)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file.'))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
+/** Yield to the event loop so any "Reading…/Parsing…" UI can paint before the
+ *  synchronous parse freezes the main thread on a big mesh. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
+    else setTimeout(resolve, 0)
+  })
+}
+
 /**
  * Import a 3D mesh file (STL / OBJ / STEP / STP) into the carving pipeline's
  * `StlMesh` structure. Dispatches by extension; STEP is async (WASM). Throws a
  * descriptive Error on unsupported extensions or parse failures.
+ *
+ * The optional `onProgress` callback reports the 'reading' fraction (0..1) and a
+ * 'parsing' stage marker so the panel can show a staged progress bar; omitting
+ * it preserves the original behaviour exactly.
  */
-export async function importMesh(file: File | MeshSource): Promise<StlMesh> {
+export async function importMesh(
+  file: File | MeshSource,
+  onProgress?: ImportProgress,
+): Promise<StlMesh> {
   const name = file.name
   const ext = name.toLowerCase().split('.').pop() ?? ''
-  const buffer = 'arrayBuffer' in file ? await file.arrayBuffer() : file.buffer
+  const isFile = 'arrayBuffer' in file
+  const buffer = isFile
+    ? await readFileBuffer(file as File, onProgress)
+    : (file as MeshSource).buffer
+
+  // Mark the parse stage + yield once so the "Parsing…" label actually paints
+  // before the synchronous parse blocks the main thread (big STL/OBJ).
+  onProgress?.('parsing')
+  if (onProgress && isFile) await nextFrame()
 
   switch (ext) {
     case 'stl':

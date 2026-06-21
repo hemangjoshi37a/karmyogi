@@ -89,7 +89,7 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .laser-seg-btn:hover {
   color: var(--fg);
@@ -104,12 +104,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* CO2 / Fiber is a MODE switch — the active pill uses the tonal --accent-soft
+   tint so it doesn't fight the real import CTA for full-accent primacy (W-C). */
 .laser-seg-btn.is-on {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--fg);
 }
 .laser-seg-btn.is-on .laser-seg-ico {
-  color: var(--accent-fg);
+  color: var(--accent);
 }
 
 /* ───────────────────────── status strip ───────────────────────── */
@@ -139,7 +141,7 @@
 .lp-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-elev);
+  background: var(--bg-card);
   padding: var(--sp-3);
   display: flex;
   flex-direction: column;
@@ -150,15 +152,26 @@
   align-items: center;
   gap: var(--sp-2);
 }
+/* Canonical section header (§2.8/W-F): raised-contrast uppercase micro-label,
+   --fw-label weight, .5px tracking, optional muted leading glyph. */
 .lp-card-head h4 {
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   font-size: var(--fs-section);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.5px;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+}
+/* Any leading glyph inside the header is muted + 14px, never accent. */
+.lp-card-head h4 > svg,
+.lp-card-head h4 .cam-card-ico {
   color: var(--fg-muted);
+  width: 14px;
+  height: 14px;
 }
 .lp-card-count {
   margin-left: auto;
@@ -188,7 +201,7 @@
   min-width: 0;
   padding: 1px 2px;
   border-radius: var(--radius);
-  transition: background 0.12s;
+  transition: background var(--dur-fast) var(--ease);
 }
 .laser-sfield:hover {
   background: color-mix(in srgb, var(--fg) 4%, transparent);
@@ -198,7 +211,7 @@
   align-items: center;
   gap: 6px;
   flex: 0 1 auto;
-  width: 92px;
+  width: 72px;
   min-width: 38px;
   font-size: var(--fs-label);
   font-weight: 500;
@@ -215,7 +228,7 @@
   width: 16px;
   color: var(--fg-muted);
   opacity: 0.85;
-  transition: color 0.12s, opacity 0.12s;
+  transition: color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
 }
 .laser-sfield:focus-within .laser-sfield-ico {
   color: var(--accent);
@@ -223,8 +236,9 @@
 }
 .laser-sfield-txt {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* wrap to a 2nd line rather than truncating the label to a stub (W-B). */
+  white-space: normal;
+  line-height: 1.2;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -235,14 +249,14 @@
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  width: 80px;
+  width: 64px;
   height: var(--ctl-h);
   padding: 0 6px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   min-width: 0;
-  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 .laser-snum:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
@@ -289,7 +303,7 @@
    LEFT of the thumb via inline `--pct` (WebKit/Blink gradient) + ::-moz-range-progress. */
 .laser-slider {
   flex: 1 1 0;
-  min-width: 34px;
+  min-width: 72px;
   height: 18px;
   margin: 0;
   cursor: pointer;
@@ -304,14 +318,14 @@
   background: linear-gradient(
     to right,
     var(--accent) 0 var(--pct, 0%),
-    var(--bg-elev) var(--pct, 0%) 100%
+    var(--bg-input) var(--pct, 0%) 100%
   );
 }
 .laser-slider::-moz-range-track {
   height: 5px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: var(--bg-input);
 }
 .laser-slider::-moz-range-progress {
   height: 5px;
@@ -329,7 +343,7 @@
   border: 2px solid var(--bg-elev);
   box-shadow: 0 0 0 1px var(--border);
   cursor: pointer;
-  transition: background 0.12s ease, box-shadow 0.12s ease;
+  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 .laser-slider::-moz-range-thumb {
   width: 13px;
@@ -503,12 +517,13 @@
   text-align: left;
   background: none;
   border: none;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   cursor: pointer;
   padding: var(--sp-1) var(--sp-2);
-  font-size: var(--fs-label);
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.5px;
 }
 .lp-advanced-toggle:hover {
   color: var(--fg);

@@ -126,7 +126,7 @@ export function AboutModal({ open, onClose, repoUrl, issuesUrl }: AboutModalProp
 
   return (
     <>
-      <Modal open={open} title={t('about.title', 'About karmyogi')} onClose={onClose} width={500}>
+      <Modal open={open} title={t('about.title', 'About karmyogi')} onClose={onClose} size="sm">
         <div className="km-about2">
           {/* Hero */}
           <div className="km-about2-hero">

@@ -1147,7 +1147,7 @@ function LaserVectorWorkbench() {
   }
 
   // Collapse the two mode-specific (advanced) cards to tame vertical scroll.
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAdvanced, setShowAdvanced] = usePersistentState<boolean>('karmyogi.laser.showAdvanced', false)
 
   // ---- Sheet / nesting (persisted). ---------------------------------------
   const [sheetW, setSheetW] = usePersistentState<number>('karmyogi.laser.sheetW', 300)

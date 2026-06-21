@@ -320,7 +320,7 @@ export function AiBubble() {
       <Modal
         open={settingsOpen}
         title={t('ai.bubble.settingsTitle', 'AI provider & connection')}
-        width={560}
+        size="md"
         onClose={() => setSettingsOpen(false)}
       >
         <AiSettings />

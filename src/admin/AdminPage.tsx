@@ -61,7 +61,7 @@ export function AdminPage() {
           <button className="admin-btn primary" onClick={() => void signIn()}>
             {t('auth.google', 'Sign in with Google')}
           </button>
-          {error && <p className="admin-error">{error}</p>}
+          {error && <p className="admin-error">{t(error.key, error.message)}</p>}
         </div>
       </AdminShell>
     )

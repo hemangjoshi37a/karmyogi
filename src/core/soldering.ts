@@ -113,6 +113,11 @@ function clampDecimals(decimals: number): number {
 /** Formatted number, never "-0.000" — mirrors the C++ fmt() and the emitter. */
 function fmt(value: number, decimals: number): string {
   const d = clampDecimals(decimals);
+  // Never emit "NaN"/"Infinity" into the program: a blank/garbage point coord
+  // (e.g. an empty table row or a bad Gerber-extracted value) would otherwise
+  // write literal `XNaN`, which a real GRBL rejects and which flung the sim
+  // playhead. Coerce any non-finite coordinate to 0 (a safe, in-bounds value).
+  if (!Number.isFinite(value)) value = 0;
   const snap = 0.5 * Math.pow(10, -d);
   if (Math.abs(value) < snap) value = 0;
   if (value === 0) value = 0; // collapse a residual signed zero

@@ -43,15 +43,17 @@
   color: var(--fg);
 }
 
-/* ---- Mode toggle (Draw / From image) ---- */
+/* ---- Mode toggle (Draw / From image) — canonical segmented control
+   (§2.8/W-C). A MODE SWITCH, so the active segment uses the tonal --accent-soft
+   tint, reserving full-accent for the true primary CTA. ---- */
 .sig-modes {
   display: flex;
   gap: var(--sp-1);
   margin: 0 0 var(--sp-3);
   padding: 2px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elev);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
 }
 .sig-mode {
   flex: 1 1 0;
@@ -59,18 +61,20 @@
   padding: 0 var(--sp-2);
   font: inherit;
   font-size: var(--fs-ctl);
-  color: var(--fg-muted);
+  color: var(--fg);
   background: transparent;
   border: none;
-  border-radius: calc(var(--radius) - 1px);
+  border-radius: calc(var(--radius-sm) - 1px);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
-.sig-mode:hover {
-  color: var(--fg);
+.sig-mode:hover:not(.active) {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
 .sig-mode.active {
-  color: var(--accent-fg);
-  background: var(--accent);
+  color: var(--fg);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
 }
 
 /* ---- Freehand draw surface ---- */
@@ -128,7 +132,8 @@
   grid-column: 1 / -1;
 }
 
-/* ---- Card section ---- */
+/* ---- Card section (canonical card surface, §2.8/W-F: --bg-card fill, 1px
+   border edge, --radius, NO resting drop shadow) ---- */
 .sig-card {
   display: flex;
   flex-direction: column;
@@ -137,7 +142,7 @@
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-elev);
+  background: var(--bg-card);
 }
 .sig-card-head {
   display: flex;
@@ -145,15 +150,25 @@
   justify-content: space-between;
   gap: var(--sp-2);
 }
+/* Canonical section header (§2.8): uppercase micro-label, raised contrast, no
+   bottom border. */
 .sig-card-head > h4 {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   margin: 0;
   font-size: var(--fs-section);
-  font-weight: 600;
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
   letter-spacing: 0.5px;
   text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+}
+/* Canonical leading glyph (§2.8/W-F): muted, never accent (overrides the shared
+   `.cam-card-ico` accent color within Signature card headers — the numbered
+   `.sig-step` chip keeps its accent as a meaningful step affordance). */
+.sig-card-head > h4 > .cam-card-ico {
+  flex: 0 0 auto;
   color: var(--fg-muted);
 }
 
@@ -334,7 +349,7 @@
   padding: 0 6px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   min-width: 0;
   transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
 }
@@ -473,14 +488,14 @@
   color: var(--fg-muted);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .sig-toggle:hover { border-color: var(--accent); color: var(--fg); }
 .sig-toggle.active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
   color: var(--fg);
 }
 
@@ -492,7 +507,7 @@
   color: var(--fg);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .sig-btn:hover:not(:disabled) {
@@ -505,10 +520,17 @@
   opacity: 0.5;
   cursor: default;
 }
+/* Primary button (§2.8): SOLID accent fill, taller (--ctl-h-lg), 600 weight. */
 .sig-btn.primary {
+  min-height: var(--ctl-h-lg);
+  font-weight: var(--fw-title);
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
+}
+.sig-btn.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  filter: brightness(1.08);
 }
 
 .sig-actions {
@@ -536,11 +558,11 @@
   min-height: var(--ctl-h);
   padding: 0 var(--sp-1);
   font-size: var(--fs-section);
-  font-weight: 600;
+  font-weight: var(--fw-label);
   letter-spacing: 0.5px;
   text-transform: uppercase;
   text-align: left;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
   background: transparent;
   border: none;
   cursor: pointer;
@@ -552,7 +574,7 @@
   display: inline-flex;
   align-items: center;
   width: 12px;
-  color: var(--accent);
+  color: var(--fg-muted);
 }
 .sig-advanced {
   padding-top: 2px;

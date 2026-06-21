@@ -44,7 +44,7 @@
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-elev);
+  background: var(--bg-card);
   padding: var(--sp-3);
   display: flex;
   flex-direction: column;
@@ -155,8 +155,12 @@
   font-weight: 600;
 }
 .lvl-btn.danger {
-  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+  border-color: var(--border-danger);
   color: var(--danger);
+}
+.lvl-btn.danger:hover:not(:disabled) {
+  border-color: var(--border-danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 .lvl-btn:disabled {
   opacity: 0.5;
@@ -210,9 +214,11 @@
 .lvl-modes button:last-child {
   border-right: none;
 }
+/* Apply-mode is a MODE switch (off / baked / on-the-fly), so the active segment
+   uses the tonal --accent-soft tint rather than a full-accent primary (§2.8/W-C). */
 .lvl-modes button.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--fg);
   font-weight: 600;
 }
 .lvl-modes button:disabled {

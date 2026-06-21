@@ -21,17 +21,30 @@ export interface AuthUser {
   photoURL: string | null
 }
 
+/**
+ * A localizable sign-in error: a stable i18n `key` plus the inline English
+ * `message` used as the fallback. The store can't call the React `useT` hook,
+ * so it stores BOTH and the UI localizes via `useT(error.key, error.message)` —
+ * matching the project's English-fallback translation contract.
+ */
+export interface AuthError {
+  key: string
+  message: string
+}
+
 interface AuthState {
   status: AuthStatus
   user: AuthUser | null
-  /** Last sign-in error message (e.g. popup blocked / closed), if any. */
-  error: string | null
+  /** Last sign-in error (e.g. popup blocked / storage disabled), if any. */
+  error: AuthError | null
   /** Start listening to auth changes. Idempotent; no-op when unconfigured. */
   init: () => void
   /**
-   * Fallback sign-in: a FULL-PAGE redirect to Google (NOT a popup), so it works
-   * even when the user isn't already signed into any Google account and when
-   * One Tap / FedCM can't be shown. Returns after the navigation is kicked off.
+   * Primary sign-in: a Google account-chooser POPUP, which authenticates in a
+   * FIRST-PARTY context — so it works in incognito and without third-party
+   * cookies (unlike redirect, which relies on a cross-site iframe on the
+   * firebaseapp.com auth domain). Automatically FALLS BACK to a full-page
+   * redirect when popups are blocked / unsupported by the environment.
    */
   signInWithGoogle: () => Promise<void>
   /**
@@ -46,6 +59,52 @@ let initialized = false
 // The uid we last reported a `login` for, so onAuthStateChanged re-firing on
 // reload/refresh doesn't log a duplicate login per page load.
 let reportedLoginUid: string | null = null
+
+/** Pull Firebase's `auth/...` error code off an unknown thrown value, if present. */
+function authErrorCode(e: unknown): string | undefined {
+  if (e && typeof e === 'object' && 'code' in e) {
+    const c = (e as { code?: unknown }).code
+    if (typeof c === 'string') return c
+  }
+  return undefined
+}
+
+/**
+ * Map a sign-in failure to a localizable {key, message}. Storage / third-party
+ * cookie failures (common in incognito or with cookies disabled) get a clear,
+ * actionable message; everything else falls back to a generic message keyed for
+ * translation, with the raw text appended for debugging.
+ */
+function describeAuthError(e: unknown): AuthError {
+  const code = authErrorCode(e)
+  if (
+    code === 'auth/web-storage-unsupported' ||
+    code === 'auth/operation-not-supported-in-this-environment'
+  ) {
+    return {
+      key: 'auth.error.storage',
+      message:
+        'Sign-in needs cookies and site data. Enable them for this site (or use a normal, non-incognito window) and try again.',
+    }
+  }
+  if (code === 'auth/network-request-failed') {
+    return {
+      key: 'auth.error.network',
+      message: 'Network error during sign-in. Check your connection and try again.',
+    }
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return {
+      key: 'auth.error.domain',
+      message: 'This domain is not authorized for sign-in. Please contact the site owner.',
+    }
+  }
+  const raw = e instanceof Error ? e.message : String(e)
+  return {
+    key: 'auth.error.generic',
+    message: `Could not sign in. Please try again. (${raw})`,
+  }
+}
 
 export const useAuth = create<AuthState>((set) => ({
   status: firebaseConfigured() ? 'loading' : 'disabled',
@@ -90,8 +149,7 @@ export const useAuth = create<AuthState>((set) => ({
         const { getRedirectResult } = await import('firebase/auth')
         await getRedirectResult(auth)
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        set({ error: msg })
+        set({ error: describeAuthError(e) })
       }
       onAuthStateChanged(auth, (fbUser) => {
         if (fbUser) {
@@ -124,17 +182,48 @@ export const useAuth = create<AuthState>((set) => ({
     try {
       const auth = await getFirebaseAuth()
       if (!auth) return
-      const { GoogleAuthProvider, signInWithRedirect } = await import('firebase/auth')
+      const {
+        GoogleAuthProvider,
+        signInWithPopup,
+        signInWithRedirect,
+        browserPopupRedirectResolver,
+      } = await import('firebase/auth')
       const provider = new GoogleAuthProvider()
       // Always prompt account selection so a logged-out user can pick/add an
-      // account on the redirect, instead of bouncing back unresolved.
+      // account, instead of silently reusing a stale session.
       provider.setCustomParameters({ prompt: 'select_account' })
-      // FULL-PAGE redirect (not popup): the page navigates to Google now; on
-      // return, getRedirectResult() + onAuthStateChanged complete the sign-in.
-      await signInWithRedirect(auth, provider)
+      // PRIMARY: a popup. It authenticates in a FIRST-PARTY context, so it works
+      // in incognito and survives the third-party-cookie phase-out (unlike
+      // signInWithRedirect, whose cross-site iframe on firebaseapp.com is blocked
+      // there, bouncing the user back unauthenticated). Pass the configured
+      // resolver explicitly so it never re-probes the environment.
+      try {
+        await signInWithPopup(auth, provider, browserPopupRedirectResolver)
+        // onAuthStateChanged flips status → 'signedIn'.
+        return
+      } catch (e) {
+        const code = authErrorCode(e)
+        // User simply dismissed the popup (closed it, or a second popup raced
+        // and cancelled the first) — not an error worth showing.
+        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+          return
+        }
+        // Popup couldn't open (blocker) or the environment can't host one — fall
+        // back to a FULL-PAGE redirect. getRedirectResult() (on init) +
+        // onAuthStateChanged complete it on return. Storage/3rd-party-cookie
+        // failures are surfaced (redirect can't fix those) rather than retried.
+        if (
+          code === 'auth/popup-blocked' ||
+          code === 'auth/operation-not-supported-in-this-environment' ||
+          code === 'auth/missing-or-invalid-nonce'
+        ) {
+          await signInWithRedirect(auth, provider, browserPopupRedirectResolver)
+          return
+        }
+        throw e
+      }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      set({ error: msg })
+      set({ error: describeAuthError(e) })
     }
   },
 
@@ -146,13 +235,13 @@ export const useAuth = create<AuthState>((set) => ({
       if (!auth) return
       const { GoogleAuthProvider, signInWithCredential } = await import('firebase/auth')
       // The One Tap / FedCM callback hands us a Google ID token (JWT). Exchange
-      // it for a Firebase session in-place — no popup, no redirect.
+      // it for a Firebase session in-place — no popup, no redirect (a fully
+      // first-party flow that also works in incognito).
       const cred = GoogleAuthProvider.credential(idToken)
       await signInWithCredential(auth, cred)
       // onAuthStateChanged flips status → 'signedIn'.
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      set({ error: msg })
+      set({ error: describeAuthError(e) })
     }
   },
 

@@ -6,7 +6,7 @@ import {
   type ChangeEvent,
   type DragEvent,
 } from 'react'
-import { useProgram, useMachine } from '../store'
+import { useProgram, useMachine, usePersistentState } from '../store'
 import { useT } from '../i18n'
 import { grbl } from '../serial/controller'
 import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
@@ -59,6 +59,13 @@ import '../styles/pcbLevel.css'
  *  Using ONE name means each push REPLACES the previous one — the operator never
  *  accumulates stale stages, and what shows in the Visualizer == what runs. */
 const PCB_SECTION = 'pcb'
+
+/** Presentation-only: the section flow now carries an authoritative numbered
+ *  step badge, so drop any leading "N · " (or "N - " / "N. ") number that legacy
+ *  translation strings still embed in the title — otherwise the badge and the
+ *  text would show the number twice. Matches digits of any script. */
+const stripStepNum = (s: string): string =>
+  s.replace(/^[\s]*[\p{Nd}]+[\s]*[·.\-—]?[\s]*/u, '')
 
 const ZIP_ACCEPT = '.zip'
 const GERBER_ACCEPT = '.gbr,.ger,.gtl,.gbl,.art,.gko,.gm1,.txt'
@@ -427,8 +434,15 @@ export function PcbPanel() {
   const [dragDrill, setDragDrill] = useState(false)
   const [showSingle, setShowSingle] = useState(false)
 
-  const [params, setParams] = useState<Params>(DEFAULTS)
-  const [activeStage, setActiveStage] = useState<StageId>('isolation')
+  // Persisted CAM params + active stage so the operator's tool/feed/depth tuning
+  // and selected stage survive a reload. Seed with a merge over DEFAULTS so a
+  // newly-added field is never undefined if an older saved shape is restored.
+  const [storedParams, setParams] = usePersistentState<Params>('karmyogi.pcb.params', DEFAULTS)
+  const params = useMemo<Params>(() => ({ ...DEFAULTS, ...storedParams }), [storedParams])
+  const [activeStage, setActiveStage] = usePersistentState<StageId>(
+    'karmyogi.pcb.activeStage',
+    'isolation',
+  )
   // The single status line. `statusError` routes the message to .pcb-error
   // (red/danger) styling rather than the green .pcb-status success styling.
   const [status, setStatus] = useState<string>('')
@@ -446,7 +460,7 @@ export function PcbPanel() {
   }
 
   // Advanced section is collapsed by default — beginners drive the layer table.
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAdvanced, setShowAdvanced] = usePersistentState<boolean>('karmyogi.pcb.showAdvanced', false)
 
   // Last generated G-code, shown in a collapsible (collapsed by default) preview.
   const [lastGcode, setLastGcode] = useState<{ name: string; text: string } | null>(null)
@@ -1162,10 +1176,11 @@ export function PcbPanel() {
         {/* ---- 1. Upload package (primary action) ---- */}
         <section className="pcb-section pcb-section-wide">
           <h3>
+            <span className="pcb-step-num" aria-hidden="true">1</span>
             <span className="cam-card-ico" aria-hidden="true">
               <Icon name="upload" size={15} />
             </span>
-            {t('pcb.upload.title', '1 · Upload Gerber ZIP')}
+            {stripStepNum(t('pcb.upload.title', 'Upload Gerber ZIP'))}
           </h3>
           <div className="pcb-section-body">
             <div
@@ -1317,10 +1332,11 @@ export function PcbPanel() {
           <section className="pcb-section pcb-section-wide">
             <h3 className="pcb-h3-row">
               <span>
+                <span className="pcb-step-num" aria-hidden="true">2</span>
                 <span className="cam-card-ico" aria-hidden="true">
                   <Icon name="copy" size={15} />
                 </span>
-                {t('pcb.layers.title', '2 · Layers')}
+                {stripStepNum(t('pcb.layers.title', 'Layers — press ▶ to run'))}
               </span>
               <IconButton
                 className="pcb-clear-btn"
@@ -1553,10 +1569,11 @@ export function PcbPanel() {
         {layers.length > 0 && (
           <section className="pcb-section pcb-section-wide">
             <h3>
+              <span className="pcb-step-num" aria-hidden="true">3</span>
               <span className="cam-card-ico" aria-hidden="true">
                 <Icon name="settings" size={15} />
               </span>
-              {t('pcb.ops.title', '3 · Toolpath operations')}
+              {stripStepNum(t('pcb.ops.title', 'Toolpath operations'))}
             </h3>
             <div className="pcb-section-body">
               <p className="pcb-hint">
@@ -1835,10 +1852,11 @@ export function PcbPanel() {
         <section className="pcb-section">
           <h3 className="pcb-h3-row">
             <span>
+              <span className="pcb-step-num" aria-hidden="true">4</span>
               <span className="cam-card-ico" aria-hidden="true">
                 <Icon name="settings" size={15} />
               </span>
-              {t('pcb.essentials.title', '4 · Essentials')}
+              {stripStepNum(t('pcb.essentials.title', 'Essentials'))}
             </span>
             <SaveLoadButtons
               value={pcbDoc}
