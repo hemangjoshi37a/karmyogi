@@ -5,6 +5,8 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles/theme.css'
 import './styles/globals.css'
 import './styles/ui-kit.css'
+import './styles/ui-seg.css'
+import './styles/slider-row.css'
 import 'dockview/dist/styles/dockview.css'
 
 // Silence ONE known-benign upstream deprecation: @react-three/fiber constructs

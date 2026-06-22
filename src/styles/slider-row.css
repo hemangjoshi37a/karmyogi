@@ -1,0 +1,115 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   slider-row.css — THE canonical slider + number field (plan §2.8 / W-B).
+
+   Backs <SliderField> (src/components/ui/SliderField.tsx) and is the single
+   place the per-tab sliders converge onto. Geometry keeps the track usable at
+   all times (label wraps instead of squeezing the track to a stub; number
+   frame fixed with a stable gutter so units never clip). Token-driven.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.ui-sfield {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.ui-sfield-label {
+  flex: 0 0 auto;
+  width: var(--slider-label-w, 68px);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-label, 600);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+  line-height: var(--lh-tight, 1.25);
+  white-space: normal; /* wrap to 2 lines — never ellipsis */
+}
+
+.ui-slider {
+  flex: 1 1 auto;
+  min-width: 72px;
+  height: var(--ctl-h-sm, 26px);
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.ui-slider:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* WebKit/Blink: gradient-filled track + round thumb. */
+.ui-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--accent) calc(var(--pct, 0) * 1%),
+    var(--bg-input) calc(var(--pct, 0) * 1%)
+  );
+}
+.ui-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px; /* (track 4 − thumb 14) / 2 */
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-panel);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.ui-slider:focus-visible {
+  outline: none;
+}
+.ui-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Firefox: native progress fill + thumb. */
+.ui-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-input);
+}
+.ui-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.ui-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--bg-panel);
+  border-radius: 50%;
+  background: var(--accent);
+}
+.ui-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.ui-sfield-num {
+  flex: 0 0 auto;
+  width: var(--slider-num-w, 64px);
+  height: var(--ctl-h-sm, 26px);
+  text-align: right;
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  scrollbar-gutter: stable; /* units never clip against the frame edge */
+}
+.ui-sfield-num:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.ui-sfield-unit {
+  flex: 0 0 auto;
+  min-width: 16px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}

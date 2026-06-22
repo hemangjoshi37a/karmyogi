@@ -1,0 +1,74 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   ui-seg.css — THE canonical segmented control (plan §2.8 / W-C).
+
+   Backs <SegControl> (src/components/ui/SegControl.tsx). One definition for
+   every mode switch / segmented choice, replacing .mc-seg, .pt-speed,
+   .cc-opseg, .laser-seg, .pcb-zmode, .cam-seg-btn, .wr-seg, .sig-mode,
+   .pr-seg-btn, … Token-driven; keyboard + a11y handled by the component.
+
+   Variants:
+   - .ui-seg--tonal  (default) → active segment uses --accent-soft (mode switch)
+   - .ui-seg--accent           → active segment solid --accent (primary choice)
+   ────────────────────────────────────────────────────────────────────────── */
+
+.ui-seg {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.ui-seg-btn {
+  appearance: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--fs-ctl);
+  min-height: var(--ctl-h, 28px);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--dur-fast, 120ms) var(--ease, ease),
+    color var(--dur-fast, 120ms) var(--ease, ease);
+}
+.ui-seg-btn:last-child {
+  border-right: none;
+}
+
+/* Tonal (default) — muted fill so only true primaries are full-accent. */
+.ui-seg-btn[aria-checked='true'] {
+  background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, var(--bg-input)));
+  color: var(--fg);
+}
+/* Accent variant — solid primary fill. */
+.ui-seg--accent .ui-seg-btn[aria-checked='true'] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.ui-seg-btn:hover:not([aria-checked='true']):not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.ui-seg-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ui-seg-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Small size for dense rows (speed/step chips). */
+.ui-seg--sm .ui-seg-btn {
+  min-height: var(--ctl-h-sm, 26px);
+  padding: 0 8px;
+  font-size: var(--fs-label);
+}
