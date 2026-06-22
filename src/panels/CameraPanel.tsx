@@ -22,7 +22,7 @@ import { grbl } from '../serial/controller'
 import { useT } from '../i18n'
 import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamBusy, CamEmpty } from '../components/cam/CamUI'
 import { useCameraCalib, useCameraLive, useMachine, usePersistentState } from '../store'
 import { useProgram } from '../store/program'
 import { useTabCommands } from '../machine/tabCommands'
@@ -2989,9 +2989,11 @@ export function CameraPanel() {
               disabled={!recorderSupported}
               onClick={() => setAutoRecord((v) => !v)}
               title={
-                autoRecord
-                  ? t('cam.auto.toggleOnTip', 'Auto-record is ON — click to disable')
-                  : t('cam.auto.toggleOffTip', 'Auto-record is OFF — click to record every run automatically')
+                !recorderSupported
+                  ? t('cam.capture.noRecorder', 'Recording is not supported in this browser (no MediaRecorder).')
+                  : autoRecord
+                    ? t('cam.auto.toggleOnTip', 'Auto-record is ON — click to disable')
+                    : t('cam.auto.toggleOffTip', 'Auto-record is OFF — click to record every run automatically')
               }
             >
               <span className="cam-rec-pill-dot" data-live={autoRecActive} aria-hidden="true" />
@@ -3455,10 +3457,14 @@ export function CameraPanel() {
                   </button>
                 )}
               </div>
-              {autoRun.running && autoRun.progress && (
-                <p className="cam-hint cam-pending cam-auto-progress" role="status">
-                  {progressLabel(autoRun.progress)}
-                </p>
+              {autoRun.running && (
+                <CamBusy
+                  label={
+                    autoRun.progress
+                      ? progressLabel(autoRun.progress)
+                      : t('cam.bt.auto.starting', 'Starting calibration…')
+                  }
+                />
               )}
               {!autoRun.running && autoRun.done && (
                 <p className="cam-hint cam-auto-done" role="status">
@@ -3730,6 +3736,9 @@ export function CameraPanel() {
                       {t('cam.head.measure', 'Quick: scale & rotation from a QR')}
                     </button>
                   </div>
+                  {headBusy && (
+                    <CamBusy label={t('cam.head.calibBusy', 'Calibrating…')} />
+                  )}
                   <p className="cam-hint">
                     {hc.pxPerMm
                       ? t('cam.head.cur', 'Scale {ppm} px/mm · rotation {rot}°', {
@@ -4052,7 +4061,13 @@ export function CameraPanel() {
                     onClick={() => {
                       autoCalibSlotFromGrid(0).catch(() => {})
                     }}
-                    title={t('cam.grid.scan1Tip', 'Read the grid in Camera 1 and solve its calibration')}
+                    title={
+                      !qrSupported
+                        ? t('cam.grid.noDetector', 'BarcodeDetector is unavailable in this browser — use Auto or Manual calibration instead.')
+                        : !live(0)
+                          ? t('cam.bt.job.needCam1Live', 'Start Camera 1 first.')
+                          : t('cam.grid.scan1Tip', 'Read the grid in Camera 1 and solve its calibration')
+                    }
                   >
                     <Icon name="frame" size={14} />
                     {t('cam.grid.scan1', 'Calibrate Cam 1')}
@@ -4070,9 +4085,13 @@ export function CameraPanel() {
                       autoCalibSlotFromGrid(1).catch(() => {})
                     }}
                     title={
-                      secondaryEnabled
-                        ? t('cam.grid.scan2Tip', 'Read the grid in Camera 2 and solve its calibration')
-                        : t('cam.bt.cam2Disabled', 'Enable the second camera first')
+                      !qrSupported
+                        ? t('cam.grid.noDetector', 'BarcodeDetector is unavailable in this browser — use Auto or Manual calibration instead.')
+                        : !secondaryEnabled
+                          ? t('cam.bt.cam2Disabled', 'Enable the second camera first')
+                          : !live(1)
+                            ? t('cam.bt.hull.needBothLive', 'Start both cameras first.')
+                            : t('cam.grid.scan2Tip', 'Read the grid in Camera 2 and solve its calibration')
                     }
                   >
                     <Icon name="frame" size={14} />
@@ -4093,7 +4112,13 @@ export function CameraPanel() {
                       onClick={() => {
                         autoCalibBothFromGrid().catch(() => {})
                       }}
-                      title={t('cam.grid.scanBothTip', 'Read the grid in both live cameras and solve both at once')}
+                      title={
+                        !qrSupported
+                          ? t('cam.grid.noDetector', 'BarcodeDetector is unavailable in this browser — use Auto or Manual calibration instead.')
+                          : !live(0)
+                            ? t('cam.bt.hull.needBothLive', 'Start both cameras first.')
+                            : t('cam.grid.scanBothTip', 'Read the grid in both live cameras and solve both at once')
+                      }
                     >
                       <Icon name="frame" size={14} />
                       {t('cam.grid.scanBoth', 'Auto-calibrate both cameras')}
@@ -4150,7 +4175,13 @@ export function CameraPanel() {
                       onClick={() => {
                         runRoleProbe().catch(() => {})
                       }}
-                      title={t('cam.role.runTip', 'Jog a known distance and infer which camera is on the head')}
+                      title={
+                        machineConn !== 'connected'
+                          ? t('cam.role.notConnectedHint', 'Connect the machine in the Controller tab to run the probe.')
+                          : !live(0) && !live(1)
+                            ? t('cam.role.needCam', 'Start at least one camera first.')
+                            : t('cam.role.runTip', 'Jog a known distance and infer which camera is on the head')
+                      }
                     >
                       <Icon name="jog" size={14} />
                       {t('cam.role.run', 'Detect camera mounts')}
@@ -4167,10 +4198,14 @@ export function CameraPanel() {
                     </button>
                   )}
                 </div>
-                {roleRunning && roleProgress && (
-                  <p className="cam-hint cam-pending" role="status">
-                    {roleProgressLabel(roleProgress)}
-                  </p>
+                {roleRunning && (
+                  <CamBusy
+                    label={
+                      roleProgress
+                        ? roleProgressLabel(roleProgress)
+                        : t('cam.role.starting', 'Starting probe…')
+                    }
+                  />
                 )}
               </div>
             </div>

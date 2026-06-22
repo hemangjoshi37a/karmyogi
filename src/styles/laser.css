@@ -149,6 +149,17 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
+  /* Shared dropzone spec (§W-I): 1.5px dashed --border, accent on hover —
+     matched to the Carving / PCB dropzones. The CTA button inside stays the
+     dominant affordance. */
+  padding: var(--sp-2);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.lp-import-row:hover {
+  border-color: var(--accent);
 }
 .lp-btn {
   height: var(--ctl-h-lg);

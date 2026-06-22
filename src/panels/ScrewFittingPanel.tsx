@@ -488,14 +488,6 @@ export function ScrewFittingPanel() {
                 : t('screw.toolbar.record.body.connect', 'Connect to a machine to capture its live position.')
             }
           />
-          <ToolButton
-            className="swd-ico-danger"
-            glyph={<Icon name="trash" />}
-            onClick={clearAll}
-            disabled={points.length === 0}
-            title={t('screw.toolbar.clear', 'Clear all')}
-            body={t('screw.toolbar.clear.body', 'Remove every screw point and start over.')}
-          />
           <span className="swd-tools-sep" aria-hidden="true" />
           <ToolButton
             glyph={<Icon name="copy" />}
@@ -529,6 +521,17 @@ export function ScrewFittingPanel() {
             ariaExpanded={showSettings}
             title={t('screw.toolbar.settings', 'Settings')}
             body={t('screw.toolbar.settings.body', 'Loader pickup location, pick Z & dwell, driver RPM, push/approach feeds, seat dwell, default depth and Safe-Z.')}
+          />
+          {/* Destructive Clear sits LAST, isolated behind its own separator, so
+              it never sits next to a benign action (W-H / §2.3). */}
+          <span className="swd-tools-sep" aria-hidden="true" />
+          <ToolButton
+            className="swd-ico-danger"
+            glyph={<Icon name="trash" />}
+            onClick={clearAll}
+            disabled={points.length === 0}
+            title={t('screw.toolbar.clear', 'Clear all')}
+            body={t('screw.toolbar.clear.body', 'Remove every screw point and start over.')}
           />
         </div>
       </header>

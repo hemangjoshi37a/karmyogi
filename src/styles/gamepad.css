@@ -291,6 +291,61 @@
   }
 }
 
+/* ---- W-I: collapsed mapping-editor disclosure (no controller connected) ----
+   Keeps the saved mapping reachable behind a worded summary + "Mapping (N)"
+   count badge, with the open/closed state persisted by the component. */
+.gp-map-disclose {
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-input);
+}
+.gp-map-disclose[open] {
+  background: transparent;
+  border-color: transparent;
+}
+.gp-map-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  min-height: var(--ctl-h, 34px);
+}
+.gp-map-summary::-webkit-details-marker { display: none; }
+.gp-map-summary > svg { color: var(--accent); flex: 0 0 auto; }
+.gp-map-summary-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--fg);
+}
+.gp-map-summary-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.gp-map-summary::after {
+  content: '▸';
+  color: var(--fg-muted);
+  font-size: 11px;
+  transition: transform 0.12s ease;
+}
+.gp-map-disclose[open] .gp-map-summary::after { transform: rotate(90deg); }
+.gp-map-disclose[open] .gp-map-summary { margin-bottom: 8px; }
+.gp-map-disclose > .gp-remap:first-of-type { margin-top: 0; }
+@media (max-width: 640px) {
+  .gp-map-summary { min-height: 44px; }
+}
+
 /* ---- immersive 3D space (modal becomes a controller viewport) ---- */
 .gp-space {
   position: relative;

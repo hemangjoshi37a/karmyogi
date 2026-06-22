@@ -87,26 +87,10 @@
   height: 14px;
 }
 
-/* Numbered step badge — makes the Upload → Layers → Operations → Essentials
-   flow read as one clear, always-sequential pipeline (the literal "N · " text
-   numbering was inconsistent and left gaps when steps 2/3 were hidden). A small
-   accent-tinted pill sits ahead of the section glyph + title. */
-.pcb-step-num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
+/* Step numbering was dropped (§Area-3): the literal "N" badges left visible gaps
+   (1 → 4) before a ZIP loaded, because steps 2/3 are hidden until then. The
+   section glyph + title now carry the Upload → Layers → Operations → Essentials
+   flow on their own, so the sequence reads continuously at every state. */
 /* A title that itself wraps an icon + text (the pcb-h3-row variant) keeps them inline. */
 .pcb-section > h3 > span {
   display: inline-flex;
@@ -133,10 +117,16 @@
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2);
-  border: 1px dashed var(--border);
+  /* Shared dropzone spec (§W-I): 1.5px dashed --border, accent on hover/drag —
+     matched to the Carving / Laser dropzones. */
+  border: 1.5px dashed var(--border);
   border-radius: var(--radius);
   background: var(--bg-input);
   justify-content: center;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.pcb-drop:hover {
+  border-color: var(--accent);
 }
 .pcb-drop.pcb-dragover {
   border-color: var(--accent);

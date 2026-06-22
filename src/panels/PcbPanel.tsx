@@ -35,7 +35,7 @@ import { SliderField as UISliderField } from '../components/ui/SliderField'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamEmpty, CamBusy, CamError } from '../components/cam/CamUI'
 import { useHeightmap, type ApplyMode } from '../store/heightmap'
 import { useConsole } from '../store/console'
 import {
@@ -399,6 +399,11 @@ export function PcbPanel() {
   const [pkgError, setPkgError] = useState<string>('')
   const [pkgName, setPkgName] = useState<string>('')
   const [dragZip, setDragZip] = useState(false)
+  // Presentation-only (W-Q): true while a ZIP is being unzipped/parsed (drives
+  // <CamBusy>); the last dropped/picked file is kept so <CamError> can re-trigger
+  // the same upload on Retry. Neither changes the parse logic.
+  const [parsingZip, setParsingZip] = useState(false)
+  const lastZipFile = useRef<File | null>(null)
 
   // ---- secondary single-file inputs ----
   const [singleGerber, setSingleGerber] = useState<GerberData | null>(null)
@@ -465,10 +470,12 @@ export function PcbPanel() {
 
   // ---- ZIP handling ----
   async function loadZip(file: File) {
+    lastZipFile.current = file
     setPkgError('')
     setStatus('')
     setStatusError(false)
     setArmedRunId(null)
+    setParsingZip(true)
     try {
       const buf = new Uint8Array(await file.arrayBuffer())
       const entries = unzipGerberPackage(buf)
@@ -494,7 +501,18 @@ export function PcbPanel() {
       setLayers([])
       setPkgName('')
       setPkgError(msg)
+    } finally {
+      setParsingZip(false)
     }
+  }
+
+  // Re-run the last upload (wired to the <CamError> Retry). If no file was ever
+  // picked (shouldn't happen — the error only shows after an attempt), fall back
+  // to re-opening the file picker.
+  function retryZip() {
+    const f = lastZipFile.current
+    if (f) void loadZip(f)
+    else zipRef.current?.click()
   }
 
   function onZipInput(e: ChangeEvent<HTMLInputElement>) {
@@ -1151,7 +1169,6 @@ export function PcbPanel() {
         {/* ---- 1. Upload package (primary action) ---- */}
         <section className="pcb-section pcb-section-wide">
           <h3>
-            <span className="pcb-step-num" aria-hidden="true">1</span>
             <span className="cam-card-ico" aria-hidden="true">
               <Icon name="upload" size={15} />
             </span>
@@ -1172,7 +1189,16 @@ export function PcbPanel() {
                 if (f) void loadZip(f)
               }}
             >
-              {!layers.length && !pkgError ? (
+              {parsingZip ? (
+                <CamBusy label={t('pcb.upload.busy', 'Reading the Gerber package…')} />
+              ) : pkgError ? (
+                <CamError
+                  title={t('pcb.upload.error.title', "Couldn't read that ZIP")}
+                  message={pkgError}
+                  onRetry={retryZip}
+                  retryLabel={t('pcb.upload.error.retry', 'Try again')}
+                />
+              ) : !layers.length ? (
                 <CamEmpty
                   icon={<Icon name="upload" size={20} />}
                   title={t('pcb.upload.empty.title', 'Drop your board export here')}
@@ -1204,8 +1230,6 @@ export function PcbPanel() {
                 onChange={onZipInput}
               />
             </div>
-
-            {pkgError && <div className="pcb-error">{pkgError}</div>}
 
             <button
               className="pcb-toggle-single"
@@ -1307,7 +1331,6 @@ export function PcbPanel() {
           <section className="pcb-section pcb-section-wide">
             <h3 className="pcb-h3-row">
               <span>
-                <span className="pcb-step-num" aria-hidden="true">2</span>
                 <span className="cam-card-ico" aria-hidden="true">
                   <Icon name="copy" size={15} />
                 </span>
@@ -1544,7 +1567,6 @@ export function PcbPanel() {
         {layers.length > 0 && (
           <section className="pcb-section pcb-section-wide">
             <h3>
-              <span className="pcb-step-num" aria-hidden="true">3</span>
               <span className="cam-card-ico" aria-hidden="true">
                 <Icon name="settings" size={15} />
               </span>
@@ -1827,7 +1849,6 @@ export function PcbPanel() {
         <section className="pcb-section">
           <h3 className="pcb-h3-row">
             <span>
-              <span className="pcb-step-num" aria-hidden="true">4</span>
               <span className="cam-card-ico" aria-hidden="true">
                 <Icon name="settings" size={15} />
               </span>

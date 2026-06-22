@@ -1156,14 +1156,6 @@ export function SolderingPanel() {
             title={t('solder.toolbar.optimize', 'Optimize travel order')}
             body={t('solder.toolbar.optimize.body', 'Reorder the points to minimize free travel between pads (nearest-neighbour + 2-opt) so the iron does not dart across the board and back.')}
           />
-          <ToolButton
-            className="sp-ico-danger"
-            glyph={<Icon name="trash" />}
-            onClick={clearAll}
-            disabled={points.length === 0}
-            title={t('solder.toolbar.clear', 'Clear all')}
-            body={t('solder.toolbar.clear.body', 'Remove every soldering point and start over.')}
-          />
           <span className="sp-tools-sep" aria-hidden="true" />
           <ToolButton
             glyph={<Icon name="download" />}
@@ -1256,6 +1248,17 @@ export function SolderingPanel() {
             ariaExpanded={showSettings}
             title={t('solder.toolbar.settings', 'Settings')}
             body={t('solder.toolbar.settings.body', 'New-point defaults plus feeder and motion parameters (Safe-Z, feeder S, plunge feed, dwell).')}
+          />
+          {/* Destructive Clear sits LAST, isolated behind its own separator, so
+              it never sits next to a benign action (W-H / §2.3). */}
+          <span className="sp-tools-sep" aria-hidden="true" />
+          <ToolButton
+            className="sp-ico-danger"
+            glyph={<Icon name="trash" />}
+            onClick={clearAll}
+            disabled={points.length === 0}
+            title={t('solder.toolbar.clear', 'Clear all')}
+            body={t('solder.toolbar.clear.body', 'Remove every soldering point and start over.')}
           />
         </div>
       </header>

@@ -9,7 +9,7 @@ import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, Sp
 import { InfoTip } from '../components/InfoTip'
 import { SegControl } from '../components/ui/SegControl'
 import { SliderField } from '../components/ui/SliderField'
-import { Gamepad2, Crosshair, Navigation, RefreshCw, Trash2, ChevronDown } from 'lucide-react'
+import { Gamepad2, Crosshair, Navigation, RefreshCw, Trash2, ChevronDown, Keyboard, X } from 'lucide-react'
 import { useTeachPoints, type TeachFrame, type TeachPoint } from '../store/teachPoints'
 import { GamepadModal } from '../components/GamepadModal'
 import { useGamepad, type GamepadAction, type GamepadHandlers } from '../machine/useGamepad'
@@ -17,6 +17,7 @@ import { useGamepadMap, padBindings, controlGlyph, tokenPressed, type GamepadAct
 import { openTabs } from '../track/tabNav'
 import { usePlayback } from '../store/playback'
 import { useNotifications } from '../store/notifications'
+import { CamError } from '../components/cam/CamUI'
 import { availablePanels } from '../app/panelRegistry'
 import { useT } from '../i18n'
 import '../styles/controller.css'
@@ -66,6 +67,117 @@ function Pad({ glyph, active }: { glyph: string; active?: boolean }) {
     <span className={`pad-hint${active ? ' on' : ''}`} aria-hidden="true">
       {glyph}
     </span>
+  )
+}
+
+/**
+ * The full keyboard shortcut map, shown as `<kbd>` chips in the help popover.
+ * Each entry is one [keys, description] pair. Kept as data so the inline summary
+ * and the popover stay in sync and the legend is never silently dropped.
+ */
+const KBD_MAP: Array<{ keys: string[]; tk: string; desc: string }> = [
+  { keys: ['←', '→', '↑', '↓'], tk: 'ctrl.kbd.row.jogxy', desc: 'Jog X / Y' },
+  { keys: ['PgUp', 'PgDn'], tk: 'ctrl.kbd.row.jogz', desc: 'Jog Z' },
+  { keys: ['Esc'], tk: 'ctrl.kbd.row.cancel', desc: 'Cancel jog' },
+  { keys: ['1', '2', '3', '4'], tk: 'ctrl.kbd.row.step', desc: 'Step size (0.1 / 1 / 10 / 100 mm)' },
+  { keys: ['h'], tk: 'ctrl.kbd.row.home', desc: 'Home' },
+  { keys: ['u'], tk: 'ctrl.kbd.row.unlock', desc: 'Unlock' },
+  { keys: ['r'], tk: 'ctrl.kbd.row.reset', desc: 'Soft reset' },
+  { keys: ['!'], tk: 'ctrl.kbd.row.hold', desc: 'Feed hold' },
+  { keys: ['~'], tk: 'ctrl.kbd.row.resume', desc: 'Resume' },
+  { keys: ['s'], tk: 'ctrl.kbd.row.spindle', desc: 'Spindle on / off' },
+  { keys: ['z'], tk: 'ctrl.kbd.row.zero', desc: 'Zero work X / Y / Z' },
+  { keys: ['[', ']'], tk: 'ctrl.kbd.row.feed', desc: 'Feed override −/+ 10%' },
+  { keys: ['\\'], tk: 'ctrl.kbd.row.feed100', desc: 'Feed override 100%' },
+]
+
+/**
+ * W-I — Controller keyboard help. SAFETY: the legend is never hidden. A reduced,
+ * always-visible one-line summary keeps the essential jog/cancel keys on screen,
+ * and a persistent WORDED `?` button opens the FULL `<kbd>`-chip map in a popover.
+ * Open/closed state is persisted (disclosure rule).
+ */
+function KbdHelp() {
+  const t = useT()
+  const [open, setOpen] = usePersistentState('karmyogi.ctrl.kbdHelp.open', false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Dismiss the popover on an outside click or Escape.
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, setOpen])
+
+  return (
+    <div className="mc-kbd" ref={ref}>
+      <span className="mc-kbd-summary">
+        {t(
+          'ctrl.kbd.summary',
+          'Arrows jog · PgUp/Dn Z · Esc cancel',
+        )}
+      </span>
+      <button
+        type="button"
+        className={`mc-kbd-toggle${open ? ' on' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((v) => !v)}
+        title={t('ctrl.kbd.toggle.title', 'Show all keyboard shortcuts')}
+      >
+        <Keyboard size={13} aria-hidden="true" />
+        <span className="mc-kbd-toggle-q" aria-hidden="true">?</span>
+        <span className="mc-kbd-toggle-label">{t('ctrl.kbd.toggle', 'Shortcuts')}</span>
+      </button>
+      {open && (
+        <div className="mc-kbd-pop" role="dialog" aria-label={t('ctrl.kbd.pop.aria', 'Keyboard shortcuts')}>
+          <div className="mc-kbd-pop-head">
+            <Keyboard size={14} aria-hidden="true" />
+            <span className="mc-kbd-pop-title">{t('ctrl.kbd.pop.title', 'Keyboard shortcuts')}</span>
+            <span className="mc-grow" />
+            <button
+              type="button"
+              className="mc-kbd-pop-close"
+              onClick={() => setOpen(false)}
+              aria-label={t('ctrl.kbd.pop.close', 'Close')}
+              title={t('ctrl.kbd.pop.close', 'Close')}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+          <p className="mc-kbd-pop-note">
+            {t(
+              'ctrl.kbd.pop.note',
+              'Work whenever this panel is visible and you are not typing in a field. Tap = step, hold = continuous.',
+            )}
+          </p>
+          <ul className="mc-kbd-pop-list">
+            {KBD_MAP.map((row) => (
+              <li className="mc-kbd-pop-row" key={row.tk}>
+                <span className="mc-kbd-pop-keys">
+                  {row.keys.map((k, i) => (
+                    <kbd key={i} className="mc-kbd-chip">
+                      {k}
+                    </kbd>
+                  ))}
+                </span>
+                <span className="mc-kbd-pop-desc">{t(row.tk, row.desc)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -371,6 +483,10 @@ export function ControllerPanel() {
   const [gamepadHaptics, setGamepadHaptics] = usePersistentState('karmyogi.gamepad.haptics', true)
   const [gamepadHapticIntensity, setGamepadHapticIntensity] = usePersistentState('karmyogi.gamepad.hapticIntensity', 1)
   const [gamepadOpen, setGamepadOpen] = useState(false)
+  // W-Q: when an ARMED gamepad is lost (e.g. battery dies / unplugged mid-jog),
+  // surface a clear inline notice with how to recover. Presentation only — the
+  // jog/disarm safety is handled by useGamepad; this just tells the operator.
+  const [gamepadLost, setGamepadLost] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
   // Optimistic spindle-running flag: flip instantly on click for responsive UI,
@@ -786,6 +902,21 @@ export function ControllerPanel() {
       }
     }
   }, [machineState, machineError, gp, gamepadEnabled])
+
+  // ---- W-Q: gamepad-lost notice ----
+  // Raise a recoverable notice when an ARMED controller drops; clear it the
+  // moment a controller is back. Only flags a loss that follows a real
+  // connection (so it never fires on first mount with no pad).
+  const wasGamepadConnectedRef = useRef(false)
+  useEffect(() => {
+    const wasConnected = wasGamepadConnectedRef.current
+    wasGamepadConnectedRef.current = gp.connected
+    if (gp.connected) {
+      if (gamepadLost) setGamepadLost(false)
+      return
+    }
+    if (wasConnected && gamepadEnabled) setGamepadLost(true)
+  }, [gp.connected, gamepadEnabled, gamepadLost])
 
   // ---- Haptic feedback on NEW notifications ----
   // A controller with a rumble motor buzzes whenever something notable is posted
@@ -1246,12 +1377,7 @@ export function ControllerPanel() {
             ))}
           </div>
         </div>
-        <span className="mc-hint">
-          {t(
-            'ctrl.kbd.hint',
-            'Keyboard control whenever this panel is visible (and you are not typing): arrows jog XY · PgUp/PgDn jog Z · Esc cancels · 1–4 step size · h Home · u Unlock · r Reset · ! Hold · ~ Resume · s Spindle · z Zero · [ ] feed ∓ · \\ feed 100%',
-          )}
-        </span>
+        <KbdHelp />
       </section>
 
       {/* Teach / record-position (F1) — capture jogged positions into a reusable
@@ -1443,6 +1569,24 @@ export function ControllerPanel() {
 
       {/* Game controller — big full-width launcher into the mapping/setup modal. */}
       <section className="mc-section mc-gamepad-section">
+        {/* W-Q: controller lost while armed — tell the operator how to recover. */}
+        {gamepadLost && !gp.connected && (
+          <div className="mc-gp-lost">
+            <CamError
+              icon={<Gamepad2 size={20} aria-hidden="true" />}
+              title={t('ctrl.gamepad.lost.title', 'Controller disconnected')}
+              message={t(
+                'ctrl.gamepad.lost.msg',
+                'The gamepad dropped (battery, cable or pairing). Any jog has stopped — reconnect or wake the controller and press any button to resume.',
+              )}
+              action={
+                <button type="button" onClick={() => setGamepadLost(false)}>
+                  {t('ctrl.gamepad.lost.dismiss', 'Dismiss')}
+                </button>
+              }
+            />
+          </div>
+        )}
         <button
           type="button"
           className="mc-btn gp-launch"

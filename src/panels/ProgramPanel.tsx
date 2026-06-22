@@ -338,10 +338,19 @@ export function ProgramPanel() {
               className="pp-icon-btn pp-btn-reset"
               onClick={() => setStartLine('1')}
               disabled={streaming || !hasProgram}
-              title={t(
-                'prog.resetStartLine',
-                'Reset start line to 1 (restart from the top)',
-              )}
+              title={
+                !hasProgram
+                  ? t('prog.resetStartLineNoProg', 'Load a program first')
+                  : streaming
+                    ? t(
+                        'prog.resetStartLineStreaming',
+                        'Stop the stream to change the start line',
+                      )
+                    : t(
+                        'prog.resetStartLine',
+                        'Reset start line to 1 (restart from the top)',
+                      )
+              }
               aria-label={t('prog.resetStartLineAria', 'Reset start line to 1')}
             >
               <svg
@@ -394,10 +403,10 @@ export function ProgramPanel() {
               onClick={onStream}
               disabled={!canStream}
               title={
-                !connected
-                  ? t('prog.streamHintConnect', 'Connect to the machine first')
-                  : !hasProgram
-                    ? t('prog.streamHintLoad', 'Load a program first')
+                !hasProgram
+                  ? t('prog.streamHintLoad', 'Load a program first')
+                  : !connected
+                    ? t('prog.streamHintConnect', 'Connect a machine to stream')
                     : t(
                         'prog.streamHint',
                         'Start streaming the program from the start line',
@@ -408,14 +417,16 @@ export function ProgramPanel() {
             </button>
             {/* Merged Pause/Resume toggle: feed-hold while running, resume when held. */}
             <button
-              className="pp-icon-btn"
+              className="pp-icon-btn pp-btn-pause"
               onClick={onPauseResume}
               disabled={!streaming}
               aria-pressed={held}
               title={
-                held
-                  ? t('prog.resume', 'Resume')
-                  : t('prog.pause', 'Pause (feed hold)')
+                !streaming
+                  ? t('prog.pauseDisabled', 'Start a stream to pause it')
+                  : held
+                    ? t('prog.resume', 'Resume')
+                    : t('prog.pause', 'Pause (feed hold)')
               }
               aria-label={
                 held
@@ -429,14 +440,42 @@ export function ProgramPanel() {
               className="pp-icon-btn pp-btn-abort"
               onClick={() => grbl.abortProgram()}
               disabled={!streaming}
-              title={t('prog.abort', 'Abort (soft reset)')}
+              title={
+                !streaming
+                  ? t('prog.abortDisabled', 'Start a stream to abort it')
+                  : t('prog.abort', 'Abort (soft reset)')
+              }
               aria-label={t('prog.abortAria', 'Abort')}
             >
               <Icon name="stop" size={16} />
             </button>
           </div>
 
-          <div className="pp-progress-eta">
+          <div
+            className={'pp-progress-eta' + (streaming ? ' is-busy' : '')}
+            aria-busy={streaming}
+          >
+            {streaming && (
+              <span
+                className={
+                  'pp-stream-busy' + (held ? ' pp-stream-busy--held' : '')
+                }
+                role="status"
+                aria-live="polite"
+                title={
+                  held
+                    ? t('prog.busyHeld', 'Paused — feed hold')
+                    : t('prog.busyStreaming', 'Streaming to the machine…')
+                }
+              >
+                <span className="pp-stream-busy-spinner" aria-hidden="true" />
+                <span className="pp-stream-busy-label">
+                  {held
+                    ? t('prog.busyHeldShort', 'Held')
+                    : t('prog.busyStreamingShort', 'Streaming…')}
+                </span>
+              </span>
+            )}
             <ProgramProgressBar
               progress={progress}
               color={held ? 'var(--warn)' : undefined}

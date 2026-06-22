@@ -206,6 +206,135 @@
 }
 .mc-hint { font-size: 10px; color: var(--fg-muted); line-height: 1.3; }
 
+/* ---- W-I keyboard-help (always-visible summary + `?` popover) ----
+   SAFETY: the legend is never hidden. The reduced one-line summary stays on
+   screen; the worded `?`/Shortcuts button opens the full chip map. */
+.mc-kbd {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mc-kbd-summary {
+  font-size: 10px;
+  color: var(--fg-muted);
+  line-height: 1.3;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mc-kbd-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 3px 9px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.mc-kbd-toggle > svg { flex: 0 0 auto; }
+.mc-kbd-toggle-q {
+  font-weight: 700;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+.mc-kbd-toggle:hover { border-color: var(--accent); color: var(--fg); }
+.mc-kbd-toggle.on { border-color: var(--accent); color: var(--accent); }
+
+.mc-kbd-pop {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  bottom: calc(100% + 6px);
+  width: min(320px, 86vw);
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-elev, var(--bg-panel));
+  box-shadow: var(--shadow-2, 0 10px 40px rgba(0, 0, 0, 0.45));
+}
+.mc-kbd-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  color: var(--fg);
+}
+.mc-kbd-pop-head > svg { color: var(--accent); flex: 0 0 auto; }
+.mc-kbd-pop-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.mc-kbd-pop-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.mc-kbd-pop-close:hover { border-color: var(--border); color: var(--fg); }
+.mc-kbd-pop-note {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  line-height: 1.4;
+}
+.mc-kbd-pop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mc-kbd-pop-row {
+  display: grid;
+  grid-template-columns: minmax(86px, auto) 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.mc-kbd-pop-keys {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.mc-kbd-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 2px 6px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+}
+.mc-kbd-pop-desc { font-size: 11.5px; color: var(--fg); }
+
+@media (max-width: 480px) {
+  .mc-kbd-toggle { min-height: 38px; }
+  .mc-kbd-pop-close { min-height: 38px; min-width: 38px; }
+}
+
 /* ---- tiny key-hint badges ----
    A "barely see it" corner superscript showing each button's keyboard shortcut.
    Very faint by default; nudged up slightly on hover/focus of its button. They
@@ -232,6 +361,12 @@
 /* Inside a segmented control the badge sits flush in the cell corner. */
 .mc-seg button.has-kbd { position: relative; }
 .mc-seg button .kbd-hint { top: 1px; right: 2px; }
+
+/* ---- W-Q: anchor for the ConnectionControl mid-stream disconnect notice ----
+   The drop banner is absolutely positioned below the connection cluster, so the
+   cluster needs to establish a positioning context. (controller.css is loaded
+   app-wide, so this applies wherever <ConnectionControl> renders.) */
+.km-conn-wrap { position: relative; }
 
 /* ---- connection / state badge ---- */
 /* The state badge sits above the DRO; keep it left-aligned and tight. */
@@ -581,6 +716,9 @@
 
 /* ---- Game-controller launcher (below Overrides) ---- */
 .mc-gamepad-section { padding: 0; border: 0; background: transparent; }
+/* W-Q gamepad-lost notice: give the inline CamError a little breathing room
+   above the launcher button. */
+.mc-gp-lost { margin-bottom: var(--sp-2, 6px); }
 .gp-launch {
   display: flex;
   align-items: center;

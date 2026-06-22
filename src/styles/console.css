@@ -94,6 +94,19 @@
 }
 .chat-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Clear-log — destructive: persistent danger tint so it never reads as just
+   another neutral icon, filling solid danger on hover/focus. */
+.chat-icon-btn--danger:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--border-danger);
+}
+.chat-icon-btn--danger:not(:disabled):hover,
+.chat-icon-btn--danger:not(:disabled):focus-visible {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--accent-fg);
+}
+
 .chat-search .mc-grow { flex: 1 1 auto; }
 
 /* Wrapper holds the scrolling thread + the absolutely-positioned jump chip; it
@@ -194,12 +207,14 @@
 .chat-bubble.dir-info .chat-time,
 .chat-bubble.dir-error .chat-time { font-size: 9px; }
 
+/* Empty state — a centering wrapper around the shared <CamEmpty> chrome (icon +
+   title + hint). `margin:auto` centres it in the flex thread; it no longer
+   clips because the inner .cam-empty supplies its own padding and wrapping. */
 .chat-empty {
   margin: auto;
+  width: 100%;
+  max-width: 320px;
   color: var(--fg-muted);
-  font-style: italic;
-  font-size: 12px;
-  text-align: center;
 }
 
 /* ---- jump-to-latest chip (floats over the thread when scrolled up) ---- */

@@ -9,6 +9,7 @@ import {
 } from '../store'
 import { useT } from '../i18n'
 import { Icon } from '../components/Icons'
+import { CamEmpty } from '../components/cam/CamUI'
 import '../styles/console.css'
 
 /** A user-editable quick-send macro: a label + the raw GRBL command. */
@@ -327,16 +328,53 @@ export function ConsolePanel() {
         >
           {entries.length === 0 ? (
             <div className="chat-empty">
-              {t(
-                'console.empty.none',
-                'No messages yet — connect and send a command.',
-              )}
+              <CamEmpty
+                icon={
+                  <svg
+                    width={22}
+                    height={22}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                  </svg>
+                }
+                title={t('console.empty.noneTitle', 'No messages yet')}
+                hint={t(
+                  'console.empty.none',
+                  'Connect a machine and send a command — replies appear here.',
+                )}
+              />
             </div>
           ) : matches.length === 0 ? (
             <div className="chat-empty">
-              {t('console.empty.noMatch', 'No messages match “{query}”.', {
-                query: query.trim(),
-              })}
+              <CamEmpty
+                icon={
+                  <svg
+                    width={22}
+                    height={22}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M21 21l-4.3-4.3" />
+                  </svg>
+                }
+                title={t('console.empty.noMatchTitle', 'No matches')}
+                hint={t('console.empty.noMatch', 'No messages match “{query}”.', {
+                  query: query.trim(),
+                })}
+              />
             </div>
           ) : (
             matches.map((e) => {

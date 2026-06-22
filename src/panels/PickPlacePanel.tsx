@@ -538,14 +538,6 @@ export function PickPlacePanel() {
               title={t('pnp.addOp', 'Add op')}
               body={t('pnp.toolbar.add.body', 'Append a pick→place operation to the table.')}
             />
-            <ToolButton
-              className="pp-ico-danger"
-              glyph={<Icon name="trash" />}
-              onClick={clearOps}
-              disabled={ops.length === 0}
-              title={t('pnp.clear', 'Clear')}
-              body={t('pnp.toolbar.clear.body', 'Remove every operation and start over.')}
-            />
             <span className="pp-tools-sep" aria-hidden="true" />
             {/* Ops FILE save/load (.kpnp = operations + params); distinct from the
                 settings-only (.kpnpset) pair in the preset save bar below. */}
@@ -593,6 +585,17 @@ export function PickPlacePanel() {
                 'pnp.settings.body',
                 'Motion, head strength, dwell, rotation and decimal settings for the generated program.',
               )}
+            />
+            {/* Destructive Clear sits LAST, isolated behind its own separator, so
+                it never sits next to a benign action (W-H / §2.3). */}
+            <span className="pp-tools-sep" aria-hidden="true" />
+            <ToolButton
+              className="pp-ico-danger"
+              glyph={<Icon name="trash" />}
+              onClick={clearOps}
+              disabled={ops.length === 0}
+              title={t('pnp.clear', 'Clear')}
+              body={t('pnp.toolbar.clear.body', 'Remove every operation and start over.')}
             />
           </div>
         </header>

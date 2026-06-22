@@ -631,14 +631,6 @@ export function WeldingPanel() {
                 : t('weld.toolbar.connect', 'Connect to a machine to capture its live position.')
             }
           />
-          <ToolButton
-            className="wp-ico-danger"
-            glyph={<Icon name="trash" />}
-            onClick={clearAll}
-            disabled={objects.length === 0}
-            title={t('weld.toolbar.clear', 'Clear all')}
-            body={t('weld.toolbar.clear.body', 'Remove every object and start over.')}
-          />
           <span className="wp-tools-sep" aria-hidden="true" />
           <ToolButton
             className={showSettings ? 'is-active' : ''}
@@ -658,6 +650,17 @@ export function WeldingPanel() {
             saveDisabled={objects.length === 0}
             saveTitle={t('weld.toolbar.save', 'Save objects + settings')}
             loadTitle={t('weld.toolbar.load', 'Load objects + settings')}
+          />
+          {/* Destructive Clear sits LAST, isolated behind its own separator, so
+              it never sits next to a benign action (W-H / §2.3). */}
+          <span className="wp-tools-sep" aria-hidden="true" />
+          <ToolButton
+            className="wp-ico-danger"
+            glyph={<Icon name="trash" />}
+            onClick={clearAll}
+            disabled={objects.length === 0}
+            title={t('weld.toolbar.clear', 'Clear all')}
+            body={t('weld.toolbar.clear.body', 'Remove every object and start over.')}
           />
         </div>
       </header>

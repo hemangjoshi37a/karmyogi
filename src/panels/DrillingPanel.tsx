@@ -450,14 +450,6 @@ export function DrillingPanel() {
                 : t('drill.toolbar.record.body.connect', 'Connect to a machine to capture its live position.')
             }
           />
-          <ToolButton
-            className="scf-ico-danger"
-            glyph={<Icon name="trash" />}
-            onClick={clearAll}
-            disabled={points.length === 0}
-            title={t('drill.toolbar.clear', 'Clear all')}
-            body={t('drill.toolbar.clear.body', 'Remove every hole point and start over.')}
-          />
           <span className="scf-tools-sep" aria-hidden="true" />
           <ToolButton
             glyph={<Icon name="copy" />}
@@ -491,6 +483,17 @@ export function DrillingPanel() {
             ariaExpanded={showSettings}
             title={t('drill.toolbar.settings', 'Settings')}
             body={t('drill.toolbar.settings.body', 'Hole size, hole type/depth, peck increment, counterbore/countersink, feeds and Safe-Z.')}
+          />
+          {/* Destructive Clear sits LAST, isolated behind its own separator, so
+              it never sits next to a benign action (W-H / §2.3). */}
+          <span className="scf-tools-sep" aria-hidden="true" />
+          <ToolButton
+            className="scf-ico-danger"
+            glyph={<Icon name="trash" />}
+            onClick={clearAll}
+            disabled={points.length === 0}
+            title={t('drill.toolbar.clear', 'Clear all')}
+            body={t('drill.toolbar.clear.body', 'Remove every hole point and start over.')}
           />
         </div>
       </header>

@@ -322,13 +322,9 @@
   font-weight: 600;
 }
 
-/* In-canvas empty-state prompt (SVG text in viewBox mm units). */
-.gp-canvas-empty {
-  font-size: 10px;
-  fill: var(--fg-muted);
-  opacity: 0.5;
-  user-select: none;
-}
+/* (The former in-canvas empty-state prompt was removed — the single empty state
+   now lives in the Shapes card's <CamEmpty>, per W-I "show one". The .gp-hint
+   line below is a contextual tool hint, not a duplicate "nothing here" prompt.) */
 
 .gp-hint {
   flex: 0 0 auto;

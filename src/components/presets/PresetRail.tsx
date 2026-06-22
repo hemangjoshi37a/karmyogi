@@ -46,7 +46,10 @@ export function PresetRail<S>({
       role="toolbar"
       aria-label={ariaLabel ?? t('presets.aria', 'Setting presets')}
     >
-      <span className="cc-presets-cap" aria-hidden="true">
+      <span
+        className="cc-presets-cap"
+        title={t('presets.capTip', 'Setting presets — click a swatch to load it, or an empty slot to save the current settings there')}
+      >
         {t('presets.tag', 'PRESETS')}
       </span>
       {slots.map((s, i) => {
@@ -63,10 +66,15 @@ export function PresetRail<S>({
               }
               style={{ ['--slot' as string]: s.color } as CSSProperties}
               aria-pressed={i === selected}
+              title={
+                filled
+                  ? t('presets.loadTip', 'Load preset {n}: {name}', { n: i + 1, name: label })
+                  : t('presets.saveTip', 'Save current settings to preset {n}', { n: i + 1 })
+              }
               aria-label={
                 filled
                   ? t('presets.loadAria', 'Load preset {n}: {name}', { n: i + 1, name: label })
-                  : t('presets.emptyAria', 'Empty preset slot {n}', { n: i + 1 })
+                  : t('presets.saveAria', 'Save current settings to preset {n}', { n: i + 1 })
               }
               onClick={() => (filled ? onLoad(i) : onSelect(i))}
             >

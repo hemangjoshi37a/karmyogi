@@ -1038,7 +1038,7 @@ function OverflowMenu({
     <div className="vz-bed-wrap" ref={wrapRef}>
       <button
         ref={btnRef}
-        className={open ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+        className="vz-toolbar-btn"
         onClick={() => setOpen((o) => !o)}
         title={t('vz.more', 'More tools (add shapes, display options)')}
         aria-label={t('vz.more', 'More tools')}
@@ -1254,9 +1254,7 @@ function LegendPanel({
     >
       <button
         type="button"
-        className={
-          open ? 'vz-toolbar-btn vz-layers-btn vz-toolbar-btn--on' : 'vz-toolbar-btn vz-layers-btn'
-        }
+        className="vz-toolbar-btn vz-layers-btn"
         onClick={() => setOpen((o) => !o)}
         title={t('vz.layers.title', 'Layers — show / hide toolpaths, model, bed')}
         aria-label={t('vz.layers.title', 'Layers')}
@@ -1779,12 +1777,25 @@ const OVERLAY_CSS = `
 .vz-toolbar-btn:active {
   transform: translateY(1px);
 }
-.vz-toolbar-btn[aria-expanded='true'],
-.vz-toolbar-btn--on {
-  /* Active toggle: bright accent on a subtle tint (readable in both themes). */
+.vz-toolbar-btn[aria-expanded='true'] {
+  /* Open popover trigger (More / Layers / Bed): a subtle accent tint — distinct
+     from a *latched mode* button, which fills solid (below). */
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
+}
+.vz-toolbar-btn--on {
+  /* Active TOGGLE mode (place / lasso / pick): a solid accent FILL so a latched
+     mode is unmistakable vs the momentary view buttons (which never fill). */
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.vz-toolbar-btn--on:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  filter: brightness(1.08);
 }
 .vz-toolbar-btn:disabled {
   opacity: 0.4;

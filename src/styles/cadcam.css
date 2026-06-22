@@ -215,11 +215,16 @@
   gap: var(--sp-1) var(--sp-3);
   min-height: 84px;
   padding: var(--sp-3) var(--pad-card-x);
-  border: 2px dashed var(--border);
+  /* Shared dropzone spec (§W-I): 1.5px dashed --border, accent on hover/drag. */
+  border: 1.5px dashed var(--border);
   border-radius: var(--radius);
   background: var(--bg-input);
   text-align: center;
   justify-content: center;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.cc-drop:hover {
+  border-color: var(--accent);
 }
 .cc-drop.cc-dragover {
   border-color: var(--accent);
@@ -1778,9 +1783,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 6px 9px;
-  border: 1px dashed var(--border);
+  /* Shared dropzone spec (§W-I): 1.5px dashed --border, accent on hover/drag —
+     matched to the PCB / Laser dropzones. */
+  border: 1.5px dashed var(--border);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--bg-elev) 50%, transparent);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.cc-modelbar-exts:hover {
+  border-color: var(--accent);
+}
+.cc-panel.cc-dragover .cc-modelbar-exts {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .cc-modelbar-actions {
   flex: 0 0 auto;
@@ -1812,7 +1827,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 6px 9px;
-  border: 1px dashed var(--border);
+  /* Shared dropzone spec (§W-I): 1.5px dashed --border. */
+  border: 1.5px dashed var(--border);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--bg-elev) 50%, transparent);
 }
@@ -2128,6 +2144,83 @@
 .cc-matcard-info:hover {
   background: rgba(0, 0, 0, 0.64);
 }
+/* --- material picker: compact thumbnail ROW (Area-3) ---
+   A small thumbnail + name on one line (mirrors the .cc-matrow rhythm), with the
+   info button trailing — replaces the tall photoreal banner so the picker stays
+   compact. The full photo grid still lives in the chooser modal. */
+.cc-matpickrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  align-self: start;
+}
+.cc-matpick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 8px 4px 4px;
+  min-height: var(--ctl-h);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+}
+.cc-matpick:hover {
+  border-color: var(--accent);
+}
+.cc-matpick-thumb {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-elev);
+  background-size: cover;
+  background-position: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.cc-matpick-emoji {
+  font-size: 17px;
+  line-height: 1;
+}
+.cc-matpick-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-matpick-caret {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.cc-matpick-info {
+  flex: 0 0 auto;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.cc-matpick-info:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
 /* material chooser MODAL — a grid of medium tiles (photo + name + info each) */
 .cc-matmodal-grid {
   display: grid;

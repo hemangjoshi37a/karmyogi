@@ -65,15 +65,18 @@
 .cc-presets-cap {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
-  /* Legible vertical caption (W-P) — bumped from a cramped 7px/2px so "PRESETS"
-     actually reads, while staying quiet against the swatches. */
-  font-size: 8.5px;
-  letter-spacing: 1.5px;
-  font-weight: var(--fw-label);
+  /* Legible vertical caption with real presence (W-P) — bumped from a cramped
+     7px to a readable label so "PRESETS" reads as a section header, not a
+     decorative tick, while staying quiet against the swatches. Carries a tooltip
+     explaining the rail (see PresetRail.tsx). */
+  font-size: 9.5px;
+  letter-spacing: 2px;
+  font-weight: 600;
   text-transform: uppercase;
-  color: var(--fg-muted);
-  opacity: 0.7;
-  margin-bottom: 2px;
+  color: color-mix(in srgb, var(--fg-muted) 80%, var(--fg));
+  opacity: 0.9;
+  margin-bottom: 5px;
+  cursor: help;
   user-select: none;
 }
 .cc-preset-slotwrap {
@@ -109,7 +112,9 @@
   border-style: dashed;
   border-color: var(--border);
   box-shadow: none;
-  opacity: 0.75;
+  /* Quiet ~40% so an empty slot reads as a dormant "save here" target, never as
+     a saturated/filled preset (W-P). It saturates only once SAVED. */
+  opacity: 0.4;
 }
 .cc-preset-slot.is-empty:hover {
   opacity: 1;

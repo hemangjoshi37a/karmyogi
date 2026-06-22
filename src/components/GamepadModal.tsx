@@ -25,6 +25,8 @@ import {
   tabCommandCatalogue,
 } from '../machine/gamepadTabActions'
 import { availablePanels } from '../app/panelRegistry'
+import { CamEmpty } from './cam/CamUI'
+import { usePersistentState } from '../store'
 import { useT } from '../i18n'
 import './../styles/gamepad.css'
 import '../styles/controller.css'
@@ -349,6 +351,270 @@ function GamepadModalInner({
     [bindings],
   )
 
+  // W-I disclosure: how many bindings exist for this pad (actions + analog
+  // directions + named labels) — surfaced as a "Mapping (N)" count badge so the
+  // collapsed editor stays discoverable when no controller is connected.
+  const bindCount = useMemo(() => {
+    let n = 0
+    for (const a of GAMEPAD_ACTIONS) if (bindings.actions[a.id]) n++
+    for (const a of GAMEPAD_ANALOG) if (bindings.analog[a.id]) n++
+    n += Object.keys(labels[padKey] ?? {}).length
+    return n
+  }, [bindings, labels, padKey])
+
+  // Remember whether the operator expanded the mapping editor while no
+  // controller is connected (disclosure rule: persist open/closed state).
+  const [mapOpen, setMapOpen] = usePersistentState('karmyogi.gamepad.mapOpen', false)
+
+  // The full mapping editor (Button names + Controller mapping + per-tab). Held
+  // as a JSX value so it renders inline when a controller is connected, or
+  // inside the collapsed <details> disclosure when none is — without duplicating
+  // the markup.
+  const mappingEditor = (
+    <>
+      {/* ───────── Button names (press-to-detect labelling) ─────────
+          A SECOND way to label a physical control (the dropdowns in the live
+          diagnostic above are the first): pick a standard name, click Rebind,
+          then press the real button. Pure DISPLAY layer — never touches input
+          reading or bindings. Each name maps to exactly one physical control. */}
+      <div className="gp-remap gp-labels">
+        <div className="gp-remap-head">
+          <Tag size={14} aria-hidden="true" className="gp-sec-ico" />
+          <h4>{t('gp.labels.title', 'Button names')}</h4>
+          <span
+            className="gp-remap-sub"
+            title={t(
+              'gp.labels.help',
+              'Give each control its real-world name so every glyph in the app shows the correct label. Click Rebind, then press the button — or use the dropdowns in Live inputs above.',
+            )}
+          >
+            {t('gp.labels.hint', 'Click Rebind, then press the button — or use the dropdowns in Live inputs above')}
+          </span>
+        </div>
+
+        <div className="gp-remap-list">
+          {STD_CONTROL_NAMES.map((nm) => {
+            const base = Object.entries(labels[padKey] ?? {}).find(([, v]) => v === nm)?.[0]
+            const isCapturing = capturing?.kind === 'label' && capturing.name === nm
+            return (
+              <div className={`gp-remap-row${isCapturing ? ' is-capturing' : ''}`} key={nm}>
+                <span className="gp-remap-label" title={nm}>
+                  {nm}
+                </span>
+                <span className="gp-remap-glyph-wrap">
+                  {isCapturing ? (
+                    <span className="gp-remap-capture" role="status">
+                      {t('gp.remap.press', 'Press a control…')}
+                    </span>
+                  ) : base ? (
+                    <LiveGlyph
+                      token={base as ControlToken}
+                      family={family}
+                      className="gp-remap-glyph"
+                      subscribeRaw={gp.subscribeRaw}
+                      getRawSnapshot={gp.getRawSnapshot}
+                      padKey={padKey}
+                      labels={labels}
+                    />
+                  ) : (
+                    <span className="gp-remap-unbound">{t('gp.labels.unmapped', 'Unmapped')}</span>
+                  )}
+                </span>
+                <span className="gp-remap-acts">
+                  <button
+                    type="button"
+                    className="gp-remap-btn"
+                    onClick={() => setCapturing(isCapturing ? null : { kind: 'label', name: nm })}
+                    title={t('gp.labels.rebind.title', 'Name a control — then press that button on your gamepad')}
+                  >
+                    {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
+                  </button>
+                  <button
+                    type="button"
+                    className="gp-remap-btn gp-remap-clear"
+                    disabled={!base || isCapturing}
+                    onClick={() => {
+                      if (base) clearLabel(padKey, base)
+                    }}
+                    aria-label={t('gp.labels.clear.aria', 'Clear the control named {name}', { name: nm })}
+                    title={t('gp.labels.clear.title', 'Clear this name')}
+                  >
+                    <X size={13} aria-hidden="true" />
+                  </button>
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ───────── Programmable mapping (video-game-style rebinding) ───────── */}
+      <div className="gp-remap">
+        <div className="gp-remap-head">
+          <Sliders size={14} aria-hidden="true" className="gp-sec-ico" />
+          <h4>{t('gp.remap.title', 'Controller mapping')}</h4>
+          <span
+            className="gp-remap-sub"
+            title={t(
+              'gp.remap.help',
+              'Rebind any action to a controller button, stick, trigger or hat. Click Rebind, then press the control. Each control drives one action. Saved per controller.',
+            )}
+          >
+            {t('gp.remap.hint', 'Click Rebind, then press a control')}
+          </span>
+          <span className="gp-remap-spacer" />
+          <button
+            type="button"
+            className="gp-remap-reset"
+            onClick={() => resetDefaults(padKey)}
+            title={t('gp.remap.resetAll.title', 'Reset every binding for this controller to its default')}
+          >
+            <RotateCcw size={13} aria-hidden="true" />
+            {t('gp.remap.resetAll', 'Reset all')}
+          </button>
+        </div>
+
+        {/* Analog jog — now rebindable per direction (stick halves / trigger axes). */}
+        <div className="gp-grouplbl">{t('gp.remap.group.analog', 'Analog jog')}</div>
+        <div className="gp-remap-analog gp-remap-analog--grid">
+          {GAMEPAD_ANALOG.map((a) => {
+            const tok = bindings.analog[a.id] ?? ''
+            const isCapturing = capturing?.kind === 'analog' && capturing.id === a.id
+            return (
+              <div className={`gp-remap-arow${isCapturing ? ' is-capturing' : ''}`} key={a.id}>
+                <span className="gp-remap-aicon" aria-hidden="true">
+                  {a.id.startsWith('jogZ') ? <ChevronsUpDown size={13} /> : <Move size={13} />}
+                </span>
+                <span className="gp-remap-alabel" title={t(a.labelKey, a.label)}>
+                  {t(a.labelKey, a.label)}
+                </span>
+                <span className="gp-remap-aglyph">
+                  {isCapturing ? (
+                    <span className="gp-remap-capture" role="status">
+                      {t('gp.remap.press', 'Press a control…')}
+                    </span>
+                  ) : tok ? (
+                    <LiveGlyph
+                      token={tok}
+                      family={family}
+                      className="gp-remap-actl"
+                      subscribeRaw={gp.subscribeRaw}
+                      getRawSnapshot={gp.getRawSnapshot}
+                      padKey={padKey}
+                      labels={labels}
+                    />
+                  ) : (
+                    <span className="gp-remap-unbound">{t('gp.remap.unbound', 'Unbound')}</span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="gp-remap-btn gp-remap-btn--sm"
+                  onClick={() => setCapturing(isCapturing ? null : { kind: 'analog', id: a.id })}
+                  title={t('gp.remap.rebind.title', 'Rebind this — then press a control on your gamepad')}
+                >
+                  {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
+                </button>
+                <button
+                  type="button"
+                  className="gp-remap-btn gp-remap-clear"
+                  disabled={!tok || isCapturing}
+                  onClick={() => clearAnalog(padKey, a.id)}
+                  aria-label={t('gp.remap.clear.aria', 'Clear binding for {action}', { action: t(a.labelKey, a.label) })}
+                  title={t('gp.remap.clear.title', 'Clear this binding')}
+                >
+                  <X size={12} aria-hidden="true" />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="gp-grouplbl">{t('gp.remap.group.actions', 'Buttons & commands')}</div>
+        <div className="gp-remap-list">
+          {GAMEPAD_ACTIONS.map((a) => {
+            const tok = bindings.actions[a.id] ?? ''
+            const isCapturing = capturing?.kind === 'action' && capturing.id === a.id
+            const owner = isCapturing ? undefined : actionOwner(tok)
+            const dupWarn = owner != null && owner !== a.id
+            return (
+              <div className={`gp-remap-row${isCapturing ? ' is-capturing' : ''}`} key={a.id}>
+                <span className="gp-remap-label" title={t(a.labelKey, a.label)}>
+                  {t(a.labelKey, a.label)}
+                  {a.machine && (
+                    <span className="gp-remap-machine" title={t('gp.remap.machineHint', 'Moves / commands the machine')}>
+                      <Crosshair size={10} aria-hidden="true" />
+                    </span>
+                  )}
+                </span>
+                <span className="gp-remap-glyph-wrap">
+                  {isCapturing ? (
+                    <span className="gp-remap-capture" role="status">
+                      {t('gp.remap.press', 'Press a control…')}
+                    </span>
+                  ) : tok ? (
+                    <LiveGlyph
+                      token={tok}
+                      family={family}
+                      className={`gp-remap-glyph${dupWarn ? ' warn' : ''}`}
+                      subscribeRaw={gp.subscribeRaw}
+                      getRawSnapshot={gp.getRawSnapshot}
+                      title={dupWarn ? t('gp.remap.conflict', 'Also used elsewhere') : undefined}
+                      padKey={padKey}
+                      labels={labels}
+                    />
+                  ) : (
+                    <span className="gp-remap-unbound">{t('gp.remap.unbound', 'Unbound')}</span>
+                  )}
+                </span>
+                <span className="gp-remap-acts">
+                  <ControlPicker
+                    value={tok}
+                    onPick={(tk) => (tk ? bind(padKey, a.id, tk) : clearBind(padKey, a.id))}
+                    family={family}
+                    padKey={padKey}
+                    labels={labels}
+                    subscribeRaw={gp.subscribeRaw}
+                    getRawSnapshot={gp.getRawSnapshot}
+                  />
+                  <button
+                    type="button"
+                    className="gp-remap-btn"
+                    onClick={() => setCapturing(isCapturing ? null : { kind: 'action', id: a.id })}
+                    title={t('gp.remap.rebind.title', 'Rebind this — then press a control on your gamepad')}
+                  >
+                    {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
+                  </button>
+                  <button
+                    type="button"
+                    className="gp-remap-btn gp-remap-clear"
+                    disabled={!tok || isCapturing}
+                    onClick={() => clearBind(padKey, a.id)}
+                    aria-label={t('gp.remap.clear.aria', 'Clear binding for {action}', { action: t(a.labelKey, a.label) })}
+                    title={t('gp.remap.clear.title', 'Clear this binding')}
+                  >
+                    <X size={13} aria-hidden="true" />
+                  </button>
+                </span>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Per-tab context overrides. */}
+        <TabOverridesEditor
+          padKey={padKey}
+          family={family}
+          labels={labels}
+          capturing={capturing}
+          setCapturing={setCapturing}
+          subscribeRaw={gp.subscribeRaw}
+          getRawSnapshot={gp.getRawSnapshot}
+        />
+      </div>
+    </>
+  )
+
   return (
     <Modal open={open} onClose={onClose} title={t('gp.title', 'Game controller')} size="xl">
       <div className="gp-modal gp-modal--v2">
@@ -435,246 +701,43 @@ function GamepadModalInner({
             open. */}
         <GamepadDiagnostic subscribeRaw={gp.subscribeRaw} getRawSnapshot={gp.getRawSnapshot} family={family} padKey={padKey} />
 
-        {/* ───────── Button names (press-to-detect labelling) ─────────
-            A SECOND way to label a physical control (the dropdowns in the live
-            diagnostic above are the first): pick a standard name, click Rebind,
-            then press the real button. Pure DISPLAY layer — never touches input
-            reading or bindings. Each name maps to exactly one physical control. */}
-        <div className="gp-remap gp-labels">
-          <div className="gp-remap-head">
-            <Tag size={14} aria-hidden="true" className="gp-sec-ico" />
-            <h4>{t('gp.labels.title', 'Button names')}</h4>
-            <span
-              className="gp-remap-sub"
-              title={t(
-                'gp.labels.help',
-                'Give each control its real-world name so every glyph in the app shows the correct label. Click Rebind, then press the button — or use the dropdowns in Live inputs above.',
-              )}
-            >
-              {t('gp.labels.hint', 'Click Rebind, then press the button — or use the dropdowns in Live inputs above')}
-            </span>
-          </div>
-
-          <div className="gp-remap-list">
-            {STD_CONTROL_NAMES.map((nm) => {
-              const base = Object.entries(labels[padKey] ?? {}).find(([, v]) => v === nm)?.[0]
-              const isCapturing = capturing?.kind === 'label' && capturing.name === nm
-              return (
-                <div className={`gp-remap-row${isCapturing ? ' is-capturing' : ''}`} key={nm}>
-                  <span className="gp-remap-label" title={nm}>
-                    {nm}
-                  </span>
-                  <span className="gp-remap-glyph-wrap">
-                    {isCapturing ? (
-                      <span className="gp-remap-capture" role="status">
-                        {t('gp.remap.press', 'Press a control…')}
-                      </span>
-                    ) : base ? (
-                      <LiveGlyph
-                        token={base as ControlToken}
-                        family={family}
-                        className="gp-remap-glyph"
-                        subscribeRaw={gp.subscribeRaw}
-                        getRawSnapshot={gp.getRawSnapshot}
-                        padKey={padKey}
-                        labels={labels}
-                      />
-                    ) : (
-                      <span className="gp-remap-unbound">{t('gp.labels.unmapped', 'Unmapped')}</span>
-                    )}
-                  </span>
-                  <span className="gp-remap-acts">
-                    <button
-                      type="button"
-                      className="gp-remap-btn"
-                      onClick={() => setCapturing(isCapturing ? null : { kind: 'label', name: nm })}
-                      title={t('gp.labels.rebind.title', 'Name a control — then press that button on your gamepad')}
-                    >
-                      {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
-                    </button>
-                    <button
-                      type="button"
-                      className="gp-remap-btn gp-remap-clear"
-                      disabled={!base || isCapturing}
-                      onClick={() => {
-                        if (base) clearLabel(padKey, base)
-                      }}
-                      aria-label={t('gp.labels.clear.aria', 'Clear the control named {name}', { name: nm })}
-                      title={t('gp.labels.clear.title', 'Clear this name')}
-                    >
-                      <X size={13} aria-hidden="true" />
-                    </button>
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* ───────── Programmable mapping (video-game-style rebinding) ───────── */}
-        <div className="gp-remap">
-          <div className="gp-remap-head">
-            <Sliders size={14} aria-hidden="true" className="gp-sec-ico" />
-            <h4>{t('gp.remap.title', 'Controller mapping')}</h4>
-            <span
-              className="gp-remap-sub"
-              title={t(
-                'gp.remap.help',
-                'Rebind any action to a controller button, stick, trigger or hat. Click Rebind, then press the control. Each control drives one action. Saved per controller.',
-              )}
-            >
-              {t('gp.remap.hint', 'Click Rebind, then press a control')}
-            </span>
-            <span className="gp-remap-spacer" />
-            <button
-              type="button"
-              className="gp-remap-reset"
-              onClick={() => resetDefaults(padKey)}
-              title={t('gp.remap.resetAll.title', 'Reset every binding for this controller to its default')}
-            >
-              <RotateCcw size={13} aria-hidden="true" />
-              {t('gp.remap.resetAll', 'Reset all')}
-            </button>
-          </div>
-
-          {/* Analog jog — now rebindable per direction (stick halves / trigger axes). */}
-          <div className="gp-grouplbl">{t('gp.remap.group.analog', 'Analog jog')}</div>
-          <div className="gp-remap-analog gp-remap-analog--grid">
-            {GAMEPAD_ANALOG.map((a) => {
-              const tok = bindings.analog[a.id] ?? ''
-              const isCapturing = capturing?.kind === 'analog' && capturing.id === a.id
-              return (
-                <div className={`gp-remap-arow${isCapturing ? ' is-capturing' : ''}`} key={a.id}>
-                  <span className="gp-remap-aicon" aria-hidden="true">
-                    {a.id.startsWith('jogZ') ? <ChevronsUpDown size={13} /> : <Move size={13} />}
-                  </span>
-                  <span className="gp-remap-alabel" title={t(a.labelKey, a.label)}>
-                    {t(a.labelKey, a.label)}
-                  </span>
-                  <span className="gp-remap-aglyph">
-                    {isCapturing ? (
-                      <span className="gp-remap-capture" role="status">
-                        {t('gp.remap.press', 'Press a control…')}
-                      </span>
-                    ) : tok ? (
-                      <LiveGlyph
-                        token={tok}
-                        family={family}
-                        className="gp-remap-actl"
-                        subscribeRaw={gp.subscribeRaw}
-                        getRawSnapshot={gp.getRawSnapshot}
-                        padKey={padKey}
-                        labels={labels}
-                      />
-                    ) : (
-                      <span className="gp-remap-unbound">{t('gp.remap.unbound', 'Unbound')}</span>
-                    )}
-                  </span>
-                  <button
-                    type="button"
-                    className="gp-remap-btn gp-remap-btn--sm"
-                    onClick={() => setCapturing(isCapturing ? null : { kind: 'analog', id: a.id })}
-                    title={t('gp.remap.rebind.title', 'Rebind this — then press a control on your gamepad')}
-                  >
-                    {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
-                  </button>
-                  <button
-                    type="button"
-                    className="gp-remap-btn gp-remap-clear"
-                    disabled={!tok || isCapturing}
-                    onClick={() => clearAnalog(padKey, a.id)}
-                    aria-label={t('gp.remap.clear.aria', 'Clear binding for {action}', { action: t(a.labelKey, a.label) })}
-                    title={t('gp.remap.clear.title', 'Clear this binding')}
-                  >
-                    <X size={12} aria-hidden="true" />
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="gp-grouplbl">{t('gp.remap.group.actions', 'Buttons & commands')}</div>
-          <div className="gp-remap-list">
-            {GAMEPAD_ACTIONS.map((a) => {
-              const tok = bindings.actions[a.id] ?? ''
-              const isCapturing = capturing?.kind === 'action' && capturing.id === a.id
-              const owner = isCapturing ? undefined : actionOwner(tok)
-              const dupWarn = owner != null && owner !== a.id
-              return (
-                <div className={`gp-remap-row${isCapturing ? ' is-capturing' : ''}`} key={a.id}>
-                  <span className="gp-remap-label" title={t(a.labelKey, a.label)}>
-                    {t(a.labelKey, a.label)}
-                    {a.machine && (
-                      <span className="gp-remap-machine" title={t('gp.remap.machineHint', 'Moves / commands the machine')}>
-                        <Crosshair size={10} aria-hidden="true" />
-                      </span>
-                    )}
-                  </span>
-                  <span className="gp-remap-glyph-wrap">
-                    {isCapturing ? (
-                      <span className="gp-remap-capture" role="status">
-                        {t('gp.remap.press', 'Press a control…')}
-                      </span>
-                    ) : tok ? (
-                      <LiveGlyph
-                        token={tok}
-                        family={family}
-                        className={`gp-remap-glyph${dupWarn ? ' warn' : ''}`}
-                        subscribeRaw={gp.subscribeRaw}
-                        getRawSnapshot={gp.getRawSnapshot}
-                        title={dupWarn ? t('gp.remap.conflict', 'Also used elsewhere') : undefined}
-                        padKey={padKey}
-                        labels={labels}
-                      />
-                    ) : (
-                      <span className="gp-remap-unbound">{t('gp.remap.unbound', 'Unbound')}</span>
-                    )}
-                  </span>
-                  <span className="gp-remap-acts">
-                    <ControlPicker
-                      value={tok}
-                      onPick={(tk) => (tk ? bind(padKey, a.id, tk) : clearBind(padKey, a.id))}
-                      family={family}
-                      padKey={padKey}
-                      labels={labels}
-                      subscribeRaw={gp.subscribeRaw}
-                      getRawSnapshot={gp.getRawSnapshot}
-                    />
-                    <button
-                      type="button"
-                      className="gp-remap-btn"
-                      onClick={() => setCapturing(isCapturing ? null : { kind: 'action', id: a.id })}
-                      title={t('gp.remap.rebind.title', 'Rebind this — then press a control on your gamepad')}
-                    >
-                      {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
-                    </button>
-                    <button
-                      type="button"
-                      className="gp-remap-btn gp-remap-clear"
-                      disabled={!tok || isCapturing}
-                      onClick={() => clearBind(padKey, a.id)}
-                      aria-label={t('gp.remap.clear.aria', 'Clear binding for {action}', { action: t(a.labelKey, a.label) })}
-                      title={t('gp.remap.clear.title', 'Clear this binding')}
-                    >
-                      <X size={13} aria-hidden="true" />
-                    </button>
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Per-tab context overrides. */}
-          <TabOverridesEditor
-            padKey={padKey}
-            family={family}
-            labels={labels}
-            capturing={capturing}
-            setCapturing={setCapturing}
-            subscribeRaw={gp.subscribeRaw}
-            getRawSnapshot={gp.getRawSnapshot}
+        {/* W-I: with NO controller connected, lead with a friendly empty state
+            instead of the full Unbound form. The mapping editor below stays
+            DISCOVERABLE (disclosure rule): it's collapsed into a labelled
+            <details> with a persistent "Mapping (N)" badge + remembered open
+            state, so a saved layout can still be reviewed/edited offline. When a
+            controller IS connected the editor renders inline, always open. */}
+        {!gp.connected && (
+          <CamEmpty
+            icon={<Gamepad2 size={26} aria-hidden="true" />}
+            title={t('gp.empty.title', 'No controller connected')}
+            hint={t(
+              'gp.empty.hint',
+              'Pair over Bluetooth, or plug in via USB or its wireless dongle, then press any button. Mapping is saved per controller — expand it below to review or edit your saved layout.',
+            )}
           />
-        </div>
+        )}
+
+        {gp.connected ? (
+          mappingEditor
+        ) : (
+          <details
+            className="gp-map-disclose"
+            open={mapOpen}
+            onToggle={(e) => setMapOpen((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="gp-map-summary">
+              <Sliders size={14} aria-hidden="true" className="gp-sec-ico" />
+              <span className="gp-map-summary-label">
+                {t('gp.empty.editTitle', 'Controller mapping & button names')}
+              </span>
+              <span className="gp-map-summary-badge">
+                {t('gp.empty.count', 'Mapping ({n})', { n: bindCount })}
+              </span>
+            </summary>
+            {mappingEditor}
+          </details>
+        )}
       </div>
     </Modal>
   )

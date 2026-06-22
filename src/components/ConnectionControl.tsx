@@ -5,6 +5,7 @@ import { BlePort } from '../serial/blePort'
 import { UsbPort } from '../serial/usbPort'
 import { mixedContentReason, normalizeWsUrl } from '../serial/wsPort'
 import { useMachine, useMachineProfile, usePersistentState, useMachines } from '../store'
+import { useProgram } from '../store/program'
 import { scanGrantedPorts, requestPort, isSerialScanSupported } from '../serial/portScan'
 import { CONTROLLER_LIST, profileFor, canLiveConnect } from '../machine/controllers'
 import type { ControllerKind } from '../machine/types'
@@ -12,6 +13,7 @@ import { useT } from '../i18n'
 import { IconButton } from './IconButton'
 import { Icon } from './Icons'
 import { FirmwareDrivers } from './FirmwareDrivers'
+import { CamError } from './cam/CamUI'
 import '../styles/connect.css'
 
 interface ConnectionControlProps {
@@ -82,8 +84,44 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
   const setControllerKind = useMachineProfile((s) => s.setControllerKind)
   const baudOverride = useMachineProfile((s) => s.baudOverride)
   const setBaudOverride = useMachineProfile((s) => s.setBaudOverride)
+  const streaming = useProgram((s) => s.streaming)
   const connected = connection === 'connected'
   const connecting = connection === 'connecting'
+
+  // --- W-Q: surface an UNEXPECTED disconnect (esp. mid-stream) instead of a
+  // silent drop. We watch the connected→disconnected transition: if it happened
+  // while streaming, or GRBL reported an error, treat it as a drop and show an
+  // inline CamError with a Reconnect CTA. Presentation only — the actual
+  // transport/streaming logic is untouched; Reconnect just re-runs the silent
+  // auto-reconnect to the preferred/granted device. The notice is dismissible
+  // and is cleared the moment a connection is (re)established.
+  const [dropped, setDropped] = useState(false)
+  const wasConnectedRef = useRef(false)
+  const wasStreamingRef = useRef(false)
+  useEffect(() => {
+    const wasConnected = wasConnectedRef.current
+    wasConnectedRef.current = connected
+    if (connected) {
+      // A fresh/restored connection clears any prior drop notice.
+      if (dropped) setDropped(false)
+      return
+    }
+    // Just transitioned connected → not-connected (and not a user "Connecting…"
+    // attempt). Flag it as a drop when it was streaming or carried an error.
+    if (wasConnected && connection === 'disconnected' && (wasStreamingRef.current || error)) {
+      setDropped(true)
+    }
+  }, [connected, connection, error, dropped])
+  // Track streaming so the drop check can read its value AT the moment of the
+  // transition (streaming flips to false on disconnect, so we need the prior).
+  useEffect(() => {
+    wasStreamingRef.current = streaming
+  }, [streaming])
+
+  const retryConnect = () => {
+    setDropped(false)
+    grbl.autoConnect().catch(() => {})
+  }
   // Server bridge toggle — same persisted flag the App shell reads to mount the
   // relay hook. Opt-in, default OFF; persists once enabled.
   const [bridge, setBridge] = usePersistentState('karmyogi.machineBridge.enabled', false)
@@ -184,7 +222,7 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
     : null
 
   return (
-    <span className="km-conn" title={error ?? undefined}>
+    <span className="km-conn km-conn-wrap" title={error ?? undefined}>
       <select
         className="km-conn-select"
         value={controllerKind}
@@ -301,6 +339,64 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
           label={t('conn.settings', 'Motion Settings')}
           onClick={onOpenSettings}
         />
+      )}
+
+      {/* W-Q: unexpected/mid-stream disconnect notice with a Reconnect CTA —
+          surfaces the drop instead of failing silently. Anchored below the
+          connection cluster; dismissible, and auto-clears on reconnect. */}
+      {dropped && !connected && !connecting && (
+        <div
+          role="alert"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            right: 0,
+            zIndex: 60,
+            width: 'min(320px, 90vw)',
+            padding: '4px',
+            borderRadius: 'var(--radius, 8px)',
+            border: '1px solid var(--danger)',
+            background: 'var(--bg-elev, var(--bg-panel))',
+            boxShadow: 'var(--shadow-2, 0 10px 40px rgba(0,0,0,0.45))',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setDropped(false)}
+            aria-label={t('conn.drop.dismiss', 'Dismiss')}
+            title={t('conn.drop.dismiss', 'Dismiss')}
+            style={{
+              position: 'absolute',
+              top: '6px',
+              right: '6px',
+              zIndex: 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: '24px',
+              minHeight: '24px',
+              padding: '2px',
+              border: '1px solid transparent',
+              borderRadius: '6px',
+              background: 'transparent',
+              color: 'var(--fg-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            <Icon name="close" size={13} />
+          </button>
+          <CamError
+            icon={<TransportGlyph kind="usb" size={20} />}
+            title={t('conn.drop.title', 'Machine disconnected')}
+            message={
+              error
+                ? t('conn.drop.msgErr', 'The connection dropped: {err}', { err: error })
+                : t('conn.drop.msg', 'The machine link dropped unexpectedly during a job. Check the cable/power, then reconnect.')
+            }
+            onRetry={retryConnect}
+            retryLabel={t('conn.drop.retry', 'Reconnect')}
+          />
+        </div>
       )}
     </span>
   )

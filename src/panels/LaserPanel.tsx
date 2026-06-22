@@ -42,7 +42,7 @@ import {
   type ImageAdjust,
   type RasterParams,
 } from '../core/laserImage'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamBusy, CamEmpty, CamError } from '../components/cam/CamUI'
 import { SliderField as KitSlider } from '../components/ui/SliderField'
 import { SegControl as KitSeg } from '../components/ui/SegControl'
 import '../styles/laser.css'
@@ -687,7 +687,9 @@ function LaserImageWorkbench() {
             <>
               <canvas ref={previewCanvas} />
               {busy && (
-                <div className="li-preview-busy">{t('laser.img.preview.busy', 'Rendering…')}</div>
+                <div className="li-preview-busy">
+                  <CamBusy label={t('laser.img.preview.busy', 'Rendering…')} />
+                </div>
               )}
             </>
           ) : (
@@ -716,7 +718,15 @@ function LaserImageWorkbench() {
           />
           {src && <span className="li-import-info">{src.name}</span>}
         </div>
-        {loadErr && <p className="li-warn">{loadErr}</p>}
+        {loadErr && (
+          <CamError
+            icon={<Icon name="camera" size={20} />}
+            title={t('laser.img.err.title', 'Could not load image')}
+            message={loadErr}
+            onRetry={() => fileRef.current?.click()}
+            retryLabel={t('laser.img.err.retry', 'Choose another image')}
+          />
+        )}
       </section>
 
       {/* Image adjustments. */}

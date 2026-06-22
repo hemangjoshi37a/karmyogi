@@ -133,8 +133,15 @@
   border-color: color-mix(in srgb, var(--accent) 85%, #fff);
   color: var(--accent-fg);
 }
+/* Clear is destructive: a persistent danger-tinted edge so it reads as "danger"
+   at rest, then a filled-danger hover (W-H / §2.3). */
+.swd-ico-danger:not(:disabled) {
+  border-color: var(--border-danger);
+  color: var(--danger);
+}
 .swd-ico-danger:hover:not(:disabled) {
   border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
 

@@ -216,6 +216,17 @@
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+  /* Shared dropzone spec (§W-I): 1.5px dashed --border, accent on hover —
+     matched to the Carving / PCB dropzones. The Load/Replace CTA inside stays
+     the dominant affordance. */
+  padding: var(--sp-2);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.li-import-row:hover {
+  border-color: var(--accent);
 }
 .li-primary {
   display: inline-flex;

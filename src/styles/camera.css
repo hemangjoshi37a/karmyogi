@@ -440,6 +440,13 @@
   object-fit: contain;
   background: #000;
 }
+/* When the slot is not live the <video> carries `hidden`; `.cam-video { display:
+   block }` outweighs the UA `[hidden]` rule, so the empty (black) video box would
+   otherwise cover the centered <CamEmpty> prompt. Force it hidden so the empty
+   state shows instead of a black void (§W-I). */
+.cam-video[hidden] {
+  display: none;
+}
 .cam-video[data-clickable='true'] {
   cursor: crosshair;
 }

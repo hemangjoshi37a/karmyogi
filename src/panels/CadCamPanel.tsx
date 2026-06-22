@@ -136,7 +136,7 @@ import {
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { SegControl } from '../components/ui/SegControl'
 import { SliderField as UISliderField } from '../components/ui/SliderField'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamEmpty, CamBusy, CamError } from '../components/cam/CamUI'
 import { useT } from '../i18n'
 import '../styles/cadcam.css'
 import '../styles/cam.css'
@@ -3039,7 +3039,11 @@ export function CadCamPanel() {
                     className="cc-iconbtn"
                     onClick={doRenest}
                     disabled={enabledJobs === 0}
-                    title={t('cc.renest', 'Re-nest all jobs on the bed (no overlap)')}
+                    title={
+                      enabledJobs === 0
+                        ? t('cc.renestDisabled', 'Add or enable a model first')
+                        : t('cc.renest', 'Re-nest all jobs on the bed (no overlap)')
+                    }
                     aria-label={t('cc.renest', 'Re-nest all jobs on the bed')}
                   >
                     <Icon name="frame" size={14} />
@@ -3048,7 +3052,11 @@ export function CadCamPanel() {
                     className="cc-iconbtn danger"
                     onClick={clearAllJobs}
                     disabled={jobs.length === 0}
-                    title={t('cc.clearAll', 'Clear all jobs / start over')}
+                    title={
+                      jobs.length === 0
+                        ? t('cc.clearAllDisabled', 'No models to clear')
+                        : t('cc.clearAll', 'Clear all jobs / start over')
+                    }
                     aria-label={t('cc.clearAll', 'Clear all jobs / start over')}
                   >
                     <Icon name="trash" size={14} />
@@ -3065,7 +3073,11 @@ export function CadCamPanel() {
                   className="cc-iconbtn"
                   onClick={downloadCarveSession}
                   disabled={mode === '2d' ? files.length === 0 : jobs.length === 0}
-                  title={t('cc.sessionDownload', 'Download this carving session (.zip) — sources + operations + presets')}
+                  title={
+                    (mode === '2d' ? files.length === 0 : jobs.length === 0)
+                      ? t('cc.sessionDownloadDisabled', 'Load a model file first')
+                      : t('cc.sessionDownload', 'Download this carving session (.zip) — sources + operations + presets')
+                  }
                   aria-label={t('cc.sessionDownloadAria', 'Download carving session')}
                 >
                   <Icon name="download" size={15} />
@@ -3224,7 +3236,11 @@ export function CadCamPanel() {
                                 e.stopPropagation()
                                 if (sel) addLoopOp(key, sel)
                               }}
-                              title={t('cc.addOpToSurface', 'Add this preset to the surface')}
+                              title={
+                                sel && sel.op !== 'Engrave' && !region.planar
+                                  ? t('cc.addOpNeedsFlat', 'This preset needs a flat surface')
+                                  : t('cc.addOpToSurface', 'Add this preset to the surface')
+                              }
                               aria-label={t('cc.addOpToSurface', 'Add this preset to the surface')}
                             >
                               <Plus size={15} strokeWidth={2.2} />
@@ -3287,37 +3303,60 @@ export function CadCamPanel() {
               ))}
             </ul>
           )}
-          {importError && <div className="cc-error">{importError}</div>}
-          {sessionError && <div className="cc-error">{sessionError}</div>}
-          {/* Staged LOAD status: file name + size + reading/parsing stage with a
-              determinate (reading) or indeterminate (parsing) progress bar. Shown
-              the instant a model is picked so a slow read never looks frozen. */}
-          {importStatus && (
-            <div className="cc-loadstatus" role="status" aria-live="polite">
-              <div className="cc-loadstatus-row">
-                <span className="cc-loadstatus-name">{importStatus.label}</span>
-                <span className="cc-loadstatus-stage">{importStatus.stage}</span>
-              </div>
-              <div
-                className={'cc-loadbar' + (importStatus.frac === null ? ' is-indet' : '')}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={
-                  importStatus.frac === null ? undefined : Math.round(importStatus.frac * 100)
-                }
-              >
-                <span
-                  className="cc-loadbar-fill"
-                  style={
-                    importStatus.frac === null
-                      ? undefined
-                      : { width: `${Math.round(importStatus.frac * 100)}%` }
-                  }
-                />
-              </div>
-            </div>
+          {/* Failed file import → shared CamError with a Retry that re-opens the
+              file picker (re-triggers the exact same pick flow). Replaces the old
+              inline .cc-error text so a failed parse reads like every other CAM
+              tab's error state. */}
+          {importError && (
+            <CamError
+              title={t('cc.importFailed', 'Import failed')}
+              message={importError}
+              onRetry={() => {
+                setImportError(null)
+                fileRef.current?.click()
+              }}
+              retryLabel={t('cc.retryPick', 'Pick file again')}
+            />
           )}
+          {sessionError && (
+            <CamError
+              title={t('cc.sessionFailed', 'Session restore failed')}
+              message={sessionError}
+              onRetry={() => {
+                setSessionError(null)
+                sessionFileRef.current?.click()
+              }}
+              retryLabel={t('cc.retryPick', 'Pick file again')}
+            />
+          )}
+          {/* Staged LOAD status: file name + size + reading/parsing stage. While
+              READING we keep the rich determinate progress bar (real byte readout
+              "2.1 / 4.6 MB"); for the indeterminate PARSING stage we surface the
+              shared <CamBusy> (spinner + aria-busy) so the in-flight state reads
+              identically to every other CAM tab. */}
+          {importStatus &&
+            (importStatus.frac === null ? (
+              <CamBusy label={`${importStatus.label} · ${importStatus.stage}`} />
+            ) : (
+              <div className="cc-loadstatus" role="status" aria-busy="true" aria-live="polite">
+                <div className="cc-loadstatus-row">
+                  <span className="cc-loadstatus-name">{importStatus.label}</span>
+                  <span className="cc-loadstatus-stage">{importStatus.stage}</span>
+                </div>
+                <div
+                  className="cc-loadbar"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(importStatus.frac * 100)}
+                >
+                  <span
+                    className="cc-loadbar-fill"
+                    style={{ width: `${Math.round(importStatus.frac * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
           {/* 3D carve progress — ONLY when there's no active file-load status (a
               standalone re-carve from a param/preset change). During a file load
               the importStatus bar above already shows the carve %, so this avoids
@@ -3379,7 +3418,11 @@ export function CadCamPanel() {
                     className="cc-iconbtn cc-optimize"
                     onClick={optimizeOps}
                     disabled={opList.length < 2}
-                    title={t('cc.optimizeOps', 'Reorder for safe machining (inner loops first, cutout last)')}
+                    title={
+                      opList.length < 2
+                        ? t('cc.optimizeOpsDisabled', 'Add at least two operations to reorder')
+                        : t('cc.optimizeOps', 'Reorder for safe machining (inner loops first, cutout last)')
+                    }
                     aria-label={t('cc.optimizeOps', 'Optimize machining order')}
                   >
                     <Wand2 size={14} />
@@ -3486,7 +3529,11 @@ export function CadCamPanel() {
                     className="cc-iconbtn cc-optimize"
                     onClick={optimizeSurfaceOps}
                     disabled={surfaceOpList.length < 2}
-                    title={t('cc.optimizeOps', 'Reorder for safe machining (inner loops first, cutout last)')}
+                    title={
+                      surfaceOpList.length < 2
+                        ? t('cc.optimizeOpsDisabled', 'Add at least two operations to reorder')
+                        : t('cc.optimizeOps', 'Reorder for safe machining (inner loops first, cutout last)')
+                    }
                     aria-label={t('cc.optimizeOps', 'Optimize machining order')}
                   >
                     <Wand2 size={14} />
@@ -4503,25 +4550,31 @@ function MaterialCard({
   const [open, setOpen] = useState(false)
   const name = t(material.i18nKey, material.name)
   return (
-    <div className="cc-matcard-wrap">
+    <div className="cc-matpickrow">
+      {/* Compact thumbnail row (Area-3): a small material thumbnail + name on one
+          line, replacing the tall photoreal banner so the material picker no
+          longer dominates the bit/material strip. The full photo grid still lives
+          in the chooser modal below. */}
       <button
         type="button"
-        className="cc-matcard"
-        style={material.image ? { backgroundImage: `url(${material.image})` } : undefined}
+        className="cc-matpick"
         onClick={() => setOpen(true)}
         title={t('cc.matPick', 'Material — click to choose ({name})', { name })}
         aria-haspopup="dialog"
       >
-        {!material.image && (
-          <span className="cc-matcard-emoji" aria-hidden="true">
-            {material.icon}
-          </span>
-        )}
-        <span className="cc-matcard-name">{name}</span>
+        <span
+          className="cc-matpick-thumb"
+          style={material.image ? { backgroundImage: `url(${material.image})` } : undefined}
+          aria-hidden="true"
+        >
+          {!material.image && <span className="cc-matpick-emoji">{material.icon}</span>}
+        </span>
+        <span className="cc-matpick-name">{name}</span>
+        <ChevronDown className="cc-matpick-caret" size={14} aria-hidden />
       </button>
       <button
         type="button"
-        className="cc-matcard-info"
+        className="cc-matpick-info"
         onClick={() => onInfo(material)}
         title={t('cc.matViewDetails', 'View {mat} details', { mat: name })}
         aria-label={t('cc.matViewDetails', 'View {mat} details', { mat: name })}
