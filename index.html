@@ -417,6 +417,14 @@
         border-bottom: 1px solid rgba(45, 212, 191, 0.4);
       }
       #app-splash a:hover { border-bottom-color: #2dd4bf; }
+      #app-splash .ky-build {
+        margin: 2px 0 0;
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        color: #6b7682;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      #app-splash .ky-build b { color: #9aa3af; font-weight: 600; }
 
       @media (max-width: 640px) {
         #app-splash ul { grid-template-columns: 1fr; gap: 8px; }
@@ -499,6 +507,12 @@
             <a href="https://karmyogi.hjlabs.in/">karmyogi.hjlabs.in</a> in Chrome, Edge, Brave
             or Opera. Source on <a href="https://github.com/hemangjoshi37a/karmyogi">GitHub</a>.
           </p>
+          <!-- Build stamp: __BUILD_VERSION__ / __BUILD_DATE__ are replaced at
+               build time by the `karmyogi-splash-build-stamp` plugin in
+               vite.config.ts (runs in dev + prod). Matches the About modal's
+               version chip; crawlable, so the indexed page advertises a fresh
+               build date on every deploy. -->
+          <p class="ky-build">karm<b>yogi</b> <b>v__BUILD_VERSION__</b> · built __BUILD_DATE__</p>
         </div>
       </div>
     </div>

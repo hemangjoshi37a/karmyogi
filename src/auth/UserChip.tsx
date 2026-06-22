@@ -47,6 +47,22 @@ export function UserChip() {
     )
   }
 
+  // Restoring the cached session: show a small circular spinner in the same
+  // slot so the chip resolves in-place to the login button / avatar with no
+  // layout shift / pop-in (matches the avatar/login footprint).
+  if (status === 'loading' && firebaseConfigured()) {
+    return (
+      <span className="km-userchip">
+        <span
+          className="km-userchip-spinner"
+          role="status"
+          aria-label={t('auth.checking', 'Checking sign-in…')}
+          aria-busy="true"
+        />
+      </span>
+    )
+  }
+
   if (status !== 'signedIn' || !user) return null
 
   const name = user.displayName || user.email || t('auth.user', 'Account')

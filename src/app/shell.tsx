@@ -363,21 +363,35 @@ export function Shell() {
         for (const panel of [...event.api.panels]) {
           if (!validIds.has(panel.id)) event.api.removePanel(panel)
         }
-        // Anchor new tabs to the left CAM/utility group (the first LEFT_TAB still
-        // present), like the default build.
-        const anchor = event.api.getPanel(
-          LEFT_TABS.find((tt) => event.api.getPanel(tt.id))?.id ?? '',
-        )
-        for (const tab of LEFT_TABS) {
-          if (event.api.getPanel(tab.id)) continue
-          event.api.addPanel({
-            id: tab.id,
-            component: tab.id,
-            title: tab.title,
-            ...(anchor ? { position: { referencePanel: anchor.id, direction: 'within' as const } } : {}),
-          })
+        // Auto-open a LEFT tab that is missing from the restored layout ONLY when
+        // it is genuinely NEW in this app version — never one the user closed on
+        // purpose. `seen` is the registry the user was last shown: a missing tab
+        // whose id is in `seen` was closed deliberately (leave it closed); one not
+        // in `seen` shipped since their last visit (surface it once). When there's
+        // no record yet (null — a layout saved before this feature), trust the
+        // restored layout as-is so we don't re-open everything on the first load.
+        const seen = useLayout.getState().loadSeen()
+        if (seen !== null) {
+          const seenSet = new Set(seen)
+          const anchor = event.api.getPanel(
+            LEFT_TABS.find((tt) => event.api.getPanel(tt.id))?.id ?? '',
+          )
+          for (const tab of LEFT_TABS) {
+            if (event.api.getPanel(tab.id)) continue // already open
+            if (seenSet.has(tab.id)) continue // user closed it on purpose → keep closed
+            event.api.addPanel({
+              id: tab.id,
+              component: tab.id,
+              title: tab.title,
+              ...(anchor ? { position: { referencePanel: anchor.id, direction: 'within' as const } } : {}),
+            })
+          }
         }
       }
+      // Record the full current registry as "seen" so closes stick from here on
+      // and only genuinely-new tabs auto-open next time (covers both the restored
+      // and the fresh-default path).
+      useLayout.getState().saveSeen(availablePanels.map((p) => p.id))
       // Keep tab titles in sync with the registry AND translate them: each tab's
       // title comes from `t('tab.<id>', <English default>)`, so renames and the
       // active language both apply even to a restored saved layout.
@@ -435,6 +449,9 @@ export function Shell() {
     if (!api) return
     api.clear()
     buildDefaultLayout(api)
+    // The default build opens the canonical set — record it as "seen" so the
+    // reconcile never re-opens these tabs after the user closes one post-reset.
+    useLayout.getState().saveSeen(availablePanels.map((p) => p.id))
     // Re-mount the default-active tab + keep the camera feed alive after a reset
     // (onReady's setup only runs once, not on a manual reset).
     try {

@@ -551,6 +551,35 @@
   background: var(--accent);
   color: #fff;
 }
+/* Session-restore spinner — occupies the same circular slot as the login
+   button / avatar so the topbar doesn't shift when auth resolves. */
+.km-userchip-spinner {
+  box-sizing: border-box;
+  display: inline-block;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  border-top-color: var(--accent);
+  animation: km-userchip-spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes km-userchip-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .km-userchip-spinner {
+    animation: none;
+    /* Static ring with a subtle accent pulse instead of spinning. */
+    border-top-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    animation: km-userchip-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes km-userchip-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+}
+
 /* Hover/focus popover. */
 .km-userchip-pop {
   position: absolute;

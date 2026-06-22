@@ -44,6 +44,8 @@ const useHttps = !!process.env.HTTPS
 const buildEpoch = Date.now()
 const buildTime = new Date(buildEpoch).toISOString()
 const buildVersion = buildEpoch.toString(36)
+// Human-readable UTC stamp for the boot splash, e.g. "2026-06-22 03:40 UTC".
+const buildStamp = buildTime.replace('T', ' ').replace(/:\d{2}\.\d+Z$/, ' UTC')
 
 /**
  * Emits `build-info.json` at the dist root after the bundle is generated:
@@ -119,6 +121,23 @@ function buildInfoEmitter() {
   }
 }
 
+/**
+ * Replaces the `__BUILD_VERSION__` / `__BUILD_DATE__` placeholders in the boot
+ * splash (index.html) with the build identity. Runs in BOTH dev and build, so
+ * the splash always shows the current build id + date (matching the About
+ * modal's version chip), and the indexed HTML advertises a fresh build date.
+ */
+function splashBuildStamp() {
+  return {
+    name: 'karmyogi-splash-build-stamp',
+    transformIndexHtml(html: string) {
+      return html
+        .replace(/__BUILD_VERSION__/g, buildVersion)
+        .replace(/__BUILD_DATE__/g, buildStamp)
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   define: {
@@ -127,6 +146,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    splashBuildStamp(),
     cameraFrameReceiver(),
     machineBridgeReceiver(),
     devBridgeReceiver(), // dev observability + control relay
