@@ -33,6 +33,8 @@ import { useT } from '../i18n'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { IconButton } from '../components/IconButton'
 import { Icon } from '../components/Icons'
+import { SliderField as KitSlider } from '../components/ui/SliderField'
+import { SegControl } from '../components/ui/SegControl'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
@@ -45,18 +47,6 @@ const ALIGN_OPTIONS: { value: TextAlign; key: string; label: string; align: 'lef
   { value: TextAlign.Center, key: 'writing.align.center', label: 'Center', align: 'center' },
   { value: TextAlign.Right, key: 'writing.align.right', label: 'Right', align: 'right' },
 ]
-
-/**
- * Parse a numeric input value, clamping to [min,max] and falling back to
- * `fallback` for any non-finite result (empty field, '-', 'e', etc.). This is
- * the P0 SAFETY guard: a NaN must never reach the emitter (it would print
- * literal 'F NaN' / 'Z NaN' into the streamed G-code).
- */
-function clampNum(v: string, fallback: number, min: number, max: number): number {
-  const n = parseFloat(v)
-  if (!Number.isFinite(n)) return fallback
-  return Math.min(Math.max(n, min), max)
-}
 
 /** The i18n translate function shape (key, English fallback, optional vars). */
 type TFunc = (key: string, english: string, vars?: Record<string, string | number>) => string
@@ -139,7 +129,6 @@ function ModeIcon({ mode }: { mode: GenMode }) {
  * usable alongside the slider, with units preserved.
  */
 function WrSlider({
-  icon,
   label,
   htmlFor,
   unit,
@@ -161,43 +150,18 @@ function WrSlider({
   step: number
   title?: string
 }) {
-  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
-  const pct =
-    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <div className="cc-sfield" title={title}>
-      <label className="cc-sfield-lbl" htmlFor={htmlFor}>
-        <span className="cc-sfield-ico" aria-hidden>{icon}</span>
-        <span className="cc-sfield-txt">{label}</span>
-      </label>
-      <input
-        type="range"
-        className="cc-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={clamp(value)}
-        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
-        onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        aria-label={label}
-        tabIndex={-1}
-      />
-      <span className="cc-sfield-num">
-        <input
-          id={htmlFor}
-          type="number"
-          inputMode="decimal"
-          className="cc-slider-num"
-          min={min}
-          max={max}
-          step={step}
-          value={String(value)}
-          aria-label={label}
-          onChange={(e) => onChange(clampNum(e.target.value, value, min, max))}
-        />
-        {unit ? <span className="cc-sfield-unit">{unit}</span> : null}
-      </span>
-    </div>
+    <KitSlider
+      id={htmlFor}
+      label={label}
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      unit={unit}
+      title={title}
+      onChange={onChange}
+    />
   )
 }
 
@@ -945,8 +909,8 @@ export function WritingPanel() {
 
         <div className="wr-cards">
         {/* ---- Text (spans full width) ---- */}
-        <section className="wr-card wr-span">
-          <h3 className="wr-card-head">
+        <section className="wr-card wr-span ui-card">
+          <h3 className="wr-card-head ui-sec-head">
             <span>
               <span className="cam-card-ico wr-glyph" aria-hidden>T</span>
               {t('writing.text.title', 'Text')}
@@ -980,8 +944,8 @@ export function WritingPanel() {
 
         {/* ---- Font & Style: sleek dense toolbar — font picker + source icons +
              Stroke/Outline mode on one line, then Style (B/I/U) + Align on one ---- */}
-        <section className="wr-card wr-span">
-          <h3>
+        <section className="wr-card wr-span ui-card">
+          <h3 className="ui-sec-head">
             <span className="cam-card-ico wr-glyph" aria-hidden>F</span>
             {t('writing.font.title', 'Font & Style')}
           </h3>
@@ -1053,53 +1017,59 @@ export function WritingPanel() {
             </div>
 
             {/* row 1b: G-code mode — compact 4-way segmented control */}
-            <div className="wr-modebar" role="group" aria-label={t('writing.mode.label', 'G-code mode')}>
-              <button
-                type="button"
-                className={'wr-modeseg' + (genMode === 'stroke' ? ' is-active' : '')}
-                aria-pressed={genMode === 'stroke'}
-                onClick={() => setGenMode('stroke')}
-                title={t('writing.mode.strokeTip', 'Draw single strokes (centerlines). Stroke/JSON fonts use their own centerlines; outline (TTF/OTF) fonts are skeletonized into centerlines that follow the chosen font.')}
-              >
-                <ModeIcon mode="stroke" />
-                <span className="wr-modeseg-lbl">{t('writing.mode.stroke', 'Stroke')}</span>
-                {!canStroke && <span className="wr-seg-note">·{t('writing.mode.skeleton', 'auto')}</span>}
-              </button>
-              <button
-                type="button"
-                className={'wr-modeseg' + (genMode === 'outline' ? ' is-active' : '')}
-                aria-pressed={genMode === 'outline'}
-                onClick={() => setGenMode('outline')}
-                disabled={!canOutline}
-                title={
-                  canOutline
-                    ? t('writing.mode.outlineTip', 'Trace each glyph contour. Best for TTF/OTF fonts.')
-                    : t('writing.mode.outlineNa', 'Outline mode needs a TTF/OTF font. Pick or upload one.')
-                }
-              >
-                <ModeIcon mode="outline" />
-                <span className="wr-modeseg-lbl">{t('writing.mode.outline', 'Outline')}</span>
-              </button>
-              <button
-                type="button"
-                className={'wr-modeseg' + (genMode === 'carveIn' ? ' is-active' : '')}
-                aria-pressed={genMode === 'carveIn'}
-                onClick={() => setGenMode('carveIn')}
-                title={t('writing.mode.carveInTip', 'Mill a pocket INSIDE each letter → recessed/engraved text. Uses spindle Z.')}
-              >
-                <ModeIcon mode="carveIn" />
-                <span className="wr-modeseg-lbl">{t('writing.mode.carveIn', 'Carve in')}</span>
-              </button>
-              <button
-                type="button"
-                className={'wr-modeseg' + (genMode === 'relief' ? ' is-active' : '')}
-                aria-pressed={genMode === 'relief'}
-                onClick={() => setGenMode('relief')}
-                title={t('writing.mode.reliefTip', 'Mill a pocket AROUND the letters → raised (relief) text; letters left standing. Uses spindle Z.')}
-              >
-                <ModeIcon mode="relief" />
-                <span className="wr-modeseg-lbl">{t('writing.mode.relief', 'Relief')}</span>
-              </button>
+            <div className="wr-modebar">
+              <SegControl<GenMode>
+                ariaLabel={t('writing.mode.label', 'G-code mode')}
+                value={genMode}
+                onChange={setGenMode}
+                className="wr-modeseg-group"
+                options={[
+                  {
+                    value: 'stroke',
+                    title: t('writing.mode.strokeTip', 'Draw single strokes (centerlines). Stroke/JSON fonts use their own centerlines; outline (TTF/OTF) fonts are skeletonized into centerlines that follow the chosen font.'),
+                    label: (
+                      <>
+                        <ModeIcon mode="stroke" />
+                        <span className="wr-modeseg-lbl">{t('writing.mode.stroke', 'Stroke')}</span>
+                        {!canStroke && <span className="wr-seg-note">·{t('writing.mode.skeleton', 'auto')}</span>}
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'outline',
+                    disabled: !canOutline,
+                    title: canOutline
+                      ? t('writing.mode.outlineTip', 'Trace each glyph contour. Best for TTF/OTF fonts.')
+                      : t('writing.mode.outlineNa', 'Outline mode needs a TTF/OTF font. Pick or upload one.'),
+                    label: (
+                      <>
+                        <ModeIcon mode="outline" />
+                        <span className="wr-modeseg-lbl">{t('writing.mode.outline', 'Outline')}</span>
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'carveIn',
+                    title: t('writing.mode.carveInTip', 'Mill a pocket INSIDE each letter → recessed/engraved text. Uses spindle Z.'),
+                    label: (
+                      <>
+                        <ModeIcon mode="carveIn" />
+                        <span className="wr-modeseg-lbl">{t('writing.mode.carveIn', 'Carve in')}</span>
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'relief',
+                    title: t('writing.mode.reliefTip', 'Mill a pocket AROUND the letters → raised (relief) text; letters left standing. Uses spindle Z.'),
+                    label: (
+                      <>
+                        <ModeIcon mode="relief" />
+                        <span className="wr-modeseg-lbl">{t('writing.mode.relief', 'Relief')}</span>
+                      </>
+                    ),
+                  },
+                ]}
+              />
             </div>
 
             {/* row 2: Style (B/I/U) + Align (left/center/right) packed on ONE tight row */}
@@ -1128,24 +1098,18 @@ export function WritingPanel() {
                 >U</button>
               </div>
               <span className="wr-vsep" aria-hidden="true" />
-              <div
+              <SegControl<TextAlign>
+                ariaLabel={t('writing.alignment', 'Alignment')}
+                value={align}
+                onChange={setAlign}
+                size="sm"
                 className="wr-align"
-                role="group"
-                aria-label={t('writing.alignment', 'Alignment')}
-                title={t('writing.alignment.tip', 'Horizontal alignment of each line of text.')}
-              >
-                {ALIGN_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    className={'wr-tgl' + (align === o.value ? ' is-active' : '')}
-                    aria-pressed={align === o.value}
-                    onClick={() => setAlign(o.value)}
-                    title={t(o.key, o.label)}
-                    aria-label={t(o.key, o.label)}
-                  ><AlignGlyph align={o.align} /></button>
-                ))}
-              </div>
+                options={ALIGN_OPTIONS.map((o) => ({
+                  value: o.value,
+                  title: t(o.key, o.label),
+                  label: <AlignGlyph align={o.align} />,
+                }))}
+              />
             </div>
 
             {missing.length > 0 && (
@@ -1159,8 +1123,8 @@ export function WritingPanel() {
         </section>
 
         {/* ---- Size & spacing — slider rows (size, line + letter spacing) ---- */}
-        <section className="wr-card">
-          <h3>
+        <section className="wr-card ui-card">
+          <h3 className="ui-sec-head">
             <span className="cam-card-ico wr-glyph" aria-hidden>↔</span>
             {t('writing.sizeSpacing.title', 'Size & Spacing')}
           </h3>
@@ -1206,8 +1170,8 @@ export function WritingPanel() {
 
         {/* ---- Carve (Carve-in / Relief milling params) — shown only for pocket modes ---- */}
         {isPocketMode(genMode) && (
-        <section className="wr-card wr-span">
-          <h3>
+        <section className="wr-card wr-span ui-card">
+          <h3 className="ui-sec-head">
             <span className="cam-card-ico" aria-hidden><ModeIcon mode={genMode} /></span>
             {t('writing.carve.title', 'Carve (milling)')}
           </h3>
@@ -1341,8 +1305,8 @@ export function WritingPanel() {
         )}
 
         {/* ---- Pen Z & feed — slider rows ---- */}
-        <section className="wr-card">
-          <h3>
+        <section className="wr-card ui-card">
+          <h3 className="ui-sec-head">
             <span className="cam-card-ico"><Icon name="download" size={14} /></span>
             {t('writing.penZ.title', 'Pen Z & Feed')}
           </h3>
@@ -1400,8 +1364,8 @@ export function WritingPanel() {
         </section>
 
         {/* ---- Placement — origin sliders ---- */}
-        <section className="wr-card">
-          <h3>
+        <section className="wr-card ui-card">
+          <h3 className="ui-sec-head">
             <span className="cam-card-ico wr-glyph" aria-hidden>+</span>
             {t('writing.placement.title', 'Placement')}
           </h3>

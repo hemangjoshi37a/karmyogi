@@ -572,12 +572,18 @@ export function Shell() {
           />
         </div>
       )}
-      <Modal open={showMotion} title="Motion Settings" onClose={() => setShowMotion(false)}>
-        {/* Tall but bounded: 72vh of the modal body when there's room, and at
-            least 320px so the panel stays usable on short viewports — the modal
-            body (overflow:auto) scrolls anything that doesn't fit. */}
+      <Modal
+        open={showMotion}
+        title="Motion Settings"
+        onClose={() => setShowMotion(false)}
+        size="lg"
+        flushBody
+      >
+        {/* embedded → MotionPanel drops its own <h4> + sticky-toolbar treatment so
+            the Modal's title is the ONLY title row (W-E double-header fix). The
+            panel self-pads, so the Modal body runs flush. */}
         <div className="km-modal-pane">
-          <MotionPanel />
+          <MotionPanel embedded />
         </div>
       </Modal>
       <Modal open={showProbe} title="Probe & Limits" onClose={() => setShowProbe(false)}>

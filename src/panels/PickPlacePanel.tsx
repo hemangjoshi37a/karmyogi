@@ -35,6 +35,7 @@ import {
   type PnpParams,
 } from '../core/pickPlace'
 import { CamEmpty, CamStatus } from '../components/cam/CamUI'
+import { SegControl } from '../components/ui/SegControl'
 import '../styles/pickplace.css'
 import '../styles/cam.css'
 
@@ -651,32 +652,38 @@ export function PickPlacePanel() {
           <div className="pp-card-body">
             <div className="pp-headrow">
               <span className="pp-headsel-lbl">{t('pnp.head.label', 'Head')}</span>
-              <div
+              {/* Canonical segmented control (§2.8/W-C): a head-type MODE switch →
+                  tonal. The optional leading glyph is muted (inherits text color). */}
+              <SegControl<'vacuum' | 'gripper'>
+                options={[
+                  {
+                    value: 'vacuum',
+                    title: t('pnp.head.opt.vacuum', 'Vacuum suction cup'),
+                    label: (
+                      <>
+                        <span className="pnp-seg-ico" aria-hidden="true"><Wind size={15} /></span>
+                        <span className="pnp-seg-lbl">{t('pnp.head.opt.vacuum', 'Vacuum suction cup')}</span>
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'gripper',
+                    title: t('pnp.head.opt.gripper', 'Gripper'),
+                    label: (
+                      <>
+                        <span className="pnp-seg-ico" aria-hidden="true"><Grip size={15} /></span>
+                        <span className="pnp-seg-lbl">{t('pnp.head.opt.gripper', 'Gripper')}</span>
+                      </>
+                    ),
+                  },
+                ]}
+                value={params.headType}
+                onChange={(v) => setParam('headType', v)}
+                ariaLabel={t('pnp.head.select.title', 'What is mounted at the head')}
+                variant="tonal"
+                size="sm"
                 className="pnp-seg"
-                role="group"
-                aria-label={t('pnp.head.select.title', 'What is mounted at the head')}
-              >
-                <button
-                  type="button"
-                  className={'pnp-seg-btn' + (params.headType === 'vacuum' ? ' active' : '')}
-                  aria-pressed={params.headType === 'vacuum'}
-                  onClick={() => setParam('headType', 'vacuum')}
-                  title={t('pnp.head.opt.vacuum', 'Vacuum suction cup')}
-                >
-                  <span className="pnp-seg-ico" aria-hidden="true"><Wind size={15} /></span>
-                  <span className="pnp-seg-lbl">{t('pnp.head.opt.vacuum', 'Vacuum suction cup')}</span>
-                </button>
-                <button
-                  type="button"
-                  className={'pnp-seg-btn' + (params.headType === 'gripper' ? ' active' : '')}
-                  aria-pressed={params.headType === 'gripper'}
-                  onClick={() => setParam('headType', 'gripper')}
-                  title={t('pnp.head.opt.gripper', 'Gripper')}
-                >
-                  <span className="pnp-seg-ico" aria-hidden="true"><Grip size={15} /></span>
-                  <span className="pnp-seg-lbl">{t('pnp.head.opt.gripper', 'Gripper')}</span>
-                </button>
-              </div>
+              />
             </div>
 
             <div className="pp-table-wrap">
@@ -1098,29 +1105,23 @@ export function PickPlacePanel() {
                   <RotateCw size={14} aria-hidden="true" />
                   {t('pnp.rotaryAxis.label', 'Part rotation (A-axis)')}
                 </span>
-                <div
+                {/* Canonical segmented control (§2.8/W-C): a bool MODE switch → tonal. */}
+                <SegControl<'off' | 'on'>
+                  options={[
+                    { value: 'off', label: t('pnp.rotaryAxis.off', 'Off') },
+                    {
+                      value: 'on',
+                      label: t('pnp.rotaryAxis.on', 'Emit A°'),
+                      title: t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)'),
+                    },
+                  ]}
+                  value={params.rotaryAxis ? 'on' : 'off'}
+                  onChange={(v) => setParam('rotaryAxis', v === 'on')}
+                  ariaLabel={t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)')}
+                  variant="tonal"
+                  size="sm"
                   className="pnp-seg pnp-seg-bool"
-                  role="group"
-                  aria-label={t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)')}
-                >
-                  <button
-                    type="button"
-                    className={'pnp-seg-btn' + (!params.rotaryAxis ? ' active' : '')}
-                    aria-pressed={!params.rotaryAxis}
-                    onClick={() => setParam('rotaryAxis', false)}
-                  >
-                    {t('pnp.rotaryAxis.off', 'Off')}
-                  </button>
-                  <button
-                    type="button"
-                    className={'pnp-seg-btn' + (params.rotaryAxis ? ' active' : '')}
-                    aria-pressed={params.rotaryAxis}
-                    onClick={() => setParam('rotaryAxis', true)}
-                    title={t('pnp.rotaryAxis', 'Emit part rotation as a real A-axis word (G0 A…)')}
-                  >
-                    {t('pnp.rotaryAxis.on', 'Emit A°')}
-                  </button>
-                </div>
+                />
               </div>
               <p className="pp-hint">
                 {t('pnp.rot.note', 'Rotation is edited per-op in the Operations table.')}

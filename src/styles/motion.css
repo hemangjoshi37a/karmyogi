@@ -57,20 +57,11 @@
 }
 
 /* ─── Motion-as-modal: kill the DOUBLE HEADER (Area 5 / W-E) ───
-   MotionPanel is rendered inside <Modal title="Motion Settings">, whose
-   .km-modal-head already supplies the canonical title. The panel's own sticky
-   <h4> ("<label> settings ($$)") would be a SECOND title competing with it, so
-   inside the modal pane we DEMOTE that h4 to a small inline caption (the
-   firmware label is still useful, it just no longer reads as a rival heading).
-   Outside a modal (e.g. if ever docked) the h4 keeps its section-header look. */
-.km-modal-pane .mo-sticky-head > h4 {
-  font-size: var(--fs-label);
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--fg-muted);
-  margin-bottom: 2px;
-}
+   MotionPanel is rendered inside <Modal title="Motion Settings"> with the
+   `embedded` prop, which suppresses the panel's own <h4> AND the sticky-toolbar
+   treatment so the Modal's title is the ONLY title row. The toolbar then reads
+   as a plain top row of actions directly under that single title. (No CSS
+   demotion needed — the <h4> simply isn't rendered when embedded.) */
 
 .mo-row {
   display: flex;

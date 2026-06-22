@@ -34,6 +34,8 @@ import { useTabCommands } from '../machine/tabCommands'
 import { IconButton } from '../components/IconButton'
 import { Icon } from '../components/Icons'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { SliderField as KitSlider } from '../components/ui/SliderField'
+import { SegControl } from '../components/ui/SegControl'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
@@ -87,7 +89,6 @@ function UndoGlyph() {
  * dragging, but the number box accepts exact entry (caller's clampNum guards NaN).
  */
 function SliderField({
-  icon,
   label,
   htmlFor,
   unit,
@@ -99,7 +100,8 @@ function SliderField({
   disabled,
   title,
 }: {
-  icon: ReactNode
+  /** Kept for call-site compatibility; the shared row has no leading glyph. */
+  icon?: ReactNode
   label: string
   htmlFor: string
   unit?: string
@@ -111,53 +113,19 @@ function SliderField({
   disabled?: boolean
   title?: string
 }) {
-  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
-  // Filled-track percentage for the accent fill (read as --pct by the WebKit/Blink
-  // track gradient; Firefox fills via ::-moz-range-progress). Uses the CLAMPED value
-  // so an out-of-range typed value never overflows the fill.
-  const pct =
-    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <div className="sig-sfield" title={title}>
-      <label className="sig-sfield-lbl" htmlFor={htmlFor}>
-        <span className="sig-sfield-ico" aria-hidden>
-          {icon}
-        </span>
-        <span className="sig-sfield-txt">{label}</span>
-      </label>
-      <input
-        type="range"
-        className="sig-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={clamp(value)}
-        disabled={disabled}
-        style={{ '--pct': `${pct}%` } as React.CSSProperties}
-        onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        aria-label={label}
-        tabIndex={-1}
-      />
-      <span className="sig-sfield-num">
-        <input
-          id={htmlFor}
-          type="number"
-          inputMode="decimal"
-          className="sig-slider-num"
-          min={min}
-          max={max}
-          step={step}
-          value={String(value)}
-          disabled={disabled}
-          aria-label={label}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value)
-            if (Number.isFinite(v)) onChange(v)
-          }}
-        />
-        {unit ? <span className="sig-sfield-unit">{unit}</span> : null}
-      </span>
-    </div>
+    <KitSlider
+      id={htmlFor}
+      label={label}
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      unit={unit}
+      title={title}
+      disabled={disabled}
+      onChange={onChange}
+    />
   )
 }
 
@@ -749,25 +717,23 @@ export function SignaturePanel() {
       </p>
 
       {/* ---- Mode toggle ---- */}
-      <div className="sig-modes" role="tablist" aria-label={t('sig.mode.aria', 'Signature input mode')}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'draw'}
-          className={'sig-mode' + (mode === 'draw' ? ' active' : '')}
-          onClick={() => setMode('draw')}
-        >
-          {t('sig.mode.draw', 'Draw')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'image'}
-          className={'sig-mode' + (mode === 'image' ? ' active' : '')}
-          onClick={() => setMode('image')}
-        >
-          <Icon name="camera" size={14} /> {t('sig.mode.image', 'From image')}
-        </button>
+      <div className="sig-modes">
+        <SegControl<Mode>
+          ariaLabel={t('sig.mode.aria', 'Signature input mode')}
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'draw', label: t('sig.mode.draw', 'Draw') },
+            {
+              value: 'image',
+              label: (
+                <>
+                  <Icon name="camera" size={14} /> {t('sig.mode.image', 'From image')}
+                </>
+              ),
+            },
+          ]}
+        />
       </div>
 
       <CamStatus
@@ -782,9 +748,9 @@ export function SignaturePanel() {
         {mode === 'draw' ? (
           <>
             {/* ============ Freehand draw surface (centerpiece) ============ */}
-            <section className="sig-card sig-card-wide">
+            <section className="sig-card sig-card-wide ui-card">
               <div className="sig-card-head">
-                <h4><Icon name="frame" size={14} className="cam-card-ico" /> {t('sig.draw.title', 'Sign here')}</h4>
+                <h4 className="ui-sec-head"><Icon name="frame" size={14} className="cam-card-ico" /> {t('sig.draw.title', 'Sign here')}</h4>
                 <div className="sig-draw-tools">
                   <IconButton
                     type="button"
@@ -874,9 +840,9 @@ export function SignaturePanel() {
         ) : (
           <>
             {/* ============ Traced preview (centerpiece) ============ */}
-            <section className="sig-card sig-preview-card sig-card-wide">
+            <section className="sig-card sig-preview-card sig-card-wide ui-card">
               <div className="sig-card-head">
-                <h4><Icon name="camera" size={14} className="cam-card-ico" /> {t('sig.preview.title', 'Traced preview')}</h4>
+                <h4 className="ui-sec-head"><Icon name="camera" size={14} className="cam-card-ico" /> {t('sig.preview.title', 'Traced preview')}</h4>
                 {previewPolys.length > 0 && (
                   <span className="sig-badge">{t('sig.preview.strokes', '{n} stroke(s)', { n: previewPolys.length })}</span>
                 )}
@@ -914,9 +880,9 @@ export function SignaturePanel() {
             </section>
 
             {/* ---- Step 1: Upload ---- */}
-            <section className="sig-card">
+            <section className="sig-card ui-card">
               <div className="sig-card-head">
-                <h4><span className="sig-step">1</span> {t('sig.step1', 'Upload signature')}</h4>
+                <h4 className="ui-sec-head"><span className="sig-step">1</span> {t('sig.step1', 'Upload signature')}</h4>
               </div>
               <div
                 className={'sig-drop' + (dragOver ? ' over' : '')}
@@ -950,9 +916,9 @@ export function SignaturePanel() {
             </section>
 
             {/* ---- Step 2: Trace + size ---- */}
-            <section className="sig-card">
+            <section className="sig-card ui-card">
               <div className="sig-card-head">
-                <h4><span className="sig-step">2</span> {t('sig.step2', 'Adjust')}</h4>
+                <h4 className="ui-sec-head"><span className="sig-step">2</span> {t('sig.step2', 'Adjust')}</h4>
               </div>
               <div className="sig-sgrid">
                 <SliderField
@@ -1013,7 +979,7 @@ export function SignaturePanel() {
         )}
 
         {/* ---- Advanced (collapsed) — shared pen / placement params ---- */}
-        <section className="sig-card sig-card-wide">
+        <section className="sig-card sig-card-wide ui-card">
           <button
             type="button"
             className="sig-disclosure"
@@ -1111,7 +1077,7 @@ export function SignaturePanel() {
         </section>
 
         {/* ---- Send action bar (Send to machine / Open in Visualizer) ---- */}
-        <section className="sig-card sig-card-wide">
+        <section className="sig-card sig-card-wide ui-card">
           <div className="sig-actions">
             <button
               type="button"
@@ -1133,7 +1099,7 @@ export function SignaturePanel() {
         </section>
 
         {/* ---- Raw G-code (collapsed by default, full width) ---- */}
-        <section className="sig-card sig-card-wide">
+        <section className="sig-card sig-card-wide ui-card">
           <button
             type="button"
             className="sig-disclosure"

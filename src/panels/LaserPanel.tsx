@@ -43,6 +43,8 @@ import {
   type RasterParams,
 } from '../core/laserImage'
 import { CamEmpty } from '../components/cam/CamUI'
+import { SliderField as KitSlider } from '../components/ui/SliderField'
+import { SegControl as KitSeg } from '../components/ui/SegControl'
 import '../styles/laser.css'
 import '../styles/laserImage.css'
 import '../styles/cam.css'
@@ -75,15 +77,9 @@ function gcodeLineCount(gcode: string): number {
 }
 
 /**
- * Sleek slider + number-input + unit row, modelled on the CAD/CAM panel's
- * `SliderField` (which mirrors the Controller jog "Feed" control). A compact
- * one-line row: leading glyph + label · themed draggable `.laser-slider`
- * (accent fill via the inline `--pct` var) · small typable `.laser-snum`
- * clamped to [min, max] for the slider but allowing exact entry · inline unit.
- *
- * `value`/`onChange` carry the existing wiring untouched — only the input WIDGET
- * changes (bare number box → slider + number). All theming is via CSS vars so it
- * follows light/dark.
+ * Thin wrapper around the shared {@link KitSlider} keeping the laser tab's
+ * existing call sites (icon + integer props) unchanged. The icon is dropped (the
+ * shared row has no leading glyph); `integer` just keeps the step at 1.
  */
 function SliderField(props: {
   icon: ReactNode
@@ -97,55 +93,23 @@ function SliderField(props: {
   integer?: boolean
   onChange: (n: number) => void
 }) {
-  const { icon, label, value, min, max, step = 1, unit, title, integer, onChange } = props
-  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
-  // Filled-track percentage for the accent fill (read as --pct by the WebKit/Blink
-  // track gradient; Firefox fills via ::-moz-range-progress). Uses the CLAMPED
-  // value so an out-of-range typed value doesn't overflow the fill.
-  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
+  const { label, value, min, max, step, unit, title, integer, onChange } = props
   return (
-    <div className="laser-sfield" title={title}>
-      <span className="laser-sfield-lbl">
-        <span className="laser-sfield-ico" aria-hidden>
-          {icon}
-        </span>
-        <span className="laser-sfield-txt">{label}</span>
-      </span>
-      <input
-        type="range"
-        className="laser-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={clamp(value)}
-        style={{ '--pct': `${pct}%` } as React.CSSProperties}
-        onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        aria-label={label}
-        tabIndex={-1}
-      />
-      <span className="laser-snum">
-        <input
-          type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={String(value)}
-          aria-label={label}
-          onChange={(e) => {
-            // Allow EXACT entry (don't clamp the typed number) — only blank/NaN is
-            // rejected; the caller's own guard re-clamps where it must reach the emitter.
-            const v = integer ? parseInt(e.target.value, 10) : parseFloat(e.target.value)
-            if (Number.isFinite(v)) onChange(v)
-          }}
-        />
-        {unit ? <i>{unit}</i> : null}
-      </span>
-    </div>
+    <KitSlider
+      label={label}
+      value={value}
+      min={min}
+      max={max}
+      step={step ?? (integer ? 1 : undefined)}
+      unit={unit}
+      title={title}
+      onChange={onChange}
+    />
   )
 }
 
 /** One option in a {@link SegControl}. */
-interface SegOption<T> {
+interface SegOption<T extends string> {
   value: T
   label: string
   icon?: IconName
@@ -153,39 +117,36 @@ interface SegOption<T> {
 }
 
 /**
- * Compact icon-led segmented control (mirrors `.cc-opseg`) for mode/enum choices
- * — replaces the bare radio rows. Themed via CSS vars; the active pill fills with
- * the accent. Each button is a real <button role=radio> so it stays keyboard- and
- * touch-friendly.
+ * Wrapper around the shared {@link KitSeg} keeping the laser tab's icon-led
+ * option shape. Icons are folded into the segment label node; `variant` defaults
+ * to `tonal` (mode switches) so only the true CTA stays full-accent.
  */
 function SegControl<T extends string>(props: {
   ariaLabel: string
   value: T
   options: SegOption<T>[]
   onChange: (v: T) => void
+  variant?: 'tonal' | 'accent'
 }) {
-  const { ariaLabel, value, options, onChange } = props
+  const { ariaLabel, value, options, onChange, variant } = props
   return (
-    <div className="laser-seg" role="radiogroup" aria-label={ariaLabel}>
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="radio"
-          aria-checked={value === o.value}
-          className={`laser-seg-btn${value === o.value ? ' is-on' : ''}`}
-          title={o.title}
-          onClick={() => onChange(o.value)}
-        >
-          {o.icon && (
-            <span className="laser-seg-ico" aria-hidden>
-              <Icon name={o.icon} size={14} />
-            </span>
-          )}
-          <span className="laser-seg-lbl">{o.label}</span>
-        </button>
-      ))}
-    </div>
+    <KitSeg<T>
+      ariaLabel={ariaLabel}
+      value={value}
+      onChange={onChange}
+      variant={variant}
+      options={options.map((o) => ({
+        value: o.value,
+        title: o.title,
+        label: o.icon ? (
+          <>
+            <Icon name={o.icon} size={14} /> {o.label}
+          </>
+        ) : (
+          o.label
+        ),
+      }))}
+    />
   )
 }
 
@@ -346,27 +307,32 @@ export function LaserPanel() {
   )
   return (
     <div className="cc-presets-host" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div className="li-wb-switch" role="tablist" aria-label={t('laser.img.wb.aria', 'Laser workbench')}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={workbench === 'vector'}
-          className={`li-seg-btn${workbench === 'vector' ? ' is-on' : ''}`}
-          onClick={() => setWorkbench('vector')}
-          title={t('laser.img.wb.vector.title', 'Vector cutting — DXF contours become cut loops and lines.')}
-        >
-          <Icon name="frame" size={14} /> {t('laser.img.wb.vector', 'Vector cut')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={workbench === 'image'}
-          className={`li-seg-btn${workbench === 'image' ? ' is-on' : ''}`}
-          onClick={() => setWorkbench('image')}
-          title={t('laser.img.wb.image.title', 'Raster engraving — a photo or logo burned line-by-line with dithering.')}
-        >
-          <Icon name="camera" size={14} /> {t('laser.img.wb.image', 'Image engrave')}
-        </button>
+      <div className="li-wb-switch">
+        <KitSeg<LaserWorkbench>
+          ariaLabel={t('laser.img.wb.aria', 'Laser workbench')}
+          value={workbench}
+          onChange={setWorkbench}
+          options={[
+            {
+              value: 'vector',
+              title: t('laser.img.wb.vector.title', 'Vector cutting — DXF contours become cut loops and lines.'),
+              label: (
+                <>
+                  <Icon name="frame" size={14} /> {t('laser.img.wb.vector', 'Vector cut')}
+                </>
+              ),
+            },
+            {
+              value: 'image',
+              title: t('laser.img.wb.image.title', 'Raster engraving — a photo or logo burned line-by-line with dithering.'),
+              label: (
+                <>
+                  <Icon name="camera" size={14} /> {t('laser.img.wb.image', 'Image engrave')}
+                </>
+              ),
+            },
+          ]}
+        />
       </div>
       {workbench === 'image' ? <LaserImageWorkbench /> : <LaserVectorWorkbench />}
     </div>
@@ -380,7 +346,7 @@ export function LaserPanel() {
 /** Cap the working (dither) resolution so the live preview stays responsive. */
 const MAX_WORK_PX = 1100 // longest edge of the working raster (≈1.2 MP cap)
 
-/** Compact slider+number row scoped to the image workbench (mirrors SliderField). */
+/** Image-workbench slider row — a thin wrapper over the shared {@link KitSlider}. */
 function ImgField(props: {
   icon: IconName
   label: string
@@ -393,45 +359,18 @@ function ImgField(props: {
   integer?: boolean
   onChange: (n: number) => void
 }) {
-  const { icon, label, value, min, max, step = 1, unit, title, integer, onChange } = props
-  const cl = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
-  const pct = max > min ? Math.min(100, Math.max(0, ((cl(value) - min) / (max - min)) * 100)) : 0
+  const { label, value, min, max, step, unit, title, integer, onChange } = props
   return (
-    <div className="li-sfield" title={title}>
-      <span className="li-sfield-lbl">
-        <span className="li-sfield-ico" aria-hidden>
-          <Icon name={icon} size={13} />
-        </span>
-        <span className="li-sfield-txt">{label}</span>
-      </span>
-      <input
-        type="range"
-        className="li-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={cl(value)}
-        style={{ '--pct': `${pct}%` } as React.CSSProperties}
-        onChange={(e) => onChange(cl(Number(e.target.value)))}
-        aria-label={label}
-        tabIndex={-1}
-      />
-      <span className="li-snum">
-        <input
-          type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={String(value)}
-          aria-label={label}
-          onChange={(e) => {
-            const v = integer ? parseInt(e.target.value, 10) : parseFloat(e.target.value)
-            if (Number.isFinite(v)) onChange(v)
-          }}
-        />
-        {unit ? <i>{unit}</i> : null}
-      </span>
-    </div>
+    <KitSlider
+      label={label}
+      value={value}
+      min={min}
+      max={max}
+      step={step ?? (integer ? 1 : undefined)}
+      unit={unit}
+      title={title}
+      onChange={onChange}
+    />
   )
 }
 
@@ -710,9 +649,9 @@ function LaserImageWorkbench() {
       </div>
 
       {/* Live preview — the glance-to-understand centerpiece. */}
-      <section className="li-card">
+      <section className="li-card ui-card">
         <div className="li-card-head">
-          <h4>
+          <h4 className="ui-sec-head">
             <span className="li-card-ico" aria-hidden>
               <Icon name="eye" size={14} />
             </span>
@@ -781,9 +720,9 @@ function LaserImageWorkbench() {
       </section>
 
       {/* Image adjustments. */}
-      <section className="li-card">
+      <section className="li-card ui-card">
         <div className="li-card-head">
-          <h4>
+          <h4 className="ui-sec-head">
             <span className="li-card-ico" aria-hidden>
               <Icon name="settings" size={14} />
             </span>
@@ -837,9 +776,9 @@ function LaserImageWorkbench() {
       </section>
 
       {/* Dither mode. */}
-      <section className="li-card">
+      <section className="li-card ui-card">
         <div className="li-card-head">
-          <h4>
+          <h4 className="ui-sec-head">
             <span className="li-card-ico" aria-hidden>
               <Icon name="copy" size={14} />
             </span>
@@ -889,9 +828,9 @@ function LaserImageWorkbench() {
       </section>
 
       {/* Raster geometry. */}
-      <section className="li-card">
+      <section className="li-card ui-card">
         <div className="li-card-head">
-          <h4>
+          <h4 className="ui-sec-head">
             <span className="li-card-ico" aria-hidden>
               <Icon name="frame" size={14} />
             </span>
@@ -938,26 +877,15 @@ function LaserImageWorkbench() {
           <span className="li-segrow-label" title={t('laser.img.raster.angle.title', 'Scan-line direction: horizontal (sweep X) or vertical (sweep Y).')}>
             {t('laser.img.raster.angle', 'Scan angle')}
           </span>
-          <div className="li-seg" role="radiogroup" aria-label={t('laser.img.raster.angle', 'Scan angle')}>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={params.scanAngle === ScanAngle.Horizontal}
-              className={`li-seg-btn${params.scanAngle === ScanAngle.Horizontal ? ' is-on' : ''}`}
-              onClick={() => patch({ scanAngle: ScanAngle.Horizontal })}
-            >
-              {t('laser.img.raster.angle.h', '0° (horizontal)')}
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={params.scanAngle === ScanAngle.Vertical}
-              className={`li-seg-btn${params.scanAngle === ScanAngle.Vertical ? ' is-on' : ''}`}
-              onClick={() => patch({ scanAngle: ScanAngle.Vertical })}
-            >
-              {t('laser.img.raster.angle.v', '90° (vertical)')}
-            </button>
-          </div>
+          <KitSeg<ScanAngle>
+            ariaLabel={t('laser.img.raster.angle', 'Scan angle')}
+            value={params.scanAngle}
+            onChange={(v) => patch({ scanAngle: v })}
+            options={[
+              { value: ScanAngle.Horizontal, label: t('laser.img.raster.angle.h', '0° (horizontal)') },
+              { value: ScanAngle.Vertical, label: t('laser.img.raster.angle.v', '90° (vertical)') },
+            ]}
+          />
         </div>
         <div className="li-toggle-row">
           <label className="li-toggle" title={t('laser.img.raster.bidi.title', 'Engrave on both sweep directions (faster) vs always left-to-right (more consistent, slower).')}>
@@ -972,9 +900,9 @@ function LaserImageWorkbench() {
       </section>
 
       {/* Power + passes. */}
-      <section className="li-card">
+      <section className="li-card ui-card">
         <div className="li-card-head">
-          <h4>
+          <h4 className="ui-sec-head">
             <span className="li-card-ico" aria-hidden>
               <Icon name="laser" size={14} />
             </span>
@@ -1057,26 +985,29 @@ function LaserImageWorkbench() {
           <span className="li-segrow-label" title={t('laser.img.power.mode.title', 'M4 dynamic scales power with feed (recommended for engraving — even shading through accel); M3 is constant power.')}>
             {t('laser.img.power.mode', 'Power mode')}
           </span>
-          <div className="li-seg" role="radiogroup" aria-label={t('laser.img.power.mode', 'Power mode')}>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={params.dynamicPower}
-              className={`li-seg-btn${params.dynamicPower ? ' is-on' : ''}`}
-              onClick={() => patch({ dynamicPower: true })}
-            >
-              <Icon name="play" size={13} /> {t('laser.img.power.m4', 'M4 dynamic')}
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={!params.dynamicPower}
-              className={`li-seg-btn${!params.dynamicPower ? ' is-on' : ''}`}
-              onClick={() => patch({ dynamicPower: false })}
-            >
-              <Icon name="spindle" size={13} /> {t('laser.img.power.m3', 'M3 constant')}
-            </button>
-          </div>
+          <KitSeg<'dynamic' | 'constant'>
+            ariaLabel={t('laser.img.power.mode', 'Power mode')}
+            value={params.dynamicPower ? 'dynamic' : 'constant'}
+            onChange={(v) => patch({ dynamicPower: v === 'dynamic' })}
+            options={[
+              {
+                value: 'dynamic',
+                label: (
+                  <>
+                    <Icon name="play" size={13} /> {t('laser.img.power.m4', 'M4 dynamic')}
+                  </>
+                ),
+              },
+              {
+                value: 'constant',
+                label: (
+                  <>
+                    <Icon name="spindle" size={13} /> {t('laser.img.power.m3', 'M3 constant')}
+                  </>
+                ),
+              },
+            ]}
+          />
         </div>
         <div className="li-toggle-row">
           <label className="li-toggle" title={t('laser.img.power.focus.title', 'Move Z to a fixed focus height at program start (no negative Z — there is no safe-Z retract before it).')}>
@@ -1443,9 +1374,9 @@ function LaserVectorWorkbench() {
       </div>
 
       {/* DXF import. */}
-      <section className="lp-card">
+      <section className="lp-card ui-card">
         <div className="lp-card-head">
-          <h4>
+          <h4 className="ui-sec-head">
             <span className="cam-card-ico" aria-hidden="true">
               <Icon name="frame" size={14} />
             </span>
@@ -1500,9 +1431,9 @@ function LaserVectorWorkbench() {
       </section>
 
       {/* Nesting / sheet. */}
-      <section className="lp-card">
+      <section className="lp-card ui-card">
         <div className="lp-card-head">
-          <h4>
+          <h4 className="ui-sec-head">
             <span className="cam-card-ico" aria-hidden="true">
               <Icon name="duplicate" size={14} />
             </span>
@@ -1597,9 +1528,9 @@ function LaserVectorWorkbench() {
       </section>
 
       {/* Common cut parameters. */}
-      <section className="lp-card">
+      <section className="lp-card ui-card">
         <div className="lp-card-head">
-          <h4>
+          <h4 className="ui-sec-head">
             <span className="cam-card-ico" aria-hidden="true">
               <Icon name="laser" size={14} />
             </span>
@@ -1706,9 +1637,9 @@ function LaserVectorWorkbench() {
       {showAdvanced && (
       <>
       {/* Mode-specific: piercing. Both modes can pierce; defaults differ. */}
-      <section className="lp-card">
+      <section className="lp-card ui-card">
         <div className="lp-card-head">
-          <h4>{fiberMode ? t('laser.pierce.title.fiber', 'Piercing (Fiber)') : t('laser.pierce.title.co2', 'Piercing (CO2 — usually off)')}</h4>
+          <h4 className="ui-sec-head">{fiberMode ? t('laser.pierce.title.fiber', 'Piercing (Fiber)') : t('laser.pierce.title.co2', 'Piercing (CO2 — usually off)')}</h4>
           <label className="lp-toggle">
             <input
               type="checkbox"
@@ -1753,9 +1684,9 @@ function LaserVectorWorkbench() {
       </section>
 
       {/* Mode-specific: focus-Z. */}
-      <section className="lp-card">
+      <section className="lp-card ui-card">
         <div className="lp-card-head">
-          <h4>{fiberMode ? t('laser.focus.title.fiber', 'Autofocus / focus offset (Fiber)') : t('laser.focus.title.co2', 'Focus height (CO2)')}</h4>
+          <h4 className="ui-sec-head">{fiberMode ? t('laser.focus.title.fiber', 'Autofocus / focus offset (Fiber)') : t('laser.focus.title.co2', 'Focus height (CO2)')}</h4>
           <label className="lp-toggle">
             <input
               type="checkbox"

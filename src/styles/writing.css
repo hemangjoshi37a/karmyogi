@@ -152,175 +152,9 @@
   white-space: nowrap;
 }
 
-.cc-sfield {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px 8px;
-  min-width: 0;
-  padding: 1px 0;
-  border-radius: var(--radius);
-  transition: background 0.12s;
-}
-.cc-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
-.cc-sfield-lbl {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 1 auto;
-  width: 96px;
-  min-width: 40px;
-  font-size: var(--fs-label);
-  font-weight: 500;
-  color: var(--fg-muted);
-}
-.cc-sfield:focus-within .cc-sfield-lbl { color: var(--fg); }
-.cc-sfield-ico {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 18px;
-  color: var(--fg-muted);
-  opacity: 0.85;
-  transition: color 0.12s, opacity 0.12s;
-}
-.cc-sfield:focus-within .cc-sfield-ico { color: var(--accent); opacity: 1; }
-.cc-sfield-txt {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.cc-sfield-num {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  width: 84px;
-  height: var(--ctl-h);
-  padding: 0 6px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  min-width: 0;
-  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
-}
-.cc-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
-.cc-sfield-num:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
-}
-.cc-sfield-unit {
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--fg-muted);
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  opacity: 0.8;
-}
-
-/* Themed draggable slider — track + thumb via theme vars (light/dark); accent
-   fill to the LEFT of the thumb from the inline `--mc-pct` (Blink) and from
-   ::-moz-range-progress (Firefox). */
-.cc-slider {
-  flex: 1 1 0;
-  min-width: 34px;
-  height: 18px;
-  margin: 0;
-  cursor: pointer;
-  background: transparent;
-  -webkit-appearance: none;
-  appearance: none;
-}
-.cc-slider::-webkit-slider-runnable-track {
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: linear-gradient(
-    to right,
-    var(--accent) 0 var(--mc-pct, 0%),
-    var(--bg-elev) var(--mc-pct, 0%) 100%
-  );
-}
-.cc-slider::-moz-range-track {
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-}
-.cc-slider::-moz-range-progress {
-  height: 5px;
-  border-radius: 999px;
-  background: var(--accent);
-}
-.cc-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 13px;
-  height: 13px;
-  margin-top: -4px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-elev);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-  transition: background 0.12s ease, box-shadow 0.12s ease;
-}
-.cc-slider::-moz-range-thumb {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-elev);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-}
-.cc-slider:hover::-webkit-slider-thumb {
-  background: color-mix(in srgb, var(--accent) 85%, #fff);
-}
-.cc-slider:hover::-moz-range-thumb {
-  background: color-mix(in srgb, var(--accent) 85%, #fff);
-}
-.cc-slider:focus-visible { outline: none; }
-.cc-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.cc-slider:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-/* the small typable number input inside the bordered .cc-sfield-num frame */
-.cc-slider-num {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  height: 100%;
-  border: none;
-  background: transparent;
-  padding: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--fg);
-  -moz-appearance: textfield;
-}
-.cc-slider-num:focus { outline: none; box-shadow: none; }
-.cc-slider-num::-webkit-outer-spin-button,
-.cc-slider-num::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-/* Touch / coarse-pointer sizing — bigger track + thumb so it's grabbable. */
-@media (pointer: coarse) {
-  .cc-slider { height: 24px; }
-  .cc-slider::-webkit-slider-runnable-track,
-  .cc-slider::-moz-range-track,
-  .cc-slider::-moz-range-progress { height: 6px; }
-  .cc-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
-  .cc-slider::-moz-range-thumb { width: 17px; height: 17px; }
-}
+/* The Writing slider rows now use the shared <SliderField> (.ui-sfield /
+   .ui-slider in slider-row.css); the bespoke .cc-sfield / .cc-slider copies
+   were removed (W-B). */
 
 .wr-text {
   width: 100%;
@@ -404,45 +238,9 @@
    Canonical segmented control (§2.8/W-C): inactive = --bg-input/--fg; 1px seam;
    --radius-sm. This is a MODE SWITCH, so the active segment uses the tonal
    --accent-soft tint (reserving full-accent for the true primary CTA). */
-.wr-mode {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-input);
-}
-.wr-seg {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: var(--ctl-h);
-  min-height: 0;
-  padding: 0 var(--sp-2);
-  font: inherit;
-  font-size: var(--fs-ctl);
-  color: var(--fg);
-  background: var(--bg-input);
-  border: none;
-  border-right: 1px solid var(--border);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-.wr-seg:last-child {
-  border-right: none;
-}
-.wr-seg:hover:not(:disabled):not(.is-active) {
-  background: color-mix(in srgb, var(--fg) 6%, var(--bg-input));
-}
-.wr-seg.is-active {
-  background: var(--accent-soft);
-  color: var(--fg);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
-}
-.wr-seg:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
+/* The Stroke/Outline/Carve mode switch + the alignment picker now use the shared
+   <SegControl> (.ui-seg); the bespoke .wr-mode / .wr-seg / .wr-modeseg button
+   styles were removed (W-C). Only the label/note spans below survive. */
 .wr-seg-note {
   font-size: 9px;
   text-transform: uppercase;
@@ -454,47 +252,16 @@
 .wr-modebar {
   display: flex;
   width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-input);
 }
-.wr-modeseg {
+/* Make the shared <SegControl> for G-code mode span the full bar width and give
+   each segment room for its glyph + label. */
+.wr-modebar .ui-seg {
+  display: flex;
+  width: 100%;
+}
+.wr-modebar .ui-seg-btn {
   flex: 1 1 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   gap: 5px;
-  height: var(--ctl-h);
-  min-height: 36px;
-  padding: 0 var(--sp-2);
-  font: inherit;
-  font-size: var(--fs-ctl);
-  color: var(--fg);
-  background: var(--bg-input);
-  border: none;
-  border-right: 1px solid var(--border);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-.wr-modeseg:last-child {
-  border-right: none;
-}
-.wr-modeseg svg {
-  flex: 0 0 auto;
-}
-.wr-modeseg:hover:not(:disabled):not(.is-active) {
-  background: color-mix(in srgb, var(--fg) 6%, var(--bg-input));
-}
-.wr-modeseg.is-active {
-  color: var(--fg);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
-}
-.wr-modeseg:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 .wr-modeseg-lbl {
   overflow: hidden;
@@ -611,11 +378,6 @@
   .wr-mode {
     flex: 1 1 auto;
   }
-  .wr-seg {
-    flex: 1 1 0;
-    justify-content: center;
-    height: var(--ctl-h-touch);
-  }
   .wr-tgl {
     width: var(--ctl-h-touch);
     height: var(--ctl-h-touch);
@@ -623,14 +385,6 @@
   }
   .wr-vsep {
     min-height: var(--ctl-h-touch);
-  }
-  /* slider number box stays usable but compact; label may shrink */
-  .cc-sfield-lbl {
-    width: 78px;
-  }
-  .cc-sfield-num {
-    width: 78px;
-    height: var(--ctl-h-touch);
   }
 }
 
@@ -642,16 +396,10 @@
     height: var(--ctl-h-touch);
     min-height: var(--ctl-h-touch);
   }
-  .wr-seg {
-    height: var(--ctl-h-touch);
-  }
   .wr-tgl {
     width: var(--ctl-h-touch);
     height: var(--ctl-h-touch);
     min-width: var(--ctl-h-touch);
-  }
-  .cc-sfield-num {
-    height: var(--ctl-h-touch);
   }
 }
 
@@ -666,9 +414,6 @@
     .wr-field input {
       height: var(--ctl-h-touch);
       min-height: var(--ctl-h-touch);
-    }
-    .cc-sfield-num {
-      height: var(--ctl-h-touch);
     }
   }
 }

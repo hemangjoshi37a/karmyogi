@@ -266,57 +266,28 @@
    Themed icon-led segmented buttons (mirrors CadCam `.cc-opseg`): glyph + label
    inline, active fills with the accent. Used for the head-type picker and the
    rotary-axis Off/Emit toggle. All colors via theme vars (light + dark). */
-.pnp-seg {
-  display: flex;
+/* Head-type + rotary toggles now render via the shared <SegControl> kit
+   (.ui-seg / .ui-seg-btn). Only the row-fill layout + the optional leading-glyph
+   wrappers (used inside the segment labels) are kept here. */
+.ui-seg.pnp-seg {
   flex: 1 1 auto;
   min-width: 0;
-  gap: var(--sp-1);
 }
-.pnp-seg-bool {
+.ui-seg.pnp-seg-bool {
   flex: 0 0 auto;
-}
-.pnp-seg-btn {
-  flex: 1 1 0;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-1);
-  padding: 5px var(--sp-2);
-  min-height: var(--ctl-h);
-  background: var(--bg-input);
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  line-height: 1.1;
-  font-size: var(--fs-ctl);
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-}
-.pnp-seg-btn:hover {
-  border-color: var(--accent);
-  color: var(--fg);
 }
 .pnp-seg-ico {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  /* §2.8/W-F: a leading glyph is muted, never accent. */
+  color: var(--fg-muted);
 }
 .pnp-seg-lbl {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* Mode switch (head type / rotary toggle): tonal accent-soft fill so only true
-   primaries are full-accent (§2.8 segmented). */
-.pnp-seg-btn.active {
-  background: var(--accent-soft);
-  color: var(--fg);
-  border-color: var(--accent);
-}
-.pnp-seg-btn.active .pnp-seg-ico {
-  color: var(--accent);
 }
 
 /* rotary-axis toggle row: label + Off/Emit segmented pair */
@@ -552,9 +523,6 @@
   .pnp-slider::-moz-range-thumb {
     width: 17px;
     height: 17px;
-  }
-  .pnp-seg-btn {
-    min-height: var(--ctl-h-touch);
   }
 }
 

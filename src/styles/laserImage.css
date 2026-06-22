@@ -14,29 +14,20 @@
   overflow: auto;
 }
 
-/* ---- Workbench switch (vector vs image), pinned at the top -------------- */
+/* ---- Workbench switch (vector vs image), pinned at the top --------------
+   A shared <SegControl> (.ui-seg, tonal) so it reads as a mode switch, not a
+   primary CTA (W-C). The wrapper makes it span the full width. */
 .li-wb-switch {
   display: flex;
-  gap: 2px;
   padding: var(--sp-2) var(--sp-3) 0;
   background: var(--bg-panel);
 }
-.li-wb-switch .li-seg-btn {
+.li-wb-switch .ui-seg {
+  display: flex;
+  width: 100%;
+}
+.li-wb-switch .ui-seg-btn {
   flex: 1 1 0;
-  justify-content: center;
-  min-height: var(--ctl-h-touch);
-  border: 1px solid var(--border);
-  background: var(--bg-input);
-}
-/* Vector / Image is a MODE switch — active uses the tonal --accent-soft tint
-   (not a full-accent primary), so only the real CTA reads as primary (W-C). */
-.li-wb-switch .li-seg-btn.is-on {
-  background: var(--accent-soft);
-  color: var(--fg);
-  border-color: var(--accent);
-}
-.li-wb-switch .li-seg-btn.is-on svg {
-  color: var(--accent);
 }
 
 /* ---- Header ------------------------------------------------------------- */
@@ -258,95 +249,9 @@
   grid-template-columns: 1fr;
   gap: var(--sp-1);
 }
-.li-sfield {
-  display: grid;
-  grid-template-columns: minmax(64px, 0.7fr) minmax(72px, 1.4fr) auto;
-  align-items: center;
-  gap: var(--sp-2);
-  min-height: var(--ctl-h);
-}
-.li-sfield-lbl {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  overflow: hidden;
-}
-.li-sfield-ico {
-  display: inline-flex;
-  color: var(--fg-muted);
-  flex: 0 0 auto;
-}
-.li-sfield-txt {
-  overflow: hidden;
-  /* wrap rather than ellipsing to a stub (W-B). */
-  white-space: normal;
-  line-height: 1.2;
-}
-.li-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  min-width: 72px;
-  height: 18px;
-  margin: 0;
-  background: transparent;
-  cursor: pointer;
-}
-.li-slider::-webkit-slider-runnable-track {
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: linear-gradient(
-    to right,
-    var(--accent) 0 var(--pct, 0%),
-    var(--bg-input) var(--pct, 0%) 100%
-  );
-}
-.li-slider::-moz-range-track {
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-input);
-}
-.li-slider::-moz-range-progress {
-  height: 5px;
-  border-radius: 999px;
-  background: var(--accent);
-}
-.li-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 13px;
-  height: 13px;
-  margin-top: -4px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-card);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-}
-.li-slider::-moz-range-thumb {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-card);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-}
-/* focus ring on the thumb (the global input outline is suppressed for ranges,
-   so the thumb carries the visible focus indicator — matches laser.css). */
-.li-slider:focus-visible {
-  outline: none;
-}
-.li-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.li-slider:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
-}
+/* The image-workbench slider rows now use the shared <SliderField> (.ui-sfield /
+   .ui-slider in slider-row.css). The bespoke .li-sfield / .li-slider blocks were
+   removed (W-B). .li-snum below is still used by the standalone Focus-Z number. */
 .li-snum {
   display: inline-flex;
   align-items: center;
@@ -371,37 +276,10 @@
   color: var(--fg-muted);
   min-width: 24px;
 }
-/* coarse-pointer / touch sizing — fatter track + thumb so it stays grabbable. */
-@media (pointer: coarse) {
-  .li-slider {
-    height: 24px;
-  }
-  .li-slider::-webkit-slider-runnable-track,
-  .li-slider::-moz-range-track,
-  .li-slider::-moz-range-progress {
-    height: 6px;
-  }
-  .li-slider::-webkit-slider-thumb {
-    width: 17px;
-    height: 17px;
-    margin-top: -6px;
-  }
-  .li-slider::-moz-range-thumb {
-    width: 17px;
-    height: 17px;
-  }
-}
 
-/* ---- Segmented controls (mode pickers) ---------------------------------- */
-.li-seg {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 2px;
-}
+/* ---- Segmented controls (dither grid pills) -----------------------------
+   The scan-angle / power-mode mode switches now use the shared <SegControl>
+   (.ui-seg); only the multi-row Dither grid keeps these bespoke pills (W-C). */
 .li-seg-btn {
   display: inline-flex;
   align-items: center;
@@ -507,13 +385,6 @@
 
 /* ---- Responsive --------------------------------------------------------- */
 @media (max-width: 560px) {
-  .li-sfield {
-    grid-template-columns: 1fr auto;
-  }
-  .li-slider {
-    grid-column: 1 / -1;
-    order: 3;
-  }
   .li-seg-btn,
   .li-snum input {
     min-height: var(--ctl-h-touch);

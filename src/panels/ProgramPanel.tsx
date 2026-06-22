@@ -332,7 +332,7 @@ export function ProgramPanel() {
       {/* Masonry wrapper. With only the Run card here, it spans full width. */}
       <div className="pp-cols">
         {/* --- Run card (full-width): start/current line + transport + progress + ETA --- */}
-        <section className="pp-card pp-run-card">
+        <section className="ui-card pp-card pp-run-card">
           <div className="pp-btnrow">
             <button
               className="pp-icon-btn pp-btn-reset"
@@ -484,9 +484,9 @@ export function ProgramPanel() {
       {/* --- Sections: one expandable/deletable card per source/tab. Each tab
               that generates G-code keeps its OWN section here; regenerating from
               a tab updates its section in place rather than clobbering others. --- */}
-      <section className="pp-card pp-sections-card">
+      <section className="ui-card pp-card pp-sections-card">
           <div className="pp-sections-header">
-            <span className="pp-section-title">
+            <span className="pp-section-title ui-sec-head">
               {t('prog.sections', 'Sections')}
             </span>
             <span className="pp-meta">

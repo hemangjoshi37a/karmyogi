@@ -11,6 +11,7 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { IconButton } from './IconButton'
+import { SegControl } from './ui/SegControl'
 import { usePlayback } from '../store/playback'
 import { useT } from '../i18n'
 import '../styles/timeline.css'
@@ -215,20 +216,18 @@ export function PlaybackTimeline() {
         {fmt(time)} / {fmt(duration)}
       </span>
 
-      <div className="pt-speed" role="group" aria-label={t('transport.speed', 'Playback speed')}>
-        {SPEEDS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className={s === speed ? 'pt-speed-btn pt-speed-btn--active' : 'pt-speed-btn'}
-            aria-pressed={s === speed}
-            title={t('transport.speedX', 'Speed {speed}×', { speed: s })}
-            onClick={() => setSpeed(s)}
-          >
-            {s}×
-          </button>
-        ))}
-      </div>
+      <SegControl
+        className="pt-speed"
+        ariaLabel={t('transport.speed', 'Playback speed')}
+        size="sm"
+        value={speed}
+        onChange={setSpeed}
+        options={SPEEDS.map((s) => ({
+          value: s,
+          label: `${s}×`,
+          title: t('transport.speedX', 'Speed {speed}×', { speed: s }),
+        }))}
+      />
     </div>
   )
 }

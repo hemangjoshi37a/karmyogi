@@ -7,6 +7,8 @@ import { DroReadout } from '../components/DroReadout'
 import { JogPad, jogKeyToDelta, jogParamsFromDelta, HOLD_DELAY_MS, type JogDelta } from '../components/JogPad'
 import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, SpindleCcwIcon, AxisZeroIcon, GoToZeroIcon, PlusIcon, MinusIcon, OvResetIcon } from '../components/MachineIcons'
 import { InfoTip } from '../components/InfoTip'
+import { SegControl } from '../components/ui/SegControl'
+import { SliderField } from '../components/ui/SliderField'
 import { Gamepad2, Crosshair, Navigation, RefreshCw, Trash2, ChevronDown } from 'lucide-react'
 import { useTeachPoints, type TeachFrame, type TeachPoint } from '../store/teachPoints'
 import { GamepadModal } from '../components/GamepadModal'
@@ -64,61 +66,6 @@ function Pad({ glyph, active }: { glyph: string; active?: boolean }) {
     <span className={`pad-hint${active ? ' on' : ''}`} aria-hidden="true">
       {glyph}
     </span>
-  )
-}
-
-/**
- * Compact Adobe-style numeric control: a slider you can DRAG plus a small number
- * input you can TYPE into — both synced and clamped to [min, max]. The whole row
- * carries one explanatory `title` tooltip (replacing the per-field ⓘ icon).
- */
-function SliderField(props: {
-  label: string
-  rowTitle: string
-  inputId: string
-  value: number
-  onChange: (v: number) => void
-  min: number
-  max: number
-  step: number
-  unit: string
-  ariaLabel: string
-}) {
-  const { label, rowTitle, inputId, value, onChange, min, max, step, unit, ariaLabel } = props
-  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
-  // Filled-track percentage for the slider's accent fill (read as --mc-pct by the
-  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress).
-  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
-  return (
-    <div className="mc-field mc-sliderfield" title={rowTitle}>
-      <label className="mc-label" htmlFor={inputId}>
-        {label}
-      </label>
-      <input
-        type="range"
-        className="mc-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
-        onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        aria-label={ariaLabel}
-        tabIndex={-1}
-      />
-      <input
-        id={inputId}
-        type="number"
-        className="mc-input mc-slider-num"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(clamp(Number(e.target.value) || 0))}
-        aria-label={ariaLabel}
-      />
-      <span className="mc-unit">{unit}</span>
-    </div>
   )
 }
 
@@ -1173,7 +1120,7 @@ export function ControllerPanel() {
 
       {/* Jog */}
       <section className="mc-section">
-        <h4>{t('ctrl.jog', 'Jog')}</h4>
+        <h4 className="ui-sec-head">{t('ctrl.jog', 'Jog')}</h4>
         <div className="mc-field">
           <span className="mc-label">{t('ctrl.step', 'Step')}</span>
           <span className="mc-seg mc-grow" role="group" aria-label={t('ctrl.step.aria', 'Jog step (mm)')}>
@@ -1202,35 +1149,33 @@ export function ControllerPanel() {
         </div>
         <SliderField
           label={t('ctrl.feed', 'Feed')}
-          rowTitle={t(
+          title={t(
             'ctrl.jogfeed.row',
             'Jog feed rate ({unit}) — how fast jog moves run. Drag the slider or type a value.',
             { unit: unitMmMin },
           )}
-          inputId="jog-feed"
+          id="jog-feed"
           value={jogFeed}
           onChange={setJogFeed}
           min={1}
           max={10000}
           step={10}
           unit={unitMmMin}
-          ariaLabel={t('ctrl.jogfeed.aria', 'Jog feed rate (mm/min)')}
         />
         <SliderField
           label={t('ctrl.jog.continuous', 'Hold dist')}
-          rowTitle={t(
+          title={t(
             'ctrl.jog.continuous.row',
             'How far a press-and-hold jog travels before repeating — capped to machine travel ({cap} {unit}). Drag the slider or type a value.',
             { cap: Math.round(continuousJogMm), unit: unitMm },
           )}
-          inputId="jog-cont"
+          id="jog-cont"
           value={contJogMm}
           onChange={setContJogMm}
           min={1}
           max={CONTINUOUS_JOG_MAX_MM}
           step={10}
           unit={unitMm}
-          ariaLabel={t('ctrl.jog.continuous.aria', 'Continuous (hold) jog distance (mm)')}
         />
         {/* Work coordinate system (G54–G59 → W1–W6): a compact row above the
             jog arrows. The active system is highlighted (machine `$G` report
@@ -1347,30 +1292,25 @@ export function ControllerPanel() {
             {gpHints && <Pad glyph={padGlyph('spindle')} active={padActive('spindle')} />}
             <Kbd k="s" />
           </button>
-          <span
-            className="mc-seg mc-spindle-mode"
-            role="group"
-            aria-label={t('ctrl.spindle.mode', 'Spindle output mode')}
-          >
-            <button
-              type="button"
-              className={spindleMode === 'spindle' ? 'active' : ''}
-              onClick={() => setSpindleMode('spindle')}
-              aria-pressed={spindleMode === 'spindle'}
-              title={t('ctrl.spindle.mode.spindle', 'Spindle — set speed in RPM (M3/M4 S<rpm>)')}
-            >
-              {t('ctrl.spindle', 'Spindle')}
-            </button>
-            <button
-              type="button"
-              className={spindleMode === 'pwm' ? 'active' : ''}
-              onClick={() => setSpindleMode('pwm')}
-              aria-pressed={spindleMode === 'pwm'}
-              title={t('ctrl.spindle.mode.pwm', 'PWM — drive the GRBL spindle-PWM output as a duty % (S over the 0–1000 PWM range)')}
-            >
-              {t('ctrl.spindle.pwm', 'PWM')}
-            </button>
-          </span>
+          <SegControl
+            className="mc-spindle-mode"
+            ariaLabel={t('ctrl.spindle.mode', 'Spindle output mode')}
+            size="sm"
+            value={spindleMode}
+            onChange={setSpindleMode}
+            options={[
+              {
+                value: 'spindle',
+                label: t('ctrl.spindle', 'Spindle'),
+                title: t('ctrl.spindle.mode.spindle', 'Spindle — set speed in RPM (M3/M4 S<rpm>)'),
+              },
+              {
+                value: 'pwm',
+                label: t('ctrl.spindle.pwm', 'PWM'),
+                title: t('ctrl.spindle.mode.pwm', 'PWM — drive the GRBL spindle-PWM output as a duty % (S over the 0–1000 PWM range)'),
+              },
+            ]}
+          />
           <span className="mc-grow" />
           <span className="mc-seg mc-spindle-dir" role="group" aria-label={t('ctrl.spindle.dir', 'Spindle direction')}>
             <button
@@ -1453,7 +1393,7 @@ export function ControllerPanel() {
 
       {/* Overrides */}
       <section className="mc-section">
-        <h4>{t('ctrl.overrides', 'Overrides')}</h4>
+        <h4 className="ui-sec-head">{t('ctrl.overrides', 'Overrides')}</h4>
         <div className="ov-grid">
           <span className="ov-name">{t('ctrl.feed', 'Feed')}<InfoTip
             topic="feedOverride"

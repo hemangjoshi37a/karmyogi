@@ -565,9 +565,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* §2.8/W-F: a leading glyph is optional + MUTED, never accent. */
+  color: var(--fg-muted);
   opacity: 0.85;
 }
 .spr-seg-btn.is-on .spr-seg-ico {
+  color: var(--fg-muted);
   opacity: 1;
 }
 .spr-seg-lbl {

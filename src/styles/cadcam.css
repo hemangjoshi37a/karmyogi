@@ -516,38 +516,24 @@
   white-space: nowrap;
 }
 
-/* --- operation selector (graphical segmented) ---
-   Thin, icon-led row buttons: glyph + label sit INLINE so Engrave / Profile /
-   Pocket pack into one tidy row at the docked width (no lone wrap). */
+/* --- operation selector (canonical segmented control, §2.8 / W-C) ---
+   The operation picker is now the shared <SegControl> (.ui-seg / .ui-seg-btn,
+   ui-seg.css). The MODE switch uses the tonal active tint by default. Here we
+   only override the wrapper to span the full panel width and lay its four
+   segments (Engrave / Profile / Pocket / V-carve) out as equal columns, with a
+   stacked icon-over-label inside each (R10 — all four fit on one row). */
 .cc-opseg {
-  display: grid;
-  /* All FOUR operations (Engrave / Profile / Pocket / V-carve) fit in ONE row
-     (R10) — compact tiles so the 4th no longer wraps to a second line. */
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--sp-1);
-}
-/* Canonical segmented control (§2.8 / W-C). The operation picker is a MODE
-   switch (it chooses what to compute, not a primary CTA), so its active state is
-   the tonal --accent-soft tint — only true primaries get the full-accent fill. */
-.cc-opseg-btn {
-  min-width: 0;
   display: flex;
+  width: 100%;
+}
+.cc-opseg .ui-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
   gap: 2px;
   padding: 5px 3px;
-  min-height: var(--ctl-h);
-  background: var(--bg-input);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
   line-height: 1.1;
-  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
 }
-.cc-opseg-btn:hover { border-color: var(--accent); color: var(--fg); }
 .cc-opseg-ico {
   display: flex;
   align-items: center;
@@ -558,16 +544,12 @@
 .cc-opseg-ico svg { width: 15px; height: 15px; }
 .cc-opseg-lbl {
   font-size: var(--fs-ctl);
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cc-opseg-btn.active {
-  background: var(--accent-soft);
-  color: var(--fg);
-  border-color: var(--accent);
-}
-.cc-opseg-btn.active .cc-opseg-ico { color: var(--accent); }
+.cc-opseg .ui-seg-btn[aria-checked='true'] .cc-opseg-ico { color: var(--accent); }
 
 /* --- profile-side selector (custom spatial SVGs) ---
    Tight row buttons: the small spatial glyph sits beside its label. */
@@ -771,20 +753,20 @@
   opacity: 0.8;
 }
 
-/* --- slider parameter rows (icon + label + themed slider + number + unit) ---
+/* --- slider parameter rows (icon + shared SliderField + action + hint) ---
    Used by Position & size / Tool & cut / Z-mode / Advanced. Each is a FULL-WIDTH
-   row (one per line, like the Controller jog "Feed") so the slider has room to
-   drag, so the grid is a SINGLE column. The slider styling mirrors the Controller
-   tab's `.mc-slider` (themed track + thumb via vars, accent fill to the thumb).
-   Replicated LOCALLY here as `.cc-slider` so cadcam.css doesn't import
-   controller.css. */
+   row (one per line) so the slider has room to drag → the grid is a SINGLE
+   column. The CORE control (label + draggable track + number + unit) is now the
+   shared kit `<SliderField>` (.ui-sfield, slider-row.css — §2.8 W-B); only the
+   leading colour glyph, the optional trailing action and the recommendation hint
+   are carving-specific chrome wrapped around it here. */
 .cc-sgrid {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--sp-2) var(--sp-3);
   align-items: center;
 }
-.cc-sfield {
+.cc-sfield-row {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
@@ -795,24 +777,10 @@
   border-radius: var(--radius);
   transition: background 0.12s;
 }
-.cc-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
-.cc-sfield-lbl {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  /* Compact label column so the sliders all start at the same x AND the track
-     keeps real width (§2.8 W-B): a ~68px basis that may shrink, paired with a
-     2-line wrap (no ellipsis) on the text so long labels never truncate or
-     squeeze the slider down to a stub. */
-  flex: 0 1 auto;
-  flex-basis: 68px;
-  width: auto;
-  min-width: 38px;
-  font-size: var(--fs-label);
-  font-weight: 500;
-  color: var(--fg-muted);
-}
-.cc-sfield:focus-within .cc-sfield-lbl { color: var(--fg); }
+.cc-sfield-row:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+/* The shared field fills the row between the leading glyph and the trailing
+   action; its own label/track/number geometry handles the rest (W-B). */
+.cc-sfield-core { flex: 1 1 auto; min-width: 0; }
 .cc-sfield-ico {
   display: inline-flex;
   align-items: center;
@@ -823,51 +791,13 @@
   opacity: 0.85;
   transition: color 0.12s, opacity 0.12s;
 }
-.cc-sfield:focus-within .cc-sfield-ico { color: var(--accent); opacity: 1; }
-.cc-sfield-txt {
-  /* Wrap to 2 lines instead of truncating (§2.8 W-B) so the slider keeps its
-     min-width and labels are never clipped to an ellipsis. */
-  flex: 1 1 auto;
-  min-width: 0;
-  line-height: 1.2;
-  overflow-wrap: anywhere;
-}
+.cc-sfield-row:focus-within .cc-sfield-ico { color: var(--accent); opacity: 1; }
 /* Optional trailing control (e.g. the "apply to all jobs" ⇄ button) tucked at the
-   end of a slider row. Never shrinks; sits after the number frame. */
+   end of a slider row. Never shrinks; sits after the shared number frame. */
 .cc-sfield-action {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-}
-/* The number-input + unit share one bordered frame (matches .cc-ifield-input) so
-   the unit reads as a suffix; the real <input> is borderless inside it. */
-.cc-sfield-num {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  /* Slimmer number frame (§2.8 W-B ~64px) so the slider track gets its room. */
-  width: 64px;
-  height: var(--ctl-h);
-  padding: 0 6px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  min-width: 0;
-  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
-}
-.cc-sfield-num:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
-.cc-sfield-num:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
-}
-.cc-sfield-unit {
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--fg-muted);
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  opacity: 0.8;
 }
 
 /* Aspect-link PAIR: two SliderFields bracketing a compact chain-link toggle
@@ -883,8 +813,8 @@
   align-items: center;
   column-gap: 6px;
 }
-.cc-linkpair > .cc-sfield:first-of-type { grid-area: top; }
-.cc-linkpair > .cc-sfield:last-of-type { grid-area: bot; }
+.cc-linkpair > .cc-sfield-row:first-of-type { grid-area: top; }
+.cc-linkpair > .cc-sfield-row:last-of-type { grid-area: bot; }
 .cc-aspectlink {
   grid-area: link;
   display: inline-flex;
@@ -913,118 +843,13 @@
 }
 .cc-aspectlink:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Themed draggable slider — mirrors .mc-slider from controller.css. Track + thumb
-   use theme vars (follows light/dark); the accent fill to the LEFT of the thumb
-   comes from the inline `--mc-pct` (WebKit/Blink gradient) and from
-   ::-moz-range-progress (Firefox). */
-.cc-slider {
-  /* basis 0 (not auto) so the range input doesn't claim its ~129px default width
-     and push the number box onto a 2nd line; it grows to fill instead, keeping
-     label + slider + number on ONE row even in a slim docked column. */
-  flex: 1 1 0;
-  /* The track always stays a usable length (§2.8 W-B): never collapses to a
-     stub even when the label + number frame are at their widest. */
-  min-width: 72px;
-  height: 18px;
-  margin: 0;
-  cursor: pointer;
-  background: transparent;
-  -webkit-appearance: none;
-  appearance: none;
-}
-.cc-slider:disabled { opacity: 0.5; cursor: not-allowed; }
-/* track */
-.cc-slider::-webkit-slider-runnable-track {
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: linear-gradient(
-    to right,
-    var(--accent) 0 var(--mc-pct, 0%),
-    var(--bg-elev) var(--mc-pct, 0%) 100%
-  );
-}
-.cc-slider::-moz-range-track {
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-}
-.cc-slider::-moz-range-progress {
-  height: 5px;
-  border-radius: 999px;
-  background: var(--accent);
-}
-/* thumb */
-.cc-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 13px;
-  height: 13px;
-  margin-top: -4px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-elev);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-  transition: background 0.12s ease, box-shadow 0.12s ease;
-}
-.cc-slider::-moz-range-thumb {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-elev);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-}
-.cc-slider:hover::-webkit-slider-thumb {
-  background: color-mix(in srgb, var(--accent) 85%, #fff);
-}
-.cc-slider:hover::-moz-range-thumb {
-  background: color-mix(in srgb, var(--accent) 85%, #fff);
-}
-.cc-slider:focus-visible { outline: none; }
-.cc-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.cc-slider:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-/* the small typable number input inside the bordered .cc-sfield-num frame */
-.cc-slider-num {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  height: 100%;
-  border: none;
-  background: transparent;
-  padding: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--fg);
-  -moz-appearance: textfield;
-}
-.cc-slider-num:focus { outline: none; box-shadow: none; }
-.cc-slider-num:disabled { opacity: 0.5; }
-.cc-slider-num::-webkit-outer-spin-button,
-.cc-slider-num::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-/* Touch / coarse-pointer sizing — larger track + thumb so the slider is grabbable
-   on a phone (matches the jog slider's coarse sizing). */
-@media (pointer: coarse) {
-  .cc-slider { height: 24px; }
-  .cc-slider::-webkit-slider-runnable-track,
-  .cc-slider::-moz-range-track,
-  .cc-slider::-moz-range-progress { height: 6px; }
-  .cc-slider::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -6px; }
-  .cc-slider::-moz-range-thumb { width: 17px; height: 17px; }
-}
-/* The recommendation hint flows onto its own full-width line below the row. */
-.cc-sfield .cc-rechint {
+/* The slider track + number frame are the shared kit (.ui-slider / .ui-sfield-num
+   in slider-row.css) — the bespoke `.cc-slider` track/thumb impl + its private
+   ::-webkit-slider-thumb / ::-moz-range-* blocks were removed here (§2.8 W-B). */
+
+/* The recommendation hint flows onto its own full-width line below the row,
+   aligned under the value column it annotates. */
+.cc-sfield-row .cc-rechint {
   flex: 0 0 100%;
   min-width: 0;
   text-align: right;
@@ -1539,7 +1364,7 @@
   .cc-field input,
   .cc-field select,
   .cc-ifield-input,
-  .cc-sfield-num,
+  .cc-sfield-row .ui-sfield-num,
   .cc-prim-select,
   .cc-prim-input,
   .cc-nudge input,
@@ -1548,8 +1373,8 @@
   .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
   .cc-igrid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
   .cc-prim-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
-  .cc-op-btn, .cc-subop-btn,
-  .cc-opseg-btn, .cc-sideseg-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
+  .cc-op-btn, .cc-subop-btn, .cc-sideseg-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
+  .cc-opseg .ui-seg-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
   .cc-zmode button { min-height: var(--ctl-h-touch); }
   .cc-raw-toggle { min-width: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
   .cc-load-btn,
@@ -1567,8 +1392,8 @@
   .cc-grid,
   .cc-igrid,
   .cc-prim-grid { grid-template-columns: 1fr; }
-  .cc-op-btn, .cc-subop-btn,
-  .cc-opseg-btn, .cc-sideseg-btn { flex: 1 1 100%; min-width: 0; }
+  .cc-op-btn, .cc-subop-btn, .cc-sideseg-btn { flex: 1 1 100%; min-width: 0; }
+  .cc-opseg .ui-seg-btn { flex: 1 1 100%; min-width: 0; }
   .cc-pickgrid { grid-template-columns: 1fr; }
   .cc-chip { flex: 1 1 100%; justify-content: center; }
 }
@@ -1581,14 +1406,14 @@
   .cc-field input,
   .cc-field select,
   .cc-ifield-input,
-  .cc-sfield-num,
+  .cc-sfield-row .ui-sfield-num,
   .cc-prim-select,
   .cc-prim-input,
   .cc-nudge input,
   .cc-nudge button { height: var(--ctl-h-touch); min-height: var(--ctl-h-touch); }
   .cc-nudge button { min-width: var(--ctl-h-touch); }
-  .cc-op-btn, .cc-subop-btn,
-  .cc-opseg-btn, .cc-sideseg-btn, .cc-zmode button { min-height: var(--ctl-h-touch); }
+  .cc-op-btn, .cc-subop-btn, .cc-sideseg-btn, .cc-zmode button { min-height: var(--ctl-h-touch); }
+  .cc-opseg .ui-seg-btn { min-height: var(--ctl-h-touch); }
 }
 
 /* --- Cutout (cut part free from stock) card --- */
@@ -1725,8 +1550,8 @@
   }
   @media (max-width: 480px) {
     .cc-grid { grid-template-columns: repeat(auto-fit, minmax(46%, 1fr)); }
-    .cc-op-btn, .cc-subop-btn,
-    .cc-opseg-btn, .cc-sideseg-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
+    .cc-op-btn, .cc-subop-btn, .cc-sideseg-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
+    .cc-opseg .ui-seg-btn { flex: 1 1 40%; min-height: var(--ctl-h-touch); }
     .cc-regen, .cc-raw-toggle { min-height: var(--ctl-h-touch); }
     .cc-raw-toggle { min-width: var(--ctl-h-touch); }
     .cc-adv-toggle, .cc-check { min-height: var(--ctl-h-touch); }

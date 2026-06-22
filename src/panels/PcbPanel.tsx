@@ -30,6 +30,8 @@ import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
 import { InfoTip } from '../components/InfoTip'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { SegControl } from '../components/ui/SegControl'
+import { SliderField as UISliderField } from '../components/ui/SliderField'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
@@ -295,12 +297,11 @@ type RowGeom =
   | { kind: 'outline'; data: GerberData }
 
 /**
- * Themed slider + number-input row for a numeric CAM parameter, mirroring the
- * CadCam panel's SliderField (.cc-sfield / .cc-slider) so the PCB operation cards
- * use the same control vocabulary as the rest of the app. Drag the slider for a
- * coarse value or type an exact one in the number box; the slider clamps to
- * [min,max] while typed values are committed verbatim (the caller's clamp guards
- * the stored value).
+ * Themed slider + number-input row for a numeric CAM parameter. This is now the
+ * shared kit `<SliderField>` (plan §2.8 / W-B — track + number + unit, usable
+ * track at all widths, stable number-frame gutter so units never clip); this
+ * thin adapter only maps the panel's existing `htmlFor` prop onto the shared
+ * component's `id`, leaving every call site untouched.
  */
 function SliderField({
   label,
@@ -321,43 +322,17 @@ function SliderField({
   max: number
   step: number
 }) {
-  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
-  const pct = max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <div className="cc-sfield">
-      <label className="cc-sfield-lbl" htmlFor={htmlFor}>
-        <span className="cc-sfield-txt">{label}</span>
-      </label>
-      <input
-        type="range"
-        className="cc-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={clamp(value)}
-        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
-        onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        aria-label={label}
-        tabIndex={-1}
-      />
-      <span className="cc-sfield-num">
-        <input
-          id={htmlFor}
-          type="number"
-          className="cc-slider-num"
-          min={min}
-          max={max}
-          step={step}
-          value={String(value)}
-          aria-label={label}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value)
-            if (Number.isFinite(v)) onChange(v)
-          }}
-        />
-        {unit ? <span className="cc-sfield-unit">{unit}</span> : null}
-      </span>
-    </div>
+    <UISliderField
+      id={htmlFor}
+      label={label}
+      unit={unit}
+      value={value}
+      onChange={onChange}
+      min={min}
+      max={max}
+      step={step}
+    />
   )
 }
 
@@ -1869,20 +1844,16 @@ export function PcbPanel() {
             />
           </h3>
           <div className="pcb-section-body">
-            <div className="pcb-zmode">
-              <button
-                className={params.zmode === 'spindle' ? 'active' : ''}
-                onClick={() => set('zmode', 'spindle')}
-              >
-                {t('pcb.essentials.spindle', 'Spindle (mill)')}
-              </button>
-              <button
-                className={params.zmode === 'pen' ? 'active' : ''}
-                onClick={() => set('zmode', 'pen')}
-              >
-                {t('pcb.essentials.pen', 'Pen (plotter)')}
-              </button>
-            </div>
+            <SegControl<'spindle' | 'pen'>
+              className="pcb-zmode"
+              ariaLabel={t('pcb.essentials.zmode', 'Z mode')}
+              value={params.zmode}
+              onChange={(v) => set('zmode', v)}
+              options={[
+                { value: 'spindle', label: t('pcb.essentials.spindle', 'Spindle (mill)') },
+                { value: 'pen', label: t('pcb.essentials.pen', 'Pen (plotter)') },
+              ]}
+            />
             <div className="pcb-grid">
               <Field label={t('pcb.essentials.toolDia', 'Tool Ø (mm)')}>
                 <input type="number" step="0.05" min="0.05" value={params.toolDia} onChange={num('toolDia', 0.05)} />
@@ -1914,24 +1885,27 @@ export function PcbPanel() {
             <div className="pcb-section-body">
               {/* Operation stage */}
               <div className="pcb-subhead">{t('pcb.advanced.operationStage', 'Operation stage')}</div>
-              <div className="pcb-stages">
-                {stageMeta.map((s) => (
-                  <button
-                    key={s.id}
-                    className={'pcb-stage-btn' + (activeStage === s.id ? ' active' : '')}
-                    onClick={() => setActiveStage(s.id)}
-                    title={s.ready ? s.note : t('pcb.advanced.layerNotAssigned', 'Required layer not assigned')}
-                  >
-                    {s.label}
-                    {!s.ready && (
-                      <span className="pcb-stage-missing" title={t('pcb.advanced.layerNotAssigned', 'Required layer not assigned')}>
-                        {' '}
-                        <Icon name="warning" size={12} />
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
+              <SegControl<StageId>
+                className="pcb-stages"
+                ariaLabel={t('pcb.advanced.operationStage', 'Operation stage')}
+                value={activeStage}
+                onChange={setActiveStage}
+                options={stageMeta.map((s) => ({
+                  value: s.id,
+                  title: s.ready ? s.note : t('pcb.advanced.layerNotAssigned', 'Required layer not assigned'),
+                  label: (
+                    <>
+                      {s.label}
+                      {!s.ready && (
+                        <span className="pcb-stage-missing" aria-hidden>
+                          {' '}
+                          <Icon name="warning" size={12} />
+                        </span>
+                      )}
+                    </>
+                  ),
+                }))}
+              />
               {(() => {
                 const cur = stageMeta.find((s) => s.id === activeStage)
                 return cur?.ready && cur.note ? (

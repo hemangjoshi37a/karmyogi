@@ -9,6 +9,7 @@ import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
 import { CamEmpty, CamStatus } from '../components/cam/CamUI'
+import { SegControl } from '../components/ui/SegControl'
 import '../styles/cam.css'
 import {
   WeavePattern,
@@ -785,24 +786,18 @@ export function WeldingPanel() {
                     body={t('weld.field.useArc.body', 'Emit M3/M5 around each object. Turn off to move the path without striking the arc (dry run).')}
                   />
                 </span>
-                <div className="wp-seg" role="group" aria-label={t('weld.field.useArc', 'Arc control')}>
-                  <button
-                    type="button"
-                    className={`wp-seg-btn${params.useArc ? ' is-on' : ''}`}
-                    aria-pressed={params.useArc}
-                    onClick={() => setParams((p) => ({ ...p, useArc: true }))}
-                  >
-                    {t('weld.on', 'On')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`wp-seg-btn${!params.useArc ? ' is-on' : ''}`}
-                    aria-pressed={!params.useArc}
-                    onClick={() => setParams((p) => ({ ...p, useArc: false }))}
-                  >
-                    {t('weld.off', 'Off')}
-                  </button>
-                </div>
+                {/* Canonical segmented control (§2.8/W-C): a MODE switch → tonal. */}
+                <SegControl<'on' | 'off'>
+                  options={[
+                    { value: 'on', label: t('weld.on', 'On') },
+                    { value: 'off', label: t('weld.off', 'Off') },
+                  ]}
+                  value={params.useArc ? 'on' : 'off'}
+                  onChange={(v) => setParams((p) => ({ ...p, useArc: v === 'on' }))}
+                  ariaLabel={t('weld.field.useArc', 'Arc control')}
+                  variant="tonal"
+                  size="sm"
+                />
               </div>
               <SliderField
                 label={t('weld.field.arcPower', 'Arc power')}
@@ -1042,20 +1037,20 @@ function ObjectCard(props: {
           <span className="weld-sfield-lbl">
             <span className="weld-sfield-txt">{t('weld.weave.pattern', 'Pattern')}</span>
           </span>
-          <div className="wp-seg wp-seg-pattern" role="group" aria-label={t('weld.weave.pattern', 'Pattern')}>
-            {WEAVE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`wp-seg-btn${obj.pattern === opt.value ? ' is-on' : ''}`}
-                aria-pressed={obj.pattern === opt.value}
-                title={t(opt.key, opt.label)}
-                onClick={() => onUpdate({ pattern: opt.value })}
-              >
-                {t(opt.key, opt.label)}
-              </button>
-            ))}
-          </div>
+          {/* Canonical segmented control (§2.8/W-C): a pattern MODE switch → tonal. */}
+          <SegControl<WeavePattern>
+            options={WEAVE_OPTIONS.map((opt) => ({
+              value: opt.value,
+              label: t(opt.key, opt.label),
+              title: t(opt.key, opt.label),
+            }))}
+            value={obj.pattern}
+            onChange={(v) => onUpdate({ pattern: v })}
+            ariaLabel={t('weld.weave.pattern', 'Pattern')}
+            variant="tonal"
+            size="sm"
+            className="wp-seg-pattern"
+          />
         </div>
         <SliderField
           label={obj.kind === 'line' ? t('weld.weave.travel', 'Travel') : t('weld.weave.peripheral', 'Periph.')}

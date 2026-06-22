@@ -134,6 +134,8 @@ import {
   Wand2,
 } from 'lucide-react'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
+import { SegControl } from '../components/ui/SegControl'
+import { SliderField as UISliderField } from '../components/ui/SliderField'
 import { CamEmpty } from '../components/cam/CamUI'
 import { useT } from '../i18n'
 import '../styles/cadcam.css'
@@ -194,16 +196,16 @@ function Tip({ id, title, body }: { id: string; title: string; body: string }) {
 }
 
 /**
- * Sleek slider + number-input + unit row for the carving parameter fields,
- * modelled on the Controller tab's jog "Feed" control. A full-width row: leading
- * glyph + label, a themed draggable `.cc-slider` (accent fill via the inline
- * `--mc-pct` var), a small typable `.cc-slider-num` clamped to [min, max] for the
- * slider but allowing exact entry, and an inline unit suffix. The optional
- * `.cc-rechint` recommendation flows onto its own line below (same as IconField).
+ * Carving parameter row: the shared kit `<UISliderField>` (track + number + unit,
+ * plan §2.8 / W-B) dressed with the carving-specific chrome — a leading colour
+ * glyph, an optional trailing control (e.g. "apply to all jobs"), and a wrapped
+ * recommendation hint below. The core control (label + draggable track + typable
+ * number + unit) is the canonical shared component, so the bespoke `.cc-slider`
+ * track/thumb CSS is gone; only the icon/hint/action wrapper is local.
  *
- * `value`/`onChange` carry the field's existing wiring untouched — only the input
- * WIDGET changes (number box → slider + input). `disabled` greys it out when a
- * field has no meaningful value (e.g. Width/Height with no geometry).
+ * `value`/`onChange` carry the field's existing wiring untouched. `disabled`
+ * greys it out when a field has no meaningful value (e.g. Width/Height with no
+ * geometry).
  */
 function SliderField({
   icon,
@@ -235,54 +237,23 @@ function SliderField({
   /** Optional trailing control in the label area (e.g. an "apply to all" button). */
   action?: ReactNode
 }) {
-  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
-  // Filled-track percentage for the slider's accent fill (read as --mc-pct by the
-  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress). Uses the
-  // CLAMPED value so an out-of-range typed value doesn't overflow the fill.
-  const pct =
-    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
   return (
-    <div className="cc-sfield" title={title}>
-      <label className="cc-sfield-lbl" htmlFor={htmlFor}>
-        <span className="cc-sfield-ico" aria-hidden>
-          {icon}
-        </span>
-        <span className="cc-sfield-txt">{label}</span>
-      </label>
-      <input
-        type="range"
-        className="cc-slider"
+    <div className="cc-sfield-row" title={title}>
+      <span className="cc-sfield-ico" aria-hidden>
+        {icon}
+      </span>
+      <UISliderField
+        className="cc-sfield-core"
+        id={htmlFor}
+        label={label}
+        unit={unit}
+        value={value}
+        onChange={onChange}
         min={min}
         max={max}
         step={step}
-        value={clamp(value)}
         disabled={disabled}
-        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
-        onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        aria-label={label}
-        tabIndex={-1}
       />
-      <span className="cc-sfield-num">
-        <input
-          id={htmlFor}
-          type="number"
-          className="cc-slider-num"
-          min={min}
-          max={max}
-          step={step}
-          value={String(value)}
-          disabled={disabled}
-          aria-label={label}
-          onChange={(e) => {
-            // Allow EXACT entry (don't clamp the typed number) — a half-typed or
-            // out-of-slider-range value is still committed verbatim; only blank/NaN
-            // is rejected by the caller's own num2d/onChange guard.
-            const v = parseFloat(e.target.value)
-            if (Number.isFinite(v)) onChange(v)
-          }}
-        />
-        {unit ? <span className="cc-sfield-unit">{unit}</span> : null}
-      </span>
       {action ? <span className="cc-sfield-action">{action}</span> : null}
       {hint ? <span className="cc-rechint">{hint}</span> : null}
     </div>
@@ -3769,21 +3740,22 @@ export function CadCamPanel() {
                       {t('cc.perFeatureNote', 'Per-feature operations (in the Features panel above) are driving the toolpath. Clear them to use this whole-file operation instead.')}
                     </span>
                   )}
-                  <div className="cc-opseg" role="group" aria-label={t('cc.operation', 'Operation')}>
-                    {(['Engrave', 'Profile', 'Pocket', 'VCarve'] as Op[]).map((o) => (
-                      <button
-                        key={o}
-                        type="button"
-                        className={'cc-opseg-btn' + (op === o ? ' active' : '')}
-                        aria-pressed={op === o}
-                        onClick={() => setOp(o)}
-                        title={`${opLabelText(t, o)} — ${opHelp(t, o)}`}
-                      >
-                        <span className="cc-opseg-ico">{opIcon(o)}</span>
-                        <span className="cc-opseg-lbl">{opLabelText(t, o)}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <SegControl<Op>
+                    className="cc-opseg"
+                    ariaLabel={t('cc.operation', 'Operation')}
+                    value={op}
+                    onChange={setOp}
+                    options={(['Engrave', 'Profile', 'Pocket', 'VCarve'] as Op[]).map((o) => ({
+                      value: o,
+                      title: `${opLabelText(t, o)} — ${opHelp(t, o)}`,
+                      label: (
+                        <>
+                          <span className="cc-opseg-ico">{opIcon(o)}</span>
+                          <span className="cc-opseg-lbl">{opLabelText(t, o)}</span>
+                        </>
+                      ),
+                    }))}
+                  />
                   {op === 'Profile' && (
                     <div className="cc-sideseg" role="group" aria-label={t('cc.profile', 'Profile')}>
                       {[ProfileSide.On, ProfileSide.Inside, ProfileSide.Outside].map((s) => (

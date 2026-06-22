@@ -48,25 +48,26 @@ import '../styles/motion.css'
  * Selecting a controller in the titlebar dropdown updates `useMachineProfile`, so
  * this re-renders reactively with no reload.
  */
-export function MotionPanel() {
+export function MotionPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const controllerKind = useMachineProfile((s) => s.controllerKind)
   const profile = profileFor(controllerKind)
   switch (profile.settingsModel) {
     case 'grbl':
     case 'grblhal': {
       const dialect = resolveDialect(profile.dialect, profile.kind)
-      if (dialect.supportsNamedSettings) return <NamedSettingsEditor profile={profile} />
-      return <GrblSettingsEditor profile={profile} />
+      if (dialect.supportsNamedSettings)
+        return <NamedSettingsEditor profile={profile} embedded={embedded} />
+      return <GrblSettingsEditor profile={profile} embedded={embedded} />
     }
     case 'marlin':
-      return <MarlinSettingsView profile={profile} />
+      return <MarlinSettingsView profile={profile} embedded={embedded} />
     case 'smoothie':
-      return <SmoothieSettingsView profile={profile} />
+      return <SmoothieSettingsView profile={profile} embedded={embedded} />
     case 'masso':
-      return <MassoSettingsView profile={profile} />
+      return <MassoSettingsView profile={profile} embedded={embedded} />
     case 'none':
     default:
-      return <NoSettingsView profile={profile} />
+      return <NoSettingsView profile={profile} embedded={embedded} />
   }
 }
 
@@ -82,7 +83,13 @@ export function MotionPanel() {
  * every jog throw error:15 is obvious at a glance. Factory-reset buttons
  * ($RST=$ / # / *) are behind confirms.
  */
-function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
+function GrblSettingsEditor({
+  profile,
+  embedded = false,
+}: {
+  profile: ControllerProfile
+  embedded?: boolean
+}) {
   const t = useT()
   const connection = useMachine((s) => s.connection)
   const values = useGrblSettings((s) => s.values)
@@ -368,13 +375,17 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
   return (
     <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and GRBL settings')}>
       {/* Read / status — sticks to the top of the (scrolling) modal so the
-          Sync/Save toolbar stays reachable while the parameters scroll. */}
-      <section className="mo-section mo-sticky-head">
-        <h4>
-          {t('motion.heading.settingsFor', '{label} settings ($$)', {
-            label: profile.label,
-          })}
-        </h4>
+          Sync/Save toolbar stays reachable while the parameters scroll. When
+          embedded in a <Modal> the Modal title already names the panel, so we
+          drop our own <h4> (no double header) and the sticky/shadow treatment. */}
+      <section className={`mo-section${embedded ? '' : ' mo-sticky-head'}`}>
+        {!embedded && (
+          <h4>
+            {t('motion.heading.settingsFor', '{label} settings ($$)', {
+              label: profile.label,
+            })}
+          </h4>
+        )}
         <div className="mo-row">
           <button
             type="button"
@@ -785,7 +796,13 @@ function GrblSettingsEditor({ profile }: { profile: ControllerProfile }) {
  *  - is honest that the FULL machine config lives in the YAML file
  *    (`$Config/Dump` prints it to the Console).
  */
-function NamedSettingsEditor({ profile }: { profile: ControllerProfile }) {
+function NamedSettingsEditor({
+  profile,
+  embedded = false,
+}: {
+  profile: ControllerProfile
+  embedded?: boolean
+}) {
   const t = useT()
   const connection = useMachine((s) => s.connection)
   const connected = connection === 'connected'
@@ -915,11 +932,13 @@ function NamedSettingsEditor({ profile }: { profile: ControllerProfile }) {
   return (
     <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and controller settings')}>
       <section className="mo-section">
-        <h4>
-          {t('motion.heading.settingsFor', '{label} settings ($$)', {
-            label: profile.label,
-          })}
-        </h4>
+        {!embedded && (
+          <h4>
+            {t('motion.heading.settingsFor', '{label} settings ($$)', {
+              label: profile.label,
+            })}
+          </h4>
+        )}
         <div className="mo-row">
           <button
             type="button"
@@ -1183,14 +1202,22 @@ function CapabilitySummary({ caps }: { caps: Capabilities }) {
  * machine settings over this connection. Show a clean, capability-aware notice
  * instead of a fake `$`-editor.
  */
-function NoSettingsView({ profile }: { profile: ControllerProfile }) {
+function NoSettingsView({
+  profile,
+  embedded = false,
+}: {
+  profile: ControllerProfile
+  embedded?: boolean
+}) {
   const t = useT()
   return (
     <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and controller settings')}>
       <section className="mo-section">
-        <h4>
-          {t('motion.heading.controllerFor', '{label} controller', { label: profile.label })}
-        </h4>
+        {!embedded && (
+          <h4>
+            {t('motion.heading.controllerFor', '{label} controller', { label: profile.label })}
+          </h4>
+        )}
         <div className="mo-alert" role="status">
           {t(
             'motion.none.notice',
@@ -1219,7 +1246,13 @@ function NoSettingsView({ profile }: { profile: ControllerProfile }) {
  * "report current settings" button (which streams into the Console), and list the
  * common setter M-codes for reference. No fake editor.
  */
-function MarlinSettingsView({ profile }: { profile: ControllerProfile }) {
+function MarlinSettingsView({
+  profile,
+  embedded = false,
+}: {
+  profile: ControllerProfile
+  embedded?: boolean
+}) {
   const t = useT()
   const connection = useMachine((s) => s.connection)
   const connected = connection === 'connected'
@@ -1245,9 +1278,11 @@ function MarlinSettingsView({ profile }: { profile: ControllerProfile }) {
   return (
     <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and controller settings')}>
       <section className="mo-section">
-        <h4>
-          {t('motion.heading.settingsForLabel', '{label} settings', { label: profile.label })}
-        </h4>
+        {!embedded && (
+          <h4>
+            {t('motion.heading.settingsForLabel', '{label} settings', { label: profile.label })}
+          </h4>
+        )}
         <div className="mo-alert" role="status">
           {t(
             'motion.marlin.notice',
@@ -1329,7 +1364,13 @@ function MarlinSettingsView({ profile }: { profile: ControllerProfile }) {
  * read/written with `config-get sd <key>` / `config-set sd <key> <value>`. Be
  * honest: show the model + a connected-only button to fetch a common key.
  */
-function SmoothieSettingsView({ profile }: { profile: ControllerProfile }) {
+function SmoothieSettingsView({
+  profile,
+  embedded = false,
+}: {
+  profile: ControllerProfile
+  embedded?: boolean
+}) {
   const t = useT()
   const connection = useMachine((s) => s.connection)
   const connected = connection === 'connected'
@@ -1351,9 +1392,11 @@ function SmoothieSettingsView({ profile }: { profile: ControllerProfile }) {
   return (
     <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and controller settings')}>
       <section className="mo-section">
-        <h4>
-          {t('motion.heading.controllerFor', '{label} controller', { label: profile.label })}
-        </h4>
+        {!embedded && (
+          <h4>
+            {t('motion.heading.controllerFor', '{label} controller', { label: profile.label })}
+          </h4>
+        )}
         <div className="mo-alert" role="status">
           {t(
             'motion.smoothie.notice',
@@ -1435,14 +1478,22 @@ function SmoothieSettingsView({ profile }: { profile: ControllerProfile }) {
  * to edit from the browser. Explain the offline/export workflow (generate G-code →
  * copy to a USB stick → run from the Masso pendant) and show capabilities.
  */
-function MassoSettingsView({ profile }: { profile: ControllerProfile }) {
+function MassoSettingsView({
+  profile,
+  embedded = false,
+}: {
+  profile: ControllerProfile
+  embedded?: boolean
+}) {
   const t = useT()
   return (
     <div className="mo-panel" aria-label={t('motion.aria.panel', 'Motion and controller settings')}>
       <section className="mo-section">
-        <h4>
-          {t('motion.heading.controllerFor', '{label} controller', { label: profile.label })}
-        </h4>
+        {!embedded && (
+          <h4>
+            {t('motion.heading.controllerFor', '{label} controller', { label: profile.label })}
+          </h4>
+        )}
         <div className="mo-alert" role="status">
           {t(
             'motion.masso.notice',

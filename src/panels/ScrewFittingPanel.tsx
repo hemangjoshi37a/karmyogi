@@ -28,7 +28,8 @@ import {
   type ScrewDrivePoint,
   type ScrewDrivingParams,
 } from '../core/screwDriving'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamEmpty, CamStatus } from '../components/cam/CamUI'
+import { SegControl } from '../components/ui/SegControl'
 import '../styles/screwdriving.css'
 import '../styles/cam.css'
 
@@ -532,22 +533,16 @@ export function ScrewFittingPanel() {
         </div>
       </header>
 
-      {/* Live status strip: point + line counts, auto-synced to the Program tab. */}
+      {/* Live status strip: point + line counts, auto-synced to the Program tab.
+          Uses the shared <CamStatus> kit so it reads identically to every tab. */}
       <div className="swd-status">
-        <span className="swd-status-pill">
-          <b>{points.length}</b> {t('screw.status.points', 'screws')}
-        </span>
-        <span className="swd-status-sep" aria-hidden="true">·</span>
-        <span className="swd-status-pill">
-          <b>{lineCount}</b> {t('screw.status.lines', 'G-code lines')}
-        </span>
-        <span className="swd-status-sep" aria-hidden="true">·</span>
-        <span className="swd-status-pill">
-          {t('screw.status.driver', 'driver')} <b>S{safeParams.driverRPM}</b>
-        </span>
-        <span className="swd-status-sync" title={t('screw.live.title', 'Lines auto-synced to the Program tab')}>
-          → {t('screw.status.program', 'Program')}
-        </span>
+        <CamStatus
+          items={[
+            { value: points.length, unit: t('screw.status.points', 'screws') },
+            { value: lineCount, unit: t('screw.status.lines', 'G-code lines') },
+            { label: t('screw.status.driver', 'driver'), value: `S${safeParams.driverRPM}` },
+          ]}
+        />
       </div>
 
       {pickTooHigh && (
@@ -777,19 +772,16 @@ export function ScrewFittingPanel() {
                   body={t('screw.field.decimals.body', 'Number of decimal places in the emitted coordinates (0–6).')}
                 />
               </span>
-              <div className="sd-seg" role="group" aria-label={t('screw.field.decimals', 'Decimals')}>
-                {[0, 1, 2, 3, 4, 5, 6].map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    className={'sd-seg-btn' + (clampDecimals(params.decimals) === d ? ' active' : '')}
-                    aria-pressed={clampDecimals(params.decimals) === d}
-                    onClick={() => setParams((p) => ({ ...p, decimals: d }))}
-                  >
-                    {d}
-                  </button>
-                ))}
-              </div>
+              {/* Canonical segmented control (§2.8/W-C): a decimals MODE switch → tonal. */}
+              <SegControl<number>
+                options={[0, 1, 2, 3, 4, 5, 6].map((d) => ({ value: d, label: String(d) }))}
+                value={clampDecimals(params.decimals)}
+                onChange={(d) => setParams((p) => ({ ...p, decimals: d }))}
+                ariaLabel={t('screw.field.decimals', 'Decimals')}
+                variant="tonal"
+                size="sm"
+                className="sd-seg"
+              />
             </div>
           </div>
         </section>

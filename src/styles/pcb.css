@@ -223,55 +223,34 @@
 /* --- stage selector (segmented value picker §2.8) — active = full accent
    because it picks WHICH operation stage to run (a value), not a presentation
    mode. Inactive inherits the base button (--bg-input/--fg). --- */
+/* Operation-stage picker — the canonical <SegControl> (.ui-seg / .ui-seg-btn,
+   ui-seg.css). It picks WHICH stage to run (a mode), so it keeps the default
+   tonal active tint. We only override the wrapper to span the full row with
+   equal segments; the per-segment "missing" warning glyph stays warn-coloured. */
 .pcb-stages {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
+  width: 100%;
 }
-.pcb-stage-btn {
-  flex: 1 1 auto;
-  min-height: var(--ctl-h);
-  min-width: 80px;
-  border-radius: var(--radius-sm);
-}
-.pcb-stage-btn.active {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
+.pcb-stages .ui-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .pcb-stage-missing {
   color: var(--warn);
 }
-.pcb-stage-btn.active .pcb-stage-missing {
-  color: var(--accent-fg);
+.pcb-stages .ui-seg-btn[aria-checked='true'] .pcb-stage-missing {
+  color: inherit;
 }
 
-/* --- z-mode toggle (Spindle / Pen) — a MODE switch, so active uses the tonal
-   --accent-soft tint (only true primaries are full-accent §2.8/W-C). Joined
-   segmented control with a 1px seam and --radius-sm outer corners. --- */
+/* Z-mode toggle (Spindle / Pen) — also the canonical <SegControl>; a MODE switch
+   so it keeps the default tonal active tint. Full-width equal segments. */
 .pcb-zmode {
   display: flex;
-  gap: 0;
+  width: 100%;
 }
-.pcb-zmode button {
-  flex: 1 1 auto;
-  min-height: var(--ctl-h-lg);
-  border-radius: 0;
-  margin-left: -1px;
-}
-.pcb-zmode button:first-child {
-  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-  margin-left: 0;
-}
-.pcb-zmode button:last-child {
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-}
-.pcb-zmode button.active {
-  background: var(--accent-soft);
-  color: var(--fg);
-  border-color: var(--accent);
-  position: relative;
-  z-index: 1;
+.pcb-zmode .ui-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 /* --- parameter / field grid (compact, packs left, wraps naturally) --- */
@@ -661,8 +640,8 @@
 @container pcbpanel (max-width: 360px) {
   .pcb-load-btn,
   .pcb-load-zip,
-  .pcb-stage-btn,
-  .pcb-zmode button,
+  .pcb-stages .ui-seg-btn,
+  .pcb-zmode .ui-seg-btn,
   .pcb-field input,
   .pcb-role-select,
   .pcb-toggle-single,
@@ -683,8 +662,8 @@
   }
   .pcb-load-btn,
   .pcb-load-zip,
-  .pcb-stage-btn,
-  .pcb-zmode button,
+  .pcb-stages .ui-seg-btn,
+  .pcb-zmode .ui-seg-btn,
   .pcb-field input,
   .pcb-role-select,
   .pcb-toggle-single,
@@ -837,6 +816,11 @@
 }
 .pcb-op-params {
   margin: 2px 0;
+  /* Stack the shared <SliderField> rows in a single column (the .cc-sgrid grid
+     from cadcam.css isn't loaded here, so own the layout). */
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1) var(--sp-2);
 }
 .pcb-op-actions {
   display: flex;
@@ -868,166 +852,8 @@
   }
 }
 
-/* --- Local copy of the CadCam SliderField widget (.cc-sfield / .cc-slider),
-   so the operation cards use the same themed slider as the rest of the app
-   without pcb.css importing cadcam.css. Track + thumb follow theme vars; the
-   accent fill comes from the inline --mc-pct (WebKit/Blink) and
-   ::-moz-range-progress (Firefox). --- */
-.pcb-op-card .cc-sgrid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--sp-1) var(--sp-2);
-  align-items: center;
-}
-.pcb-op-card .cc-sfield {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px 8px;
-  min-width: 0;
-  padding: 1px 0;
-}
-.pcb-op-card .cc-sfield-lbl {
-  display: flex;
-  align-items: center;
-  flex: 0 1 auto;
-  width: 72px;
-  min-width: 38px;
-  font-size: var(--fs-label);
-  font-weight: 500;
-  color: var(--fg-muted);
-  /* wrap to 2 lines rather than ellipsing the label to a stub (W-B). */
-  white-space: normal;
-  line-height: 1.2;
-}
-.pcb-op-card .cc-sfield-txt {
-  overflow: hidden;
-  /* wrap (no ellipsis stub) so the full label reads — W-B. */
-  white-space: normal;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.pcb-op-card .cc-sfield-num {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  width: 64px;
-  height: var(--ctl-h);
-  padding: 0 6px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  min-width: 0;
-  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
-}
-.pcb-op-card .cc-sfield-num:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
-}
-.pcb-op-card .cc-sfield-unit {
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--fg-muted);
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  opacity: 0.8;
-}
-.pcb-op-card .cc-slider {
-  flex: 1 1 0;
-  min-width: 72px;
-  height: 18px;
-  margin: 0;
-  cursor: pointer;
-  background: transparent;
-  -webkit-appearance: none;
-  appearance: none;
-}
-.pcb-op-card .cc-slider::-webkit-slider-runnable-track {
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: linear-gradient(
-    to right,
-    var(--accent) 0 var(--mc-pct, 0%),
-    var(--bg-input) var(--mc-pct, 0%) 100%
-  );
-}
-.pcb-op-card .cc-slider::-moz-range-track {
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-input);
-}
-.pcb-op-card .cc-slider::-moz-range-progress {
-  height: 5px;
-  border-radius: 999px;
-  background: var(--accent);
-}
-.pcb-op-card .cc-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 13px;
-  height: 13px;
-  margin-top: -4px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-elev);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-}
-.pcb-op-card .cc-slider::-moz-range-thumb {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-elev);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-}
-.pcb-op-card .cc-slider-num {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  height: 100%;
-  border: none;
-  background: transparent;
-  padding: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--fg);
-  -moz-appearance: textfield;
-}
-.pcb-op-card .cc-slider-num:focus {
-  outline: none;
-  box-shadow: none;
-}
-.pcb-op-card .cc-slider-num::-webkit-outer-spin-button,
-.pcb-op-card .cc-slider-num::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-@media (pointer: coarse) {
-  .pcb-op-card .cc-slider {
-    height: 24px;
-  }
-  .pcb-op-card .cc-slider::-webkit-slider-runnable-track,
-  .pcb-op-card .cc-slider::-moz-range-track,
-  .pcb-op-card .cc-slider::-moz-range-progress {
-    height: 6px;
-  }
-  .pcb-op-card .cc-slider::-webkit-slider-thumb {
-    width: 17px;
-    height: 17px;
-    margin-top: -6px;
-  }
-  .pcb-op-card .cc-slider::-moz-range-thumb {
-    width: 17px;
-    height: 17px;
-  }
-  .pcb-op-card .cc-sfield-num {
-    height: var(--ctl-h-touch);
-  }
-}
+/* --- Operation-card parameter sliders ---
+   These are the shared kit `<SliderField>` (.ui-sfield, slider-row.css — §2.8
+   W-B). The bespoke local `.cc-slider` copy + its private ::-webkit-slider-thumb
+   / ::-moz-range-* blocks were removed; the rows stack in a single column via
+   `.pcb-op-params` above. */

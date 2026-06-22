@@ -395,14 +395,16 @@
   position: relative;
   width: 100%;
   height: clamp(220px, 38vh, 420px);
-  border-radius: 8px;
+  /* Reconciled to the shared corner + surface tokens (§2.8 W-F). The dark fill
+     is the WebGL scene clear colour set inside the <Canvas> itself. */
+  border-radius: var(--radius);
   overflow: hidden;
   background: #15181c;
-  border: 1px solid var(--border, #2a2f37);
+  border: 1px solid var(--border);
 }
 .sv-empty {
-  padding: 16px;
+  padding: var(--sp-3);
   text-align: center;
-  color: var(--text-dim, #8a93a0);
-  font-size: 0.85rem;
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
 }

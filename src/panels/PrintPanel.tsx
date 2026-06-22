@@ -11,8 +11,10 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
 import { useT } from '../i18n'
-import { Icon, type IconName } from '../components/Icons'
+import { Icon } from '../components/Icons'
 import { IconButton } from '../components/IconButton'
+import { SliderField } from '../components/ui/SliderField'
+import { SegControl } from '../components/ui/SegControl'
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { usePlayback } from '../store/playback'
 import { useTabCommands } from '../machine/tabCommands'
@@ -125,133 +127,6 @@ interface MeshInfo {
 }
 
 const f1 = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : '—')
-
-/**
- * Themed slider + number-input + unit row for slicing/print parameters, mirroring
- * the 2D/3D Carving "Position & Size" rows and the Controller jog "Feed" control.
- * A full-width row: leading glyph + label, a themed draggable `.pr-slider` (accent
- * fill via the inline `--mc-pct` var), a small typable number input inside a
- * bordered frame, and an inline unit suffix.
- *
- * The slider clamps to [min, max]; the number input commits the EXACT typed value
- * (so out-of-slider-range entry still works). All colours come from theme CSS
- * variables so it follows light/dark like the rest of the app.
- */
-function SliderField({
-  icon,
-  label,
-  htmlFor,
-  unit,
-  value,
-  onChange,
-  min,
-  max,
-  step,
-  title,
-}: {
-  icon: ReactNode
-  label: string
-  htmlFor: string
-  unit?: string
-  value: number
-  onChange: (n: number) => void
-  min: number
-  max: number
-  step: number
-  title?: string
-}) {
-  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min))
-  // Filled-track percentage for the accent fill (read as --mc-pct by the
-  // WebKit/Blink track gradient; Firefox fills via ::-moz-range-progress). Uses
-  // the CLAMPED value so an out-of-range typed value doesn't overflow the fill.
-  const pct =
-    max > min ? Math.min(100, Math.max(0, ((clamp(value) - min) / (max - min)) * 100)) : 0
-  return (
-    <div className="pr-sfield" title={title}>
-      <label className="pr-sfield-lbl" htmlFor={htmlFor}>
-        <span className="pr-sfield-ico" aria-hidden>
-          {icon}
-        </span>
-        <span className="pr-sfield-txt">{label}</span>
-      </label>
-      <input
-        type="range"
-        className="pr-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={clamp(value)}
-        style={{ '--mc-pct': `${pct}%` } as React.CSSProperties}
-        onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        aria-label={label}
-        tabIndex={-1}
-      />
-      <span className="pr-sfield-num">
-        <input
-          id={htmlFor}
-          type="number"
-          className="pr-slider-num"
-          min={min}
-          max={max}
-          step={step}
-          value={String(value)}
-          aria-label={label}
-          onChange={(e) => {
-            // Allow EXACT entry (don't clamp the typed number) — only blank/NaN
-            // is rejected (caller keeps the previous value).
-            const v = parseFloat(e.target.value)
-            if (Number.isFinite(v)) onChange(v)
-          }}
-        />
-        {unit ? <span className="pr-sfield-unit">{unit}</span> : null}
-      </span>
-    </div>
-  )
-}
-
-interface SegOption<T extends string> {
-  value: T
-  label: string
-  icon?: IconName
-  title?: string
-}
-
-/**
- * Compact icon-led segmented control (mirrors `.cc-opseg`) for enum/toggle choices
- * — replaces bare checkboxes. Themed via CSS vars; the active pill fills with the
- * accent. Each button is a real <button role=radio> so it stays keyboard- and
- * touch-friendly.
- */
-function SegControl<T extends string>(props: {
-  ariaLabel: string
-  value: T
-  options: SegOption<T>[]
-  onChange: (v: T) => void
-}) {
-  const { ariaLabel, value, options, onChange } = props
-  return (
-    <div className="pr-seg" role="radiogroup" aria-label={ariaLabel}>
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="radio"
-          aria-checked={value === o.value}
-          className={`pr-seg-btn${value === o.value ? ' is-on' : ''}`}
-          title={o.title}
-          onClick={() => onChange(o.value)}
-        >
-          {o.icon && (
-            <span className="pr-seg-ico" aria-hidden>
-              <Icon name={o.icon} size={14} />
-            </span>
-          )}
-          <span className="pr-seg-lbl">{o.label}</span>
-        </button>
-      ))}
-    </div>
-  )
-}
 
 /** A labelled row pairing a caption with a segmented control. */
 function SegRow({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
@@ -766,8 +641,8 @@ export function PrintPanel() {
 
         <div className="print-cards">
         {/* ---- 1. Import ---- */}
-        <section className="print-section">
-          <h3><Icon name="upload" size={14} className="cam-card-ico" /> {t('print.import.title', '1 · Import STL')}</h3>
+        <section className="print-section ui-card">
+          <h3 className="ui-sec-head"><Icon name="upload" size={14} className="cam-card-ico" /> {t('print.import.title', '1 · Import STL')}</h3>
           <div className="print-section-body">
             <div
               className={'print-drop' + (dragOver ? ' print-dragover' : '')}
@@ -817,8 +692,8 @@ export function PrintPanel() {
 
         {/* ---- 2. Preview + Arrange (full-width: holds the primary 3D preview) ---- */}
         {placed && (
-          <section className="print-section print-card-wide">
-            <h3><Icon name="frame" size={14} className="cam-card-ico" /> {t('print.arrange.title', '2 · Arrange')}</h3>
+          <section className="print-section print-card-wide ui-card">
+            <h3 className="ui-sec-head"><Icon name="frame" size={14} className="cam-card-ico" /> {t('print.arrange.title', '2 · Arrange')}</h3>
             <div className="print-section-body">
               <div className="print-viewport">
                 <MeshPreview triangles={placed.mesh.triangles} fits={placed.fits} bedX={bedX} bedY={bedY} />
@@ -883,14 +758,12 @@ export function PrintPanel() {
         )}
 
         {/* ---- 3. Print settings ---- */}
-        <section className="print-section">
-          <h3><Icon name="settings" size={14} className="cam-card-ico" /> {t('print.settings.title', '3 · Print settings')}</h3>
+        <section className="print-section ui-card">
+          <h3 className="ui-sec-head"><Icon name="settings" size={14} className="cam-card-ico" /> {t('print.settings.title', '3 · Print settings')}</h3>
           <div className="print-section-body">
             <div className="pr-sfields">
               <SliderField
-                icon={<Icon name="frame" size={14} />}
                 label={t('print.field.layerHeight', 'Layer height')}
-                htmlFor="pr-layerHeight"
                 unit={t('unit.mm', 'mm')}
                 value={settings.layerHeight}
                 min={0.05}
@@ -900,9 +773,7 @@ export function PrintPanel() {
                 onChange={(v) => set('layerHeight', v)}
               />
               <SliderField
-                icon={<Icon name="settings" size={14} />}
                 label={t('print.field.infill', 'Infill')}
-                htmlFor="pr-infill"
                 unit={t('unit.pct', '%')}
                 value={settings.infill}
                 min={0}
@@ -912,9 +783,7 @@ export function PrintPanel() {
                 onChange={(v) => set('infill', v)}
               />
               <SliderField
-                icon={<Icon name="frame" size={14} />}
                 label={t('print.field.perimeters', 'Perimeters')}
-                htmlFor="pr-perimeters"
                 unit={t('unit.walls', 'walls')}
                 value={settings.perimeters}
                 min={1}
@@ -924,9 +793,7 @@ export function PrintPanel() {
                 onChange={(v) => set('perimeters', Math.round(v))}
               />
               <SliderField
-                icon={<Icon name="spindle" size={14} />}
                 label={t('print.field.nozzleTemp', 'Nozzle temp')}
-                htmlFor="pr-nozzleTemp"
                 unit={t('unit.degC', '°C')}
                 value={settings.nozzleTemp}
                 min={150}
@@ -936,9 +803,7 @@ export function PrintPanel() {
                 onChange={(v) => set('nozzleTemp', v)}
               />
               <SliderField
-                icon={<Icon name="home" size={14} />}
                 label={t('print.field.bedTemp', 'Bed temp')}
-                htmlFor="pr-bedTemp"
                 unit={t('unit.degC', '°C')}
                 value={settings.bedTemp}
                 min={0}
@@ -948,9 +813,7 @@ export function PrintPanel() {
                 onChange={(v) => set('bedTemp', v)}
               />
               <SliderField
-                icon={<Icon name="jog" size={14} />}
                 label={t('print.field.printSpeed', 'Print speed')}
-                htmlFor="pr-printSpeed"
                 unit={t('unit.mmPerMin', 'mm/min')}
                 value={settings.printSpeed}
                 min={300}
@@ -978,7 +841,7 @@ export function PrintPanel() {
         </section>
 
         {/* ---- 4. Advanced (collapsed) ---- */}
-        <section className="print-section">
+        <section className="print-section ui-card">
           <button
             className="print-advanced-toggle"
             onClick={() => setShowAdvanced((v) => !v)}
@@ -991,9 +854,7 @@ export function PrintPanel() {
             <div className="print-section-body">
               <div className="pr-sfields">
                 <SliderField
-                  icon={<Icon name="spindle" size={14} />}
                   label={t('print.field.filamentDia', 'Filament Ø')}
-                  htmlFor="pr-filamentDia"
                   unit={t('unit.mm', 'mm')}
                   value={settings.filamentDiameter}
                   min={1.5}
@@ -1003,9 +864,7 @@ export function PrintPanel() {
                   onChange={(v) => set('filamentDiameter', v)}
                 />
                 <SliderField
-                  icon={<Icon name="frame" size={14} />}
                   label={t('print.field.lineWidth', 'Line width')}
-                  htmlFor="pr-lineWidth"
                   unit={t('unit.mm', 'mm')}
                   value={settings.lineWidth}
                   min={0.2}
@@ -1015,9 +874,7 @@ export function PrintPanel() {
                   onChange={(v) => set('lineWidth', v)}
                 />
                 <SliderField
-                  icon={<Icon name="jog" size={14} />}
                   label={t('print.field.travelSpeed', 'Travel speed')}
-                  htmlFor="pr-travelSpeed"
                   unit={t('unit.mmPerMin', 'mm/min')}
                   value={settings.travelSpeed}
                   min={600}
@@ -1027,9 +884,7 @@ export function PrintPanel() {
                   onChange={(v) => set('travelSpeed', v)}
                 />
                 <SliderField
-                  icon={<Icon name="probe" size={14} />}
                   label={t('print.field.retractDist', 'Retract dist')}
-                  htmlFor="pr-retractDist"
                   unit={t('unit.mm', 'mm')}
                   value={settings.retractDistance}
                   min={0}
@@ -1039,9 +894,7 @@ export function PrintPanel() {
                   onChange={(v) => set('retractDistance', v)}
                 />
                 <SliderField
-                  icon={<Icon name="jog" size={14} />}
                   label={t('print.field.retractSpeed', 'Retract speed')}
-                  htmlFor="pr-retractSpeed"
                   unit={t('unit.mmPerMin', 'mm/min')}
                   value={settings.retractSpeed}
                   min={600}
@@ -1051,9 +904,7 @@ export function PrintPanel() {
                   onChange={(v) => set('retractSpeed', v)}
                 />
                 <SliderField
-                  icon={<Icon name="spindle" size={14} />}
                   label={t('print.field.firstLayerTemp', 'First-layer temp')}
-                  htmlFor="pr-firstLayerTemp"
                   unit={t('unit.degC', '°C')}
                   value={settings.firstLayerTemp}
                   min={150}
@@ -1063,9 +914,7 @@ export function PrintPanel() {
                   onChange={(v) => set('firstLayerTemp', v)}
                 />
                 <SliderField
-                  icon={<Icon name="jog" size={14} />}
                   label={t('print.field.firstLayerSpeed', 'First-layer speed')}
-                  htmlFor="pr-firstLayerSpeed"
                   unit={t('unit.mmPerMin', 'mm/min')}
                   value={settings.firstLayerSpeed}
                   min={300}
@@ -1094,8 +943,8 @@ export function PrintPanel() {
         </section>
 
         {/* ---- 5. Slice & send (full-width: primary action bar + g-code) ---- */}
-        <section className="print-section print-card-wide">
-          <h3><Icon name="play" size={14} className="cam-card-ico" /> {t('print.slice.title', '4 · Slice & print')}</h3>
+        <section className="print-section print-card-wide ui-card">
+          <h3 className="ui-sec-head"><Icon name="play" size={14} className="cam-card-ico" /> {t('print.slice.title', '4 · Slice & print')}</h3>
           <div className="print-section-body">
             <div className="print-actions">
               <button className="print-btn primary" onClick={doSlice} disabled={!placed || slicing}>

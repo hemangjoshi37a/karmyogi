@@ -138,46 +138,8 @@
   color: var(--danger);
 }
 
-/* ───────────────────────── status strip ───────────────────────── */
-.scf-status {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-variant-numeric: tabular-nums;
-}
-.scf-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-.scf-status-pill b {
-  color: var(--fg);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.scf-status-sep {
-  color: var(--border);
-}
-.scf-status-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: auto;
-  padding: 1px 8px;
-  border-radius: 999px;
-  color: var(--accent);
-  font-weight: 600;
-  white-space: nowrap;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
+/* Status strip styling lives in the shared <CamStatus> kit (.cam-status); the
+ * .scf-status div is just a bare wrapper. */
 
 .scf-warn {
   margin: 0;

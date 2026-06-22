@@ -483,52 +483,14 @@
   .weld-sfield-num { height: var(--ctl-h-touch); }
 }
 
+/* Arc On/Off + the weave-pattern segmented controls now render via the shared
+   <SegControl> kit (.ui-seg / .ui-seg-btn). Only the surrounding LAYOUT bits the
+   kit doesn't own are kept here. */
+
 /* A slider-row that hosts a segmented control instead of a slider (Arc On/Off). */
-.weld-sfield-toggle .wp-seg {
+.weld-sfield-toggle .ui-seg {
   flex: 1 1 0;
   min-width: 34px;
-}
-
-/* ─────────────── compact segmented control (enums / toggles) ───────────────
-   Themed pill row: each option a flush button; the active one fills with the
-   accent. Used for Arc On/Off and the per-object weave pattern. */
-.wp-seg {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  min-width: 0;
-}
-.wp-seg-btn {
-  flex: 1 1 0;
-  min-width: 0;
-  height: var(--ctl-h);
-  padding: 0 10px;
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  background: var(--bg-input);
-  border: 0;
-  border-right: 1px solid var(--border);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: background 0.12s, color 0.12s;
-}
-.wp-seg-btn:last-child {
-  border-right: 0;
-}
-.wp-seg-btn:not(.is-on):hover {
-  color: var(--accent);
-}
-/* Active (Arc On/Off, weave pattern) is a mode switch → tonal accent-soft fill
-   so only true primaries are full-accent (§2.8 segmented). */
-.wp-seg-btn.is-on {
-  color: var(--fg);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent);
-  font-weight: 600;
 }
 /* The pattern selector spans the full card width and wraps its 4 options. */
 .weld-pattern-row {
@@ -539,7 +501,7 @@
   gap: 3px 8px;
   grid-column: 1 / -1;
 }
-.wp-seg-pattern {
+.ui-seg.wp-seg-pattern {
   flex: 1 1 0;
   min-width: 0;
   flex-wrap: wrap;
@@ -819,8 +781,7 @@
   .wp-field select,
   .wp-switch,
   .wp-kind-btn,
-  .weld-sfield-num,
-  .wp-seg-btn {
+  .weld-sfield-num {
     height: var(--ctl-h-touch);
   }
   .wp-mini input {
@@ -860,7 +821,6 @@
     .wp-switch,
     .wp-kind-btn,
     .weld-sfield-num,
-    .wp-seg-btn,
     .wp-mini input {
       height: var(--ctl-h-touch);
     }

@@ -39,16 +39,14 @@
 }
 
 /* --- card (§2.8: --bg-card fill, 1px border, --radius corner, no resting shadow) --- */
+/* Card SURFACE (border/bg/radius/padding) now comes from the shared .ui-card
+   (§2.8); .pp-card only carries the masonry LAYOUT bits the kit doesn't. */
 .pp-card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1, 4px);
   break-inside: avoid;
   margin: 0 0 var(--sp-2, 6px);
-  padding: var(--sp-2, 6px) 7px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 6px);
-  background: var(--bg-card);
 }
 
 .pp-hint {

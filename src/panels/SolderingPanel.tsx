@@ -43,6 +43,8 @@ import {
   unzipGerberPackage,
   GerberPackageError,
 } from '../core/gerberPackage'
+import { CamStatus, CamEmpty } from '../components/cam/CamUI'
+import { SegControl } from '../components/ui/SegControl'
 import '../styles/soldering.css'
 
 /** Clamp decimals to the range toFixed() accepts (0..6) — guards the
@@ -294,19 +296,16 @@ function SegField<T extends string>(props: {
         <span className="sp-sfield-txt">{label}</span>
         {info && <InfoTip topic="solderField" title={info.title} body={info.body} />}
       </span>
-      <div className="sp-seg" role="group" aria-label={label}>
-        {options.map((o) => (
-          <button
-            key={o.value}
-            type="button"
-            className={`sp-seg-btn${o.value === value ? ' active' : ''}`}
-            aria-pressed={o.value === value}
-            onClick={() => onChange(o.value)}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+      {/* Canonical segmented control (§2.8/W-C): roving-tabindex + arrow keys.
+          A feed-type MODE switch → tonal variant. */}
+      <SegControl<T>
+        options={options}
+        value={value}
+        onChange={onChange}
+        ariaLabel={label}
+        variant="tonal"
+        size="sm"
+      />
     </div>
   )
 }
@@ -1401,32 +1400,25 @@ export function SolderingPanel() {
         </div>
       )}
 
-      {/* Live status strip: point + line counts, auto-synced to the Program tab. */}
+      {/* Live status strip: point + line counts, auto-synced to the Program tab.
+          Uses the shared <CamStatus> kit so it reads identically to every tab. */}
       <div className="sp-status">
-        <span className="sp-status-pill">
-          <b>{points.length}</b> {t('solder.status.points', 'points')}
-        </span>
-        <span className="sp-status-sep" aria-hidden="true">·</span>
-        <span className="sp-status-pill">
-          <b>{lineCount}</b> {t('solder.status.lines', 'G-code lines')}
-        </span>
-        <span className="sp-status-sep" aria-hidden="true">·</span>
-        <span
-          className="sp-status-pill"
-          title={t('solder.status.travel.title', 'Total free (XY) travel between points in the current order, from the work origin. Use Optimize travel order to shrink it.')}
-        >
-          <b>{travelMm.toFixed(0)}</b> {t('solder.status.travel', 'mm travel')}
-        </span>
-        <span className="sp-status-sep" aria-hidden="true">·</span>
-        <span
-          className="sp-status-pill"
-          title={t('solder.status.est.title', 'Estimated cycle time (plunge + feeder + settle dwells; travel ignored)')}
-        >
-          <b>{fmtDuration(estSeconds, t)}</b> {t('solder.status.est', 'est.')}
-        </span>
-        <span className="sp-status-sync" title={t('solder.live.title', 'Lines auto-synced to the Program tab')}>
-          → {t('solder.status.program', 'Program')}
-        </span>
+        <CamStatus
+          items={[
+            { value: points.length, unit: t('solder.status.points', 'points') },
+            { value: lineCount, unit: t('solder.status.lines', 'G-code lines') },
+            {
+              value: travelMm.toFixed(0),
+              unit: t('solder.status.travel', 'mm travel'),
+              title: t('solder.status.travel.title', 'Total free (XY) travel between points in the current order, from the work origin. Use Optimize travel order to shrink it.'),
+            },
+            {
+              value: fmtDuration(estSeconds, t),
+              unit: t('solder.status.est', 'est.'),
+              title: t('solder.status.est.title', 'Estimated cycle time (plunge + feeder + settle dwells; travel ignored)'),
+            },
+          ]}
+        />
       </div>
 
       {invertedPoints.length > 0 && (
@@ -1685,11 +1677,20 @@ export function SolderingPanel() {
             <tbody>
               {points.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="sp-empty">
-                    {t(
-                      'solder.table.empty',
-                      'No points yet. Press + to add one, or ⌖ to record the machine position.',
-                    )}
+                  <td colSpan={9}>
+                    <CamEmpty
+                      icon={<Icon name="add" size={22} />}
+                      title={t('solder.empty.title', 'No solder points yet')}
+                      hint={t(
+                        'solder.empty.hint',
+                        'Add a point, or jog the machine and record its position.',
+                      )}
+                      action={
+                        <button type="button" className="cam-primary" onClick={addRow}>
+                          <Icon name="add" size={15} /> {t('solder.toolbar.add', 'Add point')}
+                        </button>
+                      }
+                    />
                   </td>
                 </tr>
               )}
@@ -1812,12 +1813,19 @@ export function SolderingPanel() {
             panels (the table above is shown instead) — toggled purely in CSS. */}
         <div className="sp-cards">
           {points.length === 0 && (
-            <p className="sp-empty">
-              {t(
-                'solder.table.empty',
-                'No points yet. Press + to add one, or ⌖ to record the machine position.',
+            <CamEmpty
+              icon={<Icon name="add" size={22} />}
+              title={t('solder.empty.title', 'No solder points yet')}
+              hint={t(
+                'solder.empty.hint',
+                'Add a point, or jog the machine and record its position.',
               )}
-            </p>
+              action={
+                <button type="button" className="cam-primary" onClick={addRow}>
+                  <Icon name="add" size={15} /> {t('solder.toolbar.add', 'Add point')}
+                </button>
+              }
+            />
           )}
           {/* Bulk "apply to all" bar — the mobile equivalent of the per-header
               affordances (the table headers are hidden in this layout). One chip

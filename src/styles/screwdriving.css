@@ -138,46 +138,8 @@
   color: var(--danger);
 }
 
-/* ───────────────────────── status strip ───────────────────────── */
-.swd-status {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-variant-numeric: tabular-nums;
-}
-.swd-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-.swd-status-pill b {
-  color: var(--fg);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.swd-status-sep {
-  color: var(--border);
-}
-.swd-status-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: auto;
-  padding: 1px 8px;
-  border-radius: 999px;
-  color: var(--accent);
-  font-weight: 600;
-  white-space: nowrap;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
+/* Status strip styling lives in the shared <CamStatus> kit (.cam-status); the
+ * .swd-status div is just a bare wrapper. */
 
 .swd-warn {
   margin: 0;
@@ -471,37 +433,11 @@
   font-weight: 500;
   color: var(--fg-muted);
 }
-.sd-seg {
-  display: flex;
+/* The Decimals stepper now renders via the shared <SegControl> kit
+   (.ui-seg / .ui-seg-btn); only the row-fill layout is kept here. */
+.ui-seg.sd-seg {
   flex: 1 1 0;
   min-width: 0;
-  gap: var(--sp-1);
-}
-.sd-seg-btn {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: var(--ctl-h);
-  padding: 0 2px;
-  font-size: var(--fs-ctl);
-  font-variant-numeric: tabular-nums;
-  color: var(--fg-muted);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-}
-.sd-seg-btn:hover {
-  border-color: var(--accent);
-  color: var(--fg);
-}
-.sd-seg-btn.active {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
 }
 
 /* ───────────────────────── point table ───────────────────────── */
@@ -708,8 +644,7 @@
   .swd-settings {
     grid-template-columns: 1fr;
   }
-  .sd-sfield-num,
-  .sd-seg-btn {
+  .sd-sfield-num {
     height: var(--ctl-h-touch);
   }
   .swd-ico {
@@ -730,8 +665,7 @@
     .swd-settings {
       grid-template-columns: 1fr;
     }
-    .sd-sfield-num,
-    .sd-seg-btn {
+    .sd-sfield-num {
       height: var(--ctl-h-touch);
     }
     .swd-ico {

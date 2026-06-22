@@ -115,49 +115,20 @@
   text-align: right;
 }
 
-/* ---- Speed control (button group) ---- */
+/* ---- Speed control — the shared <SegControl> (.ui-seg). Keep it from growing
+   so it stays pinned at the bar's right edge with tabular-figure labels. ---- */
 .pt-speed {
-  display: inline-flex;
-  align-items: center;
   flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.pt-speed-btn {
-  border: none;
-  border-left: 1px solid var(--border);
-  background: var(--bg-input);
-  color: var(--fg-muted);
-  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  padding: 4px 7px;
-  min-height: 26px;
-  cursor: pointer;
-  line-height: 1;
-}
-.pt-speed-btn:first-child {
-  border-left: none;
-}
-.pt-speed-btn:hover {
-  color: var(--fg);
-  background: var(--bg-panel);
-}
-.pt-speed-btn--active {
-  background: var(--accent);
-  color: var(--accent-fg);
 }
 
-/* ---- Narrow reflow: drop the speed labels' breathing room, allow wrap ---- */
+/* ---- Narrow reflow: drop the readout's breathing room, allow wrap ---- */
 @media (max-width: 420px) {
   .pt-bar {
     gap: 6px;
   }
   .pt-readout {
     min-width: 0;
-  }
-  .pt-speed-btn {
-    padding: 4px 5px;
   }
 }
 
@@ -179,10 +150,5 @@
   .pt-range::-moz-range-thumb {
     width: 20px;
     height: 20px;
-  }
-  .pt-speed-btn {
-    min-height: 38px;
-    padding: 6px 10px;
-    font-size: 13px;
   }
 }

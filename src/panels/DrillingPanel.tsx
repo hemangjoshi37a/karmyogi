@@ -21,7 +21,7 @@ import {
   type ScrewPoint,
   type ScrewPresetKey,
 } from '../core/drilling'
-import { CamEmpty } from '../components/cam/CamUI'
+import { CamEmpty, CamStatus } from '../components/cam/CamUI'
 import '../styles/drilling.css'
 import '../styles/cam.css'
 
@@ -495,22 +495,16 @@ export function DrillingPanel() {
         </div>
       </header>
 
-      {/* Live status strip: point + line counts, drilled diameter, auto-synced. */}
+      {/* Live status strip: point + line counts, drilled diameter, auto-synced.
+          Uses the shared <CamStatus> kit so it reads identically to every tab. */}
       <div className="scf-status">
-        <span className="scf-status-pill">
-          <b>{points.length}</b> {t('drill.status.points', 'holes')}
-        </span>
-        <span className="scf-status-sep" aria-hidden="true">·</span>
-        <span className="scf-status-pill">
-          <b>{lineCount}</b> {t('drill.status.lines', 'G-code lines')}
-        </span>
-        <span className="scf-status-sep" aria-hidden="true">·</span>
-        <span className="scf-status-pill">
-          {preset.label} <b>⌀{drilledDia.toFixed(2)}</b> {t('unit.mm', 'mm')}
-        </span>
-        <span className="scf-status-sync" title={t('drill.live.title', 'Lines auto-synced to the Program tab')}>
-          → {t('drill.status.program', 'Program')}
-        </span>
+        <CamStatus
+          items={[
+            { value: points.length, unit: t('drill.status.points', 'holes') },
+            { value: lineCount, unit: t('drill.status.lines', 'G-code lines') },
+            { label: preset.label, value: `⌀${drilledDia.toFixed(2)}`, unit: t('unit.mm', 'mm') },
+          ]}
+        />
       </div>
 
       {recessTooWide && (

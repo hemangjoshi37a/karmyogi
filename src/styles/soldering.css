@@ -118,33 +118,8 @@
   border-color: var(--danger);
   color: var(--danger);
 }
-/* ───────────────────────── status strip ───────────────────────── */
-.sp-status {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-label);
-  color: var(--fg-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-variant-numeric: tabular-nums;
-}
-.sp-status-pill b {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-.sp-status-sep {
-  color: var(--border);
-}
-.sp-status-sync {
-  margin-left: auto;
-  color: var(--accent);
-  font-weight: 600;
-  white-space: nowrap;
-}
+/* Status strip styling lives in the shared <CamStatus> kit (.cam-status); the
+ * .sp-status div is just a bare wrapper. */
 
 .sp-warn {
   margin: 0;
@@ -480,39 +455,9 @@
    share one bordered frame; the active one is filled with the accent. The
    Approach select reuses the same row layout but stays a native <select> as it
    has five options (too many for a comfortable pill row). */
-.sp-seg {
-  display: inline-flex;
-  flex: 1 1 0;
-  min-width: 0;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--bg-input);
-}
-.sp-seg-btn {
-  flex: 1 1 0;
-  min-width: 0;
-  height: var(--ctl-h);
-  padding: 0 8px;
-  font-size: var(--fs-ctl);
-  color: var(--fg-muted);
-  background: transparent;
-  border: none;
-  border-left: 1px solid var(--border);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: background 0.12s, color 0.12s;
-}
-.sp-seg-btn:first-child { border-left: none; }
-.sp-seg-btn:hover { color: var(--fg); }
-.sp-seg-btn.active {
-  color: var(--accent-fg);
-  background: var(--accent);
-  font-weight: 600;
-}
+/* The Feed-type segmented control now renders via the shared <SegControl> kit
+ * (.ui-seg / .ui-seg-btn). The Approach picker stays a native <select>
+ * (.sp-seg-select) — five options is too many for a comfortable pill row. */
 .sp-seg-select {
   flex: 1 1 0;
   min-width: 0;
@@ -617,13 +562,7 @@
   outline: none;
   border-color: var(--accent);
 }
-.sp-empty {
-  padding: 22px 12px;
-  text-align: center;
-  color: var(--fg-muted);
-  font-size: var(--fs-body);
-  line-height: 1.5;
-}
+/* Empty state uses the shared <CamEmpty> kit (.cam-empty). */
 
 /* ───────────────── column header + bulk "apply to all" ─────────────────
    Each bulk-editable header holds its label plus a tiny "fill down" trigger.
@@ -1011,11 +950,10 @@
   .sp-settings {
     grid-template-columns: 1fr;
   }
-  /* Grow the slider number box, segmented pills and Approach select to the
-     ≥36px touch target; the slider thumb/track is handled by the coarse-pointer
-     block above. */
+  /* Grow the slider number box and Approach select to the ≥36px touch target;
+     the slider thumb/track is handled by the coarse-pointer block above, and the
+     Feed-type segmented control sizes itself via the shared <SegControl> kit. */
   .sp-sfield-num,
-  .sp-seg-btn,
   .sp-seg-select {
     height: var(--ctl-h-touch);
   }
@@ -1041,7 +979,6 @@
       grid-template-columns: 1fr;
     }
     .sp-sfield-num,
-    .sp-seg-btn,
     .sp-seg-select {
       height: var(--ctl-h-touch);
     }
