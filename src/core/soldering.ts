@@ -272,13 +272,158 @@ export function orderSolderPointsForTravel<T extends { x: number; y: number }>(
 }
 
 /**
- * Produce a complete, safe G-code program for the given soldering points.
- * Faithful port of cadcam::SolderingGenerator::generate.
+ * One soldering point's slice of the program. `pointId` is a STABLE index-based
+ * id ('sp-0', 'sp-1', …) so the UI can match a segment to the same-ordered
+ * `SolderPoint`; `gcode` is exactly that point's lines of the combined program
+ * (NO trailing newline — the combined output joins all slices with '\n').
  */
-export function generateSoldering(points: SolderPoint[], params: Partial<SolderingParams> = {}): string {
-  const p = defaultSolderingParams(params);
+export interface SolderingSegment {
+  /** Stable, order-based id matching the point's position in the input list. */
+  pointId: string;
+  /** This point's G-code lines, joined with '\n' (no trailing newline). */
+  gcode: string;
+}
+
+/**
+ * Structured per-point breakdown of the soldering program, alongside the same
+ * flat output `generateSoldering` produces. The Program tab uses `segments` to
+ * show each point's own G-code expandably (like the carving per-op breakdown).
+ *
+ * INVARIANT — byte-identical streamed output: `combined` EQUALS
+ * `generateSoldering(points, params)` exactly. It is built by joining the
+ * `preamble`, every `segments[i].gcode`, and the `postamble` with '\n' (plus a
+ * trailing newline), so every streamed line appears exactly once and in the
+ * same order. The safe header (G21/G90/G94/G17 + initial M5/safe-Z) is the
+ * `preamble`; the final safe-Z/M5/M30 is the `postamble`.
+ */
+export interface SolderingBreakdown {
+  /** Flat program — byte-identical to `generateSoldering(points, params)`. */
+  combined: string;
+  /** One slice per input point, in order. */
+  segments: SolderingSegment[];
+  /** Safe header lines (joined with '\n', no trailing newline). */
+  preamble: string;
+  /** Safe footer lines (joined with '\n', no trailing newline). */
+  postamble: string;
+}
+
+/** Build the lines for ONE soldering point's sequence (no header/footer). */
+function solderPointLines(
+  pt: SolderPoint,
+  n: number,
+  p: SolderingParams,
+  zr: (v: number) => number,
+): string[] {
   const d = p.decimals;
   const o: string[] = [];
+  // Pre-travel raise must clear the SAFE height: travel XY at max(freeZ,safeZ)
+  // so a per-point freeZ set BELOW safeZ never drags the tip across the board
+  // under the guaranteed-clear height. freeZ stays the post-solder retract.
+  const travelZ = Math.max(pt.freeZ, p.safeZ);
+  const feedOn = `M3 S${fmt(p.feederRPM, d)}`;
+  const feed = `G4 P${fmt(pt.feedSeconds, d)}`;
+  const feedF = fmt(Math.max(1, p.plungeFeed), d); // F0 stalls GRBL
+  const preRaise = `G0 Z${fmt(zr(travelZ), d)}`;
+  const raise = `G0 Z${fmt(zr(pt.freeZ), d)}`;
+
+  // Where the tip arrives before the final descent, the moves that make it
+  // touch down, and the symmetric retract back out — all approach-aware.
+  //
+  // For a straight plunge the tip sits directly above the pad, drops
+  // vertically to Touch-Z, and (after touching/feeding) lifts straight back to
+  // Free-Z via `raise`.
+  //
+  // For a directional 45° approach the tip starts at Free-Z offset from the
+  // pad along ONE axis by the horizontal run (= |FreeZ−TouchZ|, so the
+  // diagonal is a true 45°), with the other axis at the pad coord. It then
+  // moves diagonally INTO the pad (offset axis → pad coord WHILE Z → Touch-Z),
+  // and on retract reverses the SAME diagonal (offset axis back out WHILE Z →
+  // Free-Z) before the normal safe-Z handling. Direction = the side the tip
+  // comes IN from: front = −Y, back = +Y, right = +X, left = −X.
+  const approach: SolderApproach = pt.approach ?? 'plunge';
+  let xy: string; // rapid to the start-of-descent XY at Free-Z
+  const touch: string[] = []; // moves that bring the tip onto the pad
+  // Diagonal retract that mirrors the descent (empty for a straight plunge —
+  // the plain vertical `raise` is used instead).
+  const angleRetract: string[] = [];
+  if (approach === 'plunge') {
+    // Straight plunge: above the pad, then a vertical descent.
+    xy = `G0 X${fmt(pt.x, d)} Y${fmt(pt.y, d)}`;
+    touch.push(`G1 Z${fmt(zr(pt.touchZ), d)} F${feedF}`);
+  } else {
+    const off = Math.abs(pt.freeZ - pt.touchZ); // horizontal run = vertical drop
+    // Per-direction signed offset of the descent START from the pad. The tip
+    // comes IN from this side, so it starts on that side and moves toward the
+    // pad. front = from −Y, back = from +Y, right = from +X, left = from −X.
+    let startX = pt.x;
+    let startY = pt.y;
+    switch (approach) {
+      case 'angle-front':
+        startY = pt.y - off; // start on the −Y side, move in +Y into the pad
+        break;
+      case 'angle-back':
+        startY = pt.y + off; // start on the +Y side, move in −Y into the pad
+        break;
+      case 'angle-right':
+        startX = pt.x + off; // start on the +X side, move in −X into the pad
+        break;
+      case 'angle-left':
+        startX = pt.x - off; // start on the −X side, move in +X into the pad
+        break;
+    }
+    // Start above the offset point at Free-Z, descend diagonally onto the pad,
+    // and (on retract) reverse the diagonal back out to the offset point.
+    xy = `G0 X${fmt(startX, d)} Y${fmt(startY, d)}`;
+    touch.push(`G1 X${fmt(pt.x, d)} Y${fmt(pt.y, d)} Z${fmt(zr(pt.touchZ), d)} F${feedF}`);
+    angleRetract.push(`G1 X${fmt(startX, d)} Y${fmt(startY, d)} Z${fmt(zr(pt.freeZ), d)} F${feedF}`);
+  }
+
+  if (pt.type === SolderFeedType.PreSolder) {
+    o.push(`(Point ${n}: pre-solder, ${approach}, feed ${fmt(pt.feedSeconds, d)}s)`);
+    o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
+    o.push(xy); // move above pad (or its 45° start) at free Z
+    o.push(feedOn); // pre-feed wire onto tip
+    o.push(feed);
+    o.push('M5'); // stop feeder
+    o.push(...touch); // touch pad to deposit (straight or 45°)
+    if (p.settleSeconds > 0.0) o.push(`G4 P${fmt(p.settleSeconds, d)}`);
+    // Retract: diagonal back out along the 45° approach, else straight up.
+    if (angleRetract.length > 0) o.push(...angleRetract);
+    else o.push(raise);
+  } else {
+    // TouchDown
+    o.push(`(Point ${n}: touch-down, ${approach}, feed ${fmt(pt.feedSeconds, d)}s)`);
+    o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
+    o.push(xy); // move above pad (or its 45° start) at free Z
+    o.push(...touch); // touch pad first (straight or 45°)
+    o.push(feedOn); // feed wire while in contact
+    o.push(feed);
+    o.push('M5'); // stop feeder
+    if (p.settleSeconds > 0.0) o.push(`G4 P${fmt(p.settleSeconds, d)}`);
+    // Retract: diagonal back out along the 45° approach, else straight up.
+    if (angleRetract.length > 0) o.push(...angleRetract);
+    else o.push(raise);
+  }
+  return o;
+}
+
+/**
+ * Produce the soldering program AS A PER-POINT BREAKDOWN: the safe preamble, one
+ * G-code slice per point (in order), and the safe postamble — plus the `combined`
+ * flat program. `combined` is byte-identical to {@link generateSoldering} (which
+ * is itself implemented in terms of this). Pure (no rounding side effects beyond
+ * the same `fmt` the flat path uses).
+ *
+ * The header (G21/G90/… + initial M5/safe-Z) is the `preamble`; the closing
+ * safe-Z/M5/M30 is the `postamble`. Each segment's `gcode` is exactly that
+ * point's lines — together they reconstruct the streamed program line-for-line.
+ */
+export function generateSolderingSegments(
+  points: SolderPoint[],
+  params: Partial<SolderingParams> = {},
+): SolderingBreakdown {
+  const p = defaultSolderingParams(params);
+  const d = p.decimals;
 
   // Z DATUM: the FIRST point's touch-down Z is the job's zero. Every absolute Z
   // emitted below is expressed RELATIVE to it (subtract `zOrigin`), so point 1
@@ -288,115 +433,44 @@ export function generateSoldering(points: SolderPoint[], params: Partial<Solderi
   const zOrigin = points.length > 0 ? points[0].touchZ : 0;
   const zr = (v: number): number => v - zOrigin;
 
-  // ---- Header -----------------------------------------------------------
-  if (p.programName.length > 0) o.push(`(${p.programName})`);
-  o.push('(Generated by karmyogi.hjLabs.in Auto-Soldering)');
-  o.push('(Z0 = first point touch-down — set work Z zero at the first pad)');
-  o.push(p.metric ? 'G21' : 'G20');
-  o.push('G90');
-  o.push('G94');
-  o.push('G17');
-  o.push('M5'); // feeder off to start
-  o.push(`G0 Z${fmt(zr(p.safeZ), d)}`); // safe height first (relative to datum)
+  // ---- Header (preamble) -------------------------------------------------
+  const head: string[] = [];
+  if (p.programName.length > 0) head.push(`(${p.programName})`);
+  head.push('(Generated by karmyogi.hjLabs.in Auto-Soldering)');
+  head.push('(Z0 = first point touch-down — set work Z zero at the first pad)');
+  head.push(p.metric ? 'G21' : 'G20');
+  head.push('G90');
+  head.push('G94');
+  head.push('G17');
+  head.push('M5'); // feeder off to start
+  head.push(`G0 Z${fmt(zr(p.safeZ), d)}`); // safe height first (relative to datum)
 
-  // ---- Per-point sequences ----------------------------------------------
-  let n = 0;
-  for (const pt of points) {
-    ++n;
-    // Pre-travel raise must clear the SAFE height: travel XY at max(freeZ,safeZ)
-    // so a per-point freeZ set BELOW safeZ never drags the tip across the board
-    // under the guaranteed-clear height. freeZ stays the post-solder retract.
-    const travelZ = Math.max(pt.freeZ, p.safeZ);
-    const feedOn = `M3 S${fmt(p.feederRPM, d)}`;
-    const feed = `G4 P${fmt(pt.feedSeconds, d)}`;
-    const feedF = fmt(Math.max(1, p.plungeFeed), d); // F0 stalls GRBL
-    const preRaise = `G0 Z${fmt(zr(travelZ), d)}`;
-    const raise = `G0 Z${fmt(zr(pt.freeZ), d)}`;
+  // ---- Per-point slices --------------------------------------------------
+  const segments: SolderingSegment[] = points.map((pt, i) => ({
+    pointId: `sp-${i}`,
+    gcode: solderPointLines(pt, i + 1, p, zr).join('\n'),
+  }));
 
-    // Where the tip arrives before the final descent, the moves that make it
-    // touch down, and the symmetric retract back out — all approach-aware.
-    //
-    // For a straight plunge the tip sits directly above the pad, drops
-    // vertically to Touch-Z, and (after touching/feeding) lifts straight back to
-    // Free-Z via `raise`.
-    //
-    // For a directional 45° approach the tip starts at Free-Z offset from the
-    // pad along ONE axis by the horizontal run (= |FreeZ−TouchZ|, so the
-    // diagonal is a true 45°), with the other axis at the pad coord. It then
-    // moves diagonally INTO the pad (offset axis → pad coord WHILE Z → Touch-Z),
-    // and on retract reverses the SAME diagonal (offset axis back out WHILE Z →
-    // Free-Z) before the normal safe-Z handling. Direction = the side the tip
-    // comes IN from: front = −Y, back = +Y, right = +X, left = −X.
-    const approach: SolderApproach = pt.approach ?? 'plunge';
-    let xy: string; // rapid to the start-of-descent XY at Free-Z
-    const touch: string[] = []; // moves that bring the tip onto the pad
-    // Diagonal retract that mirrors the descent (empty for a straight plunge —
-    // the plain vertical `raise` is used instead).
-    const angleRetract: string[] = [];
-    if (approach === 'plunge') {
-      // Straight plunge: above the pad, then a vertical descent.
-      xy = `G0 X${fmt(pt.x, d)} Y${fmt(pt.y, d)}`;
-      touch.push(`G1 Z${fmt(zr(pt.touchZ), d)} F${feedF}`);
-    } else {
-      const off = Math.abs(pt.freeZ - pt.touchZ); // horizontal run = vertical drop
-      // Per-direction signed offset of the descent START from the pad. The tip
-      // comes IN from this side, so it starts on that side and moves toward the
-      // pad. front = from −Y, back = from +Y, right = from +X, left = from −X.
-      let startX = pt.x;
-      let startY = pt.y;
-      switch (approach) {
-        case 'angle-front':
-          startY = pt.y - off; // start on the −Y side, move in +Y into the pad
-          break;
-        case 'angle-back':
-          startY = pt.y + off; // start on the +Y side, move in −Y into the pad
-          break;
-        case 'angle-right':
-          startX = pt.x + off; // start on the +X side, move in −X into the pad
-          break;
-        case 'angle-left':
-          startX = pt.x - off; // start on the −X side, move in +X into the pad
-          break;
-      }
-      // Start above the offset point at Free-Z, descend diagonally onto the pad,
-      // and (on retract) reverse the diagonal back out to the offset point.
-      xy = `G0 X${fmt(startX, d)} Y${fmt(startY, d)}`;
-      touch.push(`G1 X${fmt(pt.x, d)} Y${fmt(pt.y, d)} Z${fmt(zr(pt.touchZ), d)} F${feedF}`);
-      angleRetract.push(`G1 X${fmt(startX, d)} Y${fmt(startY, d)} Z${fmt(zr(pt.freeZ), d)} F${feedF}`);
-    }
+  // ---- Footer (postamble) ------------------------------------------------
+  const foot: string[] = [`G0 Z${fmt(zr(p.safeZ), d)}`, 'M5', 'M30'];
 
-    if (pt.type === SolderFeedType.PreSolder) {
-      o.push(`(Point ${n}: pre-solder, ${approach}, feed ${fmt(pt.feedSeconds, d)}s)`);
-      o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
-      o.push(xy); // move above pad (or its 45° start) at free Z
-      o.push(feedOn); // pre-feed wire onto tip
-      o.push(feed);
-      o.push('M5'); // stop feeder
-      o.push(...touch); // touch pad to deposit (straight or 45°)
-      if (p.settleSeconds > 0.0) o.push(`G4 P${fmt(p.settleSeconds, d)}`);
-      // Retract: diagonal back out along the 45° approach, else straight up.
-      if (angleRetract.length > 0) o.push(...angleRetract);
-      else o.push(raise);
-    } else {
-      // TouchDown
-      o.push(`(Point ${n}: touch-down, ${approach}, feed ${fmt(pt.feedSeconds, d)}s)`);
-      o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
-      o.push(xy); // move above pad (or its 45° start) at free Z
-      o.push(...touch); // touch pad first (straight or 45°)
-      o.push(feedOn); // feed wire while in contact
-      o.push(feed);
-      o.push('M5'); // stop feeder
-      if (p.settleSeconds > 0.0) o.push(`G4 P${fmt(p.settleSeconds, d)}`);
-      // Retract: diagonal back out along the 45° approach, else straight up.
-      if (angleRetract.length > 0) o.push(...angleRetract);
-      else o.push(raise);
-    }
-  }
+  const preamble = head.join('\n');
+  const postamble = foot.join('\n');
+  // Combined = preamble + every segment + postamble, joined line-for-line. This
+  // is exactly the flat sequence the original generator emitted (header lines,
+  // then each point's block, then footer), so it stays byte-identical.
+  const combined =
+    [preamble, ...segments.map((s) => s.gcode), postamble].join('\n') + '\n';
 
-  // ---- Footer -----------------------------------------------------------
-  o.push(`G0 Z${fmt(zr(p.safeZ), d)}`);
-  o.push('M5');
-  o.push('M30');
+  return { combined, segments, preamble, postamble };
+}
 
-  return o.join('\n') + '\n';
+/**
+ * Produce a complete, safe G-code program for the given soldering points.
+ * Faithful port of cadcam::SolderingGenerator::generate. Implemented in terms of
+ * {@link generateSolderingSegments} so the flat and per-point views can never
+ * drift — they are literally the same bytes.
+ */
+export function generateSoldering(points: SolderPoint[], params: Partial<SolderingParams> = {}): string {
+  return generateSolderingSegments(points, params).combined;
 }

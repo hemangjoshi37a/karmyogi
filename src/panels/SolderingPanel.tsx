@@ -26,7 +26,7 @@ import {
   defaultSolderPoint,
   defaultSolderingParams,
   estimateSolderingSeconds,
-  generateSoldering,
+  generateSolderingSegments,
   orderSolderPointsForTravel,
   solderTravelDistance,
   type SolderApproach,
@@ -109,6 +109,13 @@ const numOr = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback
 
 const CSV_HEADER = 'x,y,freeZ,touchZ,type,feedSeconds,approach'
+
+/**
+ * Per-point operation tint for the Program-tab breakdown + the Visualizer's
+ * toolpath slice — the soldering accent cyan (matches the 3D SolderScene
+ * highlight `hiColor`). One shared colour: every point reads as "soldering".
+ */
+const SOLDER_OP_COLOR = '#0891b2'
 
 /** Serialize the soldering points to a CSV string (header + one row each). */
 function pointsToCsv(points: SolderPoint[]): string {
@@ -1006,8 +1013,36 @@ export function SolderingPanel() {
     () => points.map((p) => ({ ...p, feedSeconds: Math.max(0, p.feedSeconds) })),
     [points],
   )
-  const gcode = useMemo(() => generateSoldering(safePoints, safeParams), [safePoints, safeParams])
+  // Per-point breakdown: `combined` is byte-identical to the old flat
+  // generateSoldering output (streamed unchanged); `segments` is the per-point
+  // structure the Program tab renders as an expandable op list (like carving).
+  const breakdown = useMemo(
+    () => generateSolderingSegments(safePoints, safeParams),
+    [safePoints, safeParams],
+  )
+  const gcode = breakdown.combined
   const lineCount = useMemo(() => gcodeLines(gcode).length, [gcode])
+  // ProgramOperation[] for the shared Program tab: one entry PER POINT, keyed by
+  // the segment's stable id (matches the same-ordered solder point / 3D point),
+  // labelled "Point N · (x, y)" in the panel's metric formatting, tinted the
+  // soldering accent so the Visualizer can colour its slice. Purely additive —
+  // the streamed `combined` is unchanged whether or not these are passed.
+  const operations = useMemo(() => {
+    const dp = clampDecimals(params.decimals)
+    return breakdown.segments.map((seg, i) => {
+      const pt = safePoints[i]
+      return {
+        id: seg.pointId,
+        label: t('solder.op.point', 'Point {n} · ({x}, {y})', {
+          n: i + 1,
+          x: pt ? pt.x.toFixed(dp) : '0',
+          y: pt ? pt.y.toFixed(dp) : '0',
+        }),
+        gcode: seg.gcode,
+        color: SOLDER_OP_COLOR,
+      }
+    })
+  }, [breakdown, safePoints, params.decimals, t])
   const estSeconds = useMemo(
     () => estimateSolderingSeconds(safePoints, safeParams),
     [safePoints, safeParams],
@@ -1035,11 +1070,14 @@ export function SolderingPanel() {
       releaseOwner('soldering')
       return
     }
-    // We have points → CLAIM ownership (last writer wins) and publish the program.
+    // We have points → CLAIM ownership (last writer wins) and publish the program
+    // WITH its per-point breakdown (operations) so the Program tab can expand each
+    // point's own G-code (like carving). `gcode` is byte-identical to the old flat
+    // output, so streaming is unchanged — operations are additive display metadata.
     claimOwner('soldering')
-    const id = window.setTimeout(() => setProgram('soldering', gcode), 300)
+    const id = window.setTimeout(() => setProgram('soldering', gcode, { operations }), 300)
     return () => window.clearTimeout(id)
-  }, [gcode, points.length, setProgram, removeSection, claimOwner, releaseOwner])
+  }, [gcode, operations, points.length, setProgram, removeSection, claimOwner, releaseOwner])
 
   // Publish the points to the 3D PCB stand-in (board + pads/holes). The yield
   // effect below clears it when another panel takes over; this re-publishes when

@@ -1,8 +1,11 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { Line } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
 import { useSolderViz } from '../store/solderViz'
-import { useProgram } from '../store'
+import { useProgram, useMachine } from '../store'
+import { usePlayback } from '../store/playback'
+import { prefersReducedMotion } from './reducedMotion'
 import { isIdentityJob, type JobPlacement } from '../core/transform'
 
 /**
@@ -27,8 +30,12 @@ export interface SolderSceneProps {
 export function SolderScene({ dark }: SolderSceneProps) {
   const points = useSolderViz((s) => s.points)
   const selected = useSolderViz((s) => s.selected)
+  const activeIndex = useSolderViz((s) => s.activeIndex)
+  const setActiveIndex = useSolderViz((s) => s.setActiveIndex)
   const fromDrill = useSolderViz((s) => s.fromDrill)
   const detected = useSolderViz((s) => s.detected)
+
+  const reduceMotion = useMemo(() => prefersReducedMotion(), [])
   // The soldering section's placement (the gizmo edits it). We apply the SAME
   // transform to the board so it tracks the toolpath when the job is moved /
   // rotated / scaled. (Updates on gizmo release — the live drag previews the
@@ -92,6 +99,60 @@ export function SolderScene({ dark }: SolderSceneProps) {
       .multiply(new THREE.Matrix4().makeTranslation(-cx, -cy, 0))
   }, [board, placement])
 
+  // ── Active-point tracking: shimmer whatever point the machine is doing NOW ──
+  // Each frame, derive the live tool XY (sim playhead while playing, else the
+  // live machine work-position while a real stream runs) and shimmer the NEAREST
+  // solder point within a small XY radius — so the highlight naturally advances
+  // point-to-point as the program executes. Read imperatively via getState() so
+  // this never re-renders at 60fps; the chosen index is pushed to the store
+  // (cheap no-op when unchanged) and consumed by the shimmer mesh + the panel.
+  const tmpXY = useRef({ x: 0, y: 0 })
+  useFrame(() => {
+    const pts = useSolderViz.getState().points
+    if (pts.length === 0) {
+      setActiveIndex(-1)
+      return
+    }
+    // 1) Where is the tool right now?
+    const pb = usePlayback.getState()
+    let x: number | null = null
+    let y: number | null = null
+    if (pb.isPlaying && pb.timeline && pb.timeline.duration > 0) {
+      const pos = pb.timeline.positionAt(pb.time)
+      x = pos[0]
+      y = pos[1]
+    } else {
+      const m = useMachine.getState()
+      const prog = useProgram.getState()
+      if (m.connection === 'connected' && prog.streaming) {
+        x = m.wpos.x
+        y = m.wpos.y
+      }
+    }
+    if (x === null || y === null || !Number.isFinite(x) || !Number.isFinite(y)) {
+      setActiveIndex(-1)
+      return
+    }
+    // 2) Nearest point within a small XY radius (so "between pads" shimmers none).
+    //    Radius scales with the feature size, with a sane floor for tiny boards.
+    const r = Math.max(board ? board.feat * 2.5 : 2, 2)
+    const r2 = r * r
+    let best = -1
+    let bestD = Infinity
+    for (let i = 0; i < pts.length; i++) {
+      const dx = pts[i].x - x
+      const dy = pts[i].y - y
+      const d = dx * dx + dy * dy
+      if (d < bestD) {
+        bestD = d
+        best = i
+      }
+    }
+    tmpXY.current.x = x
+    tmpXY.current.y = y
+    setActiveIndex(best >= 0 && bestD <= r2 ? best : -1)
+  })
+
   const transformRef = useRef<THREE.Group>(null)
   useLayoutEffect(() => {
     const g = transformRef.current
@@ -145,6 +206,9 @@ export function SolderScene({ dark }: SolderSceneProps) {
   if (!board || points.length === 0) return detMarkers
 
   const sel = selected >= 0 && selected < points.length ? points[selected] : null
+  // The point the machine is currently executing — shimmered (animated pulse),
+  // visually distinct from the static cyan click-selected highlight above.
+  const act = activeIndex >= 0 && activeIndex < points.length ? points[activeIndex] : null
 
   return (
     <>
@@ -250,7 +314,113 @@ export function SolderScene({ dark }: SolderSceneProps) {
           </mesh>
         </group>
       )}
+
+      {/* ---- SHIMMER the point the machine is CURRENTLY executing: a warm-amber
+          pulsing ring + glow disc on the pad that animates (or static-bright when
+          reduced motion), advancing point-to-point as the sim/stream runs. A warm
+          colour keeps it distinct from the cyan click-selected highlight, and it
+          can show on the SAME pad as a selection (both read independently). ---- */}
+      {act && (
+        <SolderShimmer
+          key={`shim-${activeIndex}`}
+          x={act.x}
+          y={act.y}
+          freeZ={act.freeZ}
+          touchZ={act.touchZ}
+          feat={board.feat}
+          dark={dark}
+          reduceMotion={reduceMotion}
+        />
+      )}
     </group>
     </>
+  )
+}
+
+/**
+ * The shimmering "currently-executing" marker: a warm-amber ring + glow disc on
+ * the active pad and a small hovering bead at its Free-Z. While motion is allowed
+ * it PULSES (emissive + scale, via useFrame, mutating material/transform refs so
+ * the 60fps animation never re-renders React); under reduced-motion it renders a
+ * steady bright emphasis instead. Amber keeps it distinct from the cyan static
+ * click-selected highlight. Remounted per active index (the `key`), so each new
+ * point starts its pulse cleanly.
+ */
+function SolderShimmer(props: {
+  x: number
+  y: number
+  freeZ: number
+  touchZ: number
+  feat: number
+  dark: boolean
+  reduceMotion: boolean
+}) {
+  const { x, y, freeZ, touchZ, feat, dark, reduceMotion } = props
+  const color = dark ? '#ffb454' : '#ea7a17' // warm amber — distinct from cyan
+  const ringRef = useRef<THREE.Group>(null)
+  const ringMat = useRef<THREE.MeshStandardMaterial>(null)
+  const discMat = useRef<THREE.MeshStandardMaterial>(null)
+  const beadMat = useRef<THREE.MeshStandardMaterial>(null)
+
+  useFrame((state) => {
+    if (reduceMotion) return
+    // 0..1 pulse; drive ring scale + emissive so it visibly "breathes".
+    const p = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 4.5)
+    if (ringRef.current) {
+      const s = 1 + 0.35 * p
+      ringRef.current.scale.set(s, s, 1)
+    }
+    if (ringMat.current) ringMat.current.emissiveIntensity = 0.45 + 0.85 * p
+    if (discMat.current) {
+      discMat.current.emissiveIntensity = 0.3 + 0.6 * p
+      discMat.current.opacity = 0.35 + 0.4 * p
+    }
+    if (beadMat.current) beadMat.current.emissiveIntensity = 0.4 + 0.8 * p
+  })
+
+  // Reduced-motion: steady bright values baked into the initial material props.
+  const baseI = reduceMotion ? 0.9 : 0.45
+  const discI = reduceMotion ? 0.7 : 0.3
+  const discO = reduceMotion ? 0.6 : 0.4
+
+  return (
+    <group>
+      {/* Pulsing ring on the pad (scaled by the group ref). */}
+      <group ref={ringRef} position={[x, y, 0.08]}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[feat * 1.8, feat * 0.22, 10, 32]} />
+          <meshStandardMaterial ref={ringMat} color={color} emissive={color} emissiveIntensity={baseI} />
+        </mesh>
+      </group>
+      {/* Soft glow disc under the ring. */}
+      <mesh position={[x, y, 0.07]} rotation={[Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[feat * 1.5, 32]} />
+        <meshStandardMaterial
+          ref={discMat}
+          color={color}
+          emissive={color}
+          emissiveIntensity={discI}
+          transparent
+          opacity={discO}
+          depthWrite={false}
+        />
+      </mesh>
+      {/* A bead hovering at Free-Z with a guide line down to the pad. */}
+      <mesh position={[x, y, freeZ]}>
+        <sphereGeometry args={[feat * 0.7, 16, 12]} />
+        <meshStandardMaterial ref={beadMat} color={color} emissive={color} emissiveIntensity={baseI} />
+      </mesh>
+      <Line
+        points={[
+          [x, y, freeZ],
+          [x, y, Math.min(0, touchZ)],
+        ]}
+        color={color}
+        lineWidth={2}
+        dashed
+        dashSize={0.6}
+        gapSize={0.4}
+      />
+    </group>
   )
 }

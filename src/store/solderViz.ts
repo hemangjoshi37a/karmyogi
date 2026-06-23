@@ -43,8 +43,16 @@ interface SolderVizState {
   active: boolean
   /** All solder points, in current order. */
   points: SolderVizPoint[]
-  /** Index of the selected/highlighted point, or -1 for none. */
+  /** Index of the selected/highlighted point (click), or -1 for none. */
   selected: number
+  /**
+   * Index of the point the machine is CURRENTLY executing (the sim playhead /
+   * live stream is at/near it), or -1 for none. Distinct from `selected`: the
+   * Viewer SHIMMERS this one (animated, reduced-motion-aware) while keeping the
+   * static click-selected highlight separate. Driven by the Viewer from the
+   * live/sim tool position, so the SolderingPanel doesn't need to track it.
+   */
+  activeIndex: number
   /** True when the points came from a drill file (render holes vs surface pads). */
   fromDrill: boolean
   /** Camera-detected candidate pads (bed-mm), shown as reviewable ＋ markers. */
@@ -53,6 +61,8 @@ interface SolderVizState {
   set: (points: SolderVizPoint[], fromDrill: boolean) => void
   /** Highlight one point (or -1 to clear the highlight). */
   select: (index: number) => void
+  /** Set the currently-executing (shimmering) point index (or -1 to clear). */
+  setActiveIndex: (index: number) => void
   /** Publish (or clear) the camera-detected candidate pads. */
   setDetected: (pads: DetectedPadViz[]) => void
   /** Clear everything (panel unmounted). */
@@ -63,10 +73,16 @@ export const useSolderViz = create<SolderVizState>((set) => ({
   active: false,
   points: [],
   selected: -1,
+  activeIndex: -1,
   fromDrill: false,
   detected: [],
   set: (points, fromDrill) => set({ active: true, points, fromDrill }),
   select: (index) => set({ selected: index }),
+  setActiveIndex: (index) =>
+    // Avoid a needless re-render when the active point hasn't changed (this is
+    // driven from a 60fps playhead effect, so cheap-no-op matters).
+    set((s) => (s.activeIndex === index ? s : { activeIndex: index })),
   setDetected: (detected) => set({ detected }),
-  clear: () => set({ active: false, points: [], selected: -1, fromDrill: false, detected: [] }),
+  clear: () =>
+    set({ active: false, points: [], selected: -1, activeIndex: -1, fromDrill: false, detected: [] }),
 }))
