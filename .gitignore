@@ -34,6 +34,7 @@ test_stl_files/
 
 # detached dev-server log (setsid `npm run dev` → devserver.log)
 devserver.log
+devserver-http.log
 
 # dev scratch (camera frames sent from the browser, UI screenshots)
 .camera-frames/

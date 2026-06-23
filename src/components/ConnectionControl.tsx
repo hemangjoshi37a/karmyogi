@@ -550,7 +550,32 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
     if (!h) return null
     try {
       const url = normalizeWsUrl(h, port.trim() ? Number(port.trim()) : 81)
-      return mixedContentReason(url)
+      const blocked = mixedContentReason(url)
+      if (blocked) return blocked
+      // On an HTTPS page a bare host (no explicit scheme) is auto-upgraded to
+      // wss:// (TLS). Hobby GRBL-over-WiFi boards (FluidNC / ESP3D / MKS DLC32)
+      // serve ONLY plain ws:// (no TLS), so wss:// just fails with an opaque
+      // "WebSocket … failed". Warn up front (unless the user explicitly typed
+      // wss://, i.e. they really do have a TLS endpoint, or it's loopback).
+      const typedScheme = /^wss?:\/\//i.test(h)
+      const httpsPage = typeof location !== 'undefined' && location.protocol === 'https:'
+      if (httpsPage && !typedScheme && url.toLowerCase().startsWith('wss://')) {
+        let host2 = ''
+        try {
+          host2 = new URL(url).hostname.toLowerCase()
+        } catch {
+          host2 = ''
+        }
+        const loopback =
+          host2 === 'localhost' || host2 === '127.0.0.1' || host2 === '[::1]' || host2 === '::1'
+        if (!loopback) {
+          return t(
+            'conn.wifi.wssWontWork',
+            'Connecting as wss:// (TLS) because this page is https — but most FluidNC/ESP3D boards only serve plain ws:// (no TLS), so this will fail. To use Wi-Fi, open karmyogi over http on your LAN, or connect by USB.',
+          )
+        }
+      }
+      return null
     } catch {
       return null
     }
@@ -577,7 +602,23 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
     grbl
       .connectWebSocket(h, { defaultPort: p })
       .then(() => setOpen(false))
-      .catch((err) => setWifiErr(err instanceof Error ? err.message : String(err)))
+      .catch((err) => {
+        let msg = err instanceof Error ? err.message : String(err)
+        // A wss:// failure from an https page against a bare LAN host is almost
+        // always "the board only speaks ws:// (no TLS)" — append the fix so the
+        // error isn't a dead end.
+        const typedScheme = /^wss?:\/\//i.test(h)
+        const httpsPage = typeof location !== 'undefined' && location.protocol === 'https:'
+        if (httpsPage && !typedScheme && /wss:\/\//i.test(msg)) {
+          msg +=
+            ' — ' +
+            t(
+              'conn.wifi.wssFailHint',
+              'FluidNC/ESP3D serve plain ws:// (no TLS); a secure (https) page cannot reach them. Open karmyogi over http on your LAN, or use USB.',
+            )
+        }
+        setWifiErr(msg)
+      })
   }
 
   const connectBle = () => {
