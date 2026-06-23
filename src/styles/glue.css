@@ -222,7 +222,7 @@
 }
 .gp-undo.icon-btn:disabled,
 .gp-clear.icon-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 /* Touch targets: grow with the adjacent .km-io-btn pair on coarse pointers. */
@@ -518,7 +518,7 @@
   position: absolute;
   right: 7px;
   font-style: normal;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   pointer-events: none;
 }
@@ -609,11 +609,10 @@
 .glue-sfield-num-bad:hover { border-color: var(--danger); }
 .glue-sfield-unit {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
-  opacity: 0.8;
 }
 
 /* Themed draggable slider — track + thumb use theme vars; the accent fill to the
@@ -797,7 +796,7 @@
   color: var(--fg);
 }
 .gp-raw-toggle:disabled {
-  opacity: 0.45;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .gp-preview {

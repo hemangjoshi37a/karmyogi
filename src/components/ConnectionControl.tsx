@@ -258,7 +258,12 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
         onChange={setBaudOverride}
       />
       <span className="km-conn-dot" data-conn={connection} />
-      <span className="km-conn-state" data-conn={connection}>
+      <span
+        className="km-conn-state"
+        data-conn={connection}
+        role="status"
+        aria-live="polite"
+      >
         {/* Connection status only (Connected / Connecting / Disconnected) — the
             live Idle/Run/busy machine STATE is intentionally not shown here per
             the operator's request. Disconnected is rendered at full --fg presence

@@ -94,7 +94,7 @@
   padding: 3px 8px;
 }
 .mc-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 /* Icon-only mc-btn (override +/−/reset): center the glyph in the button. */
@@ -188,7 +188,7 @@
 .mc-seg button:last-child { border-right: none; }
 .mc-seg button:hover:not(:disabled):not(.active) { background: var(--border); }
 .mc-seg button.active { background: var(--accent); color: var(--accent-fg); }
-.mc-seg button:disabled { opacity: 0.45; cursor: not-allowed; }
+.mc-seg button:disabled { opacity: 0.6; cursor: not-allowed; }
 .mc-seg.mc-grow { display: flex; }
 .mc-seg.mc-grow button { flex: 1 1 0; }
 
@@ -349,14 +349,14 @@
   line-height: 1;
   font-weight: 600;
   pointer-events: none;
-  opacity: 0.18;
+  opacity: 0.62;
   color: var(--fg-muted);
   transition: opacity 120ms ease;
 }
 .has-kbd:hover .kbd-hint,
 .has-kbd:focus-visible .kbd-hint,
 .mc-panel:focus-within .has-kbd .kbd-hint {
-  opacity: 0.5;
+  opacity: 0.85;
 }
 /* Inside a segmented control the badge sits flush in the cell corner. */
 .mc-seg button.has-kbd { position: relative; }
@@ -559,7 +559,7 @@
   background: var(--accent-fg);
 }
 .mc-switch:disabled {
-  opacity: 0.45;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 /* The key-hint badge on the switch sits just inside the top-right corner. */
@@ -825,7 +825,7 @@
   line-height: 1;
   font-weight: 700;
   pointer-events: none;
-  opacity: 0.22;
+  opacity: 0.62;
   color: var(--accent);
   transition: opacity 120ms ease, transform 120ms ease;
 }
@@ -833,7 +833,7 @@
 .has-kbd:focus-visible .pad-hint,
 .pad-host:hover .pad-hint,
 .mc-panel:focus-within .has-kbd .pad-hint {
-  opacity: 0.55;
+  opacity: 0.85;
 }
 /* Inside a segmented control the badge sits flush in the cell's left corner. */
 .mc-seg button .pad-hint { top: 1px; left: 2px; }
@@ -855,7 +855,7 @@
 
 /* Jog-pad host: anchor the pad badge to the pad's upper-left corner. */
 .mc-jogpad-host { display: inline-flex; }
-.mc-jogpad-host .pad-hint { top: 2px; left: 2px; font-size: 9px; opacity: 0.3; }
+.mc-jogpad-host .pad-hint { top: 2px; left: 2px; font-size: 9px; opacity: 0.62; }
 .mc-jogpad-host.gp-active { border-radius: 12px; }
 
 /* ───────────── programmable mapping (rebind) UI — in the gamepad modal ───────────── */
@@ -928,7 +928,7 @@
   display: inline-flex; align-items: center; justify-content: center;
 }
 .gp-remap-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.gp-remap-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.gp-remap-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .gp-remap-clear { padding: 4px 7px; min-width: 28px; }
 
 @media (max-width: 640px) {

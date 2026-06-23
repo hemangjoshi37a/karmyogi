@@ -6,7 +6,9 @@
 .km-pwa-stack {
   position: fixed;
   right: 18px;
-  bottom: 18px;
+  /* Clear the device safe-area (home indicator / gesture bar) on notched phones
+     — index.html sets viewport-fit=cover so env() is non-zero there (§W-K). */
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   z-index: 2147483000; /* above modals/popovers */
   display: flex;
   flex-direction: column;
@@ -236,7 +238,7 @@
   .km-pwa-stack {
     left: 14px;
     right: 14px;
-    bottom: 14px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
     width: auto;
     max-width: none;
   }

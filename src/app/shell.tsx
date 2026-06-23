@@ -482,6 +482,7 @@ export function Shell() {
 
   return (
     <div className="app-shell">
+      <MachineAlertLive />
       <header className="topbar" data-mobile={isMobile ? 'true' : undefined}>
         {/* Brand — clicking the logo/title opens the About modal (this replaces a
             separate ⓘ button, freeing app-bar space). The "by hjLabs.in · MIT
@@ -620,6 +621,74 @@ export function Shell() {
   )
 }
 
+/** Visually-hidden style for screen-reader-only live regions (W-N d). */
+const SR_ONLY: React.CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
+
+/**
+ * App-global ASSERTIVE live region for the two safety-critical machine
+ * transitions (W-N d): entering an ALARM state, and an unexpected DISCONNECT.
+ * These interrupt the screen reader (role="alert" / aria-live="assertive")
+ * because the operator must know immediately, regardless of which panel has
+ * focus.
+ *
+ * It fires ONLY on the transition — gated on the previous state/connection — so
+ * it is silent during the steady stream of status polls (which re-report the
+ * same Alarm/disconnected value many times a second). Routine Idle↔Run↔Hold and
+ * a user-initiated disconnect from a connected→idle flow are covered by the
+ * POLITE state chip in ConnectionControl instead; here we announce the alarm and
+ * the connected→lost transition. Pure presentation: it reads store state and
+ * never mutates anything.
+ */
+function MachineAlertLive() {
+  const t = useT()
+  const state = useMachine((s) => s.state)
+  const connection = useMachine((s) => s.connection)
+  const error = useMachine((s) => s.error)
+  const [message, setMessage] = useState('')
+  const prevState = useRef(state)
+  const prevConnection = useRef(connection)
+
+  useEffect(() => {
+    const wasState = prevState.current
+    const wasConnection = prevConnection.current
+    prevState.current = state
+    prevConnection.current = connection
+
+    // Entering ALARM (from any non-Alarm state) — the most urgent transition.
+    if (state === 'Alarm' && wasState !== 'Alarm') {
+      setMessage(
+        error
+          ? t('alert.alarm.msg', 'Alarm: {msg}', { msg: error })
+          : t('alert.alarm', 'Machine alarm'),
+      )
+      return
+    }
+    // Lost the connection (was connected, now disconnected). A deliberate
+    // disconnect lands here too, but announcing "machine disconnected" once is
+    // correct in both cases and never repeats (gated on the transition).
+    if (connection === 'disconnected' && wasConnection === 'connected') {
+      setMessage(t('alert.disconnected', 'Machine disconnected'))
+      return
+    }
+  }, [state, connection, error, t])
+
+  return (
+    <div role="alert" aria-live="assertive" style={SR_ONLY}>
+      {message}
+    </div>
+  )
+}
+
 /**
  * Small hook: close `open` on outside-click / Escape. Shared by the mobile
  * connect sheet and the "⋯" menu so they behave like the other top-bar popovers.
@@ -674,7 +743,9 @@ function MobileConnectSheet({ onOpenSettings, onOpenProbe }: MobileConnectSheetP
         title={t('conn.connect.menu', 'Connect to the controller — USB, Wi-Fi, or Bluetooth')}
       >
         <span className="km-conn-dot" data-conn={connection} />
-        <span className="km-mconn-label">{t(`conn.status.${connection}`, connection)}</span>
+        <span className="km-mconn-label" role="status" aria-live="polite">
+          {t(`conn.status.${connection}`, connection)}
+        </span>
         <span className="km-mconn-caret" aria-hidden="true">
           <Icon name="chevron-down" size={12} />
         </span>

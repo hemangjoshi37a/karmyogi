@@ -113,7 +113,7 @@
   color: var(--accent);
 }
 .scf-ico:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .scf-ico.is-active {
@@ -254,7 +254,7 @@
   position: absolute;
   right: 7px;
   font-style: normal;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   pointer-events: none;
 }
@@ -355,11 +355,10 @@
 }
 .dr-sfield-unit {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
-  opacity: 0.8;
 }
 
 /* Themed draggable range input. */
@@ -593,7 +592,7 @@
   color: var(--accent);
 }
 .scf-row-ico:disabled {
-  opacity: 0.35;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .scf-row-ico.scf-del:not(:disabled):hover {

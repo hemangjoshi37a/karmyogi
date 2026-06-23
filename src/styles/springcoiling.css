@@ -106,7 +106,7 @@
   color: var(--accent);
 }
 .spr-ico:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .spr-ico.is-active {
@@ -343,7 +343,7 @@
   color: var(--accent);
 }
 .spr-raw-toggle:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .spr-preview {
@@ -375,7 +375,7 @@
   transition: background 0.12s;
 }
 .spr-sfield:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
-.spr-sfield.is-disabled { opacity: 0.45; pointer-events: none; }
+.spr-sfield.is-disabled { opacity: 0.6; pointer-events: none; }
 .spr-sfield-lbl {
   display: inline-flex;
   align-items: center;
@@ -415,11 +415,10 @@
 }
 .spr-sfield-unit {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
-  opacity: 0.8;
 }
 
 .spr-slider {

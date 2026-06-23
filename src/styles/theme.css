@@ -10,7 +10,8 @@
   --ctl-h: 28px;          /* compact control height (desktop) */
   --ctl-h-lg: 34px;       /* primary / send action height */
   --ctl-h-sm: 26px;       /* small control (speed / search / chip) */
-  --ctl-h-touch: 38px;    /* ≥ tap target at narrow/mobile widths */
+  --ctl-h-touch: 40px;    /* ≥ tap target at narrow/mobile widths (one token for
+                             the @media(pointer:coarse) overrides + .mobile-tab) */
   --fs-section: 10.5px;   /* uppercase section / card label */
   --fs-label: 11px;       /* field label */
   --fs-ctl: 12px;         /* input / button text */

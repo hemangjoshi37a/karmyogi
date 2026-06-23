@@ -171,6 +171,20 @@ export function ProgramPanel() {
   const progress = computeProgress(cursor, lines.length)
   const held = machineState === 'Hold'
 
+  // W-N d: announce streaming progress to screen readers. The visible % lives in
+  // ProgramProgressBar; here we keep a polite live region that speaks the rounded
+  // percent, gated on a WHOLE-percent change so a screen reader isn't spammed on
+  // every status poll. Presentation only — derived from the same `progress`.
+  const pct = Math.round(progress.fraction * 100)
+  const [announcedPct, setAnnouncedPct] = useState<number | null>(null)
+  useEffect(() => {
+    if (!streaming) {
+      if (announcedPct !== null) setAnnouncedPct(null)
+      return
+    }
+    if (pct !== announcedPct) setAnnouncedPct(pct)
+  }, [streaming, pct, announcedPct])
+
   // Rough ETA. Total when idle, remaining (× 1 − progress) while streaming.
   // ALWAYS rendered (shows an em-dash when there is no program / zero estimate)
   // so the layout never jumps as the program loads/empties.
@@ -476,6 +490,30 @@ export function ProgramPanel() {
                 </span>
               </span>
             )}
+            {/* W-N d: polite SR announcement of the streaming progress percent,
+                gated on whole-percent changes (the visible bar lives in
+                ProgramProgressBar). Visually hidden — purely for screen readers. */}
+            <span
+              role="status"
+              aria-live="polite"
+              style={{
+                position: 'absolute',
+                width: 1,
+                height: 1,
+                padding: 0,
+                margin: -1,
+                overflow: 'hidden',
+                clip: 'rect(0 0 0 0)',
+                whiteSpace: 'nowrap',
+                border: 0,
+              }}
+            >
+              {streaming && announcedPct !== null
+                ? t('prog.progressAnnounce', 'Streaming {pct}% complete', {
+                    pct: announcedPct,
+                  })
+                : ''}
+            </span>
             <ProgramProgressBar
               progress={progress}
               color={held ? 'var(--warn)' : undefined}

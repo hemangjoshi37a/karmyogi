@@ -16,6 +16,10 @@
      never fire. Drive all layout reflow off the panel's OWN width. */
   container-type: inline-size;
   container-name: campanel;
+  /* Chevron-right SVG (same path as the in-house <Icon name="chevron-right">,
+     stroke 2 / 24-viewBox) used as a mask for the disclosure caret below, so the
+     `.cam-guide` carets are real SVG chevrons rather than a text `▸` glyph. */
+  --ui-caret-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6l6 6-6 6'/%3E%3C/svg%3E");
 }
 
 /* Direct children must NOT flex-shrink. In this scrolling flex column a
@@ -1032,10 +1036,19 @@
 .cam-guide > summary::-webkit-details-marker {
   display: none;
 }
+/* Disclosure caret — a real chevron SVG (matching the shared .ui-caret
+   treatment) rendered as a mask, NOT a text glyph (the old `content: '▸'`).
+   currentColor-tinted, 14px, rotates 0°→90° when the <details> opens. */
 .cam-guide > summary::before {
-  content: '▸';
+  content: '';
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
   color: var(--fg-muted);
-  transition: transform 100ms ease;
+  background: currentColor;
+  -webkit-mask: var(--ui-caret-svg) center / 14px 14px no-repeat;
+  mask: var(--ui-caret-svg) center / 14px 14px no-repeat;
+  transition: transform var(--dur-fast, 100ms) var(--ease, ease);
 }
 .cam-guide[open] > summary::before {
   transform: rotate(90deg);

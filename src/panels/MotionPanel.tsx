@@ -1292,7 +1292,7 @@ function MarlinSettingsView({
         <div className="mo-row">
           <button
             type="button"
-            className="mo-btn primary"
+            className="mo-btn primary mo-iconbtn"
             disabled={!connected}
             onClick={() => send('M503')}
             title={
@@ -1301,16 +1301,18 @@ function MarlinSettingsView({
                 : t('motion.connectFirst', 'Connect first')
             }
           >
-            {t('motion.marlin.report.label', '⤓ Report settings (M503)')}
+            <Icon name="download" size={14} />
+            {t('motion.marlin.report.label', 'Report settings (M503)')}
           </button>
           <button
             type="button"
-            className="mo-btn"
+            className="mo-btn mo-iconbtn"
             disabled={!connected}
             onClick={() => send('M500')}
             title={t('motion.marlin.save.title', 'Send M500 — save current settings to EEPROM')}
           >
-            {t('motion.marlin.save.label', '💾 Save to EEPROM (M500)')}
+            <Icon name="upload" size={14} />
+            {t('motion.marlin.save.label', 'Save to EEPROM (M500)')}
           </button>
           <span className="mo-grow" />
           {!connected && (
@@ -1337,13 +1339,13 @@ function MarlinSettingsView({
               <div className="mo-cell mo-edit">
                 <button
                   type="button"
-                  className="mo-btn"
+                  className="mo-btn mo-iconbtn"
                   disabled={!connected}
                   onClick={() => send(code)}
                   title={t('motion.marlin.sendCode.title', 'Send {code} to the controller', { code })}
                   aria-label={t('motion.marlin.sendCode.aria', 'Send {code}', { code })}
                 >
-                  ▷
+                  <Icon name="play" size={13} />
                 </button>
               </div>
             </div>
@@ -1406,7 +1408,7 @@ function SmoothieSettingsView({
         <div className="mo-row">
           <button
             type="button"
-            className="mo-btn primary"
+            className="mo-btn primary mo-iconbtn"
             disabled={!connected}
             onClick={() => send('config-get sd alpha_steps_per_mm')}
             title={
@@ -1418,7 +1420,8 @@ function SmoothieSettingsView({
                 : t('motion.connectFirst', 'Connect first')
             }
           >
-            {t('motion.smoothie.get.label', '⤓ config-get sd alpha_steps_per_mm')}
+            <Icon name="download" size={14} />
+            {t('motion.smoothie.get.label', 'config-get sd alpha_steps_per_mm')}
           </button>
           <span className="mo-grow" />
           {!connected && (
@@ -1449,13 +1452,13 @@ function SmoothieSettingsView({
               <div className="mo-cell mo-edit">
                 <button
                   type="button"
-                  className="mo-btn"
+                  className="mo-btn mo-iconbtn"
                   disabled={!connected}
                   onClick={() => send(`config-get sd ${key}`)}
                   title={t('motion.smoothie.getKey.title', 'Send config-get sd {key}', { key })}
                   aria-label={t('motion.smoothie.getKey.aria', 'config-get sd {key}', { key })}
                 >
-                  ▷
+                  <Icon name="play" size={13} />
                 </button>
               </div>
             </div>

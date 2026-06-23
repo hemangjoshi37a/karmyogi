@@ -1,4 +1,12 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import { useT } from '../i18n'
 import { Icon } from './Icons'
 
@@ -45,6 +53,15 @@ interface ModalProps {
    * gutters (e.g. an embedded full-bleed panel). Maps to the `--flush` modifier.
    */
   flushBody?: boolean
+  /**
+   * Explicit element to receive focus on open (W-N e). When the dialog's first
+   * focusable control is DESTRUCTIVE (e.g. a Delete/Disconnect button), pass a
+   * ref to a non-destructive target — typically the dialog title/body or a
+   * benign control — so a keyboard/screen-reader user doesn't land on the
+   * destructive action. When omitted (the default) focus moves to the first
+   * focusable element as before, so existing callers are unchanged.
+   */
+  initialFocusRef?: RefObject<HTMLElement | null>
 }
 
 /**
@@ -112,6 +129,7 @@ export function Modal({
   eyebrow,
   footer,
   flushBody = false,
+  initialFocusRef,
 }: ModalProps) {
   const t = useT()
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -135,13 +153,20 @@ export function Modal({
     // Remember where focus was so we can return it on close.
     restoreRef.current = (document.activeElement as HTMLElement) ?? null
 
-    // Move focus into the dialog: first focusable element, else the dialog itself.
+    // Move focus into the dialog: an explicit initial-focus target if given
+    // (W-N e — used when the first focusable control is destructive, so we
+    // don't auto-focus it), else the first focusable element, else the dialog.
     const focusables = () =>
       Array.from(dialog?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter(
         (el) => el.offsetParent !== null || el === document.activeElement,
       )
-    const first = focusables()[0]
-    ;(first ?? dialog)?.focus()
+    const explicit = initialFocusRef?.current
+    if (explicit && dialog?.contains(explicit)) {
+      explicit.focus()
+    } else {
+      const first = focusables()[0]
+      ;(first ?? dialog)?.focus()
+    }
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -186,7 +211,7 @@ export function Modal({
         }
       }
     }
-  }, [open, onClose])
+  }, [open, onClose, initialFocusRef])
 
   // Run the enter transition once per open: paint at the "from" state, then flip
   // to the "to" state on the next frame. Reset when the dialog closes.

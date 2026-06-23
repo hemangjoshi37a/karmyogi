@@ -105,7 +105,7 @@
   color: var(--accent);
 }
 .wp-ico:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .wp-ico.is-active {
@@ -259,7 +259,7 @@
   position: absolute;
   right: 7px;
   font-style: normal;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   pointer-events: none;
 }
@@ -696,7 +696,7 @@
   position: absolute;
   right: 6px;
   font-style: normal;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--fg-muted);
   pointer-events: none;
 }
@@ -723,7 +723,7 @@
   color: var(--accent);
 }
 .wp-row-ico:disabled {
-  opacity: 0.35;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 /* Row delete is destructive: persistent danger-tinted edge + filled hover (W-H). */

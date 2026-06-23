@@ -94,7 +94,7 @@
   color: var(--accent);
 }
 .sp-ico:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .sp-ico.is-active {
@@ -211,7 +211,7 @@
   border-color: var(--accent);
 }
 .sp-optimize-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .sp-optimize-travel {
@@ -357,11 +357,10 @@
 }
 .sp-sfield-unit {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
-  opacity: 0.8;
 }
 
 /* Themed draggable range input. */
@@ -615,7 +614,7 @@
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
 }
 .sp-bulk-trigger:disabled {
-  opacity: 0.3;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
@@ -682,9 +681,8 @@
 }
 .sp-bulk-unit {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
-  opacity: 0.8;
   pointer-events: none;
 }
 .sp-bulk-seg {
@@ -817,7 +815,7 @@
   color: var(--accent);
 }
 .sp-row-ico:disabled {
-  opacity: 0.35;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .sp-row-ico.sp-del:not(:disabled):hover {

@@ -112,7 +112,7 @@
   color: var(--accent);
 }
 .pp-ico:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .pp-ico-primary {
@@ -409,11 +409,10 @@
 }
 .pnp-sfield-unit {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
-  opacity: 0.8;
 }
 .pnp-slider-num {
   flex: 1 1 auto;
@@ -578,7 +577,7 @@
   position: absolute;
   right: 7px;
   font-style: normal;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg-muted);
   pointer-events: none;
 }
@@ -693,7 +692,7 @@
   font-size: 13px;
 }
 .pp-row-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .pp-del.icon-btn:not(:disabled) {

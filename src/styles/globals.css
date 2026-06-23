@@ -104,6 +104,35 @@ textarea { min-height: auto; }
   outline-offset: -2px;
 }
 
+/* ── Light-theme slider legibility (W-J / §2.3) ──────────────────────────────
+   The canonical slider (slider-row.css, not editable here) draws the UNFILLED
+   track from --bg-input, which in light (#eef1f4) is nearly invisible on the
+   white/near-white card. Scoped under the SAME light selector theme.css uses
+   (:root[data-theme='light']) we darken the unfilled portion (a slate tint) and
+   strengthen the thumb's outer ring so the round thumb reads as a distinct chip
+   on white. The accent-filled portion + thumb fill stay as-is (we are NOT
+   darkening --accent — §2.3). */
+:root[data-theme='light'] .ui-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    90deg,
+    var(--accent) calc(var(--pct, 0) * 1%),
+    color-mix(in srgb, var(--border) 70%, var(--bg-input)) calc(var(--pct, 0) * 1%)
+  );
+}
+:root[data-theme='light'] .ui-slider::-webkit-slider-thumb {
+  border-color: var(--bg-panel);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, var(--fg-muted)),
+    0 1px 2px rgba(16, 24, 40, 0.18);
+}
+:root[data-theme='light'] .ui-slider::-moz-range-track {
+  background: color-mix(in srgb, var(--border) 70%, var(--bg-input));
+}
+:root[data-theme='light'] .ui-slider::-moz-range-thumb {
+  border-color: var(--bg-panel);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, var(--fg-muted)),
+    0 1px 2px rgba(16, 24, 40, 0.18);
+}
+
 /* App shell */
 .app-shell { display: flex; flex-direction: column; height: 100%; }
 
@@ -213,8 +242,11 @@ textarea { min-height: auto; }
 .mobile-tabs::-webkit-scrollbar { height: 0; }
 .mobile-tab {
   flex: 0 0 auto;
-  /* >=36px touch target on every axis (height via min-height, width via padding). */
-  min-height: 38px;
+  /* >=36px touch target on every axis (height via min-height, width via padding).
+     Height comes from the single --ctl-h-touch token (theme.css) so the tab strip,
+     the @media(pointer:coarse) control overrides, and the mobile dock tabs all share
+     one value instead of the old divergent 38/40/pill. */
+  min-height: var(--ctl-h-touch);
   min-width: 44px;
   display: inline-flex;
   align-items: center;
@@ -224,6 +256,11 @@ textarea { min-height: auto; }
   border-radius: 18px;
   white-space: nowrap;
   background: var(--bg-input);
+  /* §2.3: the ACTIVE tab is white-on-accent, which needs a 14px/600 floor on the
+     undarkened accent. Apply it to ALL tabs so activating one never reflows the
+     strip (uniform size); only the color/fill changes on `.active`. */
+  font-size: 14px;
+  font-weight: 600;
 }
 .mobile-tab-ico { flex: 0 0 auto; }
 .mobile-tab.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
@@ -238,7 +275,7 @@ textarea { min-height: auto; }
 
 /* Touch-friendly controls on small screens — restore ≥40px tap targets */
 @media (max-width: 768px) {
-  button, input, select { min-height: 40px; }
+  button, input, select { min-height: var(--ctl-h-touch); }
   textarea { min-height: auto; }
   /* Let the bar wrap to multiple rows instead of overflowing horizontally —
      the connection cluster (firmware/Connect/Mock/Machines/bridge…) is wide.
@@ -275,6 +312,111 @@ textarea { min-height: auto; }
     gap: 6px;
   }
   .mobile-tab { padding: 6px 10px; }
+}
+
+/* ── Narrow-width reflow for the dense PRESETS side-rail (W-K / §2.3) ─────────
+   The preset rail (presets.css `.cc-presets-rail`, carving's `.cc-presets-railwrap`)
+   floats as a position:absolute VERTICAL column on the left edge, with the content
+   given a left gutter to clear it. On a phone-width column a vertical floating rail
+   eats horizontal room and forces a 3rd scroll axis. Here (presets.css is owned by
+   another agent, so we reflow from globals) we relax it into a STATIC HORIZONTAL
+   strip that scrolls left↔right above its content and drop the now-unneeded left
+   gutter. Generic selectors (any `*presets-rail*`) so it applies wherever the rail
+   appears. Presentation only — every swatch/caption stays reachable. */
+@media (max-width: 768px) {
+  /* Drop the left gutter the absolute rail needed (host + carving content).
+     NOTE: cadcam.css / presets.css load AFTER this file and re-add the gutter at
+     coarse/≤768px with selectors up to 0-4-0 (`.cc-panel:has(.cc-presets-rail)
+     .cc-split-bottom > .cc-cards`). On a tie, later source wins — so we MUST match
+     or exceed their specificity here (we don't own those files). The selectors
+     below are deliberately qualified to out-specify them. */
+  .cc-presets-host > .sp-panel.sp-panel,
+  .cc-presets-host > .wr-panel.wr-panel { padding-left: var(--sp-3); }
+  .cc-panel:has(.cc-presets-rail) .cc-split-bottom > .cc-cards.cc-cards {
+    padding-left: var(--sp-3);
+  }
+
+  /* HOST variant (soldering / writing): the rail floats position:absolute on the
+     left. Reflow it to a static horizontal scroller above the content. */
+  .cc-presets-host > .cc-presets-rail,
+  .cc-presets-host .cc-presets-rail {
+    position: static;
+    inset: auto;
+    margin: 0 0 var(--sp-2);
+    width: auto;
+    max-width: 100%;
+    max-height: none;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--sp-2);
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* CARVING variant: an absolutely-positioned `.cc-presets-railwrap` holds the
+     [2D/3D switch · rail] column. Out-specify cadcam.css's `.cc-presets-railwrap`
+     (0-1-0) with the `.cc-split-bottom` ancestor (0-2-0) so the wrap becomes a
+     static horizontal strip pinned above the param cards. */
+  .cc-split-bottom .cc-presets-railwrap {
+    position: static;
+    inset: auto;
+    width: auto;
+    max-width: 100%;
+    margin: 0 0 var(--sp-2);
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-2);
+    pointer-events: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Inner rail in BOTH the carving wrap and the standalone bottom rail. The
+     `.cc-presets-railwrap .cc-presets-rail` rule in cadcam.css is 0-2-0; match+1
+     with the ancestor so the row direction + scroller win. */
+  .cc-split-bottom .cc-presets-railwrap .cc-presets-rail,
+  .cc-split-bottom .cc-presets-rail {
+    position: static;
+    inset: auto;
+    margin: 0;
+    width: auto;
+    max-width: 100%;
+    max-height: none;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-2);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  /* Vertical "PRESETS" caption → horizontal so it reads in a row. */
+  .cc-presets-cap {
+    writing-mode: horizontal-tb;
+    transform: none;
+    margin: 0 var(--sp-1) 0 0;
+    white-space: nowrap;
+  }
+  /* Swatches must not shrink in the horizontal scroller. */
+  .cc-preset-slotwrap { flex: 0 0 auto; }
+
+  /* Panel sub-toolbars (generic horizontal button rows) wrap/scroll instead of
+     overflowing the narrow column, so nothing clips off-screen. */
+  .km-btn-row,
+  .btn-row,
+  .cc-strip,
+  .panel-subtoolbar {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  /* Safe-area: keep the bottom preset save-bar above the home-indicator / gesture
+     bar on notched phones (viewport-fit=cover is set in index.html). */
+  .cc-presets-bar {
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* Bind dockview theme vars to our tokens */
@@ -340,7 +482,7 @@ textarea { min-height: auto; }
    so the 40px container height wins over the 28px default at narrow widths. */
 @media (max-width: 768px) {
   .dockview-theme-karmyogi {
-    --dv-tabs-and-actions-container-height: 40px;
+    --dv-tabs-and-actions-container-height: var(--ctl-h-touch);
   }
   .dockview-theme-karmyogi .dv-tab { padding: 0 10px; }
   .dockview-theme-karmyogi .dv-tab .dv-default-tab .dv-default-tab-action { padding: 6px; }

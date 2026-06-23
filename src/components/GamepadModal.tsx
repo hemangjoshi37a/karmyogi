@@ -425,6 +425,7 @@ function GamepadModalInner({
                     type="button"
                     className="gp-remap-btn"
                     onClick={() => setCapturing(isCapturing ? null : { kind: 'label', name: nm })}
+                    aria-label={isCapturing ? t('gp.labels.rebind.cancel.aria', 'Cancel naming {name}', { name: nm }) : t('gp.labels.rebind.aria', 'Rebind {name}', { name: nm })}
                     title={t('gp.labels.rebind.title', 'Name a control — then press that button on your gamepad')}
                   >
                     {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
@@ -511,6 +512,7 @@ function GamepadModalInner({
                   type="button"
                   className="gp-remap-btn gp-remap-btn--sm"
                   onClick={() => setCapturing(isCapturing ? null : { kind: 'analog', id: a.id })}
+                  aria-label={isCapturing ? t('gp.remap.rebind.cancel.aria', 'Cancel rebinding {action}', { action: t(a.labelKey, a.label) }) : t('gp.remap.rebind.aria', 'Rebind {action}', { action: t(a.labelKey, a.label) })}
                   title={t('gp.remap.rebind.title', 'Rebind this — then press a control on your gamepad')}
                 >
                   {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
@@ -581,6 +583,7 @@ function GamepadModalInner({
                     type="button"
                     className="gp-remap-btn"
                     onClick={() => setCapturing(isCapturing ? null : { kind: 'action', id: a.id })}
+                    aria-label={isCapturing ? t('gp.remap.rebind.cancel.aria', 'Cancel rebinding {action}', { action: t(a.labelKey, a.label) }) : t('gp.remap.rebind.aria', 'Rebind {action}', { action: t(a.labelKey, a.label) })}
                     title={t('gp.remap.rebind.title', 'Rebind this — then press a control on your gamepad')}
                   >
                     {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
@@ -902,6 +905,7 @@ function TabOverridesEditor({
                 type="button"
                 className="gp-remap-btn"
                 onClick={() => setCapturing(isCapturing ? null : { kind: 'tab', tab, action: c.id })}
+                aria-label={isCapturing ? t('gp.tabedit.rebind.cancel.aria', 'Cancel rebinding {action} for this tab', { action: t(c.labelKey, c.label) }) : t('gp.tabedit.rebind.aria', 'Rebind {action} for this tab', { action: t(c.labelKey, c.label) })}
                 title={t('gp.tabedit.rebind.title', 'Bind a control to this action on this tab — then press a control')}
               >
                 {isCapturing ? t('gp.remap.cancel', 'Cancel') : t('gp.remap.rebind', 'Rebind')}
