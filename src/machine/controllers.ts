@@ -50,19 +50,18 @@ export const CONTROLLER_PROFILES: Record<ControllerKind, ControllerProfile> = {
     // FluidNC's protocol CORE is pure GRBL (omit `dialect`): `?` realtime status,
     // `!`/`~`/0x18/0x85 + override bytes, ok/error acks, `$H`/`$X`/`$J=` and the
     // same modal G-code set, usually over USB serial at 115200 baud (the board
-    // also exposes WebSocket :81, telnet :23 and BLE). SETTINGS are the real
-    // divergence: `$$` lists NAMED `$path/name=value` settings (slash-separated
-    // names, not numbers) and the full machine config is a YAML file
-    // (`$Config/Dump` prints it; `$Bye` restarts). `resolveDialect` derives
-    // `settingsStyle: 'named'` from the kind, which routes the Motion panel to
-    // the named-settings editor. `settingsModel` stays 'grbl' because the shared
-    // `SettingsModel` union (src/machine/types.ts) has no FluidNC member — the
-    // dialect's `settingsStyle` is the named-vs-numeric switch.
+    // also exposes WebSocket :81, telnet :23 and BLE). SETTINGS: FluidNC keeps
+    // GRBL's NUMBERED `$`-settings for sender compatibility — `$$` dumps the
+    // classic `$0=…`/`$100=…` table and writes are `$N=value` — so it uses the
+    // same rich numeric `$`-settings editor as GRBL (`settingsModel: 'grbl'`,
+    // dialect `settingsStyle: 'numeric'`). The deeper machine STRUCTURE
+    // (axes/motors/pins) lives in a YAML config (`$Config/Dump` prints it;
+    // `$Bye` restarts), separate from these motion settings.
     settingsModel: 'grbl',
     notes:
       'ESP32 GRBL successor. GRBL-compatible streaming/realtime/status over USB serial at 115200 ' +
       '(boards also expose WebSocket :81, telnet and BLE). Homing $H, unlock $X, jog $J=. ' +
-      'Settings are NAMED ($name=value via $$); the full machine config is YAML — $Config/Dump prints it.',
+      'Uses GRBL numbered $-settings ($$); the deeper machine config is YAML — $Config/Dump prints it.',
   },
   grblhal: {
     kind: 'grblhal',

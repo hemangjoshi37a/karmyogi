@@ -92,6 +92,20 @@ export const GRBL_SETTING_META: Record<number, GrblSettingMeta> = {
   130: { label: 'X max travel', labelKey: 'set.130.label', units: 'mm' },
   131: { label: 'Y max travel', labelKey: 'set.131.label', units: 'mm' },
   132: { label: 'Z max travel', labelKey: 'set.132.label', units: 'mm' },
+  // Extra axes (A/B/C — the 4th/5th/6th). GRBL is 3-axis, but FluidNC / grblHAL
+  // expose these for rotary/extended machines, continuing the $1NN axis pattern.
+  103: { label: 'A steps/mm', labelKey: 'set.103.label', units: 'step/mm', unitsKey: 'set.units.stepPerMm' },
+  104: { label: 'B steps/mm', labelKey: 'set.104.label', units: 'step/mm', unitsKey: 'set.units.stepPerMm' },
+  105: { label: 'C steps/mm', labelKey: 'set.105.label', units: 'step/mm', unitsKey: 'set.units.stepPerMm' },
+  113: { label: 'A max rate', labelKey: 'set.113.label', units: 'mm/min', unitsKey: 'set.units.mmPerMin' },
+  114: { label: 'B max rate', labelKey: 'set.114.label', units: 'mm/min', unitsKey: 'set.units.mmPerMin' },
+  115: { label: 'C max rate', labelKey: 'set.115.label', units: 'mm/min', unitsKey: 'set.units.mmPerMin' },
+  123: { label: 'A acceleration', labelKey: 'set.123.label', units: 'mm/sec²', unitsKey: 'set.units.mmPerSec2' },
+  124: { label: 'B acceleration', labelKey: 'set.124.label', units: 'mm/sec²', unitsKey: 'set.units.mmPerSec2' },
+  125: { label: 'C acceleration', labelKey: 'set.125.label', units: 'mm/sec²', unitsKey: 'set.units.mmPerSec2' },
+  133: { label: 'A max travel', labelKey: 'set.133.label', units: 'mm' },
+  134: { label: 'B max travel', labelKey: 'set.134.label', units: 'mm' },
+  135: { label: 'C max travel', labelKey: 'set.135.label', units: 'mm' },
 }
 
 const SETTING_RE = /^\$(\d+)\s*=\s*(.+?)\s*$/

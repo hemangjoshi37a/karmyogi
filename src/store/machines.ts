@@ -28,6 +28,8 @@ import { grbl, type ActivePortInfo } from '../serial/controller'
 import { MockPort, WsPort } from '../serial'
 import type { PortLike } from '../serial/grblConnection'
 import { useMachine } from './machine'
+import { useMachineProfile } from './machineProfile'
+import type { ControllerKind } from '../machine/types'
 
 export type TransportKind = 'serial' | 'mock' | 'websocket'
 export type MachineLinkStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -133,6 +135,53 @@ function buildPort(entry: MachineEntry): PortLike | undefined {
   }
 }
 
+/**
+ * Map a port-probe firmware classification to a controller PROFILE kind, so a
+ * detected board connects under its real protocol/dialect (e.g. FluidNC's named
+ * settings + YAML config) instead of falling back to plain GRBL. `unknown` (or
+ * an unmapped value) returns null → leave the current selection untouched.
+ */
+function firmwareToControllerKind(fw?: DetectedFirmware): ControllerKind | null {
+  switch (fw) {
+    case 'grbl':
+      return 'grbl'
+    case 'grblhal':
+      return 'grblhal'
+    case 'fluidnc':
+      return 'fluidnc'
+    case 'marlin':
+      return 'marlin'
+    case 'smoothie':
+      return 'smoothieware'
+    default:
+      return null
+  }
+}
+
+/**
+ * Revoke the Web Serial permission for a saved serial machine (Chrome 103+
+ * `SerialPort.forget()`). Without this, "removing" a machine only drops the
+ * roster row — the browser still reports the port from `getPorts()`, so it shows
+ * as paired and gets silently re-discovered/re-added on the next scan. Matching
+ * is by USB vendor:product (Web Serial exposes nothing more identifying).
+ * Best-effort: no-op on older browsers or when the port isn't found.
+ */
+async function forgetGrantedPort(entry?: MachineEntry): Promise<void> {
+  if (!entry || entry.kind !== 'serial' || entry.usbVendorId == null) return
+  if (typeof navigator === 'undefined' || !navigator.serial) return
+  try {
+    const ports = await navigator.serial.getPorts()
+    for (const p of ports) {
+      const i = p.getInfo()
+      if (i.usbVendorId === entry.usbVendorId && i.usbProductId === entry.usbProductId) {
+        await (p as unknown as { forget?: () => Promise<void> }).forget?.()
+      }
+    }
+  } catch {
+    /* best-effort un-pair */
+  }
+}
+
 export const useMachines = create<MachinesState>()(
   persist(
     (set, get) => ({
@@ -202,7 +251,11 @@ export const useMachines = create<MachinesState>()(
 
       removeMachine: (id) => {
         const { activeId } = get()
+        const entry = get().machines.find((m) => m.id === id)
         if (activeId === id && grbl.isConnected) void grbl.disconnect()
+        // Truly un-pair: revoke the Web Serial grant so it doesn't linger as
+        // "paired" and get re-discovered/re-added on the next granted-port scan.
+        void forgetGrantedPort(entry)
         set((s) => ({
           machines: s.machines.filter((m) => m.id !== id),
           activeId: s.activeId === id ? null : s.activeId,
@@ -231,6 +284,15 @@ export const useMachines = create<MachinesState>()(
         }
         set({ activeId: id })
         get()._setStatus(id, 'connecting', undefined)
+        // Connect under the DETECTED firmware's profile so e.g. a FluidNC board
+        // resolves the FluidNC dialect (named settings + YAML config in Motion)
+        // instead of defaulting to plain GRBL. This also persists into the
+        // preferred-port record, so future auto-connects restore the right
+        // controller. `unknown` firmware leaves the current selection alone.
+        const kind = firmwareToControllerKind(entry.firmware)
+        if (kind && kind !== useMachineProfile.getState().controllerKind) {
+          useMachineProfile.getState().setControllerKind(kind)
+        }
         try {
           let port = buildPort(entry)
           // Detected serial machine: open its ALREADY-GRANTED port directly by

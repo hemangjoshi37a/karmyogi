@@ -110,15 +110,16 @@ export const GRBL_DIALECT: ResolvedDialect = withCapabilities({
  * is GRBL-compatible (`?` realtime status `<Idle|MPos:…>`, `!`/`~`/0x18/0x85 and
  * override realtime bytes, `ok`/`error:N` acks, `$H`/`$X`/`$J=`, the same G-code
  * modal set), so every primitive matches GRBL — including `dollarSettings: true`
- * because `$$` IS the settings-dump command. The single real divergence is
- * `settingsStyle: 'named'`: the dump lines are `$path/name=value`, writes are
- * `$<name>=<value>`, and the full machine config is YAML (`$Config/Dump`).
- * FluidNC's extra `[MSG:…]` chatter is already safe for ack accounting — the
- * streamer only counts standalone `ok` / `error[:N]` tokens.
+ * because `$$` IS the settings-dump command.
  *
- * NOTE: the shared `Dialect` profile type (src/machine/types.ts, owned by the
- * machine layer) has no `settingsStyle` field yet, so `resolveDialect` derives
- * the named style from the controller KIND ('fluidnc') instead.
+ * SETTINGS: FluidNC keeps GRBL's NUMBERED `$`-settings for sender
+ * compatibility — `$$` dumps the classic `$0=…`/`$100=…`/`$110=…` table (steps
+ * per mm, max rate, acceleration, max travel, homing, spindle), and writes are
+ * `$N=value` — so it uses the SAME rich numeric `$`-settings editor as GRBL
+ * (`settingsStyle: 'numeric'`). The deeper machine STRUCTURE (axes/motors/pins)
+ * lives in the YAML config (`$Config/Dump` prints it), which is separate from
+ * these motion settings. FluidNC's extra `[MSG:…]` chatter is already safe for
+ * ack accounting — the streamer only counts standalone `ok` / `error[:N]`.
  */
 export const FLUIDNC_DIALECT: ResolvedDialect = withCapabilities({
   status: 'grbl',
@@ -127,14 +128,14 @@ export const FLUIDNC_DIALECT: ResolvedDialect = withCapabilities({
   jogCommand: 'grbl-$J',
   dollarSettings: true,
   reset: 'grbl-0x18',
-  settingsStyle: 'named',
+  settingsStyle: 'numeric',
 })
 
 /**
  * Resolve a profile's (possibly partial) dialect against the GRBL defaults.
- * Pass the controller `kind` where known so FluidNC resolves to its named-
- * settings dialect; without it (legacy call sites) everything keeps resolving
- * exactly as before — GRBL-shaped, numeric `$`-settings.
+ * Pass the controller `kind` where known so FluidNC resolves to its dialect
+ * (GRBL-shaped, with the same numeric `$`-settings); without it (legacy call
+ * sites) everything keeps resolving exactly as before.
  */
 export function resolveDialect(d?: Dialect, kind?: ControllerKind | string): ResolvedDialect {
   const base = kind === 'fluidnc' ? FLUIDNC_DIALECT : GRBL_DIALECT
