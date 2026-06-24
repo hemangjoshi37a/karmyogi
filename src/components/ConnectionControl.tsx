@@ -4,6 +4,7 @@ import { MockPort } from '../serial'
 import { BlePort } from '../serial/blePort'
 import { UsbPort } from '../serial/usbPort'
 import { mixedContentReason, normalizeWsUrl } from '../serial/wsPort'
+import { scanWsSubnet, subnetBaseFromHost, type WsScanHit } from '../serial/wifiScan'
 import { useMachine, useMachineProfile, usePersistentState, useMachines } from '../store'
 import { useProgram } from '../store/program'
 import { scanGrantedPorts, requestPort, isSerialScanSupported } from '../serial/portScan'
@@ -272,7 +273,19 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
       </span>
       {!connected ? (
         <>
-          <ConnectMenu connecting={connecting} liveConnect={liveConnect} profileNotes={profile.notes} profileLabel={profile.label} />
+          <ConnectMenu
+            connecting={connecting}
+            liveConnect={liveConnect}
+            profileNotes={profile.notes}
+            profileLabel={profile.label}
+            machines={machines}
+            onAddFound={(url) => {
+              // De-dupe against an existing farm entry by url; reuse it if present.
+              const existing = machines.find((m) => m.kind === 'websocket' && m.url === url)
+              const id = existing ? existing.id : addMachine({ kind: 'websocket', url })
+              void connectMachine(id)
+            }}
+          />
           {!liveConnect && (
             <span
               className="km-conn-state"
@@ -510,6 +523,10 @@ interface ConnectMenuProps {
   liveConnect: boolean
   profileLabel: string
   profileNotes: string
+  /** Saved farm machines — to pre-fill the scan base and de-dupe found hosts. */
+  machines: ReturnType<typeof useMachines.getState>['machines']
+  /** Add a discovered ws:// host to the farm (de-duped) and connect it. */
+  onAddFound: (url: string) => void
 }
 
 /**
@@ -518,13 +535,109 @@ interface ConnectMenuProps {
  * Bluetooth (Web Bluetooth / BLE). Each transport is gated on its API being
  * available and on whether the selected firmware can live-connect.
  */
-function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: ConnectMenuProps) {
+function ConnectMenu({
+  connecting,
+  liveConnect,
+  profileLabel,
+  profileNotes,
+  machines,
+  onAddFound,
+}: ConnectMenuProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [host, setHost] = useState('')
   const [port, setPort] = useState('')
   const [wifiErr, setWifiErr] = useState<string | null>(null)
   const ref = useRef<HTMLSpanElement>(null)
+
+  // --- LAN subnet scan: discover networked GRBL controllers without typing each IP.
+  // Pre-fill the subnet base from the most recently added ws machine's host (else
+  // blank for the user to type, e.g. 192.168.29).
+  const lastWsBase = (() => {
+    for (let i = machines.length - 1; i >= 0; i--) {
+      const m = machines[i]
+      if (m.kind === 'websocket' && m.url) {
+        const b = subnetBaseFromHost(m.url)
+        if (b) return b
+      }
+    }
+    return ''
+  })()
+  const [scanBase, setScanBase] = useState(lastWsBase)
+  // Seed the base once when the popover opens, if the user hasn't typed one yet.
+  useEffect(() => {
+    if (open && !scanBase && lastWsBase) setScanBase(lastWsBase)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+  const [scanning, setScanning] = useState(false)
+  const [scanProgress, setScanProgress] = useState({ done: 0, total: 0 })
+  const [scanHits, setScanHits] = useState<WsScanHit[]>([])
+  const [scanErr, setScanErr] = useState<string | null>(null)
+  const scanAbortRef = useRef<AbortController | null>(null)
+
+  // Whether a ws:// sweep of this base would be blocked by the browser (https page,
+  // plain ws:// = mixed content). If so, the scan is doomed — show guidance instead.
+  const scanBlocked = (() => {
+    const b = scanBase.trim().replace(/\.+$/, '')
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(b)) return null
+    try {
+      return mixedContentReason(normalizeWsUrl(`${b}.1`, 80))
+    } catch {
+      return null
+    }
+  })()
+
+  const startScan = () => {
+    const base = scanBase.trim().replace(/\.+$/, '')
+    setScanErr(null)
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(base)) {
+      setScanErr(t('conn.wifi.scan.badBase', 'Enter the first three octets, e.g. 192.168.1'))
+      return
+    }
+    if (scanBlocked) {
+      setScanErr(scanBlocked)
+      return
+    }
+    const ac = new AbortController()
+    scanAbortRef.current = ac
+    setScanning(true)
+    setScanHits([])
+    setScanProgress({ done: 0, total: 0 })
+    scanWsSubnet(base, {
+      ports: [80, 81],
+      signal: ac.signal,
+      onProgress: (done, total) => setScanProgress({ done, total }),
+      onFound: (hit) => setScanHits((prev) => [...prev, hit]),
+    })
+      .catch((err) => {
+        if (!ac.signal.aborted) setScanErr(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (scanAbortRef.current === ac) scanAbortRef.current = null
+        setScanning(false)
+      })
+  }
+
+  const cancelScan = () => {
+    scanAbortRef.current?.abort()
+    scanAbortRef.current = null
+    setScanning(false)
+  }
+
+  // Abort any running scan when the popover closes / unmounts so it doesn't leak.
+  useEffect(() => {
+    if (!open && scanAbortRef.current) {
+      scanAbortRef.current.abort()
+      scanAbortRef.current = null
+      setScanning(false)
+    }
+  }, [open])
+  useEffect(() => () => scanAbortRef.current?.abort(), [])
+
+  // Hosts already in the farm (by url) — to mark found rows as "added".
+  const farmWsUrls = new Set(
+    machines.filter((m) => m.kind === 'websocket' && m.url).map((m) => m.url as string),
+  )
 
   const bleSupported = typeof navigator !== 'undefined' && BlePort.isSupported()
   const serialSupported = typeof navigator !== 'undefined' && !!navigator.serial
@@ -806,6 +919,144 @@ function ConnectMenu({ connecting, liveConnect, profileLabel, profileNotes }: Co
               {t(
                 'conn.telnet.note',
                 'Telnet (raw TCP, port 23) can’t be opened from a browser — there is no API. It needs a WebSocket↔TCP bridge/relay; use Wi-Fi (WebSocket) above, which covers ESP3D / FluidNC networked GRBL.',
+              )}
+            </div>
+
+            {/* LAN subnet scan — discover every networked controller on the /24 so
+                the user doesn't have to type each IP. Mirrors the single-host port
+                auto-detect, swept across the whole subnet. */}
+            <div className="km-cx-sep" aria-hidden="true" />
+            <div className="km-cx-scan" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className="km-cx-form-title">
+                {t('conn.wifi.scan', 'Scan network for controllers')}
+              </div>
+              <div className="km-cx-form-rowwrap" style={{ alignItems: 'center' }}>
+                <input
+                  className="km-cx-input"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={t('conn.wifi.scan.base', 'Subnet (e.g. 192.168.1)')}
+                  value={scanBase}
+                  disabled={scanning}
+                  onChange={(e) => setScanBase(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !scanning) startScan()
+                  }}
+                  aria-label={t('conn.wifi.scan.baseLabel', 'Subnet base (first three octets)')}
+                />
+                <span
+                  aria-hidden="true"
+                  style={{ fontSize: 11, color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}
+                >
+                  .0–255
+                </span>
+              </div>
+              {scanBlocked ? (
+                <div className="km-cx-note warn">
+                  {t(
+                    'conn.wifi.scan.blocked',
+                    'Scanning ws:// is blocked on this secure (https) page. Open karmyogi over http on your LAN to scan, or connect by USB.',
+                  )}
+                </div>
+              ) : !scanning ? (
+                <button
+                  className="km-conn-btn primary km-cx-go"
+                  disabled={connecting || !scanBase.trim()}
+                  onClick={startScan}
+                >
+                  {t('conn.wifi.scan.go', 'Scan')}
+                </button>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={scanProgress.total || 1}
+                    aria-valuenow={scanProgress.done}
+                    style={{
+                      height: 6,
+                      borderRadius: 999,
+                      background: 'var(--border)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'block',
+                        height: '100%',
+                        background: 'var(--accent, #4c9aff)',
+                        transition: 'width 80ms linear',
+                        width: scanProgress.total
+                          ? `${Math.round((scanProgress.done / scanProgress.total) * 100)}%`
+                          : '0%',
+                      }}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                    }}
+                  >
+                    <span className="km-cx-note" style={{ margin: 0 }}>
+                      {t('conn.wifi.scan.progress', 'Scanning {done} / {total}…', {
+                        done: scanProgress.done,
+                        total: scanProgress.total || 256,
+                      })}
+                    </span>
+                    <button className="km-conn-btn" onClick={cancelScan}>
+                      {t('conn.wifi.scan.cancel', 'Cancel')}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {scanErr && <div className="km-cx-note err">{scanErr}</div>}
+              {scanHits.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {scanHits.map((h) => {
+                    const added = farmWsUrls.has(h.url)
+                    return (
+                      <div
+                        key={h.url}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                        }}
+                      >
+                        <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
+                          {h.host}:{h.port}
+                        </span>
+                        <button
+                          className="km-conn-btn primary"
+                          disabled={connecting}
+                          onClick={() => {
+                            onAddFound(h.url)
+                            setOpen(false)
+                          }}
+                          title={t('conn.wifi.scan.connectTitle', 'Add to the farm and connect — {url}', {
+                            url: h.url,
+                          })}
+                        >
+                          {added
+                            ? t('conn.wifi.scan.connect', 'Connect')
+                            : t('conn.wifi.scan.add', 'Add + connect')}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {!scanning && !scanErr && scanHits.length === 0 && scanProgress.done > 0 && (
+                <div className="km-cx-note">
+                  {t(
+                    'conn.wifi.scan.none',
+                    'No WebSocket controllers answered on this subnet (ports 80, 81).',
+                  )}
+                </div>
               )}
             </div>
           </div>
