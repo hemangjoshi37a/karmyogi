@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "KWA KIWANGO CHA JUU KINACHORUHUSIWA NA SHERIA HUSIKA, MWENDESHAJI NA WASIMAMIZI WAKE HAWATAWAJIBIKA KWA UHARIBIFU WOWOTE WA MOJA KWA MOJA WA PILI, WA BAHATI MBAYA, MAALUMU, WA MATOKEO, WA ADHABU, AU WA MFANO, AU KWA HASARA YOYOTE YA FAIDA, DATA, AU SIFA NJEMA, AU KWA UHARIBIFU WOWOTE WA KIMWILI, JERAHA, AU HASARA INAYOTOKANA NA AU INAYOHUSIANA NA MATUMIZI YAKO YA HUDUMA AU MASHINE YOYOTE ILIYOUNGANISHWA, IWE INATEGEMEA MKATABA, KOSA LA KIRAIA, AU NADHARIA NYINGINE YOYOTE YA KISHERIA, HATA KAMA WAMESHAURIWA KUHUSU UWEZEKANO WA UHARIBIFU KAMA HUO.",
   "legal.terms.p8": "Masharti haya yanatawaliwa na kufasiriwa kwa mujibu wa sheria za India, bila kuzingatia kanuni za mgongano wa sheria. Mgogoro wowote unaotokana na au unaohusiana na Masharti haya utakuwa chini ya mamlaka ya kipekee ya mahakama zenye uwezo zenye mamlaka juu ya mahali pa biashara paliposajiliwa pa hjLabs.in. [Kishika nafasi cha mamlaka — kitakamilishwa na Mwendeshaji.]",
   "legal.terms.p9": "Mwendeshaji anaweza kusasisha Masharti haya wakati wowote. Mabadiliko muhimu yanaanza kutumika baada ya kuchapishwa ndani ya Huduma, na kuendelea kwako kutumia baada ya hapo ni kukubali. Maswali yanaweza kuelekezwa kwa {contact}.",
-  "legal.terms.title": "Masharti ya Huduma"
+  "legal.terms.title": "Masharti ya Huduma",
+  "splash.eyebrow": "Eneo-kazi la CNC + CAD/CAM la asili ya kivinjari",
+  "splash.headline": "karmyogi — kidhibiti cha GRBL CNC na eneo-kazi la CAD/CAM kinachotumia kivinjari",
+  "splash.lede": "Endesha mashine yako ya GRBL ya mihimili-mitatu moja kwa moja kutoka kivinjari chako kupitia Web Serial API — uchongaji na uchoraji wa CNC, ukataji wa leza, uchoraji wa kalamu, uelekezaji wa kutenga na uchimbaji wa PCB, ulehemu otomatiki, utoaji wa gundi, kuchukua na kuweka, ulehemu, ukunjaji wa springi na uchapishaji wa 3D — pamoja na kionyeshi cha njia ya zana cha 3D cha moja kwa moja, kidhibiti cha jog/DRO, msimamizi wa mipangilio ya $ ya GRBL na dashibodi. Mbadala wa Candle wa bila malipo, wa kisasa na huria. Hakuna usakinishaji, hakuna viendeshi, hakuna seva.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "Lugha 53",
+  "splash.feat5": "Hufanya kazi nje ya mtandao (PWA)",
+  "splash.feat6": "Kompyuta na simu",
+  "splash.loading": "Inapakia eneo-kazi…",
+  "common.close": "Funga",
+  "mobile.allPanels": "Paneli zote",
+  "mobile.hidden": "Imefichwa",
+  "mobile.hideTab": "Ficha {name}",
+  "mobile.lastPanel": "Angalau paneli moja lazima ibaki ikionekana",
+  "mobile.showTab": "Onyesha {name}"
 }

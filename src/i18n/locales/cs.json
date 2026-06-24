@@ -2975,5 +2975,21 @@
   "writing.text.placeholder": "Pište zde. Pro nový řádek použijte Enter.",
   "writing.text.title": "Text",
   "writing.text.title.tip": "Text k vykreslení. Pro nový řádek stiskněte Enter.",
-  "writing.warn.penZ": "Z pera dole ({down}) není pod Z pera nahoře ({up}) — pero se pro pojezd nezvedne."
+  "writing.warn.penZ": "Z pera dole ({down}) není pod Z pera nahoře ({up}) — pero se pro pojezd nezvedne.",
+  "splash.eyebrow": "Nativní CNC + CAD/CAM pracovní stůl v prohlížeči",
+  "splash.headline": "karmyogi — ovladač GRBL CNC a CAD/CAM pracovní stůl v prohlížeči",
+  "splash.lede": "Ovládejte svůj 3osý stroj GRBL přímo z prohlížeče přes Web Serial API — CNC řezání a gravírování, laserové řezání, kreslení perem, izolační frézování a vrtání PCB, automatické pájení, dávkování lepidla, osazování součástek, svařování, navíjení pružin a 3D tisk — s živým 3D vizualizérem dráhy nástroje, ovladačem jog/DRO, správcem nastavení GRBL $-settings a konzolí. Bezplatná, moderní, otevřená alternativa ke Candle. Žádná instalace, žádné ovladače, žádný server.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 jazyků",
+  "splash.feat5": "Funguje offline (PWA)",
+  "splash.feat6": "Počítač i mobil",
+  "splash.loading": "Načítání pracovního stolu…",
+  "common.close": "Zavřít",
+  "mobile.allPanels": "Všechny panely",
+  "mobile.hidden": "Skryto",
+  "mobile.hideTab": "Skrýt {name}",
+  "mobile.lastPanel": "Alespoň jeden panel musí zůstat viditelný",
+  "mobile.showTab": "Zobrazit {name}"
 }

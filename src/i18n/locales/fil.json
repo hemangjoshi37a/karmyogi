@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "SA PINAKAMATAAS NA LAWAK NA PINAPAHINTULUTAN NG NAAANGKOP NA BATAS, ANG OPERATOR AT ANG MGA ADMINISTRATOR NITO AY HINDI MANANAGOT SA ANUMANG HINDI DIREKTA, INSIDENTAL, ESPESYAL, KINAHINATNAN, PARUSANG, O HALIMBAWANG PINSALA, O SA ANUMANG PAGKAWALA NG KITA, DATOS, O GOODWILL, O SA ANUMANG PISIKAL NA PINSALA, SAKIT, O PAGKAWALANG NAGMUMULA SA O KAUGNAY NG IYONG PAGGAMIT NG SERBISYO O ANUMANG NAKAKONEKTANG MAKINA, MAGING BATAY SA KONTRATA, TORT, O ANUMANG IBANG LEGAL NA TEORYA, KAHIT NA PINAYUHAN TUNGKOL SA POSIBILIDAD NG GANITONG PINSALA.",
   "legal.terms.p8": "Ang mga Tuntuning ito ay pinamamahalaan at binibigyang-kahulugan alinsunod sa mga batas ng India, nang walang pagsasaalang-alang sa mga prinsipyo ng salungatan ng batas. Anumang hindi pagkakaunawaan na nagmumula sa o kaugnay ng mga Tuntuning ito ay sasailalim sa eksklusibong hurisdiksyon ng mga karampatang hukuman na may hurisdiksyon sa nakarehistrong lugar ng negosyo ng hjLabs.in. [Placeholder ng hurisdiksyon — tatapusin ng Operator.]",
   "legal.terms.p9": "Maaaring i-update ng Operator ang mga Tuntuning ito anumang oras. Ang mga materyal na pagbabago ay nagkakabisa sa paglalathala sa loob ng Serbisyo, at ang iyong patuloy na paggamit pagkatapos nito ay bumubuo ng pagtanggap. Ang mga tanong ay maaaring ipadala sa {contact}.",
-  "legal.terms.title": "Mga Tuntunin ng Serbisyo"
+  "legal.terms.title": "Mga Tuntunin ng Serbisyo",
+  "splash.eyebrow": "CNC + CAD/CAM workbench na tumatakbo sa browser",
+  "splash.headline": "karmyogi — GRBL CNC controller at CAD/CAM workbench na nasa browser",
+  "splash.lede": "Patakbuhin ang iyong 3-axis na GRBL machine nang diretso mula sa iyong browser sa pamamagitan ng Web Serial API — CNC carving at engraving, laser cutting, pen plotting, PCB isolation routing at drilling, auto-soldering, glue dispensing, pick & place, welding, spring coiling at 3D printing — may live 3D toolpath visualizer, jog/DRO controller, tagapamahala ng GRBL $-settings at console. Isang libre, makabago, at bukas na alternatibo sa Candle. Walang i-install, walang driver, walang server.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 na wika",
+  "splash.feat5": "Gumagana offline (PWA)",
+  "splash.feat6": "Desktop at mobile",
+  "splash.loading": "Nilo-load ang workbench…",
+  "common.close": "Isara",
+  "mobile.allPanels": "Lahat ng panel",
+  "mobile.hidden": "Nakatago",
+  "mobile.hideTab": "Itago ang {name}",
+  "mobile.lastPanel": "Dapat manatiling nakikita ang kahit isang panel",
+  "mobile.showTab": "Ipakita ang {name}"
 }

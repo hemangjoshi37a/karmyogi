@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "ÎN MĂSURA MAXIMĂ PERMISĂ DE LEGEA APLICABILĂ, OPERATORUL ȘI ADMINISTRATORII SĂI NU VOR FI RĂSPUNZĂTORI PENTRU NICIUN FEL DE DAUNE INDIRECTE, INCIDENTALE, SPECIALE, PE CALE DE CONSECINȚĂ, PUNITIVE SAU EXEMPLARE, NICI PENTRU VREO PIERDERE DE PROFIT, DATE SAU REPUTAȚIE, NICI PENTRU VREO DAUNĂ FIZICĂ, VĂTĂMARE SAU PIERDERE CARE DECURGE DIN SAU ESTE LEGATĂ DE UTILIZAREA DE CĂTRE DUMNEAVOASTRĂ A SERVICIULUI SAU A ORICĂREI MAȘINI CONECTATE, FIE PE BAZĂ CONTRACTUALĂ, DELICTUALĂ SAU PE ORICE ALTĂ TEORIE JURIDICĂ, CHIAR DACĂ AU FOST AVERTIZAȚI DE POSIBILITATEA UNOR ASTFEL DE DAUNE.",
   "legal.terms.p8": "Acești Termeni sunt guvernați și interpretați în conformitate cu legile din India, fără a ține cont de principiile conflictului de legi. Orice litigiu care decurge din sau în legătură cu acești Termeni va fi supus jurisdicției exclusive a instanțelor competente care au jurisdicție asupra sediului social înregistrat al hjLabs.in. [Element substitutiv pentru jurisdicție — urmează să fie finalizat de către Operator.]",
   "legal.terms.p9": "Operatorul poate actualiza acești Termeni în orice moment. Modificările materiale intră în vigoare la publicarea în cadrul Serviciului, iar utilizarea dumneavoastră continuă ulterioară constituie acceptare. Întrebările pot fi adresate la {contact}.",
-  "legal.terms.title": "Termeni de utilizare"
+  "legal.terms.title": "Termeni de utilizare",
+  "splash.eyebrow": "Banc de lucru CNC + CAD/CAM nativ pentru browser",
+  "splash.headline": "karmyogi — controler CNC GRBL și banc de lucru CAD/CAM bazate pe browser",
+  "splash.lede": "Controlează-ți mașina GRBL cu 3 axe direct din browser prin Web Serial API — frezare și gravare CNC, tăiere cu laser, plotare cu pix, rutare de izolare și găurire PCB, lipire automată, dozare adeziv, pick & place, sudare, înfășurare arcuri și imprimare 3D — cu un vizualizator 3D al traiectoriei sculei în timp real, controler jog/DRO, manager de setări $ GRBL și consolă. O alternativă Candle gratuită, modernă și deschisă. Fără instalări, fără drivere, fără server.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 de limbi",
+  "splash.feat5": "Funcționează offline (PWA)",
+  "splash.feat6": "Desktop și mobil",
+  "splash.loading": "Se încarcă bancul de lucru…",
+  "common.close": "Închide",
+  "mobile.allPanels": "Toate panourile",
+  "mobile.hidden": "Ascuns",
+  "mobile.hideTab": "Ascunde {name}",
+  "mobile.lastPanel": "Cel puțin un panou trebuie să rămână vizibil",
+  "mobile.showTab": "Afișează {name}"
 }

@@ -2975,5 +2975,21 @@
   "writing.text.placeholder": "Hier tippen. Mit Enter eine neue Zeile beginnen.",
   "writing.text.title": "Text",
   "writing.text.title.tip": "Zu plottender Text. Drücken Sie Enter für eine neue Zeile.",
-  "writing.warn.penZ": "Stift-unten-Z ({down}) liegt nicht unter Stift-oben-Z ({up}) — der Stift hebt sich für die Fahrt nicht."
+  "writing.warn.penZ": "Stift-unten-Z ({down}) liegt nicht unter Stift-oben-Z ({up}) — der Stift hebt sich für die Fahrt nicht.",
+  "splash.eyebrow": "Browser-native CNC- + CAD/CAM-Werkbank",
+  "splash.headline": "karmyogi — browserbasierter GRBL-CNC-Controller & CAD/CAM-Werkbank",
+  "splash.lede": "Steuern Sie Ihre 3-Achs-GRBL-Maschine direkt aus dem Browser über die Web Serial API — CNC-Fräsen & Gravieren, Laserschneiden, Stiftplotten, PCB-Isolationsfräsen & -Bohren, Auto-Löten, Klebstoffdosierung, Bestückung, Schweißen, Federwickeln und 3D-Druck — mit einem Live-3D-Werkzeugbahn-Visualizer, jog/DRO-Controller, GRBL-$-Einstellungsmanager und Konsole. Eine kostenlose, moderne, offene Candle-Alternative. Keine Installation, keine Treiber, kein Server.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 Sprachen",
+  "splash.feat5": "Funktioniert offline (PWA)",
+  "splash.feat6": "Desktop & Mobil",
+  "splash.loading": "Werkbank wird geladen…",
+  "common.close": "Schließen",
+  "mobile.allPanels": "Alle Panels",
+  "mobile.hidden": "Ausgeblendet",
+  "mobile.hideTab": "{name} ausblenden",
+  "mobile.lastPanel": "Mindestens ein Panel muss sichtbar bleiben",
+  "mobile.showTab": "{name} anzeigen"
 }

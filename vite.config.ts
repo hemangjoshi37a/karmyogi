@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import basicSsl from '@vitejs/plugin-basic-ssl'
+import { readFileSync, readdirSync } from 'node:fs'
 // Dev-only camera-frame receiver lives in a plain .mjs (kept out of the app
 // tsconfig so it can use Node APIs without leaking @types/node into the build).
 // @ts-ignore - JS module, not typechecked by the app tsconfig
@@ -122,16 +123,48 @@ function buildInfoEmitter() {
 }
 
 /**
+ * Build the splash translation map (splash.* keys only) from every locale file,
+ * so the pre-React boot splash can localize BEFORE any bundle/locale chunk loads.
+ * Inlined as `window.__SPLASH_I18N__` (see splashBuildStamp). Computed once at
+ * config load; a dev-server restart or a build picks up new translations.
+ */
+function buildSplashI18n(): string {
+  const out: Record<string, Record<string, string>> = {}
+  try {
+    const dir = new URL('./src/i18n/locales/', import.meta.url)
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.json')) continue
+      const code = f.slice(0, -5)
+      try {
+        const o = JSON.parse(readFileSync(new URL(f, dir), 'utf8')) as Record<string, string>
+        const sub: Record<string, string> = {}
+        for (const k of Object.keys(o)) if (k.startsWith('splash.')) sub[k] = o[k]
+        if (Object.keys(sub).length) out[code] = sub
+      } catch {
+        /* skip an unreadable/invalid locale */
+      }
+    }
+  } catch {
+    /* no locales dir */
+  }
+  return JSON.stringify(out)
+}
+const SPLASH_I18N = buildSplashI18n()
+
+/**
  * Replaces the `__BUILD_VERSION__` / `__BUILD_DATE__` placeholders in the boot
- * splash (index.html) with the build identity. Runs in BOTH dev and build, so
- * the splash always shows the current build id + date (matching the About
- * modal's version chip), and the indexed HTML advertises a fresh build date.
+ * splash (index.html) with the build identity, AND inlines `window.__SPLASH_I18N__`
+ * (the splash.* translations) into <head>. Runs in BOTH dev and build.
  */
 function splashBuildStamp() {
   return {
     name: 'karmyogi-splash-build-stamp',
     transformIndexHtml(html: string) {
       return html
+        .replace(
+          '</head>',
+          `  <script>window.__SPLASH_I18N__=${SPLASH_I18N}</script>\n  </head>`,
+        )
         .replace(/__BUILD_VERSION__/g, buildVersion)
         .replace(/__BUILD_DATE__/g, buildStamp)
     },

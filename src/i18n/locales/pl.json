@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "W MAKSYMALNYM ZAKRESIE DOZWOLONYM PRZEZ OBOWIĄZUJĄCE PRAWO OPERATOR I JEGO ADMINISTRATORZY NIE PONOSZĄ ODPOWIEDZIALNOŚCI ZA JAKIEKOLWIEK SZKODY POŚREDNIE, UBOCZNE, SZCZEGÓLNE, WTÓRNE, RETORSYJNE LUB ODSTRASZAJĄCE, ANI ZA JAKĄKOLWIEK UTRATĘ ZYSKÓW, DANYCH LUB RENOMY, ANI ZA JAKIEKOLWIEK SZKODY FIZYCZNE, OBRAŻENIA LUB STRATY WYNIKAJĄCE Z KORZYSTANIA Z USŁUGI LUB JAKIEJKOLWIEK PODŁĄCZONEJ MASZYNY LUB Z NIMI ZWIĄZANE, NIEZALEŻNIE OD TEGO, CZY OPARTE NA UMOWIE, DELIKCIE CZY JAKIEJKOLWIEK INNEJ PODSTAWIE PRAWNEJ, NAWET JEŚLI POINFORMOWANO O MOŻLIWOŚCI WYSTĄPIENIA TAKICH SZKÓD.",
   "legal.terms.p8": "Niniejsze Warunki podlegają i są interpretowane zgodnie z prawem India, bez względu na normy kolizyjne. Wszelkie spory wynikające z niniejszych Warunków lub z nimi związane podlegają wyłącznej jurysdykcji właściwych sądów mających jurysdykcję nad zarejestrowanym miejscem prowadzenia działalności hjLabs.in. [Symbol zastępczy jurysdykcji — do sfinalizowania przez Operatora.]",
   "legal.terms.p9": "Operator może w dowolnym momencie aktualizować niniejsze Warunki. Istotne zmiany wchodzą w życie po opublikowaniu w ramach Usługi, a Twoje dalsze korzystanie po tym fakcie stanowi akceptację. Pytania można kierować na adres {contact}.",
-  "legal.terms.title": "Warunki korzystania z usługi"
+  "legal.terms.title": "Warunki korzystania z usługi",
+  "splash.eyebrow": "Natywny przeglądarkowy warsztat CNC + CAD/CAM",
+  "splash.headline": "karmyogi — przeglądarkowy sterownik GRBL CNC i warsztat CAD/CAM",
+  "splash.lede": "Steruj swoją 3-osiową maszyną GRBL bezpośrednio z przeglądarki przez Web Serial API — frezowanie i grawerowanie CNC, cięcie laserowe, ploterowanie pisakiem, trasowanie izolacyjne i wiercenie PCB, automatyczne lutowanie, dozowanie kleju, pick & place, spawanie, nawijanie sprężyn i druk 3D — z interaktywnym wizualizatorem ścieżki narzędzia 3D, sterownikiem jog/DRO, menedżerem ustawień GRBL $ i konsolą. Darmowa, nowoczesna, otwarta alternatywa dla Candle. Bez instalacji, bez sterowników, bez serwera.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 języki",
+  "splash.feat5": "Działa offline (PWA)",
+  "splash.feat6": "Komputer i telefon",
+  "splash.loading": "Ładowanie warsztatu…",
+  "common.close": "Zamknij",
+  "mobile.allPanels": "Wszystkie panele",
+  "mobile.hidden": "Ukryty",
+  "mobile.hideTab": "Ukryj {name}",
+  "mobile.lastPanel": "Co najmniej jeden panel musi pozostać widoczny",
+  "mobile.showTab": "Pokaż {name}"
 }

@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "AZ ALKALMAZANDÓ JOG ÁLTAL MEGENGEDETT LEGTELJESEBB MÉRTÉKIG AZ ÜZEMELTETŐ ÉS ADMINISZTRÁTORAI NEM FELELNEK SEMMILYEN KÖZVETETT, JÁRULÉKOS, KÜLÖNÖS, KÖVETKEZMÉNYI, BÜNTETŐ VAGY PÉLDAÉRTÉKŰ KÁRÉRT, SEM SEMMILYEN ELMARADT HASZONÉRT, ADATVESZTÉSÉRT VAGY JÓ HÍRNÉV ELVESZTÉSÉÉRT, SEM SEMMILYEN FIZIKAI KÁRÉRT, SÉRÜLÉSÉRT VAGY VESZTESÉGÉRT, AMELY A SZOLGÁLTATÁS VAGY BÁRMELY CSATLAKOZTATOTT GÉP ÖN ÁLTALI HASZNÁLATÁBÓL ERED VAGY AZZAL ÖSSZEFÜGG, LEGYEN AZ SZERZŐDÉSEN, KÁROKOZÁSON VAGY BÁRMELY MÁS JOGI ELMÉLETEN ALAPULÓ, MÉG AKKOR IS, HA AZ ILYEN KÁROK LEHETŐSÉGÉRŐL TÁJÉKOZTATTÁK.",
   "legal.terms.p8": "A jelen Feltételekre India joga az irányadó, és azokat annak megfelelően kell értelmezni, a kollíziós jogi elvek figyelmen kívül hagyásával. A jelen Feltételekből eredő vagy azokkal összefüggő bármely jogvita a hjLabs.in bejegyzett székhelye szerint illetékes hatáskörrel rendelkező bíróságok kizárólagos joghatósága alá tartozik. [Joghatósági helykitöltő — az Üzemeltető véglegesíti.]",
   "legal.terms.p9": "Az Üzemeltető bármikor frissítheti a jelen Feltételeket. A lényeges változások a Szolgáltatáson belüli közzétételkor lépnek hatályba, és az Ön ezt követő folyamatos használata elfogadásnak minősül. A kérdéseket a következő címre lehet irányítani: {contact}.",
-  "legal.terms.title": "Szolgáltatási feltételek"
+  "legal.terms.title": "Szolgáltatási feltételek",
+  "splash.eyebrow": "Böngészőben futó CNC + CAD/CAM munkaasztal",
+  "splash.headline": "karmyogi — böngészőalapú GRBL CNC-vezérlő és CAD/CAM munkaasztal",
+  "splash.lede": "Vezérelje 3 tengelyes GRBL gépét közvetlenül a böngészőből a Web Serial API-n keresztül — CNC faragás és gravírozás, lézervágás, tollrajzolás, NYÁK izolációs marás és fúrás, automatikus forrasztás, ragasztóadagolás, pick & place, hegesztés, rugótekercselés és 3D nyomtatás — élő 3D szerszámpálya-megjelenítővel, jog/DRO vezérlővel, GRBL $-beállításkezelővel és konzollal. Ingyenes, modern, nyílt Candle-alternatíva. Telepítés, illesztőprogram és szerver nélkül.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 nyelv",
+  "splash.feat5": "Offline is működik (PWA)",
+  "splash.feat6": "Asztali és mobil",
+  "splash.loading": "A munkaasztal betöltése…",
+  "common.close": "Bezárás",
+  "mobile.allPanels": "Minden panel",
+  "mobile.hidden": "Rejtett",
+  "mobile.hideTab": "{name} elrejtése",
+  "mobile.lastPanel": "Legalább egy panelnek láthatónak kell maradnia",
+  "mobile.showTab": "{name} megjelenítése"
 }

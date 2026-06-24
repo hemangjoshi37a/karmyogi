@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "NELLA MASSIMA MISURA CONSENTITA DALLA LEGGE APPLICABILE, L'OPERATORE E I SUOI AMMINISTRATORI NON SARANNO RESPONSABILI PER ALCUN DANNO INDIRETTO, INCIDENTALE, SPECIALE, CONSEQUENZIALE, PUNITIVO O ESEMPLARE, NÉ PER ALCUNA PERDITA DI PROFITTI, DATI O AVVIAMENTO, NÉ PER ALCUN DANNO FISICO, LESIONE O PERDITA DERIVANTE DA O CORRELATA AL TUO UTILIZZO DEL SERVIZIO O DI QUALSIASI MACCHINA COLLEGATA, SIA ESSO BASATO SU CONTRATTO, ILLECITO O QUALSIASI ALTRA TEORIA GIURIDICA, ANCHE SE INFORMATO DELLA POSSIBILITÀ DI TALI DANNI.",
   "legal.terms.p8": "I presenti Termini sono disciplinati e interpretati in conformità con le leggi dell'India, senza riguardo ai principi sui conflitti di legge. Qualsiasi controversia derivante da o connessa ai presenti Termini sarà soggetta alla giurisdizione esclusiva dei tribunali competenti aventi giurisdizione sulla sede legale di hjLabs.in. [Segnaposto della giurisdizione — da finalizzare a cura dell'Operatore.]",
   "legal.terms.p9": "L'Operatore può aggiornare i presenti Termini in qualsiasi momento. Le modifiche sostanziali entrano in vigore al momento della pubblicazione all'interno del Servizio, e il tuo utilizzo continuato successivo costituisce accettazione. Le domande possono essere indirizzate a {contact}.",
-  "legal.terms.title": "Termini di servizio"
+  "legal.terms.title": "Termini di servizio",
+  "splash.eyebrow": "Banco di lavoro CNC + CAD/CAM nativo per browser",
+  "splash.headline": "karmyogi — controller CNC GRBL e banco di lavoro CAD/CAM nel browser",
+  "splash.lede": "Comanda la tua macchina GRBL a 3 assi direttamente dal browser tramite la Web Serial API — intaglio e incisione CNC, taglio laser, plottaggio a penna, routing di isolamento e foratura PCB, saldatura automatica, erogazione di colla, pick & place, saldatura, avvolgimento di molle e stampa 3D — con un visualizzatore di percorsi utensile 3D in tempo reale, un controller jog/DRO, un gestore delle impostazioni $ di GRBL e una console. Un’alternativa a Candle gratuita, moderna e aperta. Senza installazioni, senza driver, senza server.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 lingue",
+  "splash.feat5": "Funziona offline (PWA)",
+  "splash.feat6": "Desktop e mobile",
+  "splash.loading": "Caricamento del banco di lavoro…",
+  "common.close": "Chiudi",
+  "mobile.allPanels": "Tutti i pannelli",
+  "mobile.hidden": "Nascosto",
+  "mobile.hideTab": "Nascondi {name}",
+  "mobile.lastPanel": "Almeno un pannello deve rimanere visibile",
+  "mobile.showTab": "Mostra {name}"
 }

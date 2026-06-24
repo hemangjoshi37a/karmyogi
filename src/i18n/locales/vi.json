@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "TRONG PHẠM VI TỐI ĐA ĐƯỢC PHÁP LUẬT HIỆN HÀNH CHO PHÉP, ĐƠN VỊ VẬN HÀNH VÀ CÁC QUẢN TRỊ VIÊN CỦA HỌ SẼ KHÔNG CHỊU TRÁCH NHIỆM ĐỐI VỚI BẤT KỲ THIỆT HẠI GIÁN TIẾP, NGẪU NHIÊN, ĐẶC BIỆT, HỆ QUẢ, MANG TÍNH TRỪNG PHẠT HAY LÀM GƯƠNG NÀO, HOẶC ĐỐI VỚI BẤT KỲ TỔN THẤT LỢI NHUẬN, DỮ LIỆU HAY UY TÍN NÀO, HOẶC ĐỐI VỚI BẤT KỲ THIỆT HẠI VẬT LÝ, THƯƠNG TÍCH HAY TỔN THẤT NÀO PHÁT SINH TỪ HOẶC LIÊN QUAN ĐẾN VIỆC BẠN SỬ DỤNG DỊCH VỤ HOẶC BẤT KỲ MÁY ĐƯỢC KẾT NỐI NÀO, DÙ DỰA TRÊN HỢP ĐỒNG, VI PHẠM NGOÀI HỢP ĐỒNG HAY BẤT KỲ HỌC THUYẾT PHÁP LÝ NÀO KHÁC, NGAY CẢ KHI ĐÃ ĐƯỢC THÔNG BÁO VỀ KHẢ NĂNG XẢY RA NHỮNG THIỆT HẠI ĐÓ.",
   "legal.terms.p8": "Các Điều khoản này được điều chỉnh và diễn giải theo luật pháp của India, không xét đến các nguyên tắc xung đột pháp luật. Bất kỳ tranh chấp nào phát sinh từ hoặc liên quan đến các Điều khoản này sẽ thuộc thẩm quyền xét xử độc quyền của các tòa án có thẩm quyền đối với địa điểm kinh doanh đã đăng ký của hjLabs.in. [Phần dành cho thẩm quyền — sẽ được Đơn vị vận hành hoàn thiện.]",
   "legal.terms.p9": "Đơn vị vận hành có thể cập nhật các Điều khoản này vào bất kỳ lúc nào. Các thay đổi quan trọng có hiệu lực khi được công bố trong Dịch vụ, và việc bạn tiếp tục sử dụng sau đó cấu thành sự chấp nhận. Các câu hỏi có thể gửi đến {contact}.",
-  "legal.terms.title": "Điều khoản Dịch vụ"
+  "legal.terms.title": "Điều khoản Dịch vụ",
+  "splash.eyebrow": "Bàn làm việc CNC + CAD/CAM chạy trên trình duyệt",
+  "splash.headline": "karmyogi — bộ điều khiển GRBL CNC và bàn làm việc CAD/CAM trên trình duyệt",
+  "splash.lede": "Vận hành máy GRBL 3 trục của bạn trực tiếp từ trình duyệt qua Web Serial API — khắc và chạm CNC, cắt laser, vẽ bút, định tuyến cách ly và khoan PCB, hàn tự động, phân phối keo, gắp và đặt, hàn, cuộn lò xo và in 3D — với trình hiển thị đường chạy dao 3D trực tiếp, bộ điều khiển jog/DRO, trình quản lý cài đặt $ của GRBL và bảng điều khiển. Một giải pháp thay thế Candle miễn phí, hiện đại, mã nguồn mở. Không cài đặt, không trình điều khiển, không máy chủ.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 ngôn ngữ",
+  "splash.feat5": "Hoạt động ngoại tuyến (PWA)",
+  "splash.feat6": "Máy tính & di động",
+  "splash.loading": "Đang tải bàn làm việc…",
+  "common.close": "Đóng",
+  "mobile.allPanels": "Tất cả bảng",
+  "mobile.hidden": "Đã ẩn",
+  "mobile.hideTab": "Ẩn {name}",
+  "mobile.lastPanel": "Ít nhất một bảng phải luôn hiển thị",
+  "mobile.showTab": "Hiện {name}"
 }

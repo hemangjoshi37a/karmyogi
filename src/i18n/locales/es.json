@@ -2975,5 +2975,21 @@
   "writing.text.placeholder": "Escribe aquí. Usa Enter para una nueva línea.",
   "writing.text.title": "Texto",
   "writing.text.title.tip": "Texto a trazar. Pulsa Enter para una nueva línea.",
-  "writing.warn.penZ": "El Z de pluma abajo ({down}) no está por debajo del Z de pluma arriba ({up}) — la pluma no se levantará para desplazarse."
+  "writing.warn.penZ": "El Z de pluma abajo ({down}) no está por debajo del Z de pluma arriba ({up}) — la pluma no se levantará para desplazarse.",
+  "splash.eyebrow": "Banco de trabajo CNC + CAD/CAM nativo del navegador",
+  "splash.headline": "karmyogi — controlador CNC GRBL y banco de trabajo CAD/CAM basado en el navegador",
+  "splash.lede": "Controla tu máquina GRBL de 3 ejes directamente desde el navegador mediante la Web Serial API — tallado y grabado CNC, corte por láser, trazado con bolígrafo, fresado de aislamiento y taladrado de PCB, soldadura automática, dispensado de pegamento, pick and place, soldadura, bobinado de resortes e impresión 3D — con un visualizador 3D de trayectorias de herramienta en vivo, controlador jog/DRO, gestor de ajustes GRBL $-settings y consola. Una alternativa a Candle gratuita, moderna y abierta. Sin instalaciones, sin controladores, sin servidor.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 idiomas",
+  "splash.feat5": "Funciona sin conexión (PWA)",
+  "splash.feat6": "Escritorio y móvil",
+  "splash.loading": "Cargando el banco de trabajo…",
+  "common.close": "Cerrar",
+  "mobile.allPanels": "Todos los paneles",
+  "mobile.hidden": "Oculto",
+  "mobile.hideTab": "Ocultar {name}",
+  "mobile.lastPanel": "Al menos un panel debe permanecer visible",
+  "mobile.showTab": "Mostrar {name}"
 }

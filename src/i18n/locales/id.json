@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "SEJAUH DIIZINKAN OLEH HUKUM YANG BERLAKU, OPERATOR DAN ADMINISTRATORNYA TIDAK BERTANGGUNG JAWAB ATAS KERUGIAN TIDAK LANGSUNG, INSIDENTAL, KHUSUS, KONSEKUENSIAL, PUNITIF, ATAU EKSEMPLAR APA PUN, ATAU ATAS KEHILANGAN KEUNTUNGAN, DATA, ATAU GOODWILL APA PUN, ATAU ATAS KERUSAKAN FISIK, CEDERA, ATAU KERUGIAN APA PUN YANG TIMBUL DARI ATAU TERKAIT DENGAN PENGGUNAAN ANDA ATAS LAYANAN ATAU MESIN TERHUBUNG MANA PUN, BAIK BERDASARKAN KONTRAK, PERBUATAN MELAWAN HUKUM, ATAU TEORI HUKUM LAINNYA, SEKALIPUN TELAH DIBERITAHU TENTANG KEMUNGKINAN KERUGIAN TERSEBUT.",
   "legal.terms.p8": "Ketentuan ini diatur oleh dan ditafsirkan sesuai dengan hukum India, tanpa memperhatikan prinsip-prinsip pertentangan hukum. Setiap sengketa yang timbul dari atau sehubungan dengan Ketentuan ini akan tunduk pada yurisdiksi eksklusif pengadilan berwenang yang memiliki yurisdiksi atas tempat usaha terdaftar hjLabs.in. [Placeholder yurisdiksi — akan difinalisasi oleh Operator.]",
   "legal.terms.p9": "Operator dapat memperbarui Ketentuan ini kapan saja. Perubahan material berlaku setelah dipublikasikan dalam Layanan, dan penggunaan Anda yang berkelanjutan setelahnya merupakan penerimaan. Pertanyaan dapat ditujukan ke {contact}.",
-  "legal.terms.title": "Ketentuan Layanan"
+  "legal.terms.title": "Ketentuan Layanan",
+  "splash.eyebrow": "Workbench CNC + CAD/CAM berbasis peramban",
+  "splash.headline": "karmyogi — pengontrol CNC GRBL dan workbench CAD/CAM berbasis peramban",
+  "splash.lede": "Jalankan mesin GRBL 3-sumbu Anda langsung dari peramban melalui Web Serial API — ukiran dan gravir CNC, pemotongan laser, plotting pena, perutean isolasi dan pengeboran PCB, penyolderan otomatis, pengeluaran lem, pick & place, pengelasan, penggulungan pegas, dan pencetakan 3D — dengan penampil lintasan pahat 3D langsung, pengontrol jog/DRO, pengelola pengaturan $ GRBL, dan konsol. Alternatif Candle yang gratis, modern, dan terbuka. Tanpa instalasi, tanpa driver, tanpa server.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 bahasa",
+  "splash.feat5": "Bekerja offline (PWA)",
+  "splash.feat6": "Desktop & seluler",
+  "splash.loading": "Memuat workbench…",
+  "common.close": "Tutup",
+  "mobile.allPanels": "Semua panel",
+  "mobile.hidden": "Tersembunyi",
+  "mobile.hideTab": "Sembunyikan {name}",
+  "mobile.lastPanel": "Setidaknya satu panel harus tetap terlihat",
+  "mobile.showTab": "Tampilkan {name}"
 }

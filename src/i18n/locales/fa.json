@@ -2975,5 +2975,21 @@
   "writing.text.placeholder": "اینجا تایپ کنید. برای خط جدید Enter بزنید.",
   "writing.text.title": "متن",
   "writing.text.title.tip": "متنی که رسم می‌شود. برای خط جدید Enter بزنید.",
-  "writing.warn.penZ": "Z قلم‌پایین ({down}) پایین‌تر از Z قلم‌بالا ({up}) نیست — قلم برای جابه‌جایی بلند نمی‌شود."
+  "writing.warn.penZ": "Z قلم‌پایین ({down}) پایین‌تر از Z قلم‌بالا ({up}) نیست — قلم برای جابه‌جایی بلند نمی‌شود.",
+  "splash.eyebrow": "میز کار CAD/CAM و CNC بومی مرورگر",
+  "splash.headline": "karmyogi — کنترلر CNC مبتنی بر GRBL و میز کار CAD/CAM در مرورگر",
+  "splash.lede": "ماشین GRBL سه‌محوره خود را مستقیماً از مرورگر و از طریق Web Serial API اجرا کنید — حکاکی و کنده‌کاری CNC، برش لیزری، رسم با قلم، مسیریابی جداسازی و سوراخ‌کاری PCB، لحیم‌کاری خودکار، تزریق چسب، برداشت و قرارگیری، جوشکاری، فنرپیچی و چاپ سه‌بعدی — همراه با نمایشگر زنده مسیر ابزار سه‌بعدی، کنترلر jog/DRO، مدیر تنظیمات $ در GRBL و کنسول. جایگزینی رایگان، مدرن و باز برای Candle. بدون نصب، بدون درایور، بدون سرور.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ ← G-code",
+  "splash.feat3": "Gerber + Excellon ← PCB",
+  "splash.feat4": "۵۳ زبان",
+  "splash.feat5": "کار بدون اتصال (PWA)",
+  "splash.feat6": "دسکتاپ و موبایل",
+  "splash.loading": "در حال بارگذاری میز کار…",
+  "common.close": "بستن",
+  "mobile.allPanels": "همه پنل‌ها",
+  "mobile.hidden": "پنهان",
+  "mobile.hideTab": "پنهان‌کردن {name}",
+  "mobile.lastPanel": "حداقل یک پنل باید قابل مشاهده بماند",
+  "mobile.showTab": "نمایش {name}"
 }

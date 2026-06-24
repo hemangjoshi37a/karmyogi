@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "NA MÁXIMA EXTENSÃO PERMITIDA PELA LEI APLICÁVEL, O OPERADOR E OS SEUS ADMINISTRADORES NÃO SERÃO RESPONSÁVEIS POR QUAISQUER DANOS INDIRETOS, INCIDENTAIS, ESPECIAIS, CONSEQUENCIAIS, PUNITIVOS OU EXEMPLARES, NEM POR QUALQUER PERDA DE LUCROS, DADOS OU REPUTAÇÃO, NEM POR QUALQUER DANO FÍSICO, LESÃO OU PERDA DECORRENTE DE OU RELACIONADA COM A SUA UTILIZAÇÃO DO SERVIÇO OU DE QUALQUER MÁQUINA CONECTADA, SEJA COM BASE EM CONTRATO, RESPONSABILIDADE CIVIL OU QUALQUER OUTRA TEORIA JURÍDICA, MESMO QUE TENHA SIDO AVISADO DA POSSIBILIDADE DE TAIS DANOS.",
   "legal.terms.p8": "Estes Termos são regidos e interpretados de acordo com as leis da India, sem consideração aos princípios de conflito de leis. Qualquer litígio decorrente de ou relacionado com estes Termos estará sujeito à jurisdição exclusiva dos tribunais competentes com jurisdição sobre o local de negócios registado da hjLabs.in. [Marcador de jurisdição — a ser finalizado pelo Operador.]",
   "legal.terms.p9": "O Operador pode atualizar estes Termos a qualquer momento. As alterações materiais entram em vigor após a publicação dentro do Serviço, e a sua utilização continuada a partir de então constitui aceitação. As questões podem ser dirigidas a {contact}.",
-  "legal.terms.title": "Termos de Serviço"
+  "legal.terms.title": "Termos de Serviço",
+  "splash.eyebrow": "Bancada CNC + CAD/CAM nativa do navegador",
+  "splash.headline": "karmyogi — controlador CNC GRBL e bancada CAD/CAM baseados no navegador",
+  "splash.lede": "Opere sua máquina GRBL de 3 eixos direto do navegador pela Web Serial API — fresagem e gravação CNC, corte a laser, plotagem com caneta, roteamento de isolamento e furação de PCB, soldagem automática, dosagem de cola, pick & place, soldagem, enrolamento de molas e impressão 3D — com um visualizador 3D de trajetória ao vivo, controlador jog/DRO, gerenciador de configurações $ do GRBL e console. Uma alternativa ao Candle gratuita, moderna e aberta. Sem instalações, sem drivers, sem servidor.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 idiomas",
+  "splash.feat5": "Funciona offline (PWA)",
+  "splash.feat6": "Desktop e celular",
+  "splash.loading": "Carregando a bancada…",
+  "common.close": "Fechar",
+  "mobile.allPanels": "Todos os painéis",
+  "mobile.hidden": "Oculto",
+  "mobile.hideTab": "Ocultar {name}",
+  "mobile.lastPanel": "Pelo menos um painel deve permanecer visível",
+  "mobile.showTab": "Mostrar {name}"
 }

@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "ZUWA IYAKAR DA DOKA MAI AIKI TA YARDA, MAI AIKI DA SHI DA MASU GUDANARWARSA BA ZA SU ƊAUKI ALHAKI KAN KOWANE LALACEWA NA KAI TSAYE, NA HAƊARI, NA MUSAMMAN, NA SAKAMAKO, NA HUKUNCI, KO NA MISALI BA, KO KAN KOWANE ASARAR RIBA, BAYANAI, KO SUNA MAI KYAU, KO KAN KOWANE LALACEWA NA ZAHIRI, RAUNI, KO ASARA DA KE FITOWA DAGA KO MAI ALAƘA DA AMFANIN KU DA SABIS KO KOWANE INJIN DA AKA HAƊA, KO YA TABBATA BISA KWANTIRAGI, LAIFI, KO WANI RA'AYIN DOKA, KO DA AN SANAR DA SU GAME DA YIWUWAR IRIN WANNAN LALACEWA.",
   "legal.terms.p8": "Waɗannan Sharuɗɗan ana tafiyar da su kuma ana fassara su bisa ga dokokin India, ba tare da la'akari da ƙa'idodin saɓani na doka ba. Duk wani saɓani da ke fitowa daga ko mai alaƙa da waɗannan Sharuɗɗan zai kasance ƙarƙashin keɓaɓɓen ikon kotunan da suka cancanta da ke da ikon kan wurin kasuwanci da aka yi rajista na hjLabs.in. [Wurin ikon shari'a — Mai aiki da shi zai kammala shi.]",
   "legal.terms.p9": "Mai aiki da shi na iya sabunta waɗannan Sharuɗɗan a kowane lokaci. Manyan canje-canje suna fara aiki bayan an buga su a cikin Sabis, kuma ci gaba da amfanin ku bayan haka yana zama karɓa. Ana iya tura tambayoyi zuwa {contact}.",
-  "legal.terms.title": "Sharuɗɗan Sabis"
+  "legal.terms.title": "Sharuɗɗan Sabis",
+  "splash.eyebrow": "Wurin aiki na CNC + CAD/CAM da ke gudana cikin burauza",
+  "splash.headline": "karmyogi — mai sarrafa CNC na GRBL da wurin aiki na CAD/CAM cikin burauza",
+  "splash.lede": "Sarrafa na’urar GRBL mai gatari uku kai tsaye daga burauzarka ta hanyar Web Serial API — sassaka da zane na CNC, yankan laser, zane da alkalami, hanyar warewar PCB da hujewa, walda ta atomatik, fitar da manne, dauka da ajiyewa, walda, nadewar maɓuɓɓuga da bugu na 3D — tare da mai nuna hanyar kayan aiki ta 3D kai tsaye, mai sarrafa jog/DRO, mai kula da saitunan $ na GRBL da na’urar console. Madadin Candle kyauta, na zamani, mai buɗewa. Babu shigarwa, babu direba, babu sabar.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "Harsuna 53",
+  "splash.feat5": "Yana aiki ba tare da yanar gizo ba (PWA)",
+  "splash.feat6": "Kwamfuta da wayar hannu",
+  "splash.loading": "Ana loda wurin aiki…",
+  "common.close": "Rufe",
+  "mobile.allPanels": "Dukan panel-panel",
+  "mobile.hidden": "Ɓoye",
+  "mobile.hideTab": "Ɓoye {name}",
+  "mobile.lastPanel": "Aƙalla panel ɗaya dole ne ya ci gaba da bayyana",
+  "mobile.showTab": "Nuna {name}"
 }

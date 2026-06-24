@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "在适用法律允许的最大范围内，对于因您使用本服务或任何已连接机器而引起或与之相关的任何间接的、附带的、特殊的、后果性的、惩罚性的或惩戒性的损害，或任何利润、数据或商誉的损失，或任何物理损害、人身伤害或损失，无论是基于合同、侵权还是任何其他法律理论，即使已被告知此类损害的可能性，运营方及其管理员均不承担责任。",
   "legal.terms.p8": "本条款受印度（India）法律管辖并据其解释，不考虑法律冲突原则。因本条款引起或与之相关的任何争议，均应受对 hjLabs.in 注册营业地具有管辖权的主管法院的专属管辖。[管辖权占位符——由运营方最终确定。]",
   "legal.terms.p9": "运营方可在任何时间更新本条款。重大变更自在本服务内发布之时起生效，您此后继续使用即构成接受。如有疑问，可向 {contact} 提出。",
-  "legal.terms.title": "服务条款"
+  "legal.terms.title": "服务条款",
+  "splash.eyebrow": "浏览器原生 CNC + CAD/CAM 工作台",
+  "splash.headline": "karmyogi — 基于浏览器的 GRBL CNC 控制器和 CAD/CAM 工作台",
+  "splash.lede": "通过 Web Serial API 直接在浏览器中运行您的三轴 GRBL 机器 — CNC 雕刻与雕花、激光切割、笔式绘图、PCB 隔离铣削与钻孔、自动焊锡、点胶、贴片、焊接、弹簧绕制和 3D 打印 — 配备实时 3D 刀具路径可视化、jog/DRO 控制器、GRBL $ 设置管理器和控制台。免费、现代、开放的 Candle 替代方案。无需安装、无需驱动、无需服务器。",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 种语言",
+  "splash.feat5": "可离线使用 (PWA)",
+  "splash.feat6": "桌面与移动端",
+  "splash.loading": "正在加载工作台…",
+  "common.close": "关闭",
+  "mobile.allPanels": "所有面板",
+  "mobile.hidden": "已隐藏",
+  "mobile.hideTab": "隐藏 {name}",
+  "mobile.lastPanel": "至少需保留一个可见面板",
+  "mobile.showTab": "显示 {name}"
 }

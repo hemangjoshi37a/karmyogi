@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "YÜRÜRLÜKTEKİ YASALARIN İZİN VERDİĞİ AZAMİ ÖLÇÜDE, İŞLETMECİ VE YÖNETİCİLERİ; SÖZLEŞME, HAKSIZ FİİL VEYA BAŞKA HERHANGİ BİR HUKUKİ TEORİYE DAYANSIN VEYA DAYANMASIN VE BU TÜR ZARARLARIN OLASILIĞI HAKKINDA BİLGİLENDİRİLMİŞ OLSALAR DAHİ, HİZMET'İ VEYA BAĞLI HERHANGİ BİR MAKİNEYİ KULLANMANIZDAN KAYNAKLANAN VEYA BUNUNLA İLGİLİ HERHANGİ BİR DOLAYLI, ARIZİ, ÖZEL, SONUÇSAL, CEZAİ VEYA ÖRNEK TEŞKİL EDEN ZARARLARDAN VEYA HERHANGİ BİR KÂR, VERİ YA DA İTİBAR KAYBINDAN VEYA HERHANGİ BİR FİZİKSEL HASAR, YARALANMA YA DA KAYIPTAN SORUMLU OLMAYACAKTIR.",
   "legal.terms.p8": "Bu Koşullar, kanunlar ihtilafı ilkeleri dikkate alınmaksızın India yasalarına göre yönetilir ve yorumlanır. Bu Koşullardan kaynaklanan veya bunlarla bağlantılı herhangi bir uyuşmazlık, hjLabs.in'in kayıtlı iş yeri üzerinde yargı yetkisine sahip yetkili mahkemelerin münhasır yargı yetkisine tabi olacaktır. [Yargı yetkisi yer tutucusu — İşletmeci tarafından kesinleştirilecektir.]",
   "legal.terms.p9": "İşletmeci bu Koşulları herhangi bir zamanda güncelleyebilir. Esaslı değişiklikler, Hizmet içinde yayımlandıklarında yürürlüğe girer ve sonrasında Hizmet'i kullanmaya devam etmeniz kabul anlamına gelir. Sorularınızı {contact} adresine yöneltebilirsiniz.",
-  "legal.terms.title": "Hizmet Koşulları"
+  "legal.terms.title": "Hizmet Koşulları",
+  "splash.eyebrow": "Tarayıcıda çalışan CNC + CAD/CAM çalışma tezgâhı",
+  "splash.headline": "karmyogi — tarayıcı tabanlı GRBL CNC denetleyicisi ve CAD/CAM çalışma tezgâhı",
+  "splash.lede": "3 eksenli GRBL makinenizi Web Serial API üzerinden doğrudan tarayıcınızdan çalıştırın — CNC oyma ve gravür, lazer kesim, kalem çizimi, PCB izolasyon yönlendirme ve delme, otomatik lehimleme, yapıştırıcı dağıtımı, al-yerleştir, kaynak, yay sarma ve 3D baskı — canlı 3D takım yolu görselleştiricisi, jog/DRO denetleyicisi, GRBL $-ayarları yöneticisi ve konsol ile. Ücretsiz, modern, açık bir Candle alternatifi. Kurulum yok, sürücü yok, sunucu yok.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 dil",
+  "splash.feat5": "Çevrimdışı çalışır (PWA)",
+  "splash.feat6": "Masaüstü ve mobil",
+  "splash.loading": "Çalışma tezgâhı yükleniyor…",
+  "common.close": "Kapat",
+  "mobile.allPanels": "Tüm paneller",
+  "mobile.hidden": "Gizli",
+  "mobile.hideTab": "{name} gizle",
+  "mobile.lastPanel": "En az bir panel görünür kalmalıdır",
+  "mobile.showTab": "{name} göster"
 }

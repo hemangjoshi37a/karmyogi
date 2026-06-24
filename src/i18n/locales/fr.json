@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "DANS TOUTE LA MESURE PERMISE PAR LA LOI APPLICABLE, L’OPÉRATEUR ET SES ADMINISTRATEURS NE SAURAIENT ÊTRE TENUS RESPONSABLES DE TOUT DOMMAGE INDIRECT, ACCESSOIRE, SPÉCIAL, CONSÉCUTIF, PUNITIF OU EXEMPLAIRE, NI DE TOUTE PERTE DE PROFITS, DE DONNÉES OU DE CLIENTÈLE, NI DE TOUT DOMMAGE PHYSIQUE, BLESSURE OU PERTE DÉCOULANT DE OU LIÉ À VOTRE UTILISATION DU SERVICE OU DE TOUTE MACHINE CONNECTÉE, QUE CE SOIT SUR UNE BASE CONTRACTUELLE, DÉLICTUELLE OU TOUTE AUTRE THÉORIE JURIDIQUE, MÊME S’IL A ÉTÉ AVISÉ DE LA POSSIBILITÉ DE TELS DOMMAGES.",
   "legal.terms.p8": "Les présentes Conditions sont régies et interprétées conformément aux lois de l’Inde, sans égard aux principes de conflit de lois. Tout litige découlant de ou en relation avec les présentes Conditions sera soumis à la compétence exclusive des tribunaux compétents ayant juridiction sur le siège social enregistré de hjLabs.in. [Espace réservé de juridiction — à finaliser par l’Opérateur.]",
   "legal.terms.p9": "L’Opérateur peut mettre à jour les présentes Conditions à tout moment. Les modifications importantes prennent effet dès leur publication au sein du Service, et votre utilisation continue par la suite constitue une acceptation. Les questions peuvent être adressées à {contact}.",
-  "legal.terms.title": "Conditions d’utilisation"
+  "legal.terms.title": "Conditions d’utilisation",
+  "splash.eyebrow": "Atelier CNC + CAO/FAO natif au navigateur",
+  "splash.headline": "karmyogi — contrôleur CNC GRBL et atelier CAO/FAO dans le navigateur",
+  "splash.lede": "Pilotez votre machine GRBL 3 axes directement depuis votre navigateur via l’API Web Serial — gravure et fraisage CNC, découpe laser, traçage au stylo, routage d’isolation et perçage de PCB, soudage automatique, dépôt de colle, pick & place, soudure, bobinage de ressorts et impression 3D — avec un visualiseur de trajectoire 3D en direct, un contrôleur jog/DRO, un gestionnaire de réglages $ GRBL et une console. Une alternative à Candle gratuite, moderne et ouverte. Sans installation, sans pilote, sans serveur.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 langues",
+  "splash.feat5": "Fonctionne hors ligne (PWA)",
+  "splash.feat6": "Bureau et mobile",
+  "splash.loading": "Chargement de l’atelier…",
+  "common.close": "Fermer",
+  "mobile.allPanels": "Tous les panneaux",
+  "mobile.hidden": "Masqué",
+  "mobile.hideTab": "Masquer {name}",
+  "mobile.lastPanel": "Au moins un panneau doit rester visible",
+  "mobile.showTab": "Afficher {name}"
 }

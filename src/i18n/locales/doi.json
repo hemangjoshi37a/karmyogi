@@ -2975,5 +2975,21 @@
   "writing.text.placeholder": "इत्थें टाइप करो। नमीं लाइन आस्तै Enter दबाओ।",
   "writing.text.title": "टेक्स्ट",
   "writing.text.title.tip": "प्लॉट करने आह्ला टेक्स्ट। नमीं लाइन आस्तै Enter दबाओ।",
-  "writing.warn.penZ": "पेन-डाउन Z ({down}) पेन-अप Z ({up}) कोला थल्ले नेईं ऐ — पेन यात्रा आस्तै नेईं चुकेआ जाग।"
+  "writing.warn.penZ": "पेन-डाउन Z ({down}) पेन-अप Z ({up}) कोला थल्ले नेईं ऐ — पेन यात्रा आस्तै नेईं चुकेआ जाग।",
+  "splash.eyebrow": "ब्राउज़र-नेटिव CNC + CAD/CAM वर्कबेंच",
+  "splash.headline": "karmyogi — ब्राउज़र-आधारित GRBL CNC कंट्रोलर ते CAD/CAM वर्कबेंच",
+  "splash.lede": "अपनी 3-धुरी आह्ली GRBL मशीन गी सिद्धा अपने ब्राउज़र थमां Web Serial API दे राहें चलाओ — CNC कटाई ते नक्काशी, लेजर कटाई, पेन प्लॉटिंग, PCB आइसोलेशन राउटिंग ते ड्रिलिंग, स्वचालित सोल्डरिंग, गोंद बंडना, पिक एंड प्लेस, वेल्डिंग, स्प्रिंग कॉइलिंग ते 3D प्रिंटिंग — इक लाइव 3D टूलपाथ विज़ुअलाइज़र, jog/DRO कंट्रोलर, GRBL $-सेटिंग्स मैनेजर ते कंसोल कन्नै। इक मुफ्त, आधुनिक, खुल्ला Candle विकल्प। कोई इंस्टॉल नेईं, कोई ड्राइवर नेईं, कोई सर्वर नेईं।",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 भाशां",
+  "splash.feat5": "ऑफलाइन कम्म करदा ऐ (PWA)",
+  "splash.feat6": "डेस्कटॉप ते मोबाइल",
+  "splash.loading": "वर्कबेंच लोड होआ करदी ऐ…",
+  "common.close": "बंद करो",
+  "mobile.allPanels": "सब्भै पैनल",
+  "mobile.hidden": "लुक्का दा",
+  "mobile.hideTab": "{name} गी लुकाओ",
+  "mobile.lastPanel": "घट्ट शा घट्ट इक पैनल दिक्खने जोग रौह्ना चाहिदा",
+  "mobile.showTab": "{name} गी दस्सो"
 }

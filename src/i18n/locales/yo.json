@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "SÍ ÌWỌ̀N TÓ PỌ̀ JÙLỌ TÍ ÒFIN TÓ WÚLÒ GBÀ LÁÀYÈ, OLÙṢÀKÓSO ÀTI ÀWỌN ALÁBÒÓJÚTÓ RẸ̀ KÒ NÍ JẸ́ ALÁÀBÒ FÚN ÌBÀJẸ́ ÀITÀRÀ, TÍ Ó WÁ LÁTI ÌṢẸ̀LẸ̀, PÀTÓ, ÀBÁJÁDE, ÌFIYÀJẸNI, TÀBÍ ÀPẸẸRẸ ÈYÍKÉYÌÍ, TÀBÍ FÚN ÀDÁNÙ ÈRÈ, DÁTÀ, TÀBÍ ORÚKỌ RERE ÈYÍKÉYÌÍ, TÀBÍ FÚN ÌBÀJẸ́ TI ARA, ÌPALÁRA, TÀBÍ ÀDÁNÙ ÈYÍKÉYÌÍ TÍ Ó WÁYÉ LÁTI INÚ TÀBÍ TÍ Ó NÍ Í ṢE PẸ̀LÚ ÌLÒ RẸ TI IṢẸ́ NÁÀ TÀBÍ Ẹ̀RỌ TÍ A SOPỌ̀ ÈYÍKÉYÌÍ, YÁÀ Ó GBÉ LÉ LÓRÍ ÀDÉHÙN, ÌWÀ-ÀÌTỌ́, TÀBÍ ÌLÀNÀ-ÒFIN MÌÍRÀN ÈYÍKÉYÌÍ, PÀPÀ JÙLỌ BÍ A BÁ TI KÌLỌ̀ NÍPA ÀNFÀÀNÍ ÀWỌN ÌBÀJẸ́ BẸ́Ẹ̀.",
   "legal.terms.p8": "Òfin India ni ó ń ṣàkóso àwọn Ìlànà wọ̀nyí tí a sì túmọ̀ wọn ní ìbámu pẹ̀lú rẹ̀, láìka àwọn ìlànà ìforígbárí-òfin sí. Èyíkéyìí àríyànjiyàn tí ó bá wáyé láti inú tàbí ní ìsopọ̀ pẹ̀lú àwọn Ìlànà wọ̀nyí ni yóò wà lábẹ́ àṣẹ pàtó ti àwọn ilé-ẹjọ́ tí ó tóótun tí ó ní àṣẹ lórí ibi iṣẹ́ tí a forúkọsílẹ̀ ti hjLabs.in. [Ààyè àṣẹ-ìdájọ́ — Olùṣàkóso ni yóò parí rẹ̀.]",
   "legal.terms.p9": "Olùṣàkóso lè ṣe ìmúdójúìwọ̀n àwọn Ìlànà wọ̀nyí nígbàkúgbà. Àwọn àyípadà pàtàkì máa bẹ̀rẹ̀ sí í ṣiṣẹ́ nígbà tí a bá tẹ̀ wọ́n jáde nínú Iṣẹ́ náà, ìtẹ̀síwájú ìlò rẹ lẹ́yìn náà sì jẹ́ ìgbàgbà. A lè darí àwọn ìbéèrè sí {contact}.",
-  "legal.terms.title": "Àwọn Ìlànà Iṣẹ́"
+  "legal.terms.title": "Àwọn Ìlànà Iṣẹ́",
+  "splash.eyebrow": "Tábìlì iṣẹ́ CNC + CAD/CAM tó ń ṣiṣẹ́ nínú aṣàwákiri",
+  "splash.headline": "karmyogi — olùdarí GRBL CNC àti tábìlì iṣẹ́ CAD/CAM tó dá lórí aṣàwákiri",
+  "splash.lede": "Ṣiṣẹ́ ẹ̀rọ GRBL oníkùn-mẹ́ta rẹ tààrà láti inú aṣàwákiri rẹ nípasẹ̀ Web Serial API — gbígbẹ́ àti àkọlé CNC, gígé laser, yíyàwòrán pẹ̀lú kálàmù, ìpilẹ̀ ọ̀nà ìyà-sọ́tọ̀ àti lílu PCB, sídárìn aládàáṣiṣẹ́, pípín gluu, mímú-kí-fi-síbi, wéèlì, yíyí ọ̀wọ́n àti títẹ̀ 3D — pẹ̀lú olùfihàn ọ̀nà-ohun-èlò 3D alààyè, olùdarí jog/DRO, alábòójútó ètò $-GRBL àti console. Àyànfẹ́ Candle tó jẹ́ ọ̀fẹ́, òde-òní, tó sì ṣí sílẹ̀. Kò sí ìfìsọ́nà, kò sí awakọ̀, kò sí sáfà.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "Èdè 53",
+  "splash.feat5": "Ń ṣiṣẹ́ láìsí ayélujára (PWA)",
+  "splash.feat6": "Kọ̀ǹpútà àti ẹ̀rọ alágbèéká",
+  "splash.loading": "Ń gbé tábìlì iṣẹ́ wọlé…",
+  "common.close": "Tì í",
+  "mobile.allPanels": "Gbogbo pánẹ́ẹ̀lì",
+  "mobile.hidden": "Tó pamọ́",
+  "mobile.hideTab": "Fi {name} pamọ́",
+  "mobile.lastPanel": "Ó kéré tán, pánẹ́ẹ̀lì kan gbọ́dọ̀ hàn",
+  "mobile.showTab": "Fi {name} hàn"
 }

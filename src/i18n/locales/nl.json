@@ -2975,5 +2975,21 @@
   "legal.terms.p7": "VOOR ZOVER MAXIMAAL TOEGESTAAN DOOR DE TOEPASSELIJKE WETGEVING, ZIJN DE EXPLOITANT EN ZIJN BEHEERDERS NIET AANSPRAKELIJK VOOR ENIGE INDIRECTE, INCIDENTELE, SPECIALE, GEVOLG-, PUNITIEVE OF EXEMPLAIRE SCHADE, NOCH VOOR ENIG VERLIES VAN WINST, GEGEVENS OF GOODWILL, NOCH VOOR ENIGE FYSIEKE SCHADE, LETSEL OF VERLIES VOORTVLOEIEND UIT OF VERBAND HOUDEND MET UW GEBRUIK VAN DE DIENST OF ENIGE AANGESLOTEN MACHINE, OF DEZE NU GEBASEERD IS OP CONTRACT, ONRECHTMATIGE DAAD OF ENIGE ANDERE JURIDISCHE GRONDSLAG, ZELFS INDIEN GEWEZEN OP DE MOGELIJKHEID VAN DERGELIJKE SCHADE.",
   "legal.terms.p8": "Deze Voorwaarden worden beheerst door en uitgelegd in overeenstemming met de wetten van India, zonder rekening te houden met de beginselen van conflicterend recht. Elk geschil dat voortvloeit uit of verband houdt met deze Voorwaarden is onderworpen aan de exclusieve bevoegdheid van de bevoegde rechtbanken die rechtsmacht hebben over de geregistreerde vestigingsplaats van hjLabs.in. [Plaatsaanduiding rechtsgebied — nader te bepalen door de Exploitant.]",
   "legal.terms.p9": "De Exploitant kan deze Voorwaarden op elk moment bijwerken. Materiële wijzigingen worden van kracht bij publicatie binnen de Dienst, en uw voortgezette gebruik daarna vormt aanvaarding. Vragen kunnen worden gericht aan {contact}.",
-  "legal.terms.title": "Servicevoorwaarden"
+  "legal.terms.title": "Servicevoorwaarden",
+  "splash.eyebrow": "Browser-native CNC + CAD/CAM-werkbank",
+  "splash.headline": "karmyogi — browsergebaseerde GRBL CNC-besturing & CAD/CAM-werkbank",
+  "splash.lede": "Bestuur je 3-assige GRBL-machine rechtstreeks vanuit je browser via de Web Serial API — CNC-frezen & graveren, lassersnijden, pennen plotten, PCB-isolatiefrezen & boren, auto-solderen, lijm doseren, pick & place, lassen, veerwikkelen en 3D-printen — met een live 3D-gereedschapsbaanvisualizer, jog/DRO-besturing, GRBL $-instellingenbeheer en console. Een gratis, modern, open Candle-alternatief. Geen installaties, geen stuurprogramma’s, geen server.",
+  "splash.feat1": "GRBL · FluidNC · grblHAL · Marlin",
+  "splash.feat2": "DXF / STL / STEP / OBJ → G-code",
+  "splash.feat3": "Gerber + Excellon → PCB",
+  "splash.feat4": "53 talen",
+  "splash.feat5": "Werkt offline (PWA)",
+  "splash.feat6": "Desktop & mobiel",
+  "splash.loading": "De werkbank laden…",
+  "common.close": "Sluiten",
+  "mobile.allPanels": "Alle panelen",
+  "mobile.hidden": "Verborgen",
+  "mobile.hideTab": "{name} verbergen",
+  "mobile.lastPanel": "Ten minste één paneel moet zichtbaar blijven",
+  "mobile.showTab": "{name} tonen"
 }
