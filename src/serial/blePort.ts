@@ -210,6 +210,38 @@ export async function describeBleRequestError(err: unknown): Promise<BleRequestF
       message: 'The Bluetooth adapter is not ready — toggle Bluetooth off/on and retry.',
     }
   }
+  // "Web Bluetooth is not supported on this platform" — the `navigator.bluetooth`
+  // OBJECT exists (so this passed isSupported), but the OS/browser build has no
+  // working BLE backend. This is platform-level, not fixable in-app and NOT an
+  // "adapter off" issue — so give the real cause + USB/Wi-Fi alternatives instead
+  // of the misleading "turn Bluetooth on" hint.
+  if (name === 'NotSupportedError' || /not supported on this platform/i.test(raw)) {
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+    const insecure = typeof window !== 'undefined' && !window.isSecureContext
+    const isIOS =
+      /iPhone|iPad|iPod/i.test(ua) ||
+      (/Macintosh/i.test(ua) &&
+        typeof navigator !== 'undefined' &&
+        (navigator as unknown as { maxTouchPoints?: number }).maxTouchPoints != null &&
+        (navigator as unknown as { maxTouchPoints: number }).maxTouchPoints > 1)
+    let why: string
+    if (insecure) {
+      why = 'Open karmyogi over HTTPS — Web Bluetooth needs a secure context (an http:// page disables it).'
+    } else if (isIOS) {
+      why =
+        'Safari and Chrome on iOS/iPadOS do not implement Web Bluetooth at all. Connect this machine over Wi-Fi (WebSocket) or USB instead — or use a BLE-capable browser such as Bluefy.'
+    } else if (/Linux/i.test(ua) && !/Android/i.test(ua)) {
+      why =
+        'Chrome on Linux needs a working BlueZ adapter, and some builds require enabling chrome://flags/#enable-experimental-web-platform-features. If your machine offers USB or Wi-Fi, use those instead.'
+    } else {
+      why =
+        'This browser/device build exposes no Web Bluetooth backend. Use an up-to-date Chrome/Edge with the OS Bluetooth on — or connect over USB or Wi-Fi (WebSocket).'
+    }
+    return {
+      cancelled: false,
+      message: `Web Bluetooth isn’t available on this platform. ${why}`,
+    }
+  }
   // Anything else. IMPORTANT: navigator.bluetooth.getAvailability() is UNRELIABLE
   // on Android (it frequently returns false even when Bluetooth is ON), so we must
   // NOT use it to flatly claim "Bluetooth is off" — doing that hides the real
