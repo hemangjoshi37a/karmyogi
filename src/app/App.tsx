@@ -138,7 +138,22 @@ export function App() {
             label: active.label,
           }
         : undefined
-    grbl.autoConnect(hint).catch(() => {})
+    // Wi-Fi (WebSocket) machines persist their ws://|wss:// endpoint, so the IP
+    // is remembered across reloads — silently reconnect to the last-active one
+    // (no gesture needed; same default-ON auto-connect pref as serial). The probe
+    // fails gracefully if the board is off, so this never blocks startup.
+    let autoOn = true
+    try {
+      const raw = localStorage.getItem('karmyogi.autoConnect')
+      autoOn = raw == null ? true : JSON.parse(raw) !== false
+    } catch {
+      autoOn = true
+    }
+    if (autoOn && active && active.kind === 'websocket' && active.url) {
+      void useMachines.getState().connectMachine(active.id)
+    } else {
+      grbl.autoConnect(hint).catch(() => {})
+    }
   }, [])
 
   // Server bridge: opt-in (persisted, default OFF). Mounted at the shell level so

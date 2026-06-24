@@ -370,6 +370,13 @@ export const useMachines = create<MachinesState>()(
             )
           if (existing) {
             id = existing.id
+            // Backfill the ws endpoint onto an existing entry (e.g. one created
+            // before the url was threaded) so it persists + reconnects.
+            if (info.kind === 'websocket' && info.url && existing.url !== info.url) {
+              set((s) => ({
+                machines: s.machines.map((m) => (m.id === existing.id ? { ...m, url: info.url } : m)),
+              }))
+            }
           } else {
             id = newId()
             const entry: MachineEntry = {
@@ -377,6 +384,9 @@ export const useMachines = create<MachinesState>()(
               label: info.label ?? (info.kind === 'mock' ? 'Mock' : 'Serial'),
               kind: info.kind ?? 'serial',
               status: 'disconnected',
+              // Persist the ws://|wss:// endpoint so a Wi-Fi machine survives a
+              // reload (IP not forgotten) and can reconnect with one click.
+              url: info.kind === 'websocket' ? info.url : undefined,
               // Stamp the USB ids so a later scan dedupes onto THIS entry.
               usbVendorId: info.usbVendorId,
               usbProductId: info.usbProductId,

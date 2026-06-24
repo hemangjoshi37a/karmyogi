@@ -59,6 +59,13 @@ export interface ConnectMeta {
    */
   kind?: 'serial' | 'mock' | 'websocket'
   /**
+   * For `websocket` transports: the resolved ws://|wss:// endpoint. Persisted by
+   * the farm store so a Wi-Fi machine survives a page reload (the IP/port isn't
+   * forgotten) and can be reconnected with one click (and auto-reconnected on
+   * load). Undefined for serial/mock/BLE.
+   */
+  url?: string
+  /**
    * USB vendor/product id of the connected serial port (when available). Lets the
    * farm store DEDUPE a freshly-connected device against an auto-scan-detected
    * entry with the same ids — so a machine never shows up twice (once as the
@@ -436,7 +443,7 @@ class GrblController {
           /* getInfo unavailable (BLE/WebUSB/mock) — leave undefined */
         }
       }
-      this.setActive({ connected: true, machineId: meta?.machineId, kind, label, usbVendorId, usbProductId })
+      this.setActive({ connected: true, machineId: meta?.machineId, kind, label, usbVendorId, usbProductId, url: meta?.url })
       useConsole.getState().push('info', `Connected (${profile.label}).`)
       // Fire the Google Ads "Serial Connected" activation conversion (best-effort,
       // once per session, off-on-localhost). Only for a REAL serial port — not the
@@ -553,7 +560,7 @@ class GrblController {
     const port = new WsPort(url)
     await this.connect(port, {
       streamMode: opts?.streamMode,
-      meta: { kind: 'websocket', label: opts?.label ?? url, machineId: opts?.machineId },
+      meta: { kind: 'websocket', label: opts?.label ?? url, machineId: opts?.machineId, url },
     })
   }
 
