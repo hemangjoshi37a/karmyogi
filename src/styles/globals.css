@@ -240,22 +240,34 @@ textarea { min-height: auto; }
   scrollbar-width: none;
 }
 .mobile-tabs::-webkit-scrollbar { height: 0; }
+/* A tab is now a PILL CONTAINER (activate button + close ✕) so the ✕ can have its
+   own touch target without nesting interactive elements. The pill carries the
+   shape/fill; the inner button carries the activate click + label. */
 .mobile-tab {
   flex: 0 0 auto;
-  /* >=36px touch target on every axis (height via min-height, width via padding).
-     Height comes from the single --ctl-h-touch token (theme.css) so the tab strip,
-     the @media(pointer:coarse) control overrides, and the mobile dock tabs all share
-     one value instead of the old divergent 38/40/pill. */
+  min-height: var(--ctl-h-touch);
+  display: inline-flex;
+  align-items: center;
+  border-radius: 18px;
+  white-space: nowrap;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.mobile-tab-activate {
+  /* The activate hit area. >=36px touch target on every axis (height via the pill's
+     min-height, width via padding). Height comes from the single --ctl-h-touch token
+     (theme.css) so the tab strip, the @media(pointer:coarse) control overrides, and
+     the mobile dock tabs all share one value. */
   min-height: var(--ctl-h-touch);
   min-width: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 6px 14px;
-  border-radius: 18px;
-  white-space: nowrap;
-  background: var(--bg-input);
+  padding: 6px 8px 6px 14px;
+  background: transparent;
+  border: 0;
+  color: inherit;
   /* §2.3: the ACTIVE tab is white-on-accent, which needs a 14px/600 floor on the
      undarkened accent. Apply it to ALL tabs so activating one never reflows the
      strip (uniform size); only the color/fill changes on `.active`. */
@@ -263,8 +275,187 @@ textarea { min-height: auto; }
   font-weight: 600;
 }
 .mobile-tab-ico { flex: 0 0 auto; }
+/* Per-tab close ✕ — its own ≥36px tap target inside the pill, separated from the
+   activate area so it never fights the activate click (markup also stops props). */
+.mobile-tab-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  min-width: 30px;
+  min-height: var(--ctl-h-touch);
+  padding: 0 8px 0 2px;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.mobile-tab-close:hover,
+.mobile-tab-close:focus-visible { opacity: 1; }
 .mobile-tab.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-.mobile-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mobile-tab.active .mobile-tab-close { opacity: 0.85; }
+.mobile-tab-activate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mobile-tab-close:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+
+/* Tab bar = the "All panels" launcher button + the scrolling strip on one row. */
+.mobile-tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  /* Respect the notch on the leading edge of the row. */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.mobile-tabbar > .mobile-tabs {
+  /* The strip lives inside the bar now; the bar owns the elevation + border. */
+  border-bottom: 0;
+  background: transparent;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mobile-panels-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-h-touch);
+  min-width: var(--ctl-h-touch);
+  min-height: var(--ctl-h-touch);
+  margin: 6px 0 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+.mobile-panels-btn:hover { border-color: var(--accent); color: var(--accent); }
+.mobile-panels-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Mobile "All panels" sheet (inline launcher equivalent) ────────────────── */
+.mobile-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: color-mix(in srgb, #000 50%, transparent);
+  backdrop-filter: blur(2px);
+}
+.mobile-sheet {
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+  /* Lift the sheet content clear of the home-indicator / notch. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.mobile-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.mobile-sheet-title { font-weight: var(--fw-title); font-size: var(--fs-title); line-height: var(--lh-tight); }
+.mobile-sheet-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-h-touch);
+  min-width: var(--ctl-h-touch);
+  min-height: var(--ctl-h-touch);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+}
+.mobile-sheet-close:hover,
+.mobile-sheet-close:focus-visible { background: var(--bg-input); border-color: var(--border); color: var(--fg); }
+.mobile-sheet-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mobile-sheet-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.mobile-sheet-item {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--ctl-h-touch);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg);
+  font-size: 14px;
+  text-align: left;
+}
+.mobile-sheet-item:hover { background: var(--bg-input); }
+.mobile-sheet-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mobile-sheet-item.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.mobile-sheet-ico { flex: 0 0 auto; color: var(--fg-muted); }
+.mobile-sheet-item.active .mobile-sheet-ico { color: var(--accent); }
+.mobile-sheet-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-sheet-state {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.mobile-sheet-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-h-touch);
+  min-width: var(--ctl-h-touch);
+  min-height: var(--ctl-h-touch);
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+}
+.mobile-sheet-toggle:hover:not(:disabled) { background: var(--bg-input); border-color: var(--border); color: var(--fg); }
+.mobile-sheet-toggle[aria-pressed='true'] { color: var(--accent); }
+.mobile-sheet-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mobile-sheet-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-sheet { animation: mobile-sheet-in var(--dur-mid) var(--ease); }
+  @keyframes mobile-sheet-in {
+    from { transform: translateY(12px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+}
 .mobile-panel { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
 .mobile-panel > * { height: 100%; }
 
@@ -311,7 +502,7 @@ textarea { min-height: auto; }
     flex-wrap: wrap;
     gap: 6px;
   }
-  .mobile-tab { padding: 6px 10px; }
+  .mobile-tab-activate { padding: 6px 6px 6px 10px; }
 }
 
 /* ── Narrow-width reflow for the dense PRESETS side-rail (W-K / §2.3) ─────────
