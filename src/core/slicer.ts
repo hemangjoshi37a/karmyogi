@@ -291,11 +291,52 @@ export interface SliceWarning {
 /** How (if at all) to generate support material under overhangs. */
 export type SupportType = 'none' | 'grid' | 'tree';
 
+/**
+ * Infill pattern (D7). All are realized on top of the rectilinear scanline core:
+ * `rectilinear` is a single set of parallel lines alternating 0/90° per layer;
+ * `grid` lays both 0° and 90° on every layer; `triangles` lays 0/60/120°;
+ * `gyroid` phase-shifts the scan direction + offset per layer to approximate the
+ * woven gyroid look; `concentric` follows the wall contour inward. Gyroid is the
+ * default (best strength/weight + isotropy, matching modern slicers).
+ */
+export type InfillPattern = 'rectilinear' | 'grid' | 'triangles' | 'gyroid' | 'concentric';
+
+/**
+ * A height-range modifier (D4). For layers whose print-height Z falls in
+ * [minZ, maxZ] (mm, inclusive), the listed fields OVERRIDE the global slice
+ * params. Any omitted field is left at the global value. Modifiers apply in
+ * order; the last matching one wins per field. This is karmyogi's
+ * "per-object / height-range modifier" — e.g. solid 0–3 mm base, sparse middle.
+ */
+export interface HeightModifier {
+  minZ: number;             // mm (inclusive)
+  maxZ: number;             // mm (inclusive)
+  infillDensity?: number;   // 0..100 (%) override
+  perimeters?: number;      // wall-loop override
+  infillPattern?: InfillPattern;
+}
+
+/**
+ * A variable / adaptive layer-height band (D8). Within [minZ, maxZ] (in MODEL
+ * Z, measured from the model's own minimum), slice at `layerHeight` mm instead
+ * of the global height. Bands are a coarse, deterministic stand-in for a fully
+ * paintable Z-profile: thinner layers where the user paints detail, thicker
+ * elsewhere for speed. Slicing walks Z bottom-up, picking the band height that
+ * covers the current Z (falling back to the global height outside any band).
+ */
+export interface LayerHeightBand {
+  minZ: number;             // mm (model-relative, inclusive)
+  maxZ: number;             // mm (model-relative, inclusive)
+  layerHeight: number;      // mm (>0)
+}
+
 export interface SliceParams {
   layerHeight: number;        // mm
   lineWidth: number;          // mm (extrusion width)
   perimeters: number;         // wall loops
   infillDensity: number;      // 0..100 (%)
+  /** Infill pattern (default 'gyroid'). */
+  infillPattern?: InfillPattern;
   /** Support generation strategy (default 'none'). */
   supportType?: SupportType;
   /**
@@ -304,6 +345,10 @@ export interface SliceParams {
    * Default 50°.
    */
   supportOverhangAngle?: number;
+  /** Height-range modifiers (D4); empty/undefined = none. */
+  modifiers?: HeightModifier[];
+  /** Variable layer-height bands (D8); empty/undefined = uniform layerHeight. */
+  layerBands?: LayerHeightBand[];
   /** Optional override of the slice height (mm). Defaults to mesh Z extent. */
   // (no field — derived from mesh bbox)
 }
@@ -317,6 +362,12 @@ export interface SliceLayer {
   infill: Polyline[];
   /** Support-material toolpaths for this layer (open lines / loops). */
   support?: Polyline[];
+  /** Layer thickness (mm) — varies when adaptive layer bands are used (D8). */
+  thickness: number;
+  /** True when this is a top surface (no model layer above it) — drives ironing (D10). */
+  topSurface?: boolean;
+  /** Innermost wall (or contour) per region — the ironing pass reuses these. */
+  topRegions?: Polyline[];
 }
 
 export interface SliceResult {
@@ -472,11 +523,73 @@ function buildPerimeters(contour: Polyline, lineWidth: number, count: number): P
 }
 
 /**
+ * Concentric infill: step the boundary inward by `spacing` repeatedly, each
+ * inset ring becoming an infill loop, until the region collapses. Reuses the
+ * shared polygon offsetter (same engine as the perimeters), so it follows the
+ * wall contour — ideal for flexible (TPU) and round parts.
+ */
+function buildConcentricInfill(boundary: Polyline, spacing: number): Polyline[] {
+  const rings: Polyline[] = [];
+  // Guard against pathological tiny spacings producing thousands of rings.
+  const maxRings = 2000;
+  for (let i = 1; i <= maxRings; i++) {
+    const r = offsetPolygon(boundary, -spacing * i);
+    if (r.points.length < 3) break;
+    r.closed = true;
+    rings.push(r);
+  }
+  return rings;
+}
+
+/**
+ * Build infill for one layer per the chosen {@link InfillPattern}. Rectilinear/
+ * gyroid emit one line set at the per-layer angle; grid overlays 0°+90°;
+ * triangles overlays 0/60/120°; concentric follows the contour inward. The
+ * gyroid pattern additionally shifts the scan PHASE per layer (so successive
+ * layers weave) — a cheap, robust approximation of a true gyroid that keeps the
+ * output as printable straight runs.
+ */
+function buildInfillPattern(
+  boundary: Polyline,
+  spacing: number,
+  layerIndex: number,
+  pattern: InfillPattern,
+): Polyline[] {
+  if (boundary.points.length < 3 || !(spacing > 0) || !Number.isFinite(spacing)) return [];
+  switch (pattern) {
+    case 'concentric':
+      return buildConcentricInfill(boundary, spacing);
+    case 'grid':
+      // Both directions every layer → square grid (≈2× density of one set).
+      return [...buildInfill(boundary, spacing * 2, 0), ...buildInfill(boundary, spacing * 2, 90)];
+    case 'triangles':
+      // Three directions every layer → triangular grid (÷3 each so total ≈ density).
+      return [
+        ...buildInfill(boundary, spacing * 3, 0),
+        ...buildInfill(boundary, spacing * 3, 60),
+        ...buildInfill(boundary, spacing * 3, 120),
+      ];
+    case 'gyroid': {
+      // Rotate the scan a little and shift the phase each layer so consecutive
+      // layers cross — the woven look that gives gyroid its isotropy. Still a
+      // single straight-line set per layer (printable + robust).
+      const angle = (layerIndex * 45) % 180;
+      const phase = (layerIndex % 4) * (spacing * 0.25);
+      return buildInfill(boundary, spacing, angle, phase);
+    }
+    case 'rectilinear':
+    default:
+      return buildInfill(boundary, spacing, layerIndex % 2 === 0 ? 0 : 90);
+  }
+}
+
+/**
  * Rectilinear infill: parallel lines at `angleDeg`, spaced by `spacing`, clipped
  * to the innermost wall (or the contour if there are no walls). Implemented by
  * scanning lines across the polygon bounds and keeping the spans inside.
+ * `phase` (mm) shifts the first scanline along Y (used by the gyroid weave).
  */
-function buildInfill(boundary: Polyline, spacing: number, angleDeg: number): Polyline[] {
+function buildInfill(boundary: Polyline, spacing: number, angleDeg: number, phase = 0): Polyline[] {
   if (boundary.points.length < 3 || spacing <= 0) return [];
   const bb = boundary.bounds();
   if (!bb.isValid()) return [];
@@ -496,8 +609,8 @@ function buildInfill(boundary: Polyline, spacing: number, angleDeg: number): Pol
 
   const lines: Polyline[] = [];
   const n = rot.length;
-  // Start half a spacing in so we don't ride the wall.
-  for (let y = minY + spacing * 0.5; y < maxY; y += spacing) {
+  // Start half a spacing in so we don't ride the wall (+ optional phase shift).
+  for (let y = minY + spacing * 0.5 + (phase % spacing); y < maxY; y += spacing) {
     // Find X crossings of the scanline with each polygon edge.
     const xs: number[] = [];
     for (let i = 0; i < n; i++) {
@@ -725,23 +838,60 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
     return result;
   }
 
-  let nLayers = Math.floor(totalH / layerH);
-  if (nLayers > MAX_LAYERS) {
+  // ---- Variable / adaptive layer-height bands (D8) -------------------------
+  // Build the per-layer SLAB list: each slab has a sampling plane Z (mid), a
+  // print height Z (top, model-relative→print coords), and a thickness. With no
+  // bands this is a uniform stack; with bands we walk Z bottom-up and pick the
+  // band height covering the current model Z.
+  const bands = (params.layerBands ?? []).filter((b) => b.layerHeight > 0 && b.maxZ > b.minZ);
+  const heightAt = (modelZ: number): number => {
+    for (const b of bands) {
+      if (modelZ >= b.minZ && modelZ < b.maxZ) return b.layerHeight;
+    }
+    return layerH;
+  };
+  interface Slab { planeZ: number; printZ: number; thickness: number; }
+  const slabs: Slab[] = [];
+  let cursor = 0; // model-relative Z at the bottom of the next slab
+  let capClamped = false;
+  while (cursor < totalH - 1e-6) {
+    const h = Math.max(0.01, heightAt(cursor));
+    const top = Math.min(cursor + h, totalH);
+    const thickness = top - cursor;
+    slabs.push({ planeZ: zMin + cursor + thickness * 0.5, printZ: top, thickness });
+    cursor = top;
+    if (slabs.length >= MAX_LAYERS) { capClamped = true; break; }
+  }
+  if (capClamped) {
     warnings.push({
       code: 'layerCapClamped',
-      message: `Layer count ${nLayers} exceeds cap ${MAX_LAYERS}; clamped.`,
-      params: { count: nLayers, cap: MAX_LAYERS },
+      message: `Layer count exceeds cap ${MAX_LAYERS}; clamped.`,
+      params: { count: slabs.length, cap: MAX_LAYERS },
     });
-    nLayers = MAX_LAYERS;
   }
-  if (nLayers < 1) nLayers = 1;
+  if (slabs.length < 1) slabs.push({ planeZ: zMin + totalH * 0.5, printZ: totalH, thickness: totalH });
+  const nLayers = slabs.length;
+
+  // ---- Height-range modifiers (D4): pick the matching override per layer. --
+  const modifiers = (params.modifiers ?? []).filter((m) => m.maxZ >= m.minZ);
+  const basePattern: InfillPattern = params.infillPattern ?? 'gyroid';
+  const resolveLayer = (printZ: number): { density: number; perimeters: number; pattern: InfillPattern } => {
+    let d = density, p = perimeters, pat = basePattern;
+    for (const m of modifiers) {
+      if (printZ < m.minZ - 1e-6 || printZ > m.maxZ + 1e-6) continue;
+      if (m.infillDensity != null && Number.isFinite(m.infillDensity)) d = Math.max(0, Math.min(100, m.infillDensity));
+      if (m.perimeters != null && Number.isFinite(m.perimeters)) p = Math.max(1, Math.floor(m.perimeters));
+      if (m.infillPattern) pat = m.infillPattern;
+    }
+    return { density: d, perimeters: p, pattern: pat };
+  };
 
   const tris = mesh.triangles;
   const stride3 = STL_STRIDE * 3; // floats per triangle
   // Stitch tolerance: a fraction of line width, in mm.
   const stitchQ = Math.max(1e-4, lineWidth * 0.1);
   // Infill spacing from density: 100% -> lineWidth spacing; lower -> wider.
-  const infillSpacing = density <= 0 ? Infinity : (lineWidth * 100) / density;
+  const spacingFor = (d: number) => (d <= 0 ? Infinity : (lineWidth * 100) / d);
 
   // ---- Supports (optional) -------------------------------------------------
   const supportType: SupportType = params.supportType ?? 'none';
@@ -768,7 +918,8 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
       if (cancel === false) throw new SliceCancelled();
     }
     // Sample the plane at the middle of the layer slab for stable contours.
-    const planeZ = zMin + (li + 0.5) * layerH;
+    const slab = slabs[li];
+    const planeZ = slab.planeZ;
     const segs: Seg[] = [];
 
     for (let o = 0; o < tris.length; o += stride3) {
@@ -796,7 +947,9 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
       }
     }
 
-    const z = (li + 1) * layerH; // print height for this layer (top of slab, >0)
+    const z = slab.printZ; // print height for this layer (top of slab, >0)
+    const thickness = slab.thickness;
+    const mod = resolveLayer(z);
 
     // Support toolpaths for this layer (built even on layers with no model
     // contour, so columns reach the bed under a floating overhang).
@@ -817,14 +970,16 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
     if (contours.length === 0) {
       // No model on this layer, but support may still need to print here.
       if (support && support.length) {
-        result.layers.push({ z, perimeters: [], infill: [], support });
+        result.layers.push({ z, thickness, perimeters: [], infill: [], support });
       } else {
         degenerateLayers++;
       }
       continue;
     }
 
-    const layer: SliceLayer = { z, perimeters: [], infill: [], support };
+    const layer: SliceLayer = { z, thickness, perimeters: [], infill: [], support };
+    const innerRegions: Polyline[] = []; // innermost wall per region (for ironing/top fill)
+    const infillSpacing = spacingFor(mod.density);
 
     for (const contour of contours) {
       if (contour.points.length < 3) continue;
@@ -834,21 +989,34 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
         result.bounds.expand(cb.min);
         result.bounds.expand(cb.max);
       }
-      const walls = buildPerimeters(contour, lineWidth, perimeters);
+      const walls = buildPerimeters(contour, lineWidth, mod.perimeters);
       for (const w of walls) layer.perimeters.push(w);
 
       // Infill is clipped to the innermost wall (or contour if walls collapsed).
-      if (density > 0 && Number.isFinite(infillSpacing)) {
-        const inner = walls.length > 0 ? walls[walls.length - 1] : contour;
-        const angle = li % 2 === 0 ? 0 : 90;
-        const fill = buildInfill(inner, infillSpacing, angle);
+      const inner = walls.length > 0 ? walls[walls.length - 1] : contour;
+      innerRegions.push(inner);
+      if (mod.density > 0 && Number.isFinite(infillSpacing)) {
+        const fill = buildInfillPattern(inner, infillSpacing, li, mod.pattern);
         for (const f of fill) layer.infill.push(f);
       }
     }
+    layer.topRegions = innerRegions;
 
     if (layer.perimeters.length > 0 || layer.infill.length > 0 || (layer.support && layer.support.length > 0)) {
       result.layers.push(layer);
     }
+  }
+
+  // ---- Top-surface detection (for ironing, D10) ----------------------------
+  // A layer is a top surface where it has a model region but the NEXT printed
+  // layer has no region overlapping it. Coarse + cheap: flag the final model
+  // layer, plus any layer whose successor produced no perimeters (a step/top).
+  for (let i = 0; i < result.layers.length; i++) {
+    const cur = result.layers[i];
+    if (!cur.topRegions || cur.topRegions.length === 0) continue;
+    const next = result.layers[i + 1];
+    const nextHasModel = next && next.perimeters.length > 0;
+    if (!nextHasModel) cur.topSurface = true;
   }
 
   if (degenerateLayers > 0) {
@@ -890,8 +1058,26 @@ export interface GcodeParams {
   retractSpeed: number;       // mm/min
   // Cooling
   fanEnabled: boolean;
-  // Skirt
+  // Skirt (legacy boolean kept for back-compat; `adhesion` supersedes it).
   skirt: boolean;
+  /**
+   * First-layer adhesion strategy (D7). `none` prints nothing extra; `skirt` is
+   * a single priming loop offset out from the part (no contact); `brim` is N
+   * concentric loops touching the part outline for grip; `raft` lays a sparse
+   * solid first layer under the whole footprint. Defaults from `skirt` when
+   * omitted (skirt→'skirt', else 'none').
+   */
+  adhesion?: 'none' | 'skirt' | 'brim' | 'raft';
+  /** Number of brim loops (D7). Default 8. */
+  brimLoops?: number;
+  /**
+   * Iron top surfaces (D10): after a top layer's normal extrusion, re-traverse
+   * its surface at a tight spacing with near-zero flow to smooth it. Off by
+   * default.
+   */
+  ironing?: boolean;
+  /** Ironing flow as a fraction of normal extrusion (default 0.1 = 10%). */
+  ironingFlow?: number;
   /**
    * Emit G2/G3 arcs for curved runs of perimeter points (shrinks G-code +
    * smooths motion on controllers that support arc interpolation). Off by
@@ -1068,11 +1254,11 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams, onProgress
     lastY = y;
   };
 
-  // Extruding move to (x,y); E advances by the bead volume.
-  const extrudeTo = (x: number, y: number, feed: number) => {
+  // Extruding move to (x,y); E advances by the bead volume × `flow` (1 = full).
+  const extrudeTo = (x: number, y: number, feed: number, flow = 1) => {
     if (Number.isNaN(lastX)) { lastX = x; lastY = y; return; }
     const d = Math.hypot(x - lastX, y - lastY);
-    e += d * ePerMm;
+    e += d * ePerMm * flow;
     out.push(`G1 X${f(x + offX)} Y${f(y + offY)} E${f(e)} F${f(feed)}`);
     lastX = x;
     lastY = y;
@@ -1123,21 +1309,74 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams, onProgress
     }
   };
 
-  // ---- Optional skirt (around the first layer's footprint) ------------------
-  // Drawn as a single loop offset out from the model bounds.
-  const drawSkirt = () => {
+  // ---- Adhesion (D7): skirt / brim / raft on the first layer ----------------
+  // Back-compat: when `adhesion` is absent, fall back to the legacy `skirt` flag.
+  const adhesion = params.adhesion ?? (params.skirt ? 'skirt' : 'none');
+  const brimLoops = Math.max(1, Math.floor(params.brimLoops ?? 8));
+
+  // A rectangular loop around the model footprint, expanded by `margin` mm.
+  const footprintLoop = (margin: number): Polyline | null => {
     const bb = slice.bounds;
-    if (!bb.isValid()) return;
-    const m = 3; // skirt margin (mm)
-    const x0 = bb.min.x - m, y0 = bb.min.y - m, x1 = bb.max.x + m, y1 = bb.max.y + m;
+    if (!bb.isValid()) return null;
     const sk = new Polyline();
-    sk.add({ x: x0, y: y0 });
-    sk.add({ x: x1, y: y0 });
-    sk.add({ x: x1, y: y1 });
-    sk.add({ x: x0, y: y1 });
+    sk.add({ x: bb.min.x - margin, y: bb.min.y - margin });
+    sk.add({ x: bb.max.x + margin, y: bb.min.y - margin });
+    sk.add({ x: bb.max.x + margin, y: bb.max.y + margin });
+    sk.add({ x: bb.min.x - margin, y: bb.max.y + margin });
     sk.closed = true;
+    return sk;
+  };
+
+  // Skirt: one priming loop offset out from the footprint (no part contact).
+  const drawSkirt = () => {
+    const sk = footprintLoop(3);
+    if (!sk) return;
     out.push('; skirt');
     printPath(sk, firstSpeed);
+  };
+  // Brim: N loops from the part outline outward (each ~one line apart) — flat,
+  // peelable grip. Implemented as concentric rectangular loops touching the bbox.
+  const drawBrim = () => {
+    if (!slice.bounds.isValid()) return;
+    out.push('; brim');
+    for (let i = brimLoops; i >= 1; i--) {
+      const loop = footprintLoop(params.lineWidth * i);
+      if (loop) printPath(loop, firstSpeed);
+    }
+  };
+  // Raft: a sparse solid first-layer mat under the whole footprint (the model
+  // then prints on top). Cheap rectilinear fill at 2× line spacing.
+  const drawRaft = () => {
+    const base = footprintLoop(2);
+    if (!base) return;
+    out.push('; raft');
+    printPath(base, firstSpeed);
+    const lines = buildInfill(base, params.lineWidth * 2, 0);
+    for (const l of lines) printPath(l, firstSpeed);
+  };
+  const drawAdhesion = () => {
+    if (adhesion === 'skirt') drawSkirt();
+    else if (adhesion === 'brim') drawBrim();
+    else if (adhesion === 'raft') drawRaft();
+  };
+
+  // ---- Ironing (D10): re-traverse a top surface at low flow to smooth it. ---
+  const ironingFlow = params.ironingFlow ?? 0.1;
+  const ironSpeed = Math.max(600, Math.round(params.printSpeed * 0.5));
+  const ironLayer = (layer: SliceLayer) => {
+    if (!params.ironing || !layer.topSurface || !layer.topRegions?.length) return;
+    out.push('; ironing');
+    const ironSpacing = Math.max(params.lineWidth * 0.25, 0.1);
+    for (const region of layer.topRegions) {
+      const passes = buildInfill(region, ironSpacing, 45);
+      for (const p of passes) {
+        const pts = p.points;
+        if (pts.length < 2) continue;
+        travelTo(pts[0].x, pts[0].y, params.travelSpeed);
+        unretractMove();
+        for (let i = 1; i < pts.length; i++) extrudeTo(pts[i].x, pts[i].y, ironSpeed, ironingFlow);
+      }
+    }
   };
 
   // ---- Per-layer ------------------------------------------------------------
@@ -1163,7 +1402,7 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams, onProgress
 
     out.push(`G1 Z${f(layer.z)} F${f(params.travelSpeed)}`);
 
-    if (isFirst && params.skirt) drawSkirt();
+    if (isFirst) drawAdhesion();
 
     // Support first (printed before the model on each layer so the nozzle isn't
     // dragging over fresh part walls). Support never uses arc-fitting.
@@ -1174,6 +1413,8 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams, onProgress
     // Perimeters (arc-fittable) for surface quality, then infill (straight).
     for (const w of layer.perimeters) printPath(w, speed, true);
     for (const fpath of layer.infill) printPath(fpath, speed);
+    // Ironing pass over a finished top surface (low-flow smoothing, D10).
+    ironLayer(layer);
   }
 
   // ---- End sequence ---------------------------------------------------------

@@ -812,6 +812,19 @@
   flex-direction: column;
   gap: var(--sp-1) var(--sp-2);
 }
+/* P2/P11 — compact row of segmented toggles (stepover mode + cut direction)
+   inside an op card; wraps to a column on narrow widths so each control keeps a
+   usable touch target. */
+.pcb-op-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  margin: var(--sp-1) 0;
+}
+.pcb-op-toggles > * {
+  flex: 1 1 140px;
+  min-width: 0;
+}
 .pcb-op-actions {
   display: flex;
   flex-wrap: wrap;

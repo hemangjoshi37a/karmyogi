@@ -7,6 +7,7 @@ import {
   type DragEvent,
 } from 'react'
 import { useProgram, useMachine, useSettings } from '../store'
+import { useBed } from '../store/bed'
 import { useHover } from '../store/hover'
 import { sectionColor } from '../viewer/sectionColors'
 import { applyJobPlacement, isIdentityJob } from '../core/transform'
@@ -14,6 +15,7 @@ import { grbl } from '../serial/controller'
 import { ProgramProgressBar } from '../components/ProgramProgressBar'
 import { FrameButton } from '../components/FrameButton'
 import { Icon } from '../components/Icons'
+import { ListChecks, AlertTriangle } from 'lucide-react'
 import { CamEmpty } from '../components/cam/CamUI'
 import {
   computeProgress,
@@ -22,10 +24,98 @@ import {
 } from '../components/programWindow'
 import { useTabCommands } from '../machine/tabCommands'
 import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
+import { explainGrblMessage } from '../core/explainers'
 import { useT } from '../i18n'
 import '../styles/program.css'
 
 const ACCEPT = '.nc,.gcode,.tap,.txt,.cnc,.ngc'
+
+/**
+ * O7 — Check / validation mode (GRBL `$C`-style, done client-side so it works
+ * offline and before any motion). A finding flags a problem with a program line.
+ */
+interface CheckFinding {
+  /** 1-based line number the problem was found on (0 = whole-program). */
+  line: number
+  /** 'error' = will be rejected / unsafe; 'warn' = likely a problem. */
+  level: 'error' | 'warn'
+  /** Short plain-language message. */
+  msg: string
+}
+
+/** G-codes GRBL v1.1 understands (motion + modal). Anything else is flagged. */
+const SUPPORTED_G = new Set([
+  0, 1, 2, 3, 4, 10, 17, 18, 19, 20, 21, 28, 30, 38, 43, 49, 53, 54, 55, 56, 57,
+  58, 59, 61, 80, 90, 91, 92, 93, 94,
+])
+/** M-codes GRBL v1.1 understands. Anything else is flagged. */
+const SUPPORTED_M = new Set([0, 1, 2, 3, 4, 5, 7, 8, 9, 30])
+
+/**
+ * Parse + validate a G-code program the way GRBL's check mode ($C) would, but
+ * locally and ahead of time: flag unsupported G/M codes, a first cutting move
+ * with no feed rate, and XY moves that fall outside the machine bed. Returns an
+ * ordered list of findings (empty = clean). Pure scan; never mutates anything.
+ */
+function checkProgram(
+  lines: string[],
+  bed: { width: number; depth: number },
+): CheckFinding[] {
+  const findings: CheckFinding[] = []
+  let feedSet = false
+  let warnedNoFeed = false
+  const seenUnsupportedG = new Set<number>()
+  const seenUnsupportedM = new Set<number>()
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]
+    const line = raw.replace(/;.*$/, '').replace(/\([^)]*\)/g, '').trim()
+    if (!line) continue
+    const re = /([A-Za-z])\s*(-?\d*\.?\d+)/g
+    let m: RegExpExecArray | null
+    let cutThisLine = false
+    while ((m = re.exec(line))) {
+      const letter = m[1].toUpperCase()
+      const value = parseFloat(m[2])
+      if (Number.isNaN(value)) continue
+      if (letter === 'F' && value > 0) feedSet = true
+      if (letter === 'G') {
+        const g = value % 1 === 0 ? value : Math.floor(value)
+        if (!SUPPORTED_G.has(g) && !seenUnsupportedG.has(g)) {
+          seenUnsupportedG.add(g)
+          findings.push({ line: i + 1, level: 'error', msg: `Unsupported G-code G${g} — GRBL may reject this (error:20).` })
+        }
+        if (value === 1 || value === 2 || value === 3) cutThisLine = true
+      }
+      if (letter === 'M') {
+        const mc = Math.round(value)
+        if (!SUPPORTED_M.has(mc) && !seenUnsupportedM.has(mc)) {
+          seenUnsupportedM.add(mc)
+          findings.push({ line: i + 1, level: 'error', msg: `Unsupported M-code M${mc} — GRBL may reject this (error:20).` })
+        }
+      }
+    }
+    if (cutThisLine && !feedSet && !warnedNoFeed) {
+      warnedNoFeed = true
+      findings.push({ line: i + 1, level: 'error', msg: 'A cutting move (G1/G2/G3) runs before any feed rate (F) is set — GRBL error:22.' })
+    }
+  }
+
+  // XY out-of-bounds check vs the configured bed (work coords assumed at origin).
+  if (bed.width > 0 && bed.depth > 0) {
+    const b = frameBoundsOfGcode(lines)
+    if (b && b.isValid()) {
+      const out: string[] = []
+      if (b.min.x < -0.001) out.push(`X${b.min.x.toFixed(1)} < 0`)
+      if (b.min.y < -0.001) out.push(`Y${b.min.y.toFixed(1)} < 0`)
+      if (b.max.x > bed.width + 0.001) out.push(`X${b.max.x.toFixed(1)} > ${bed.width}`)
+      if (b.max.y > bed.depth + 0.001) out.push(`Y${b.max.y.toFixed(1)} > ${bed.depth}`)
+      if (out.length)
+        findings.push({ line: 0, level: 'warn', msg: `Travel exceeds the bed (${out.join(', ')} mm). Check work zero / job placement, or it may hit a soft limit.` })
+    }
+  }
+  return findings
+}
 
 /**
  * Program panel (W5): load a G-code program (button or drag-drop), edit it in an
@@ -55,8 +145,14 @@ export function ProgramPanel() {
   const connected = useMachine((s) => s.connection === 'connected')
   const machineState = useMachine((s) => s.state)
   const machineError = useMachine((s) => s.error)
+  const bedW = useBed((s) => s.width)
+  const bedD = useBed((s) => s.depth)
 
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // O7 — Check / validation results. null = not run yet for the current program;
+  // recomputed on demand (cleared whenever the program changes). [] = clean.
+  const [checkFindings, setCheckFindings] = useState<CheckFinding[] | null>(null)
 
   const [dragOver, setDragOver] = useState(false)
 
@@ -200,6 +296,12 @@ export function ProgramPanel() {
   // operator isn't left guessing why a stream stopped.
   const showError =
     !!machineError && (machineState === 'Alarm' || held || streaming)
+  // O8 — decode any GRBL ALARM:/error: code in the surfaced message into a
+  // plain-language cause + fix shown beneath the raw text.
+  const errorExplain = useMemo(
+    () => (showError ? explainGrblMessage(machineError) : null),
+    [showError, machineError],
+  )
 
   async function loadFile(file: File) {
     const text = await file.text()
@@ -236,6 +338,20 @@ export function ProgramPanel() {
     if (!Number.isFinite(n)) return 1
     return Math.min(Math.max(1, n), Math.max(1, lines.length))
   }, [startLine, lines.length])
+
+  // O7 — run the local validation pass over the loaded program.
+  const runCheck = useCallback(() => {
+    if (!hasProgram) return
+    setCheckFindings(checkProgram(lines, { width: bedW, depth: bedD }))
+  }, [hasProgram, lines, bedW, bedD])
+
+  // Any program change invalidates a previous check result.
+  useEffect(() => {
+    setCheckFindings(null)
+  }, [lines])
+
+  const checkErrors = checkFindings?.filter((f) => f.level === 'error').length ?? 0
+  const checkWarns = checkFindings?.filter((f) => f.level === 'warn').length ?? 0
 
   function onStream() {
     if (!connected || !hasProgram) return
@@ -412,6 +528,40 @@ export function ProgramPanel() {
               showOptions={false}
               label={t('prog.frame', 'Frame')}
             />
+            {/* O7 — Check / validate the program (offline, before any motion). */}
+            <button
+              className={
+                'pp-check' +
+                (checkFindings != null
+                  ? checkErrors > 0
+                    ? ' pp-check--err'
+                    : checkWarns > 0
+                      ? ' pp-check--warn'
+                      : ' pp-check--ok'
+                  : '')
+              }
+              onClick={runCheck}
+              disabled={!hasProgram}
+              title={
+                !hasProgram
+                  ? t('prog.checkHintLoad', 'Load a program first')
+                  : t(
+                      'prog.checkHint',
+                      'Check the program for unsupported codes, missing feed and out-of-bounds moves before running ($C-style)',
+                    )
+              }
+              aria-label={t('prog.checkAria', 'Check program')}
+            >
+              <ListChecks size={14} aria-hidden="true" /> {t('prog.check', 'Check')}
+              {checkFindings != null &&
+                (checkErrors > 0 ? (
+                  <span className="pp-check-badge pp-check-badge--err">{checkErrors}</span>
+                ) : checkWarns > 0 ? (
+                  <span className="pp-check-badge pp-check-badge--warn">{checkWarns}</span>
+                ) : (
+                  <span className="pp-check-badge pp-check-badge--ok" aria-hidden="true">✓</span>
+                ))}
+            </button>
             <button
               className="pp-stream primary"
               onClick={onStream}
@@ -542,6 +692,45 @@ export function ProgramPanel() {
             </span>
           </div>
 
+          {/* O7 — Check / validation results: a clean tick, or a list of findings
+              (unsupported codes, missing feed, out-of-bounds) with line numbers. */}
+          {checkFindings != null &&
+            (checkFindings.length === 0 ? (
+              <div className="pp-check-result pp-check-result--ok" role="status">
+                <span className="pp-check-result-icon" aria-hidden="true">✓</span>
+                <span>
+                  {t(
+                    'prog.checkClean',
+                    'Looks good — no unsupported codes, missing feed or out-of-bounds moves found.',
+                  )}
+                </span>
+              </div>
+            ) : (
+              <div className="pp-check-result" role="alert">
+                <div className="pp-check-result-head">
+                  <AlertTriangle size={14} aria-hidden="true" />
+                  <span>
+                    {t('prog.checkFound', '{errors} error(s), {warns} warning(s)', {
+                      errors: checkErrors,
+                      warns: checkWarns,
+                    })}
+                  </span>
+                </div>
+                <ul className="pp-check-list">
+                  {checkFindings.map((f, i) => (
+                    <li key={i} className={`pp-check-item pp-check-item--${f.level}`}>
+                      {f.line > 0 && (
+                        <span className="pp-check-line">
+                          {t('prog.checkLine', 'Line {n}', { n: f.line })}
+                        </span>
+                      )}
+                      <span className="pp-check-msg">{f.msg}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+
           {/* Mid-program error / alarm surfaced in-panel. */}
           {showError && (
             <div className="pp-error" role="alert">
@@ -552,6 +741,40 @@ export function ProgramPanel() {
                 {machineState === 'Alarm'
                   ? t('prog.errorAlarm', 'Alarm: {msg}', { msg: machineError! })
                   : t('prog.errorRun', '{msg}', { msg: machineError! })}
+                {errorExplain && (
+                  <span className="pp-error-explain">
+                    <strong className="pp-error-explain-title">
+                      {t(
+                        `grbl.${errorExplain.kind}.${errorExplain.code}.title`,
+                        errorExplain.title,
+                      )}
+                    </strong>
+                    <span className="pp-error-explain-cause">
+                      {t(
+                        `grbl.${errorExplain.kind}.${errorExplain.code}.cause`,
+                        errorExplain.cause,
+                      )}
+                    </span>
+                    <span className="pp-error-explain-fix">
+                      {t('prog.errorFix', 'Fix: {fix}', {
+                        fix: t(
+                          `grbl.${errorExplain.kind}.${errorExplain.code}.fix`,
+                          errorExplain.fix,
+                        ),
+                      })}
+                    </span>
+                    {errorExplain.kind === 'alarm' && connected && (
+                      <button
+                        type="button"
+                        className="pp-error-unlock"
+                        onClick={() => void grbl.unlock()}
+                        title={t('prog.unlockTitle', 'Clear the alarm lock ($X)')}
+                      >
+                        {t('prog.unlock', 'Unlock ($X)')}
+                      </button>
+                    )}
+                  </span>
+                )}
               </span>
             </div>
           )}

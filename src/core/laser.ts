@@ -22,6 +22,7 @@
 
 import { BBox, Point, Polyline, distance, kDefaultArcTolerance } from './geometry';
 import { Drawing } from './entity';
+import { insetRings } from './offset';
 
 /** Which laser source the job targets. Shares one code path; gates a few opts. */
 export enum LaserMode {
@@ -92,6 +93,28 @@ export interface LaserParams {
    */
   airAssist?: boolean;
 
+  // ---- Rotary mode (L14) --------------------------------------------------
+  /**
+   * Engrave/cut on a rotary axis: the Y travel is remapped to a rotary axis
+   * (default A) by converting the linear Y distance into degrees of rotation
+   * via the workpiece diameter (`mmPerDeg = π·⌀ / 360`). X stays linear. Off by
+   * default. Feeds on the mapped axis become deg/min, scaled by the same factor.
+   */
+  rotary?: boolean;
+  /** Rotary axis letter (A/B/C/Y). */
+  rotaryAxis?: 'A' | 'B' | 'C' | 'Y';
+  /** Workpiece diameter (mm) used for the mm→deg conversion. */
+  rotaryDiameter?: number;
+
+  // ---- Fiber galvo (L18) --------------------------------------------------
+  /**
+   * Fiber/galvo Q-switch frequency (kHz) emitted as an informational header
+   * comment (plain GRBL has no pulse word; EZCAD-style controllers consume it).
+   */
+  fiberFrequencyKHz?: number;
+  /** Fiber Q-pulse width (ns), header comment only. */
+  fiberPulseNs?: number;
+
   // ---- Output formatting --------------------------------------------------
   decimals: number;
   programName: string;
@@ -114,6 +137,11 @@ export function defaultLaserParams(mode: LaserMode = LaserMode.CO2, overrides: P
     piercePower: fiber ? 1000 : 700,
     pierceTime: fiber ? 0.3 : 0.2,
     airAssist: false,
+    rotary: false,
+    rotaryAxis: 'A',
+    rotaryDiameter: 50,
+    fiberFrequencyKHz: fiber ? 30 : undefined,
+    fiberPulseNs: fiber ? 200 : undefined,
     decimals: 3,
     programName: 'hjLabs Laser Cutting',
     ...overrides,
@@ -148,6 +176,11 @@ export interface LaserContour {
   poly: Polyline;
   /** True if the source entity is a closed loop. */
   closed: boolean;
+  /**
+   * Source DXF layer name (L2 layer system). Empty when the source has no layer.
+   * Contours sharing a layer are grouped into one layer with its own cut params.
+   */
+  layer?: string;
 }
 
 /** A laser part: one or more contours sharing a footprint, plus copy count. */
@@ -170,9 +203,19 @@ export function drawingToContours(drawing: Drawing, tol = kDefaultArcTolerance):
   for (const e of drawing.entities) {
     const poly = e.flatten(tol);
     if (poly.points.length < 2) continue;
-    out.push({ poly, closed: e.isClosed() || poly.closed });
+    out.push({ poly, closed: e.isClosed() || poly.closed, layer: e.layer || '' });
   }
   return out;
+}
+
+/** Distinct layer names across contours, in first-seen order (L2). */
+export function contourLayers(contours: LaserContour[]): string[] {
+  const seen: string[] = [];
+  for (const c of contours) {
+    const l = c.layer ?? '';
+    if (!seen.includes(l)) seen.push(l);
+  }
+  return seen;
 }
 
 /** Bounds across a list of contours. */
@@ -198,6 +241,8 @@ export interface PlacedContour {
   /** Points in absolute work coordinates. */
   points: Point[];
   closed: boolean;
+  /** Source DXF layer name (L2), propagated from the source contour. */
+  layer?: string;
 }
 
 /**
@@ -215,6 +260,7 @@ export function placeContours(
   const oy = bounds.valid ? bounds.min.y : 0;
   return contours.map((c) => ({
     closed: c.closed,
+    layer: c.layer ?? '',
     points: c.poly.points.map((p) => ({ x: p.x - ox + dx, y: p.y - oy + dy })),
   }));
 }
@@ -238,6 +284,277 @@ export function orderContours(contours: PlacedContour[]): PlacedContour[] {
   return withArea.map((w) => w.c);
 }
 
+// ---- L8: cut-order / travel optimization ----------------------------------
+
+/** First / last point of a placed contour (its travel anchors). */
+function endpoints(c: PlacedContour): { start: Point; end: Point } {
+  const pts = c.points;
+  const start = pts[0];
+  const end = c.closed ? pts[0] : pts[pts.length - 1];
+  return { start, end };
+}
+
+/**
+ * Reorder placed contours with a greedy nearest-neighbour walk to minimize the
+ * pen-up (beam-off) travel between cuts (L8). Starting from the machine origin
+ * (or `from`), each step picks the unvisited contour whose start point is
+ * nearest to the current head position. Closed loops can also be entered from
+ * the nearest vertex (`rotateStart`) so the seam lands next to the previous cut;
+ * open lines may be reversed so either end can be the entry. The *relative*
+ * inner-first ordering is NOT preserved — call this only when travel reduction
+ * is the priority (the UI gates it behind a toggle).
+ */
+export function optimizeTravel(
+  contours: PlacedContour[],
+  opts: { from?: Point; rotateClosedStart?: boolean; reverseOpen?: boolean } = {},
+): PlacedContour[] {
+  const n = contours.length;
+  if (n <= 1) return contours.slice();
+  const remaining = contours.map((_c, i) => i);
+  const out: PlacedContour[] = [];
+  let cur: Point = opts.from ?? { x: 0, y: 0 };
+  const rot = opts.rotateClosedStart ?? true;
+  const rev = opts.reverseOpen ?? true;
+
+  while (remaining.length > 0) {
+    let bestK = 0;
+    let bestD = Number.POSITIVE_INFINITY;
+    let bestReverse = false;
+    for (let k = 0; k < remaining.length; ++k) {
+      const c = contours[remaining[k]];
+      const { start, end } = endpoints(c);
+      const dStart = distance(cur, start);
+      if (dStart < bestD) {
+        bestD = dStart;
+        bestK = k;
+        bestReverse = false;
+      }
+      if (rev && !c.closed) {
+        const dEnd = distance(cur, end);
+        if (dEnd < bestD) {
+          bestD = dEnd;
+          bestK = k;
+          bestReverse = true;
+        }
+      }
+    }
+    const idx = remaining[bestK];
+    remaining.splice(bestK, 1);
+    let chosen = contours[idx];
+    if (bestReverse) {
+      chosen = { ...chosen, points: chosen.points.slice().reverse() };
+    } else if (rot && chosen.closed && chosen.points.length > 2) {
+      chosen = rotateClosedToNearest(chosen, cur);
+    }
+    out.push(chosen);
+    const { start, end } = endpoints(chosen);
+    cur = chosen.closed ? start : end;
+  }
+  return out;
+}
+
+/** Rotate a closed loop so its seam (start vertex) is the vertex nearest `to`. */
+function rotateClosedToNearest(c: PlacedContour, to: Point): PlacedContour {
+  const pts = c.points;
+  // Drop a duplicated closing vertex if present so rotation is clean.
+  const n = pts.length >= 2 && distance(pts[0], pts[pts.length - 1]) < 1e-6 ? pts.length - 1 : pts.length;
+  let best = 0;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < n; ++i) {
+    const d = distance(to, pts[i]);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  if (best === 0) return c;
+  const rotated: Point[] = [];
+  for (let i = 0; i < n; ++i) rotated.push(pts[(best + i) % n]);
+  return { ...c, points: rotated };
+}
+
+// ---- L9: tabs / bridges on cut paths --------------------------------------
+
+/**
+ * Insert un-cut "tabs" (bridges) into a CLOSED cut loop so the part stays
+ * attached to the stock after cutting (L9). The loop perimeter is divided into
+ * `count` equal arcs; a `tabWidthMm`-long gap is left un-cut at the centre of
+ * each arc. Returns an ARRAY OF OPEN polylines (the cut segments between tabs).
+ * Open contours and tiny loops are returned unchanged (wrapped in one segment).
+ *
+ * This is pure geometry — the emitter cuts each returned segment as an open
+ * path, so the gaps are simply never traversed by the beam.
+ */
+export function tabContour(c: PlacedContour, count: number, tabWidthMm: number): PlacedContour[] {
+  const tabs = Math.max(0, Math.floor(count));
+  if (!c.closed || tabs <= 0 || tabWidthMm <= 0 || c.points.length < 3) return [c];
+
+  // Build a closed point ring (drop a duplicate closing vertex).
+  const pts = c.points.slice();
+  if (distance(pts[0], pts[pts.length - 1]) < 1e-6) pts.pop();
+  const n = pts.length;
+  if (n < 3) return [c];
+
+  // Cumulative perimeter length at each vertex (ring).
+  const segLen: number[] = [];
+  let perim = 0;
+  for (let i = 0; i < n; ++i) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const len = distance(a, b);
+    segLen.push(len);
+    perim += len;
+  }
+  if (perim <= tabs * tabWidthMm * 1.2) return [c]; // tabs would consume the whole loop
+
+  // Point at arc-length `s` along the ring (s in [0, perim)).
+  const at = (s: number): Point => {
+    let rem = ((s % perim) + perim) % perim;
+    for (let i = 0; i < n; ++i) {
+      if (rem <= segLen[i] || i === n - 1) {
+        const a = pts[i];
+        const b = pts[(i + 1) % n];
+        const t = segLen[i] > 1e-9 ? rem / segLen[i] : 0;
+        return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      }
+      rem -= segLen[i];
+    }
+    return pts[0];
+  };
+
+  // Tab CENTRES evenly spaced; each tab spans [centre - half, centre + half].
+  const half = tabWidthMm / 2;
+  const segments: PlacedContour[] = [];
+  for (let k = 0; k < tabs; ++k) {
+    const tabCentre = (k / tabs) * perim;
+    const cutStart = tabCentre + half; // cut begins after this tab
+    const nextTabCentre = ((k + 1) / tabs) * perim;
+    const cutEnd = nextTabCentre - half; // cut ends before the next tab
+    const segPts: Point[] = [at(cutStart)];
+    // Sample the open arc by stepping ring vertices between the two cut ends.
+    const arc = sampleArc(pts, segLen, perim, cutStart, cutEnd);
+    for (const p of arc) segPts.push(p);
+    segPts.push(at(cutEnd));
+    segments.push({ points: dedupe(segPts), closed: false, layer: c.layer });
+  }
+  return segments;
+}
+
+/** Collect ring vertices strictly between arc-lengths a→b (a<b mod perim). */
+function sampleArc(pts: Point[], segLen: number[], perim: number, a: number, b: number): Point[] {
+  const out: Point[] = [];
+  const n = pts.length;
+  // Vertex i sits at cumulative length cum[i].
+  let cum = 0;
+  const cums: number[] = [];
+  for (let i = 0; i < n; ++i) {
+    cums.push(cum);
+    cum += segLen[i];
+  }
+  const aa = ((a % perim) + perim) % perim;
+  const bb = ((b % perim) + perim) % perim;
+  for (let i = 0; i < n; ++i) {
+    const v = cums[i];
+    const inRange = aa <= bb ? v > aa && v < bb : v > aa || v < bb;
+    if (inRange) out.push(pts[i]);
+  }
+  return out;
+}
+
+/** Remove consecutive duplicate points. */
+function dedupe(pts: Point[]): Point[] {
+  const out: Point[] = [];
+  for (const p of pts) {
+    const last = out[out.length - 1];
+    if (!last || distance(last, p) > 1e-6) out.push(p);
+  }
+  return out;
+}
+
+// ---- L11: offset (spiral) fill vs line fill -------------------------------
+
+/** Fill style for closed loops. */
+export enum FillStyle {
+  /** No fill — cut the outline only. */
+  None = 'none',
+  /** Parallel scan lines clipped to the loop (line / hatch fill). */
+  Line = 'line',
+  /** Concentric offset rings spiralling inward (reuses the offset core). */
+  Offset = 'offset',
+}
+
+/**
+ * Generate offset (concentric) fill paths for a closed loop by repeatedly
+ * insetting it by `spacing` until it collapses (L11). Reuses the shared
+ * `insetRings` offset core (read-only). Returns closed ring polylines from the
+ * outside in; the caller cuts them as additional closed contours.
+ */
+export function offsetFill(c: PlacedContour, spacing: number): PlacedContour[] {
+  if (!c.closed || spacing <= 0 || c.points.length < 3) return [];
+  const pl = new Polyline();
+  pl.points = c.points.slice();
+  pl.closed = true;
+  const rings = insetRings(pl, spacing, spacing);
+  return rings
+    .filter((r) => r.points.length >= 3)
+    .map((r) => ({ points: r.points.slice(), closed: true, layer: c.layer }));
+}
+
+/**
+ * Generate parallel-line (hatch) fill for a closed loop (L11). Scan lines at
+ * `angleDeg` spaced `spacing` apart are clipped to the polygon via even-odd
+ * crossing; each clipped span becomes one open cut segment. Alternating lines
+ * are reversed so the fill zig-zags (minimal travel).
+ */
+export function lineFill(c: PlacedContour, spacing: number, angleDeg: number): PlacedContour[] {
+  if (!c.closed || spacing <= 0 || c.points.length < 3) return [];
+  const pts = c.points;
+  // Rotate the polygon by -angle so scan lines become horizontal, clip, rotate back.
+  const a = (angleDeg * Math.PI) / 180;
+  const ca = Math.cos(-a);
+  const sa = Math.sin(-a);
+  const rot = (p: Point): Point => ({ x: p.x * ca - p.y * sa, y: p.x * sa + p.y * ca });
+  const cb = Math.cos(a);
+  const sb = Math.sin(a);
+  const unrot = (p: Point): Point => ({ x: p.x * cb - p.y * sb, y: p.x * sb + p.y * cb });
+
+  const rp = pts.map(rot);
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of rp) {
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const out: PlacedContour[] = [];
+  const n = rp.length;
+  let flip = false;
+  for (let y = minY + spacing / 2; y < maxY; y += spacing) {
+    // Find X crossings of the scan line y with each polygon edge.
+    const xs: number[] = [];
+    for (let i = 0; i < n; ++i) {
+      const p1 = rp[i];
+      const p2 = rp[(i + 1) % n];
+      const yMin = Math.min(p1.y, p2.y);
+      const yMax = Math.max(p1.y, p2.y);
+      if (y < yMin || y >= yMax) continue; // half-open avoids double-counting vertices
+      const t = (y - p1.y) / (p2.y - p1.y);
+      xs.push(p1.x + t * (p2.x - p1.x));
+    }
+    xs.sort((u, v) => u - v);
+    // Pair crossings into interior spans.
+    const spans: Array<[number, number]> = [];
+    for (let i = 0; i + 1 < xs.length; i += 2) spans.push([xs[i], xs[i + 1]]);
+    if (flip) spans.reverse();
+    for (const [x0, x1] of spans) {
+      const sp = flip ? [x1, x0] : [x0, x1];
+      const segPts = [unrot({ x: sp[0], y }), unrot({ x: sp[1], y })];
+      if (distance(segPts[0], segPts[1]) > 1e-6) out.push({ points: segPts, closed: false, layer: c.layer });
+    }
+    flip = !flip;
+  }
+  return out;
+}
+
 /**
  * Emit a complete, safe laser G-code program.
  *
@@ -255,10 +572,34 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
   const passes = Math.max(1, Math.floor(p.passes));
   const onCode = p.powerMode === LaserPowerMode.Dynamic ? 'M4' : 'M3';
 
+  // ---- Rotary (L14): Y travel → rotary axis degrees. ----------------------
+  // mmPerDeg = π·⌀ / 360; degrees = yMm / mmPerDeg. X stays linear; the swept
+  // axis letter is configurable. When off, Y is emitted verbatim.
+  const rotary = p.rotary === true && (p.rotaryDiameter ?? 0) > 0;
+  const rotAxis = p.rotaryAxis ?? 'A';
+  const mmPerDeg = rotary ? (Math.PI * (p.rotaryDiameter ?? 0)) / 360 : 1;
+  // Y/rotary axis word for a Y position in mm.
+  const yWord = (yMm: number): string =>
+    rotary ? `${rotAxis}${fmt(yMm / mmPerDeg, d)}` : `Y${fmt(yMm, d)}`;
+  // Feed in mm/min scaled to the dominant axis units (deg/min when rotary).
+  const feedVal = rotary && mmPerDeg > 0 ? p.cutFeed / mmPerDeg : p.cutFeed;
+
   // ---- Header -------------------------------------------------------------
   if (p.programName.length > 0) o.push(`(${p.programName})`);
   o.push(`(Generated by karmyogi.hjLabs.in Laser — ${p.mode} mode)`);
   o.push('(Requires GRBL laser mode: $32=1)');
+  if (p.mode === LaserMode.Fiber && (p.fiberFrequencyKHz || p.fiberPulseNs)) {
+    // L18: galvo/fiber pulse params. Plain GRBL has no pulse word — emit as a
+    // header comment so EZCAD-class controllers / operators can apply it.
+    o.push(
+      `(Fiber: frequency ${p.fiberFrequencyKHz ?? 0}kHz, Q-pulse ${p.fiberPulseNs ?? 0}ns)`,
+    );
+  }
+  if (rotary) {
+    o.push(
+      `(Rotary: ${rotAxis}-axis, ⌀${fmt(p.rotaryDiameter ?? 0, 2)}mm — ${fmt(mmPerDeg, 4)}mm/deg)`,
+    );
+  }
   o.push('G21'); // mm
   o.push('G90'); // absolute
   o.push('G94'); // feed per minute
@@ -283,7 +624,7 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
 
     // Travel to the start of the contour with the laser OFF (S0, G0).
     o.push(`(Contour ${cn}: ${c.closed ? 'loop' : 'line'})`);
-    o.push(`G0 X${fmt(start.x, d)} Y${fmt(start.y, d)} S0`);
+    o.push(`G0 X${fmt(start.x, d)} ${yWord(start.y)} S0`);
 
     // Optional pierce: dwell at the start point with the beam on at pierce power
     // BEFORE the cut begins. The pierce uses the same on-code; we drop to cut
@@ -306,7 +647,7 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
         o.push(`${onCode} S${sCut}`);
       } else {
         // Re-position to the start for the next pass with the beam off.
-        o.push(`G0 X${fmt(start.x, d)} Y${fmt(start.y, d)} S0`);
+        o.push(`G0 X${fmt(start.x, d)} ${yWord(start.y)} S0`);
         o.push(`${onCode} S${sCut}`);
       }
 
@@ -314,15 +655,15 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
       for (let i = 1; i < c.points.length; ++i) {
         const pt = c.points[i];
         if (firstFeed) {
-          o.push(`G1 X${fmt(pt.x, d)} Y${fmt(pt.y, d)} F${fmt(p.cutFeed, d)}`);
+          o.push(`G1 X${fmt(pt.x, d)} ${yWord(pt.y)} F${fmt(feedVal, d)}`);
           firstFeed = false;
         } else {
-          o.push(`G1 X${fmt(pt.x, d)} Y${fmt(pt.y, d)}`);
+          o.push(`G1 X${fmt(pt.x, d)} ${yWord(pt.y)}`);
         }
       }
       // Close a loop back to the start point.
       if (c.closed && distance(c.points[c.points.length - 1], start) > 1e-6) {
-        o.push(`G1 X${fmt(start.x, d)} Y${fmt(start.y, d)}`);
+        o.push(`G1 X${fmt(start.x, d)} ${yWord(start.y)}`);
       }
     }
 

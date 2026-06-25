@@ -10,6 +10,7 @@ import {
 import { useT } from '../i18n'
 import { Icon } from '../components/Icons'
 import { CamEmpty } from '../components/cam/CamUI'
+import { explainGrblMessage } from '../core/explainers'
 import '../styles/console.css'
 
 /** A user-editable quick-send macro: a label + the raw GRBL command. */
@@ -379,6 +380,10 @@ export function ConsolePanel() {
           ) : (
             matches.map((e) => {
               const where = side(e.dir)
+              // O8 — decode a GRBL ALARM:/error: code in an incoming/error line
+              // into a plain-language cause + fix, shown under the bubble.
+              const ex =
+                e.dir !== 'send' ? explainGrblMessage(e.text) : null
               return (
                 <div key={e.id} className={`chat-msg ${where}`}>
                   <div className={`chat-bubble dir-${e.dir}`}>
@@ -390,6 +395,56 @@ export function ConsolePanel() {
                       {clock(e.ts)}
                     </time>
                   </div>
+                  {ex && (
+                    <div
+                      className="chat-explain"
+                      style={{
+                        alignSelf: 'flex-start',
+                        maxWidth: 'min(92%, 460px)',
+                        margin: '2px 0 6px',
+                        padding: '7px 10px',
+                        borderRadius: 8,
+                        borderLeft: `3px solid ${ex.kind === 'alarm' ? 'var(--err, #e5484d)' : 'var(--warn, #f5a524)'}`,
+                        background: 'color-mix(in srgb, var(--surface-2, #2a2a2a) 80%, transparent)',
+                        fontSize: '0.78rem',
+                        lineHeight: 1.4,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 3,
+                      }}
+                    >
+                      <strong style={{ color: ex.kind === 'alarm' ? 'var(--err, #e5484d)' : 'var(--warn, #f5a524)' }}>
+                        {t(`grbl.${ex.kind}.${ex.code}.title`, ex.title)}
+                      </strong>
+                      <span style={{ opacity: 0.9 }}>
+                        {t(`grbl.${ex.kind}.${ex.code}.cause`, ex.cause)}{' '}
+                        {t('console.explain.fix', 'Fix: {fix}', {
+                          fix: t(`grbl.${ex.kind}.${ex.code}.fix`, ex.fix),
+                        })}
+                      </span>
+                      {ex.kind === 'alarm' && connected && (
+                        <button
+                          type="button"
+                          onClick={() => sendCmd('$X')}
+                          title={t('console.explain.unlock.title', 'Clear the alarm lock ($X)')}
+                          style={{
+                            alignSelf: 'flex-start',
+                            marginTop: 2,
+                            minHeight: 32,
+                            padding: '4px 12px',
+                            borderRadius: 6,
+                            border: '1px solid var(--border, #444)',
+                            background: 'var(--accent, #3b82f6)',
+                            color: '#fff',
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {t('console.explain.unlock', 'Unlock ($X)')}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })

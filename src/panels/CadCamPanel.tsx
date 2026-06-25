@@ -3,6 +3,14 @@ import { importDxfString } from '../core/dxf'
 import { Drawing } from '../core/entity'
 import { engrave, profileContours, pocket, ProfileSide, type CamParams } from '../core/cam'
 import {
+  applyLeadRamp,
+  orientLoop,
+  type CutDirection,
+  type LeadShape,
+  type PlungeMode,
+  type LeadRampOptions,
+} from '../core/carveStrategy'
+import {
   composeFeatureToolpaths,
   composeMultiFileToolpaths,
   deriveFeatures,
@@ -125,6 +133,7 @@ import {
   FlipVertical2,
   Triangle,
   Spline,
+  Route,
   Eraser,
   Pencil,
   Plus,
@@ -451,6 +460,56 @@ function parseVcarve(v: unknown, base: VCarveUiParams): VCarveUiParams {
     cleanup: boolOr(v.cleanup, base.cleanup),
     cleanupToolMm: numOr(v.cleanupToolMm, base.cleanupToolMm),
     cleanupStepoverFrac: numOr(v.cleanupStepoverFrac, base.cleanupStepoverFrac),
+  }
+}
+
+/**
+ * C7 + C12 · Cut-strategy knobs for the 2D milling ops (profile / pocket /
+ * cutout). These are machinist-grade entry/direction controls layered on top of
+ * the basic toolpath via core/carveStrategy post-processors — no straight
+ * plunges, climb-vs-conventional control, and a finishing allowance.
+ */
+interface CutStrategyParams {
+  /** Lead-in/out shape at each cut start/end. */
+  lead: LeadShape
+  /** Lead length / arc radius (mm). */
+  leadLengthMm: number
+  /** How the tool descends to depth (no straight plunge by default). */
+  plunge: PlungeMode
+  /** Ramp/helix descent angle from horizontal (deg). */
+  rampAngleDeg: number
+  /** Helix radius (mm). */
+  helixRadiusMm: number
+  /** Cut direction for closed loops (climb cuts cleaner; conventional is safer on slop). */
+  direction: CutDirection
+  /** Finishing allowance left on the wall (mm) for a later pass. */
+  stockToLeaveMm: number
+}
+
+const DEFAULT_STRATEGY: CutStrategyParams = {
+  lead: 'none',
+  leadLengthMm: 2,
+  plunge: 'ramp',
+  rampAngleDeg: 15,
+  helixRadiusMm: 1.5,
+  direction: 'climb',
+  stockToLeaveMm: 0,
+}
+
+function parseStrategy(v: unknown, base: CutStrategyParams): CutStrategyParams {
+  if (!isRecord(v)) return base
+  const lead = v.lead === 'tangent' || v.lead === 'arc' || v.lead === 'none' ? v.lead : base.lead
+  const plunge =
+    v.plunge === 'plunge' || v.plunge === 'ramp' || v.plunge === 'helix' ? v.plunge : base.plunge
+  const direction = v.direction === 'climb' || v.direction === 'conventional' ? v.direction : base.direction
+  return {
+    lead: lead as LeadShape,
+    leadLengthMm: numOr(v.leadLengthMm, base.leadLengthMm),
+    plunge: plunge as PlungeMode,
+    rampAngleDeg: numOr(v.rampAngleDeg, base.rampAngleDeg),
+    helixRadiusMm: numOr(v.helixRadiusMm, base.helixRadiusMm),
+    direction: direction as CutDirection,
+    stockToLeaveMm: numOr(v.stockToLeaveMm, base.stockToLeaveMm),
   }
 }
 
@@ -794,6 +853,15 @@ export function CadCamPanel() {
     DEFAULT_VCARVE,
   )
   const vcarve = useMemo(() => parseVcarve(vcarveRaw, DEFAULT_VCARVE), [vcarveRaw])
+
+  // C7 + C12 · cut-strategy (lead-in/out, ramp/helix plunge, climb direction,
+  // stock-to-leave). Persisted so the operator's strategy survives reloads.
+  const [strategyRaw, setStrategy] = usePersistentState<CutStrategyParams>(
+    'karmyogi.carve.strategy',
+    DEFAULT_STRATEGY,
+  )
+  const strategy = useMemo(() => parseStrategy(strategyRaw, DEFAULT_STRATEGY), [strategyRaw])
+
   /** Last V-carve generation stats (path/segment count) for the status line. */
   const [vcarveStats, setVcarveStats] = useState<{
     paths: number
@@ -1777,7 +1845,41 @@ export function CadCamPanel() {
     })
   }
   function build2DCamParams(): CamParams {
-    return { tool: build2DTool(), safeZ: p2d.safeZ, surfaceZ: p2d.surfaceZ, cutDepth: p2d.cutDepth }
+    return {
+      tool: build2DTool(),
+      safeZ: p2d.safeZ,
+      surfaceZ: p2d.surfaceZ,
+      cutDepth: p2d.cutDepth,
+      // C12 · finishing allowance left on the wall (mm).
+      stockToLeave: Math.max(0, strategy.stockToLeaveMm),
+    }
+  }
+
+  /** C7 · the lead-in/out + ramp/helix options derived from the strategy state. */
+  function leadRampOpts(): LeadRampOptions {
+    return {
+      lead: strategy.lead,
+      leadLengthMm: Math.max(0, strategy.leadLengthMm),
+      plunge: strategy.plunge,
+      rampAngleDeg: strategy.rampAngleDeg,
+      helixRadiusMm: strategy.helixRadiusMm,
+      safeZ: p2d.safeZ,
+    }
+  }
+
+  /**
+   * Post-process a freshly-built 2D toolpath with the cut strategy: rewrite
+   * straight plunges into ramps/helixes and add leads (C7). Direction control
+   * (C12) is applied at the geometry level in build2DToolpathsForFile before the
+   * op runs, so it's not repeated here. Returns the toolpath unchanged when the
+   * strategy is the default (no lead, plain plunge). Pen/laser jobs (no spindle)
+   * skip ramping — a pen has no "plunge into material" to ease.
+   */
+  function applyStrategyPost(tp: Toolpath): Toolpath {
+    if (p2d.zMode !== ZMode.Spindle) return tp
+    const needsPost = strategy.lead !== 'none' || strategy.plunge !== 'plunge'
+    if (!needsPost) return tp
+    return applyLeadRamp(tp, leadRampOpts())
   }
   /**
    * Build the 2D toolpaths PLUS the per-operation breakdown (R11/R12 contract)
@@ -1846,13 +1948,20 @@ export function CadCamPanel() {
       // the still-uncut inner piece wander. profileContours builds the
       // containment tree and emits children before parents (travel-minimised
       // among siblings).
-      const tp = profileContours(closed, side, p)
+      // C12 · re-orient each loop to the requested climb/conventional direction
+      // (inside profiles flip the winding↔direction relation vs outside).
+      const isInside = side === ProfileSide.Inside
+      const oriented =
+        side === ProfileSide.On ? closed : closed.map((c) => orientLoop(c, strategy.direction, isInside))
+      const tp = applyStrategyPost(profileContours(oriented, side, p))
       return { toolpaths: tp.isEmpty() ? [] : [tp], operations: [] }
     }
     // Pocket: clear each closed region, innermost-first for the same reason.
+    // C12 · pocket walls run as an inside cut → orient for the chosen direction.
     const out: Toolpath[] = []
     for (const idx of orderLoopsInsideOut(closed)) {
-      const tp = pocket(closed[idx], p)
+      const oriented = orientLoop(closed[idx], strategy.direction, true)
+      const tp = applyStrategyPost(pocket(oriented, p))
       if (!tp.isEmpty()) out.push(tp)
     }
     return { toolpaths: out, operations: [] }
@@ -2540,6 +2649,7 @@ export function CadCamPanel() {
       op,
       side,
       vcarve,
+      strategy,
       cutout,
       twoSided,
       bitId,
@@ -2650,6 +2760,7 @@ export function CadCamPanel() {
     )
       setSide(g.side as ProfileSide)
     setVcarve(parseVcarve(g.vcarve, DEFAULT_VCARVE))
+    setStrategy(parseStrategy(g.strategy, DEFAULT_STRATEGY))
     setCutout(parseCutout(g.cutout, defaultCutoutParams()))
     setTwoSided(defaultTwoSidedParams(isRecord(g.twoSided) ? (g.twoSided as Partial<TwoSidedParams>) : undefined))
     if (typeof g.bitId === 'string' && getBit(g.bitId)) setBitId(g.bitId)
@@ -3947,6 +4058,129 @@ export function CadCamPanel() {
                         )}
                       </div>
                     )}
+                  </div>
+                </section>
+              )}
+
+              {/* C7 + C12 · Cut strategy — lead-in/out, ramped/helical plunge,
+                  climb/conventional direction, finishing allowance. Shown for the
+                  milling ops (Profile / Pocket) when not plotting with a pen. */}
+              {!hasFeatureOps && (op === 'Profile' || op === 'Pocket') && p2d.zMode === ZMode.Spindle && (
+                <section className="cc-section">
+                  <h3>
+                    <Route className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                    {t('cc.strat.title', 'Cut strategy')}
+                    <Tip
+                      id="cut-strategy"
+                      title={t('cc.strat.title', 'Cut strategy')}
+                      body={t(
+                        'cc.strat.tip',
+                        'Machinist-grade entry and direction control. Ease the tool into the cut with a lead-in and ramp/helix down instead of plunging straight; pick climb or conventional milling; and leave a finishing allowance on the wall.',
+                      )}
+                    />
+                  </h3>
+                  <div className="cc-section-body">
+                    {/* Plunge mode — never a straight drop by default (C7). */}
+                    <div className="cc-rowlabel" title={t('cc.strat.plungeTip', 'How the tool reaches cutting depth. A straight plunge stresses a desktop machine; a ramp or helix eases it in.')}>
+                      <ArrowDownToLine size={13} strokeWidth={1.9} aria-hidden /> {t('cc.strat.plunge', 'Plunge')}
+                    </div>
+                    <SegControl<PlungeMode>
+                      ariaLabel={t('cc.strat.plunge', 'Plunge')}
+                      value={strategy.plunge}
+                      onChange={(v) => setStrategy((s) => ({ ...s, plunge: v }))}
+                      options={[
+                        { value: 'ramp', label: t('cc.strat.ramp', 'Ramp'), title: t('cc.strat.rampTip', 'Zig-zag down along the first cut — gentle, works in narrow paths.') },
+                        { value: 'helix', label: t('cc.strat.helix', 'Helix'), title: t('cc.strat.helixTip', 'Spiral down in a circle — ideal for entering open pockets.') },
+                        { value: 'plunge', label: t('cc.strat.straight', 'Straight'), title: t('cc.strat.straightTip', 'Drop straight down (only for plunge-rated bits / soft material).') },
+                      ]}
+                    />
+                    {strategy.plunge !== 'plunge' && (
+                      <div className="cc-sgrid">
+                        <SliderField
+                          icon={<Triangle size={14} strokeWidth={1.8} />}
+                          label={t('cc.strat.rampAngle', 'Ramp angle')}
+                          htmlFor="cc-strat-angle"
+                          unit="°"
+                          min={1}
+                          max={45}
+                          step={1}
+                          value={strategy.rampAngleDeg}
+                          onChange={(n) => setStrategy((s) => ({ ...s, rampAngleDeg: n }))}
+                          title={t('cc.strat.rampAngleTip', 'Descent angle from horizontal. Shallower (smaller) is gentler on the bit.')}
+                        />
+                        {strategy.plunge === 'helix' && (
+                          <SliderField
+                            icon={<RotateCw size={14} strokeWidth={1.8} />}
+                            label={t('cc.strat.helixR', 'Helix radius')}
+                            htmlFor="cc-strat-helixr"
+                            unit="mm"
+                            min={0.2}
+                            max={10}
+                            step={0.1}
+                            value={strategy.helixRadiusMm}
+                            onChange={(n) => setStrategy((s) => ({ ...s, helixRadiusMm: n }))}
+                            title={t('cc.strat.helixRTip', 'Radius of the helical descent. Must fit inside the pocket being entered.')}
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    {/* Lead-in/out (C7). */}
+                    <div className="cc-rowlabel" title={t('cc.strat.leadTip', 'Approach and leave the cut along a tangent or arc so the entry/exit mark is off the finished edge.')}>
+                      <Spline size={13} strokeWidth={1.9} aria-hidden /> {t('cc.strat.lead', 'Lead-in / out')}
+                    </div>
+                    <SegControl<LeadShape>
+                      ariaLabel={t('cc.strat.lead', 'Lead-in / out')}
+                      value={strategy.lead}
+                      onChange={(v) => setStrategy((s) => ({ ...s, lead: v }))}
+                      options={[
+                        { value: 'none', label: t('cc.strat.leadNone', 'None'), title: t('cc.strat.leadNoneTip', 'Enter directly on the contour.') },
+                        { value: 'tangent', label: t('cc.strat.leadTan', 'Tangent'), title: t('cc.strat.leadTanTip', 'Straight run-in along the cut direction.') },
+                        { value: 'arc', label: t('cc.strat.leadArc', 'Arc'), title: t('cc.strat.leadArcTip', 'Quarter-circle approach — smoothest entry.') },
+                      ]}
+                    />
+                    {strategy.lead !== 'none' && (
+                      <SliderField
+                        icon={<Spline size={14} strokeWidth={1.8} />}
+                        label={t('cc.strat.leadLen', 'Lead length')}
+                        htmlFor="cc-strat-leadlen"
+                        unit="mm"
+                        min={0.5}
+                        max={20}
+                        step={0.5}
+                        value={strategy.leadLengthMm}
+                        onChange={(n) => setStrategy((s) => ({ ...s, leadLengthMm: n }))}
+                        title={t('cc.strat.leadLenTip', 'Length of the tangent run-in, or radius of the arc lead.')}
+                      />
+                    )}
+
+                    {/* Direction (C12). */}
+                    <div className="cc-rowlabel" title={t('cc.strat.dirTip', 'Climb milling leaves a cleaner finish; conventional milling is more forgiving on machines with backlash.')}>
+                      <RotateCw size={13} strokeWidth={1.9} aria-hidden /> {t('cc.strat.dir', 'Direction')}
+                    </div>
+                    <SegControl<CutDirection>
+                      ariaLabel={t('cc.strat.dir', 'Direction')}
+                      value={strategy.direction}
+                      onChange={(v) => setStrategy((s) => ({ ...s, direction: v }))}
+                      options={[
+                        { value: 'climb', label: t('cc.strat.climb', 'Climb'), title: t('cc.strat.climbTip', 'Cutter spins into the uncut wall — cleaner edge, needs a rigid machine.') },
+                        { value: 'conventional', label: t('cc.strat.conv', 'Conventional'), title: t('cc.strat.convTip', 'Cutter spins out of the wall — safer on a flexy/backlash machine.') },
+                      ]}
+                    />
+
+                    {/* Stock-to-leave (C12). */}
+                    <SliderField
+                      icon={<Layers size={14} strokeWidth={1.8} />}
+                      label={t('cc.strat.stl', 'Stock to leave')}
+                      htmlFor="cc-strat-stl"
+                      unit="mm"
+                      min={0}
+                      max={3}
+                      step={0.05}
+                      value={strategy.stockToLeaveMm}
+                      onChange={(n) => setStrategy((s) => ({ ...s, stockToLeaveMm: Math.max(0, n) }))}
+                      title={t('cc.strat.stlTip', 'Finishing allowance kept on the wall (mm) for a later clean-up pass. 0 cuts to size.')}
+                    />
                   </div>
                 </section>
               )}

@@ -80,6 +80,7 @@ function toParams(v: unknown): EditableParams {
     closeTurnsStart: d.closeTurnsStart,
     closeTurnsEnd: d.closeTurnsEnd,
     releaseTurns: d.releaseTurns,
+    initialTension: d.initialTension,
     chuckRpm: d.chuckRpm,
     direction: d.direction,
     segmentsPerRev: d.segmentsPerRev,
@@ -374,6 +375,7 @@ export function SpringCoilingPanel() {
       closeTurnsStart: Math.max(0, params.closeTurnsStart),
       closeTurnsEnd: Math.max(0, params.closeTurnsEnd),
       releaseTurns: Math.max(0, params.releaseTurns),
+      initialTension: Math.max(0, params.initialTension),
       chuckRpm: Math.max(0.1, params.chuckRpm),
       segmentsPerRev: Math.max(4, Math.min(360, Math.floor(params.segmentsPerRev) || 48)),
     }),
@@ -821,6 +823,22 @@ export function SpringCoilingPanel() {
                   ),
                 }}
               />
+              {/* SP3 — extension springs carry an initial tension (preload). */}
+              {params.springType === 'extension' && (
+                <SliderField
+                  label={t('spring.field.initTension', 'Initial tension')}
+                  unit={t('unit.newton', 'N')}
+                  min={0}
+                  max={200}
+                  step={0.5}
+                  value={params.initialTension}
+                  onChange={(n) => editParams((p) => ({ ...p, initialTension: Math.max(0, n) }))}
+                  info={{
+                    title: t('spring.field.initTension', 'Initial tension (preload)'),
+                    body: t('spring.field.initTension.body', 'The built-in force holding the tightly-wound coils closed before any external load (extension springs). Recorded with the part and emitted as a comment; the coiler achieves it by tight winding.'),
+                  }}
+                />
+              )}
             </div>
           </div>
 

@@ -35,12 +35,27 @@ export interface SimSegment {
   tEnd: number
 }
 
+/** A tool-change event located along the program timeline (V14 timeline strip). */
+export interface ToolChange {
+  /** Tool number from the most recent T word at the change (0 if none seen). */
+  tool: number
+  /** Cumulative program time (s) at which the change occurs. */
+  t: number
+  /** 1-based G-code line number where the change was commanded. */
+  line: number
+}
+
 export interface Timeline {
   segments: SimSegment[]
   /** Total program time in seconds (0 if empty). */
   duration: number
   /** Total path distance in mm. */
   totalDistance: number
+  /**
+   * Tool-change events (M6, or a bare T-word change) in program order. Empty for
+   * a single-tool / toolless program. Powers the V14 tool-timeline strip.
+   */
+  toolChanges: ToolChange[]
   /** Tool position at time `t` (clamped to [0,duration]); [0,0,0] if empty. */
   positionAt(t: number): [number, number, number]
   /** Index of the segment in progress at time `t`; -1 if empty. */
@@ -84,8 +99,11 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
   const minFeed = opts.minFeed ?? 30
 
   const segments: SimSegment[] = []
+  const toolChanges: ToolChange[] = []
   let cumTime = 0
   let totalDistance = 0
+  let activeTool = 0 // last T word seen
+  let lineNo = 0
 
   const pos: Pos = { x: 0, y: 0, z: 0 }
   let motion = 0 // 0,1,2,3
@@ -124,6 +142,7 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
   }
 
   for (const rawLine of gcode.split(/\r?\n/)) {
+    lineNo++
     const line = stripComments(rawLine).trim()
     if (line === '') continue
 
@@ -131,10 +150,18 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
     if (words.length === 0) continue
 
     let lineMotion = motion
+    let toolWord: number | undefined // T<n> on this line
+    let m6 = false // explicit tool-change (M6)
     const axis: Partial<Record<'x' | 'y' | 'z' | 'i' | 'j' | 'k' | 'r' | 'f', number>> = {}
 
     for (const w of words) {
       switch (w.letter) {
+        case 'T':
+          if (Number.isFinite(w.value)) toolWord = w.value
+          break
+        case 'M':
+          if (w.value === 6) m6 = true
+          break
         case 'G': {
           const v = w.value
           if (v === 0 || v === 1 || v === 2 || v === 3) {
@@ -180,6 +207,15 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
     }
 
     motion = lineMotion
+
+    // Tool-change tracking (V14). An explicit M6 is always a change; a bare T-word
+    // that selects a DIFFERENT tool is treated as one too (pen/laser jobs often
+    // switch tool without M6). Record the time at which it lands so the strip can
+    // place a marker. A change is recorded at most once per line.
+    const tool = toolWord !== undefined ? toolWord : activeTool
+    const changed = m6 || (toolWord !== undefined && toolWord !== activeTool)
+    if (changed) toolChanges.push({ tool, t: cumTime, line: lineNo })
+    if (toolWord !== undefined) activeTool = toolWord
 
     // Modal feed update: an F word sets the cutting feed for this and later moves.
     if (axis.f !== undefined && axis.f > 0) feed = axis.f
@@ -269,7 +305,7 @@ export function buildTimeline(gcode: string, opts: BuildTimelineOptions = {}): T
     return out
   }
 
-  return { segments, duration, totalDistance, positionAt, activeIndexAt }
+  return { segments, duration, totalDistance, toolChanges, positionAt, activeIndexAt }
 }
 
 // ----------------------------------------------------------------------------

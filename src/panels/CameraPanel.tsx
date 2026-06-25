@@ -40,6 +40,7 @@ import {
   reprojectionRMS,
   applyHomography,
   silhouetteMask,
+  largestBlobBBoxMm,
   invertMat3,
   assumedIntrinsics,
   poseFromPlaneHomography,
@@ -49,6 +50,12 @@ import {
   type Mat3,
   type Vec2,
 } from '../core/cameraCalib'
+import {
+  suggestMaterialRuleBased,
+  type MaterialSuggestion,
+} from '../core/materialSuggest'
+import { useExperimentalAI } from '../experimental'
+import { useStock } from '../store/stock'
 import {
   captureFrame,
   videoToGray,
@@ -592,6 +599,17 @@ export function CameraPanel() {
 
   // Empty-bed reference captured flags (mirror refGrayRef for re-render).
   const [refCaptured, setRefCaptured] = useState<[boolean, boolean]>([false, false])
+
+  // --- experimental AI (gated): markerless auto-detect + material suggester ---
+  const aiEnabled = useExperimentalAI()
+  // A markerless-detected job rect held for REVIEW before the operator applies it.
+  const [pendingDetect, setPendingDetect] = useState<{
+    rect: { minX: number; minY: number; maxX: number; maxY: number }
+    confidence: number
+    areaFrac: number
+  } | null>(null)
+  // Ranked material proposals from the rule-based suggester (operator confirms).
+  const [matSuggest, setMatSuggest] = useState<MaterialSuggestion[] | null>(null)
 
   // ---- advanced live-camera image controls (per slot) ----
   // Discovered, adjustable settings on each slot's active track (re-read on every
@@ -2471,6 +2489,88 @@ export function CameraPanel() {
     )
   }, [calib, t])
 
+  // ---- job: MARKERLESS auto-detect (experimental AI, review-before-apply) ----
+  // Diff the live frame against the captured empty-bed reference (slot 0), take
+  // the largest changed blob, map its bbox to bed-mm via the calibrated
+  // homography. The result is held in `pendingDetect` for the operator to REVIEW
+  // (confidence + size) and only applied on explicit confirm — never auto-set.
+  const detectJobMarkerless = useCallback(() => {
+    setPendingDetect(null)
+    const cam = calib.cameras[JOB_SLOT]
+    const ref = refGrayRef.current[JOB_SLOT]
+    const cur = videoToGray(videoRefs.current[JOB_SLOT])
+    if (!cam.H || cam.H.length !== 9) {
+      setCalibMsg(t('cam.bt.job.needCam1Calib', 'Calibrate Cam 1 first (its homography maps stock pixels to mm).'))
+      return
+    }
+    if (!ref) {
+      setCalibMsg(t('cam.ai.detect.needRef', 'Capture an empty-bed reference for Cam 1 first (the “capture reference” button).'))
+      return
+    }
+    if (!cur) {
+      setCalibMsg(t('cam.bt.job.needCam1Live', 'Start Camera 1 first.'))
+      return
+    }
+    if (ref.width !== cur.width || ref.height !== cur.height) {
+      setCalibMsg(t('cam.bt.hull.sizeMismatch', 'Reference and live frame sizes differ — re-capture the reference.'))
+      return
+    }
+    const mask = silhouetteMask(ref, cur, 28)
+    // Confidence ≈ how decisively the bed changed: changed-pixel fraction mapped
+    // into a sane band (too little = noise, too much = lighting/whole-frame shift).
+    let changed = 0
+    for (let i = 0; i < mask.length; i++) changed += mask[i]
+    const areaFrac = changed / mask.length
+    const rect = largestBlobBBoxMm(mask, cur.width, cur.height, cam.H as Mat3)
+    if (!rect || areaFrac < 0.002) {
+      setCalibMsg(t('cam.ai.detect.none', 'No clear workpiece found — check lighting and that the bed reference was empty.'))
+      return
+    }
+    // Map the raw area fraction to a 0..1 confidence: peaks around a plausible
+    // stock footprint (~2%..60% of frame), falls off for tiny specks / whole-frame.
+    const f = areaFrac
+    const confidence =
+      f < 0.02 ? f / 0.02 * 0.6 : f <= 0.6 ? 1 - (f - 0.02) * 0.3 : Math.max(0, 0.4 - (f - 0.6))
+    setPendingDetect({ rect, confidence: Math.max(0, Math.min(1, confidence)), areaFrac })
+  }, [calib, t])
+
+  const applyPendingDetect = useCallback(() => {
+    if (!pendingDetect) return
+    calib.setJobRect(pendingDetect.rect)
+    const r = pendingDetect.rect
+    setCalibMsg(
+      t('cam.ai.detect.applied', 'Applied detected job ≈ {w}×{d} mm.', {
+        w: (r.maxX - r.minX).toFixed(0),
+        d: (r.maxY - r.minY).toFixed(0),
+      }),
+    )
+    setPendingDetect(null)
+  }, [pendingDetect, calib, t])
+
+  // ---- material + feeds suggester (experimental AI, operator-confirmed) ----
+  // Rule-based classifier over a live Cam 1 frame. PROPOSES materials only — the
+  // operator picks one; nothing auto-applies cutting parameters. (WebGPU ML path
+  // is scaffolded in materialSuggest.ts and falls back here until wired.)
+  const suggestMaterials = useCallback(() => {
+    setMatSuggest(null)
+    const frame = captureFrame(videoRefs.current[JOB_SLOT])
+    if (!frame) {
+      setCalibMsg(t('cam.bt.job.needCam1Live', 'Start Camera 1 first.'))
+      return
+    }
+    const ctx = frame.canvas.getContext('2d')
+    if (!ctx) {
+      setCalibMsg(t('cam.ai.mat.noCtx', 'Could not read the camera frame.'))
+      return
+    }
+    const img = ctx.getImageData(0, 0, frame.width, frame.height)
+    const res = suggestMaterialRuleBased(
+      { data: img.data, width: frame.width, height: frame.height },
+      { topK: 3 },
+    )
+    setMatSuggest(res.candidates)
+  }, [t])
+
   const applyManualJob = useCallback(() => {
     const w = parseFloat(jobW)
     const d = parseFloat(jobD)
@@ -4238,6 +4338,116 @@ export function CameraPanel() {
               {t('cam.bt.job.detect', 'Detect from stock QR')}
             </button>
           </div>
+
+          {aiEnabled && (
+            <div className="cam-ai-detect">
+              <div className="cam-row">
+                <button
+                  type="button"
+                  className="cam-btn cam-grow"
+                  disabled={!calib.cameras[0].H || !live(0) || !refCaptured[0]}
+                  onClick={detectJobMarkerless}
+                  title={
+                    !calib.cameras[0].H
+                      ? t('cam.bt.job.needCam1Calib', 'Calibrate Cam 1 first (its homography maps stock pixels to mm).')
+                      : !live(0)
+                        ? t('cam.bt.job.needCam1Live', 'Start Camera 1 first.')
+                        : !refCaptured[0]
+                          ? t('cam.ai.detect.needRef', 'Capture an empty-bed reference for Cam 1 first (the “capture reference” button).')
+                          : t('cam.ai.detect.tip', 'AI: find the workpiece by comparing the live frame to the empty bed (no stickers). Review before applying.')
+                  }
+                >
+                  <Icon name="eye" size={14} />
+                  {t('cam.ai.detect.btn', 'Auto-detect job (markerless)')}
+                  <span className="cam-ai-badge">{t('cam.ai.badge', 'AI')}</span>
+                </button>
+              </div>
+              {pendingDetect && (
+                <div className="cam-ai-review" role="group" aria-label={t('cam.ai.detect.reviewAria', 'Detected job — review before applying')}>
+                  <div className="cam-ai-review-head">
+                    <Icon name="eye" size={13} />
+                    <span>
+                      {t('cam.ai.detect.proposal', 'Proposed job ≈ {w}×{d} mm', {
+                        w: (pendingDetect.rect.maxX - pendingDetect.rect.minX).toFixed(0),
+                        d: (pendingDetect.rect.maxY - pendingDetect.rect.minY).toFixed(0),
+                      })}
+                    </span>
+                    <span
+                      className={`cam-ai-conf ${pendingDetect.confidence >= 0.66 ? 'is-high' : pendingDetect.confidence >= 0.33 ? 'is-mid' : 'is-low'}`}
+                      title={t('cam.ai.conf.tip', 'How confident the detection is. Always review before cutting.')}
+                    >
+                      {t('cam.ai.conf', '{p}% confidence', { p: Math.round(pendingDetect.confidence * 100) })}
+                    </span>
+                  </div>
+                  <p className="cam-hint">
+                    {t('cam.ai.detect.reviewHint', 'AI proposes — you confirm. Check the size matches your stock before applying.')}
+                  </p>
+                  <div className="cam-row">
+                    <button type="button" className="cam-btn cam-grow cam-primary" onClick={applyPendingDetect}>
+                      <Icon name="frame" size={14} />
+                      {t('cam.ai.detect.apply', 'Apply this job')}
+                    </button>
+                    <button type="button" className="cam-btn cam-grow" onClick={() => setPendingDetect(null)}>
+                      {t('cam.ai.detect.discard', 'Discard')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="cam-row">
+                <button
+                  type="button"
+                  className="cam-btn cam-grow"
+                  disabled={!live(0)}
+                  onClick={suggestMaterials}
+                  title={
+                    !live(0)
+                      ? t('cam.bt.job.needCam1Live', 'Start Camera 1 first.')
+                      : t('cam.ai.mat.tip', 'AI: suggest a likely material (and feeds/speeds) from the camera. Suggestions only — you confirm.')
+                  }
+                >
+                  <Icon name="probe" size={14} />
+                  {t('cam.ai.mat.btn', 'Suggest material')}
+                  <span className="cam-ai-badge">{t('cam.ai.badge', 'AI')}</span>
+                </button>
+              </div>
+              {matSuggest && matSuggest.length > 0 && (
+                <div className="cam-ai-review" role="group" aria-label={t('cam.ai.mat.reviewAria', 'Suggested materials — pick one to use')}>
+                  <p className="cam-hint">
+                    {t('cam.ai.mat.hint', 'AI suggestions only — pick the material that matches your stock. Feeds/speeds are conservative defaults you can still tune.')}
+                  </p>
+                  <ul className="cam-ai-matlist">
+                    {matSuggest.map((s) => (
+                      <li key={s.material.id} className="cam-ai-matrow">
+                        <span className="cam-ai-mat-icon" aria-hidden>{s.material.icon}</span>
+                        <span className="cam-ai-mat-name">
+                          {s.material.name}
+                          <span className="cam-ai-mat-reason">{s.reason}</span>
+                        </span>
+                        <span
+                          className={`cam-ai-conf ${s.confidence >= 0.5 ? 'is-high' : s.confidence >= 0.25 ? 'is-mid' : 'is-low'}`}
+                        >
+                          {Math.round(s.confidence * 100)}%
+                        </span>
+                        <button
+                          type="button"
+                          className="cam-btn cam-mini"
+                          onClick={() => {
+                            useStock.getState().setMaterial(s.material.id)
+                            setCalibMsg(t('cam.ai.mat.used', 'Material set to {m} — review feeds/speeds before cutting.', { m: s.material.name }))
+                            setMatSuggest(null)
+                          }}
+                          title={t('cam.ai.mat.useTip', 'Use this material (sets the stock material; you still confirm feeds before cutting)')}
+                        >
+                          {t('cam.ai.mat.use', 'Use')}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
           <div className="cam-sgrid">
             <CamSlider
               icon={<Icon name="frame" size={13} />}

@@ -403,12 +403,61 @@
 .mc-error {
   color: var(--danger);
   font-size: 12px;
-  padding: 4px 8px;
+  padding: 6px 9px;
   border: 1px solid var(--danger);
   border-radius: 5px;
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   word-break: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
+.mc-error-raw {
+  font-weight: 600;
+}
+/* O8 — plain-language alarm/error explanation under the raw GRBL message. */
+.mc-error-explain {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  color: var(--fg);
+}
+.mc-error-explain-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--danger);
+}
+.mc-error-explain-cause,
+.mc-error-explain-fix {
+  font-size: 11.5px;
+  line-height: 1.4;
+  opacity: 0.92;
+}
+.mc-error-explain-fix {
+  font-style: italic;
+}
+.mc-error-unlock {
+  align-self: flex-start;
+  margin-top: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mc-error-unlock:hover {
+  background: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.mc-error-unlock > svg { flex: 0 0 auto; }
 /* Non-error success feedback (e.g. "Set X/Y/Z work zero"). */
 .mc-feedback {
   color: var(--fg);
@@ -1526,6 +1575,19 @@
   background: var(--accent);
   border-radius: 999px;
   transition: width 0.3s ease;
+}
+/* O9 — report export buttons. */
+.mc-diag-export {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.mc-diag-export-btn {
+  flex: 1 1 120px;
+  min-height: 36px;
+  justify-content: center;
+  font-size: 12px;
 }
 
 /* Mobile: coolant chips reflow to a tighter grid; park fields stack. */

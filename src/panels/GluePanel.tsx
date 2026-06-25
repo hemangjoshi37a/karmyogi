@@ -11,7 +11,9 @@ import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { usePresets } from '../components/presets/usePresets'
 import {
   defaultGlueParams,
+  estimateGlueVolume,
   generateGlue,
+  isClosedShape,
   shapeToPolyline,
   type GlueParams,
   type GlueShape,
@@ -121,7 +123,7 @@ const BED = { w: 300, h: 200 }
 /** SVG padding (px) around the bed so the border/grid is visible. */
 const PAD = 6
 
-type Tool = 'select' | 'line' | 'triangle' | 'circle' | 'rect'
+type Tool = 'select' | 'dot' | 'line' | 'triangle' | 'circle' | 'rect'
 
 /**
  * Crisp inline-SVG glyphs for the drawing tools. The shared {@link Icon} set has
@@ -146,6 +148,7 @@ function ToolGlyph({ tool }: { tool: Tool }) {
       focusable="false"
     >
       {tool === 'select' && <path d="M5 4l6 16 2.5-6.5L20 11z" />}
+      {tool === 'dot' && <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />}
       {tool === 'line' && <path d="M5 19L19 5" />}
       {tool === 'triangle' && <path d="M12 5l7 14H5z" />}
       {tool === 'circle' && <circle cx="12" cy="12" r="7.5" />}
@@ -183,6 +186,7 @@ function UndoGlyph() {
  */
 const TOOLS: { id: Tool; key: string; label: string; hint: string }[] = [
   { id: 'select', key: 'select', label: 'Select', hint: 'Select / move a shape' },
+  { id: 'dot', key: 'dot', label: 'Dot', hint: 'Place a single glue dot (volume-controlled)' },
   { id: 'line', key: 'line', label: 'Line', hint: 'Draw a straight bead' },
   { id: 'triangle', key: 'triangle', label: 'Triangle', hint: 'Draw a triangle outline' },
   { id: 'circle', key: 'circle', label: 'Circle', hint: 'Draw a circle' },
@@ -284,6 +288,9 @@ function shapeFromDrag(
   const dy = b.y - a.y
   const dist = Math.hypot(dx, dy)
   switch (tool) {
+    case 'dot':
+      // A dot ignores drag extent — it's a single placed point at the start.
+      return { kind: 'dot', x: a.x, y: a.y }
     case 'line': {
       if (dist < MIN_SIZE) return null
       return { kind: 'line', x1: a.x, y1: a.y, x2: b.x, y2: b.y }
@@ -320,6 +327,8 @@ function shapeFromDrag(
 /** Return a copy of `shape` translated by (dx, dy) in machine mm. */
 function translateShape(shape: GlueShape, dx: number, dy: number): GlueShape {
   switch (shape.kind) {
+    case 'dot':
+      return { ...shape, x: shape.x + dx, y: shape.y + dy }
     case 'line':
       return { ...shape, x1: shape.x1 + dx, y1: shape.y1 + dy, x2: shape.x2 + dx, y2: shape.y2 + dy }
     case 'circle':
@@ -352,6 +361,8 @@ interface DimLabel {
 
 function shapeDim(shape: GlueShape, t: ReturnType<typeof useT>): DimLabel {
   switch (shape.kind) {
+    case 'dot':
+      return { text: t('glue.dim.dot', '•'), x: shape.x, y: shape.y }
     case 'line': {
       const len = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1)
       return {
@@ -382,6 +393,8 @@ function shapeDim(shape: GlueShape, t: ReturnType<typeof useT>): DimLabel {
 /** Bottom-left (X,Y) origin of a shape, for the selected-shape readout. */
 function shapeOrigin(shape: GlueShape): Pt {
   switch (shape.kind) {
+    case 'dot':
+      return { x: shape.x, y: shape.y }
     case 'line':
       return { x: Math.min(shape.x1, shape.x2), y: Math.min(shape.y1, shape.y2) }
     case 'circle':
@@ -427,22 +440,29 @@ function isPt(v: unknown): v is Pt {
 /** Narrow an arbitrary value to a valid GlueShape, or null if malformed. */
 function parseShape(v: unknown): GlueShape | null {
   if (!isObj(v)) return null
+  // Carry the optional per-shape overrides (G4 per-shape Z, G1 area fill) through
+  // a load when present + valid.
+  const ov: { dispenseZ?: number; fill?: boolean } = {}
+  if (isNum(v.dispenseZ)) ov.dispenseZ = v.dispenseZ
+  if (v.fill === true) ov.fill = true
   switch (v.kind) {
+    case 'dot':
+      return isNum(v.x) && isNum(v.y) ? { kind: 'dot', x: v.x, y: v.y, ...ov } : null
     case 'line':
       return isNum(v.x1) && isNum(v.y1) && isNum(v.x2) && isNum(v.y2)
-        ? { kind: 'line', x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2 }
+        ? { kind: 'line', x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2, ...ov }
         : null
     case 'circle':
       return isNum(v.cx) && isNum(v.cy) && isNum(v.r)
-        ? { kind: 'circle', cx: v.cx, cy: v.cy, r: v.r }
+        ? { kind: 'circle', cx: v.cx, cy: v.cy, r: v.r, ...ov }
         : null
     case 'rect':
       return isNum(v.x) && isNum(v.y) && isNum(v.w) && isNum(v.h)
-        ? { kind: 'rect', x: v.x, y: v.y, w: v.w, h: v.h }
+        ? { kind: 'rect', x: v.x, y: v.y, w: v.w, h: v.h, ...ov }
         : null
     case 'triangle':
       return Array.isArray(v.points) && v.points.length === 3 && v.points.every(isPt)
-        ? { kind: 'triangle', points: [v.points[0], v.points[1], v.points[2]] as [Pt, Pt, Pt] }
+        ? { kind: 'triangle', points: [v.points[0], v.points[1], v.points[2]] as [Pt, Pt, Pt], ...ov }
         : null
     default:
       return null
@@ -455,7 +475,8 @@ function parseGlueParams(v: unknown): GlueDocParams {
   if (!isObj(v)) return out
   const keys = [
     'travelZ', 'dispenseZ', 'feed', 'plungeFeed', 'dispenseRate', 'settleMs',
-    'postDwellMs', 'decimals',
+    'postDwellMs', 'leadInMm', 'leadOutMm', 'volPerDotMm3', 'volPerMmMm3', 'dotMs',
+    'decimals',
   ] as const
   for (const k of keys) if (isNum(v[k])) out[k] = v[k]
   return out
@@ -464,6 +485,8 @@ function parseGlueParams(v: unknown): GlueDocParams {
 /** Short human label for a shape kind, for the shape list. */
 function shapeSummary(shape: GlueShape, t: ReturnType<typeof useT>): string {
   switch (shape.kind) {
+    case 'dot':
+      return t('glue.summary.dot', 'Dot · ({x}, {y})', { x: shape.x.toFixed(0), y: shape.y.toFixed(0) })
     case 'line':
       return t('glue.summary.line', 'Line · {len} mm', {
         len: Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1).toFixed(0),
@@ -506,6 +529,11 @@ export function GluePanel() {
       dispenseRate: d.dispenseRate,
       settleMs: d.settleMs,
       postDwellMs: d.postDwellMs,
+      leadInMm: d.leadInMm,
+      leadOutMm: d.leadOutMm,
+      volPerDotMm3: d.volPerDotMm3,
+      volPerMmMm3: d.volPerMmMm3,
+      dotMs: d.dotMs,
       decimals: d.decimals,
     }
   })())
@@ -521,6 +549,11 @@ export function GluePanel() {
       dispenseRate: storedParams.dispenseRate ?? d.dispenseRate,
       settleMs: storedParams.settleMs ?? d.settleMs,
       postDwellMs: storedParams.postDwellMs ?? d.postDwellMs,
+      leadInMm: storedParams.leadInMm ?? d.leadInMm,
+      leadOutMm: storedParams.leadOutMm ?? d.leadOutMm,
+      volPerDotMm3: storedParams.volPerDotMm3 ?? d.volPerDotMm3,
+      volPerMmMm3: storedParams.volPerMmMm3 ?? d.volPerMmMm3,
+      dotMs: storedParams.dotMs ?? d.dotMs,
       decimals: storedParams.decimals ?? d.decimals,
     }
   }, [storedParams])
@@ -542,6 +575,11 @@ export function GluePanel() {
       dispenseRate: Math.max(0, numOr(v.dispenseRate, prev.dispenseRate ?? params.dispenseRate)),
       settleMs: Math.max(0, numOr(v.settleMs, prev.settleMs ?? params.settleMs)),
       postDwellMs: Math.max(0, numOr(v.postDwellMs, prev.postDwellMs ?? params.postDwellMs)),
+      leadInMm: Math.max(0, numOr(v.leadInMm, prev.leadInMm ?? params.leadInMm)),
+      leadOutMm: Math.max(0, numOr(v.leadOutMm, prev.leadOutMm ?? params.leadOutMm)),
+      volPerDotMm3: Math.max(0, numOr(v.volPerDotMm3, prev.volPerDotMm3 ?? params.volPerDotMm3)),
+      volPerMmMm3: Math.max(0, numOr(v.volPerMmMm3, prev.volPerMmMm3 ?? params.volPerMmMm3)),
+      dotMs: Math.max(0, numOr(v.dotMs, prev.dotMs ?? params.dotMs)),
       decimals: Math.max(0, Math.min(5, Math.round(numOr(v.decimals, prev.decimals ?? params.decimals)))),
     }))
   }
@@ -676,6 +714,12 @@ export function GluePanel() {
   // so the visible counters must say 0 — not the preamble-only lines the
   // emitter still produces for zero shapes.
   const liveLines = shapes.length === 0 ? 0 : lineCount
+  // G3 — total glue volume estimate (mm³). Non-zero only when a volume model is
+  // configured (per-dot volume and/or per-mm bead section). Shown in the status.
+  const volMm3 = useMemo(
+    () => estimateGlueVolume(shapes.map((s) => s.shape), params),
+    [shapes, params],
+  )
 
   // Degenerate dispense: with Dispense-Z at or above Travel-Z the head never
   // descends below travel height, so no real bead is laid down.
@@ -776,7 +820,9 @@ export function GluePanel() {
   const hint =
     tool === 'select'
       ? t('glue.hint.select', 'Drag a shape to move it · Delete removes the selected one')
-      : tool === 'circle'
+      : tool === 'dot'
+        ? t('glue.hint.dot', 'Click to place a glue dot (volume- or time-controlled)')
+        : tool === 'circle'
         ? t('glue.hint.circle', 'Drag from the centre outwards to set the radius')
         : tool === 'line'
           ? t('glue.hint.line', 'Drag from one end of the bead to the other')
@@ -864,6 +910,15 @@ export function GluePanel() {
                   : t('glue.status.shapes', 'shapes'),
             },
             { value: liveLines, unit: t('glue.status.lines', 'G-code lines') },
+            ...(volMm3 > 0
+              ? [
+                  {
+                    value: volMm3.toFixed(1),
+                    unit: t('glue.status.vol', 'mm³ glue'),
+                    title: t('glue.status.vol.title', 'Estimated total glue volume (per-dot volume + per-mm bead cross-section)'),
+                  },
+                ]
+              : []),
           ]}
         />
       </div>
@@ -947,6 +1002,30 @@ export function GluePanel() {
                 const dim = shapeDim(shape, t)
                 return (
                   <g key={id}>
+                    {shape.kind === 'dot' ? (
+                      <>
+                        {/* A dot renders as a filled marker (the path would be a
+                            zero-length, invisible move). The wider invisible circle
+                            is the grab/hit target. */}
+                        <circle
+                          className={tool === 'select' ? 'gp-hit gp-hit-grab' : 'gp-hit'}
+                          cx={shape.x}
+                          cy={sy(shape.y)}
+                          r={5}
+                          onPointerDown={(e) => {
+                            if (tool === 'select') beginMove(e, id, shape)
+                          }}
+                        />
+                        <circle
+                          className={isSel ? 'gp-dot gp-dot-sel' : 'gp-dot'}
+                          cx={shape.x}
+                          cy={sy(shape.y)}
+                          r={2.5}
+                          pointerEvents="none"
+                        />
+                      </>
+                    ) : (
+                      <>
                     {/* Wide transparent hit area so thin lines are easy to grab. */}
                     <path
                       className={tool === 'select' ? 'gp-hit gp-hit-grab' : 'gp-hit'}
@@ -960,6 +1039,8 @@ export function GluePanel() {
                       d={shapePath(shape)}
                       pointerEvents="none"
                     />
+                      </>
+                    )}
                     {/* Tiny live size annotation (brighter for the selected shape). */}
                     <text
                       className={isSel ? 'gp-dim gp-dim-sel' : 'gp-dim'}
@@ -977,7 +1058,11 @@ export function GluePanel() {
               {/* In-progress drag preview */}
               {dragShape && (
                 <>
-                  <path className="gp-shape gp-shape-draft" d={shapePath(dragShape)} />
+                  {dragShape.kind === 'dot' ? (
+                    <circle className="gp-dot gp-dot-sel" cx={dragShape.x} cy={sy(dragShape.y)} r={2.5} />
+                  ) : (
+                    <path className="gp-shape gp-shape-draft" d={shapePath(dragShape)} />
+                  )}
                   {(() => {
                     const dim = shapeDim(dragShape, t)
                     return (
@@ -1073,6 +1158,46 @@ export function GluePanel() {
                     clampX={clampX}
                     clampY={clampY}
                   />
+                </div>
+                {/* Per-shape overrides: G1 area fill (closed shapes) + G4 per-shape
+                    touch-down Z. Both are optional; left unset they follow the
+                    global Dispense Z and trace the outline only. */}
+                <div className="gp-overrides">
+                  {isClosedShape(selectedShape.shape) && (
+                    <label className="gp-override-fill" title={t('glue.override.fill.title', 'Flood the interior with concentric rings (area dispense / potting) instead of tracing only the outline')}>
+                      <input
+                        type="checkbox"
+                        checked={selectedShape.shape.fill === true}
+                        onChange={(e) =>
+                          updateShape(selectedShape.id, { ...selectedShape.shape, fill: e.target.checked || undefined })
+                        }
+                      />
+                      {t('glue.override.fill', 'Area fill')}
+                    </label>
+                  )}
+                  <label className="gp-override-z" title={t('glue.override.z.title', 'Per-shape touch-down Z (mm), overriding the global Dispense Z — for a stepped or uneven workpiece. Clear to follow the global value')}>
+                    <span>{t('glue.override.z', 'Z override')}</span>
+                    <input
+                      type="number"
+                      step={0.1}
+                      placeholder={String(params.dispenseZ)}
+                      value={
+                        typeof selectedShape.shape.dispenseZ === 'number' &&
+                        Number.isFinite(selectedShape.shape.dispenseZ)
+                          ? selectedShape.shape.dispenseZ
+                          : ''
+                      }
+                      onChange={(e) => {
+                        const raw = e.target.value.trim()
+                        const v = parseFloat(raw)
+                        updateShape(selectedShape.id, {
+                          ...selectedShape.shape,
+                          dispenseZ: raw === '' || !Number.isFinite(v) ? undefined : v,
+                        })
+                      }}
+                    />
+                    <span className="gp-override-unit">{t('unit.mm', 'mm')}</span>
+                  </label>
                 </div>
               </div>
             )}
@@ -1186,6 +1311,69 @@ export function GluePanel() {
                   step={50}
                   title={t('glue.field.postDwell.title', 'Dwell (ms) after the dispenser stops, before retracting')}
                   onChange={(v) => setParams({ ...params, postDwellMs: Math.max(0, v) })}
+                />
+                {/* G2 — lead-in / lead-out (anti-blob / anti-tail), open beads only. */}
+                <SliderField
+                  icon={<Icon name="jog" size={14} />}
+                  label={t('glue.field.leadIn', 'Lead-in')}
+                  htmlFor="glue-leadIn"
+                  unit={t('unit.mm', 'mm')}
+                  value={params.leadInMm}
+                  min={0}
+                  max={20}
+                  step={0.5}
+                  title={t('glue.field.leadIn.title', 'Start the dispenser this far before a line bead (along its direction) so glue is flowing at the first point — anti-starve')}
+                  onChange={(v) => setParams({ ...params, leadInMm: Math.max(0, v) })}
+                />
+                <SliderField
+                  icon={<Icon name="jog" size={14} />}
+                  label={t('glue.field.leadOut', 'Lead-out')}
+                  htmlFor="glue-leadOut"
+                  unit={t('unit.mm', 'mm')}
+                  value={params.leadOutMm}
+                  min={0}
+                  max={20}
+                  step={0.5}
+                  title={t('glue.field.leadOut.title', 'After the dispenser stops, drag the tail this far past a line bead end — anti-tail / anti-blob')}
+                  onChange={(v) => setParams({ ...params, leadOutMm: Math.max(0, v) })}
+                />
+                {/* G3 — volume model: per-dot volume → dwell, plus per-mm bead
+                    cross-section for the volume estimate. */}
+                <SliderField
+                  icon={<Icon name="spindle" size={14} />}
+                  label={t('glue.field.volPerDot', 'Vol / dot')}
+                  htmlFor="glue-volPerDot"
+                  unit={t('unit.mm3', 'mm³')}
+                  value={params.volPerDotMm3}
+                  min={0}
+                  max={50}
+                  step={0.5}
+                  title={t('glue.field.volPerDot.title', 'Target glue volume per dot (mm³). Converted via the dispense rate to the dot ON time. 0 = use the Dot ms below')}
+                  onChange={(v) => setParams({ ...params, volPerDotMm3: Math.max(0, v) })}
+                />
+                <SliderField
+                  icon={<Icon name="pause" size={14} />}
+                  label={t('glue.field.dotMs', 'Dot ms')}
+                  htmlFor="glue-dotMs"
+                  unit={t('unit.ms', 'ms')}
+                  value={params.dotMs}
+                  min={0}
+                  max={3000}
+                  step={50}
+                  title={t('glue.field.dotMs.title', 'Fallback dot ON dwell (ms) when no per-dot volume is set')}
+                  onChange={(v) => setParams({ ...params, dotMs: Math.max(0, v) })}
+                />
+                <SliderField
+                  icon={<Icon name="spindle" size={14} />}
+                  label={t('glue.field.volPerMm', 'Vol / mm')}
+                  htmlFor="glue-volPerMm"
+                  unit={t('unit.mm3PerMm', 'mm³/mm')}
+                  value={params.volPerMmMm3}
+                  min={0}
+                  max={10}
+                  step={0.1}
+                  title={t('glue.field.volPerMm.title', 'Bead cross-section (mm³ per mm of bead) — used for the total-volume estimate')}
+                  onChange={(v) => setParams({ ...params, volPerMmMm3: Math.max(0, v) })}
                 />
                 <SliderField
                   icon={<Icon name="settings" size={14} />}

@@ -53,3 +53,7 @@ controllers_3d/*.tmp-*
 # UI/UX audit scratch screenshots
 ui-audit/
 .ui-serve/
+
+# Wave-2 agent raw transcripts (large; keep status md only)
+wave2-logs/*.jsonl
+wave2-logs/*.output

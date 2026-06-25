@@ -25,8 +25,15 @@ import {
   mirrorGerber,
   mirrorExcellon,
   drcCheck,
+  copperPourClear,
+  millHoles as millHolesTp,
+  oversizedHoleCount,
+  originShift,
+  reoriginGerber,
+  reoriginExcellon,
   type DrcIssue,
   type MirrorAxis,
+  type OriginMode,
 } from '../core/pcbCam'
 import { makeRect, BBox, Polyline } from '../core/geometry'
 import { Toolpath, defaultTool } from '../core/toolpath'
@@ -168,6 +175,22 @@ interface Params {
   // P8 — double-sided: mirror the BOTTOM copper/drill about an axis for the flip.
   twoSided: boolean
   mirrorAxis: 'x' | 'y'
+  // P2 — express pass stepover as a fixed mm distance or as a % overlap of the
+  // cutter width (overlap → step = width·(1 − overlap)). Stored alongside the mm.
+  stepoverMode: 'mm' | 'overlap'
+  overlapPct: number // 0..90 (% the next pass overlaps the previous cut width)
+  // P11 — multi-depth isolation + cut direction.
+  isoStepdown: number // depth per isolation pass (mm); 0 = single full-depth pass
+  climb: boolean // true = climb milling (CW); false = conventional (CCW)
+  // P4 — copper-pour / non-copper clearing of the open field between nets.
+  copperClear: boolean
+  copperClearClearance: number // mm gap kept between cutter edge and copper
+  copperClearStepover: number // mm raster stepover
+  // P6 — mill holes that are larger than the drill bit instead of plunge-drilling.
+  millHoles: boolean
+  millOversize: number // mm: mill a hole only if Ø exceeds bit by this margin
+  // P10 — board origin handling (corner/center/keep-positive).
+  origin: 'asis' | 'keepPositive' | 'corner' | 'center'
 }
 
 const DEFAULTS: Params = {
@@ -193,6 +216,16 @@ const DEFAULTS: Params = {
   minDrillBit: 0.3,
   twoSided: false,
   mirrorAxis: 'y',
+  stepoverMode: 'mm',
+  overlapPct: 25,
+  isoStepdown: 0,
+  climb: false,
+  copperClear: false,
+  copperClearClearance: 0.2,
+  copperClearStepover: 0.3,
+  millHoles: false,
+  millOversize: 0.1,
+  origin: 'asis',
 }
 
 interface ParseInfo {
@@ -229,6 +262,11 @@ function parsePcbParams(v: unknown, base: Params): Params {
   if (!isRecord(v)) return base
   const zmode = v.zmode === 'spindle' || v.zmode === 'pen' ? v.zmode : base.zmode
   const mirrorAxis = v.mirrorAxis === 'x' || v.mirrorAxis === 'y' ? v.mirrorAxis : base.mirrorAxis
+  const stepoverMode = v.stepoverMode === 'mm' || v.stepoverMode === 'overlap' ? v.stepoverMode : base.stepoverMode
+  const origin =
+    v.origin === 'asis' || v.origin === 'keepPositive' || v.origin === 'corner' || v.origin === 'center'
+      ? v.origin
+      : base.origin
   return {
     zmode,
     toolDia: numOr(v.toolDia, base.toolDia),
@@ -252,6 +290,16 @@ function parsePcbParams(v: unknown, base: Params): Params {
     minDrillBit: numOr(v.minDrillBit, base.minDrillBit),
     twoSided: typeof v.twoSided === 'boolean' ? v.twoSided : base.twoSided,
     mirrorAxis,
+    stepoverMode,
+    overlapPct: numOr(v.overlapPct, base.overlapPct),
+    isoStepdown: numOr(v.isoStepdown, base.isoStepdown),
+    climb: typeof v.climb === 'boolean' ? v.climb : base.climb,
+    copperClear: typeof v.copperClear === 'boolean' ? v.copperClear : base.copperClear,
+    copperClearClearance: numOr(v.copperClearClearance, base.copperClearClearance),
+    copperClearStepover: numOr(v.copperClearStepover, base.copperClearStepover),
+    millHoles: typeof v.millHoles === 'boolean' ? v.millHoles : base.millHoles,
+    millOversize: numOr(v.millOversize, base.millOversize),
+    origin,
   }
 }
 
@@ -704,6 +752,18 @@ export function PcbPanel() {
     [params.vbit, effCopperZ, params.vbitAngle, params.vbitTip, params.toolDia],
   )
 
+  // P2 — effective per-pass lateral spacing (mm). In 'overlap' mode the step is
+  // derived from the cutter WIDTH so each pass overlaps the previous by the chosen
+  // %: step = width · (1 − overlap). In 'mm' mode the explicit field is used.
+  const effStepover = useMemo(() => {
+    if (params.stepoverMode === 'overlap') {
+      const ov = Math.min(90, Math.max(0, params.overlapPct)) / 100
+      const s = effToolWidth * (1 - ov)
+      return s > 0.01 ? s : 0.01
+    }
+    return params.stepover
+  }, [params.stepoverMode, params.overlapPct, params.stepover, effToolWidth])
+
   function buildToolpath(
     stage: StageId,
     geom: { copper?: GerberData | null; drillData?: ExcellonData | null; outline?: GerberData | null },
@@ -712,6 +772,16 @@ export function PcbPanel() {
     const tool = makeTool()
     const mirror = !!opts.mirror
     const axis: MirrorAxis = params.mirrorAxis
+    // P10 — board re-origin: a single shift derived from the board extents (outline
+    // preferred, else copper) applied identically to copper + drill + outline so
+    // every layer stays registered. 'asis' is a no-op.
+    const originMode: OriginMode = params.origin
+    let originDelta = { x: 0, y: 0 }
+    if (originMode !== 'asis') {
+      const ob = (geom.outline ?? geom.copper ?? geom.drillData)?.bounds()
+      if (ob && ob.isValid()) originDelta = originShift(ob, originMode)
+    }
+    const shiftG = (g: GerberData) => reoriginGerber(g, originDelta)
     // P8 — the flip datum: the mid-line of the board (outline preferred, else the
     // copper being machined) on the mirror axis, so the mirrored bottom registers
     // against the SAME line the operator flips the stock about.
@@ -719,7 +789,7 @@ export function PcbPanel() {
     let mirrorCoord: number | undefined
     if (datumSrc) {
       const b = datumSrc.bounds()
-      if (b.isValid()) mirrorCoord = axis === 'y' ? b.center().x : b.center().y
+      if (b.isValid()) mirrorCoord = (axis === 'y' ? b.center().x : b.center().y) + (axis === 'y' ? originDelta.x : originDelta.y)
     }
     let tp: Toolpath
     if (stage === 'isolation') {
@@ -730,14 +800,48 @@ export function PcbPanel() {
             'Assign a Copper Top/Bottom layer (or load a Gerber) for isolation routing.',
           ),
         }
-      const copper = mirror ? mirrorGerber(geom.copper, axis, mirrorCoord) : geom.copper
-      tp = isolationRoutes(copper, tool, params.safeZ, effCopperZ, params.passes, params.stepover)
+      let copper = shiftG(geom.copper)
+      copper = mirror ? mirrorGerber(copper, axis, mirrorCoord) : copper
+      // P11 — multi-depth + climb/conventional; P2 — overlap/mm stepover.
+      tp = isolationRoutes(copper, tool, params.safeZ, effCopperZ, params.passes, effStepover, true, {
+        stepdown: params.isoStepdown,
+        climb: params.climb,
+      })
+      // P4 — optionally clear the non-copper field (copper pour) after isolating.
+      if (params.copperClear) {
+        let outlinePoly: Polyline | null = null
+        if (geom.outline) {
+          const ol = mirror ? mirrorGerber(shiftG(geom.outline), axis, mirrorCoord) : shiftG(geom.outline)
+          outlinePoly = boardOutlinePolygon(ol)
+        }
+        const clearTp = copperPourClear(copper, tool, params.safeZ, effCopperZ, outlinePoly, {
+          clearanceMm: params.copperClearClearance,
+          stepoverMm: params.copperClearStepover,
+          stepdown: params.isoStepdown,
+        })
+        for (const m of clearTp.moves) tp.append(m)
+      }
     } else if (stage === 'drill') {
       if (!geom.drillData)
         return {
           error: t('pcb.error.assignDrill', 'Assign a Drill layer (or load an Excellon file) for drilling.'),
         }
-      const drillData = mirror ? mirrorExcellon(geom.drillData, axis, mirrorCoord) : geom.drillData
+      let drillData = reoriginExcellon(geom.drillData, originDelta)
+      drillData = mirror ? mirrorExcellon(drillData, axis, mirrorCoord) : drillData
+      // P6 — split oversized holes off to a milling pass; the rest plunge-drill.
+      let millOnly: ExcellonData | null = null
+      if (params.millHoles) {
+        const big = new ExcellonData()
+        const small = new ExcellonData()
+        for (const h of drillData.hits) {
+          if (h.diameter > params.toolDia + params.millOversize) big.hits.push(h)
+          else small.hits.push(h)
+        }
+        if (big.hits.length > 0) {
+          millOnly = big
+          drillData = small
+        }
+      }
       if (params.drillGroup) {
         // P5 — one travel-optimised sub-path per drill bit, concatenated in
         // ascending Ø order with the bit annotated. (The All-stages run inserts an
@@ -752,16 +856,25 @@ export function PcbPanel() {
       } else {
         tp = drillHits(drillData, params.safeZ, params.drillZ, params.peckDepth)
       }
+      // P6 — append the milled-bore pass for holes bigger than the bit.
+      if (millOnly && millOnly.hits.length > 0) {
+        const mtp = millHolesTp(millOnly, params.toolDia, params.safeZ, params.drillZ, {
+          minOversizeMm: params.millOversize,
+          stepdown: params.isoStepdown,
+        })
+        for (const m of mtp.moves) tp.append(m)
+      }
     } else {
       // Cutout: prefer an assigned Board Outline layer; fall back to copper.
-      const source = geom.outline ?? geom.copper
-      if (!source)
+      const source0 = geom.outline ?? geom.copper
+      if (!source0)
         return {
           error: t(
             'pcb.error.assignOutline',
             'Assign a Board Outline or Copper layer to derive the cutout outline.',
           ),
         }
+      const source = shiftG(source0)
       // Use the real outline polygon (stitched from the edge-cuts traces/region)
       // when we can derive one; otherwise fall back to the bounding rectangle.
       const src = mirror ? mirrorGerber(source, axis, mirrorCoord) : source
@@ -1054,6 +1167,12 @@ export function PcbPanel() {
   const drillGroups = useMemo(
     () => (resolved.drillData ? groupDrillHits(resolved.drillData) : []),
     [resolved],
+  )
+
+  // P6 — holes bigger than the bit (which a small mill must ROUT, not plunge).
+  const oversizedCount = useMemo(
+    () => (resolved.drillData ? oversizedHoleCount(resolved.drillData, params.toolDia, params.millOversize) : 0),
+    [resolved, params.toolDia, params.millOversize],
   )
 
   // P12 — DRC-lite: cheap pre-flight checks (copper gap vs cutter width, tiny
@@ -1862,16 +1981,29 @@ export function PcbPanel() {
                           max={8}
                           step={1}
                         />
-                        <SliderField
-                          label={t('pcb.advanced.passStepover', 'Pass stepover')}
-                          htmlFor="pcb-iso-step"
-                          unit="mm"
-                          value={params.stepover}
-                          onChange={(n) => set('stepover', Math.max(0.05, n))}
-                          min={0.05}
-                          max={1}
-                          step={0.05}
-                        />
+                        {params.stepoverMode === 'overlap' ? (
+                          <SliderField
+                            label={t('pcb.p2.overlap', 'Pass overlap')}
+                            htmlFor="pcb-iso-overlap"
+                            unit="%"
+                            value={params.overlapPct}
+                            onChange={(n) => set('overlapPct', Math.min(90, Math.max(0, n)))}
+                            min={0}
+                            max={90}
+                            step={5}
+                          />
+                        ) : (
+                          <SliderField
+                            label={t('pcb.advanced.passStepover', 'Pass stepover')}
+                            htmlFor="pcb-iso-step"
+                            unit="mm"
+                            value={params.stepover}
+                            onChange={(n) => set('stepover', Math.max(0.05, n))}
+                            min={0.05}
+                            max={1}
+                            step={0.05}
+                          />
+                        )}
                         {params.vbit ? (
                           <>
                             <SliderField
@@ -1934,6 +2066,86 @@ export function PcbPanel() {
                             z: Math.abs(effCopperZ).toFixed(3),
                             w: vbitWidthAtDepth(Math.abs(effCopperZ), params.vbitAngle, params.vbitTip).toFixed(3),
                           })}
+                        </p>
+                      )}
+                      {/* P2 stepover mode + P11 direction */}
+                      <div className="pcb-op-toggles">
+                        <SegControl<'mm' | 'overlap'>
+                          ariaLabel={t('pcb.p2.modeAria', 'Stepover mode')}
+                          value={params.stepoverMode}
+                          onChange={(v) => set('stepoverMode', v)}
+                          options={[
+                            { value: 'mm', label: t('pcb.p2.mm', 'Stepover mm') },
+                            { value: 'overlap', label: t('pcb.p2.overlapMode', 'Overlap %') },
+                          ]}
+                        />
+                        <SegControl<'conv' | 'climb'>
+                          ariaLabel={t('pcb.p11.dirAria', 'Cut direction')}
+                          value={params.climb ? 'climb' : 'conv'}
+                          onChange={(v) => set('climb', v === 'climb')}
+                          options={[
+                            { value: 'conv', label: t('pcb.p11.conventional', 'Conventional') },
+                            { value: 'climb', label: t('pcb.p11.climb', 'Climb') },
+                          ]}
+                        />
+                      </div>
+                      {params.stepoverMode === 'overlap' && (
+                        <p className="pcb-hint">
+                          {t('pcb.p2.overlapReadout', '≈ {mm} mm step (over a {w} mm cut).', {
+                            mm: effStepover.toFixed(3),
+                            w: effToolWidth.toFixed(3),
+                          })}
+                        </p>
+                      )}
+                      {/* P11 multi-depth */}
+                      <div className="cc-sgrid pcb-op-params">
+                        <SliderField
+                          label={t('pcb.p11.stepdown', 'Depth per pass (0 = single)')}
+                          htmlFor="pcb-iso-sd"
+                          unit="mm"
+                          value={params.isoStepdown}
+                          onChange={(n) => set('isoStepdown', Math.max(0, n))}
+                          min={0}
+                          max={0.3}
+                          step={0.01}
+                        />
+                      </div>
+                      {/* P4 copper-pour / non-copper clearing */}
+                      <label className="pcb-check pcb-op-check">
+                        <input
+                          type="checkbox"
+                          checked={params.copperClear}
+                          onChange={(e) => set('copperClear', e.target.checked)}
+                        />
+                        <span>{t('pcb.p4.enable', 'Clear copper pour (mill the non-copper field)')}</span>
+                      </label>
+                      {params.copperClear && (
+                        <div className="cc-sgrid pcb-op-params">
+                          <SliderField
+                            label={t('pcb.p4.clearance', 'Keep-out from copper')}
+                            htmlFor="pcb-cc-clr"
+                            unit="mm"
+                            value={params.copperClearClearance}
+                            onChange={(n) => set('copperClearClearance', Math.max(0, n))}
+                            min={0}
+                            max={2}
+                            step={0.05}
+                          />
+                          <SliderField
+                            label={t('pcb.p4.stepover', 'Clear stepover')}
+                            htmlFor="pcb-cc-step"
+                            unit="mm"
+                            value={params.copperClearStepover}
+                            onChange={(n) => set('copperClearStepover', Math.max(0.05, n))}
+                            min={0.05}
+                            max={2}
+                            step={0.05}
+                          />
+                        </div>
+                      )}
+                      {params.copperClear && (
+                        <p className="pcb-hint">
+                          {t('pcb.p4.hint', 'Removes the open ground-plane field so only isolated copper remains. Slow — uses the same bit and copper Z.')}
                         </p>
                       )}
                     </>
@@ -2034,6 +2246,39 @@ export function PcbPanel() {
                           {t('pcb.drillGroup.readout', 'Bits: {list}', {
                             list: drillGroups.map((g) => `Ø${g.diameter.toFixed(2)} ×${g.hits.length}`).join(', '),
                           })}
+                        </p>
+                      )}
+                      {/* P6 — mill holes bigger than the bit. */}
+                      <label className="pcb-check pcb-op-check">
+                        <input
+                          type="checkbox"
+                          checked={params.millHoles}
+                          onChange={(e) => set('millHoles', e.target.checked)}
+                        />
+                        <span>{t('pcb.p6.enable', 'Mill holes bigger than the bit ({n})', { n: oversizedCount })}</span>
+                      </label>
+                      {params.millHoles && (
+                        <div className="cc-sgrid pcb-op-params">
+                          <SliderField
+                            label={t('pcb.p6.oversize', 'Mill if Ø over bit by')}
+                            htmlFor="pcb-mill-over"
+                            unit="mm"
+                            value={params.millOversize}
+                            onChange={(n) => set('millOversize', Math.max(0, n))}
+                            min={0}
+                            max={2}
+                            step={0.05}
+                          />
+                        </div>
+                      )}
+                      {params.millHoles && (
+                        <p className="pcb-hint">
+                          {oversizedCount > 0
+                            ? t('pcb.p6.readout', '{n} oversized hole(s) will be milled out (spiralled) with the {dia} mm bit; the rest plunge-drill.', {
+                                n: oversizedCount,
+                                dia: params.toolDia.toFixed(2),
+                              })
+                            : t('pcb.p6.none', 'No holes exceed the bit Ø by the threshold — all will plunge-drill.')}
                         </p>
                       )}
                     </>
@@ -2196,10 +2441,24 @@ export function PcbPanel() {
                 <input type="number" step="0.5" min="0" value={params.safeZ} onChange={num('safeZ', 0)} />
               </Field>
             </div>
+            {/* P10 — board origin handling (mm/inch is auto-detected on import). */}
+            <Field label={t('pcb.p10.origin', 'Board origin')}>
+              <SegControl<'asis' | 'keepPositive' | 'corner' | 'center'>
+                ariaLabel={t('pcb.p10.origin', 'Board origin')}
+                value={params.origin}
+                onChange={(v) => set('origin', v)}
+                options={[
+                  { value: 'asis', label: t('pcb.p10.asis', 'As-is') },
+                  { value: 'keepPositive', label: t('pcb.p10.keepPositive', 'Keep +') },
+                  { value: 'corner', label: t('pcb.p10.corner', 'Corner') },
+                  { value: 'center', label: t('pcb.p10.center', 'Center') },
+                ]}
+              />
+            </Field>
             <p className="pcb-hint">
               {t(
                 'pcb.essentials.hint',
-                'These apply to every operation. Fine-tune passes, depths and feeds under Advanced.',
+                'These apply to every operation. Units (mm/inch) are auto-detected from the Gerber/Excellon header. Fine-tune passes, depths and feeds under Advanced.',
               )}
             </p>
           </div>

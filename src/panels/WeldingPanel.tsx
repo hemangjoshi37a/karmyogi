@@ -104,6 +104,11 @@ function defaultParams(): PersistParams {
     arcPower: d.arcPower,
     preFlowSeconds: d.preFlowSeconds,
     postFlowSeconds: d.postFlowSeconds,
+    craterSeconds: d.craterSeconds,
+    passes: d.passes,
+    passOffset: d.passOffset,
+    tackCount: d.tackCount,
+    tackSeconds: d.tackSeconds,
     decimals: d.decimals,
   }
 }
@@ -121,6 +126,7 @@ const VALID_PATTERNS: WeavePattern[] = [
   WeavePattern.Zigzag,
   WeavePattern.Sine,
   WeavePattern.Circular,
+  WeavePattern.Figure8,
 ]
 
 /** Weave-pattern options for the per-object segmented selector (value + i18n). */
@@ -129,6 +135,7 @@ const WEAVE_OPTIONS: { value: WeavePattern; key: string; label: string }[] = [
   { value: WeavePattern.Zigzag, key: 'weld.pattern.zigzag', label: 'Zigzag' },
   { value: WeavePattern.Sine, key: 'weld.pattern.sine', label: 'Sine' },
   { value: WeavePattern.Circular, key: 'weld.pattern.circular', label: 'Circular' },
+  { value: WeavePattern.Figure8, key: 'weld.pattern.figure8', label: 'Fig-8' },
 ]
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -168,6 +175,9 @@ function parseObject(v: unknown): WeldObject | null {
       pattern: patternOr(v.pattern, base.pattern),
       amplitude: numOr(v.amplitude, base.amplitude),
       patternSpeed: numOr(v.patternSpeed, base.patternSpeed),
+      edgeDwell: Math.max(0, numOr(v.edgeDwell, base.edgeDwell ?? 0)),
+      wireFeedSpeed: Math.max(0, numOr(v.wireFeedSpeed, base.wireFeedSpeed ?? 0)),
+      voltage: Math.max(0, numOr(v.voltage, base.voltage ?? 0)),
     }
   }
   if (v.kind === 'line') {
@@ -181,6 +191,9 @@ function parseObject(v: unknown): WeldObject | null {
       pattern: patternOr(v.pattern, base.pattern),
       amplitude: numOr(v.amplitude, base.amplitude),
       patternSpeed: numOr(v.patternSpeed, base.patternSpeed),
+      edgeDwell: Math.max(0, numOr(v.edgeDwell, base.edgeDwell ?? 0)),
+      wireFeedSpeed: Math.max(0, numOr(v.wireFeedSpeed, base.wireFeedSpeed ?? 0)),
+      voltage: Math.max(0, numOr(v.voltage, base.voltage ?? 0)),
     }
   }
   return null
@@ -200,6 +213,11 @@ function parseWeldParams(v: unknown, base: PersistParams): PersistParams {
     arcPower: numOr(v.arcPower, base.arcPower),
     preFlowSeconds: numOr(v.preFlowSeconds, base.preFlowSeconds),
     postFlowSeconds: numOr(v.postFlowSeconds, base.postFlowSeconds),
+    craterSeconds: Math.max(0, numOr(v.craterSeconds, base.craterSeconds)),
+    passes: Math.max(1, Math.floor(numOr(v.passes, base.passes))),
+    passOffset: numOr(v.passOffset, base.passOffset),
+    tackCount: Math.max(0, Math.floor(numOr(v.tackCount, base.tackCount))),
+    tackSeconds: Math.max(0, numOr(v.tackSeconds, base.tackSeconds)),
     decimals: clampDecimals(numOr(v.decimals, base.decimals)),
   }
 }
@@ -866,6 +884,85 @@ export function WeldingPanel() {
                   body: t('weld.field.postFlow.body', 'Gas dwell (G4 P) after the arc stops, before retract. 0 = none.'),
                 }}
               />
+              <SliderField
+                label={t('weld.field.crater', 'Crater fill')}
+                unit={t('unit.s', 's')}
+                min={0}
+                max={10}
+                step={0.1}
+                value={params.craterSeconds}
+                onChange={(n) => setParams((p) => ({ ...p, craterSeconds: n }))}
+                info={{
+                  title: t('weld.field.crater', 'Crater fill'),
+                  body: t('weld.field.crater.body', 'After the bead, hold the arc in place (G4) before M5 to fill the end crater and avoid a crack-prone bead end. 0 = none.'),
+                }}
+              />
+            </div>
+          </div>
+
+          {/* WE2/WE3 — passes + tack welds. */}
+          <div className="wp-card">
+            <div className="wp-card-head">
+              <h4><Icon name="frame" size={14} className="cam-card-ico" /> {t('weld.passes.title', 'Passes & tacks')}</h4>
+              <InfoTip
+                topic="weldPasses"
+                title={t('weld.passes.title', 'Passes & tacks')}
+                body={t('weld.passes.body', 'Lay multiple beads over each object (root → fill → cap), each raised by the per-pass Z offset. Optional tack welds deposit short stationary spots first to hold the joint.')}
+              />
+            </div>
+            <div className="wp-fields wp-sfields">
+              <SliderField
+                label={t('weld.field.passes', 'Passes')}
+                min={1}
+                max={10}
+                step={1}
+                value={params.passes}
+                parse={intNum}
+                onChange={(n) => setParams((p) => ({ ...p, passes: Math.max(1, Math.floor(n)) }))}
+                info={{
+                  title: t('weld.field.passes', 'Passes'),
+                  body: t('weld.field.passes.body', 'Number of beads laid over each object. The first is the root, the last the cap, the rest fill.'),
+                }}
+              />
+              <SliderField
+                label={t('weld.field.passOffset', 'Per-pass Z')}
+                unit={t('unit.mm', 'mm')}
+                min={0}
+                max={10}
+                step={0.1}
+                value={params.passOffset}
+                onChange={(n) => setParams((p) => ({ ...p, passOffset: n }))}
+                info={{
+                  title: t('weld.field.passOffset', 'Per-pass Z build-up'),
+                  body: t('weld.field.passOffset.body', 'Each pass after the first is raised by this much so the bead stacks up. 0 keeps every pass on the same plane.'),
+                }}
+              />
+              <SliderField
+                label={t('weld.field.tackCount', 'Tacks')}
+                min={0}
+                max={20}
+                step={1}
+                value={params.tackCount}
+                parse={intNum}
+                onChange={(n) => setParams((p) => ({ ...p, tackCount: Math.max(0, Math.floor(n)) }))}
+                info={{
+                  title: t('weld.field.tackCount', 'Tack welds'),
+                  body: t('weld.field.tackCount.body', 'Short stationary tacks deposited at evenly-spaced points along each object BEFORE the bead pass(es), to hold the joint. 0 = none.'),
+                }}
+              />
+              <SliderField
+                label={t('weld.field.tackSec', 'Tack dwell')}
+                unit={t('unit.s', 's')}
+                min={0}
+                max={10}
+                step={0.1}
+                value={params.tackSeconds}
+                onChange={(n) => setParams((p) => ({ ...p, tackSeconds: n }))}
+                info={{
+                  title: t('weld.field.tackSec', 'Tack dwell'),
+                  body: t('weld.field.tackSec.body', 'How long the arc is held at each tack point (seconds).'),
+                }}
+              />
             </div>
           </div>
         </section>
@@ -1111,6 +1208,49 @@ function ObjectCard(props: {
           info={{
             title: t('weld.weave.patSpeed', 'Pattern speed'),
             body: t('weld.weave.patSpeed.body', 'A second, independent speed (mm/min) that sets how fast the weave oscillates. Density = pattern-speed ÷ travel-speed: higher pattern speed packs more cycles per mm (denser weave), lower stretches them out (scattered).'),
+          }}
+        />
+        {/* WE1 — edge dwell at the weave side-walls (toes). */}
+        {obj.pattern !== WeavePattern.Straight && obj.pattern !== WeavePattern.Circular && (
+          <SliderField
+            label={t('weld.weave.edgeDwell', 'Edge dwell')}
+            unit={t('unit.s', 's')}
+            min={0}
+            max={5}
+            step={0.05}
+            value={obj.edgeDwell ?? 0}
+            onChange={(n) => onUpdate({ edgeDwell: Math.max(0, n) })}
+            info={{
+              title: t('weld.weave.edgeDwell', 'Edge dwell'),
+              body: t('weld.weave.edgeDwell.body', 'A pause (G4) at each transverse extreme of the weave (the bead toes) for better side-wall fusion. 0 = none.'),
+            }}
+          />
+        )}
+        {/* WE4 — per-segment process parameters (WFS + voltage). */}
+        <SliderField
+          label={t('weld.weave.wfs', 'Wire feed')}
+          unit={t('unit.mmPerMin', 'mm/min')}
+          min={0}
+          max={15000}
+          step={50}
+          value={obj.wireFeedSpeed ?? 0}
+          onChange={(n) => onUpdate({ wireFeedSpeed: Math.max(0, n) })}
+          info={{
+            title: t('weld.weave.wfs', 'Wire feed speed (WFS)'),
+            body: t('weld.weave.wfs.body', 'Wire-feed speed for this object (mm/min). Recorded with the bead and emitted as a comment for the process post. 0 = unspecified.'),
+          }}
+        />
+        <SliderField
+          label={t('weld.weave.voltage', 'Voltage')}
+          unit={t('unit.volts', 'V')}
+          min={0}
+          max={50}
+          step={0.5}
+          value={obj.voltage ?? 0}
+          onChange={(n) => onUpdate({ voltage: Math.max(0, n) })}
+          info={{
+            title: t('weld.weave.voltage', 'Arc voltage'),
+            body: t('weld.weave.voltage.body', 'Arc voltage for this object (V). Recorded with the bead and emitted as a comment. 0 = unspecified.'),
           }}
         />
       </div>

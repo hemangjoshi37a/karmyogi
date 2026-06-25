@@ -322,6 +322,25 @@
   font-weight: 600;
 }
 
+/* A glue DOT marker — a filled accent disc; the selected one fills with --fg.
+   (The wide invisible .gp-hit circle around it provides a comfortable grab
+   target, overriding the path-oriented pointer-events for the circle element.) */
+.gp-dot {
+  fill: var(--accent);
+  stroke: none;
+}
+.gp-dot-sel {
+  fill: var(--fg);
+  stroke: var(--accent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+circle.gp-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: fill;
+}
+
 /* (The former in-canvas empty-state prompt was removed — the single empty state
    now lives in the Shapes card's <CamEmpty>, per W-I "show one". The .gp-hint
    line below is a contextual tool hint, not a duplicate "nothing here" prompt.) */
@@ -473,6 +492,41 @@
 .gp-dim-readout .gp-dim-size {
   color: var(--fg);
   font-weight: 600;
+}
+
+/* Per-shape overrides row (area fill toggle + per-shape Z) under the editor. */
+.gp-overrides {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.gp-override-fill,
+.gp-override-z {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 36px;
+}
+.gp-override-fill input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.gp-override-z input {
+  width: 5.5ch;
+  height: var(--ctl-h);
+  padding: 0 4px;
+  background: var(--surface-2, var(--surface));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  font-variant-numeric: tabular-nums;
+}
+.gp-override-unit {
+  color: var(--fg-muted);
 }
 
 /* Compact field grid: fields pack left tightly and wrap naturally, never

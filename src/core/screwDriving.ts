@@ -55,6 +55,31 @@ export interface ScrewDrivingParams {
   seatDwellSec: number;
   /** Default per-point screwing depth (mm, negative = into the work). */
   defaultDepth: number;
+
+  // ---- SC1: torque + insertion-depth target + abort-on-fault --------------
+  /**
+   * Target torque (N·cm) for the driver clutch — recorded + emitted as a comment
+   * so a torque-controlled driver / external controller can act on it. GRBL has
+   * no torque feedback, so this is documentary (and feeds the driver's own
+   * clutch setting). 0 = not specified.
+   */
+  targetTorque: number;
+  /**
+   * After driving, PROBE the seated depth with G38.2 toward the target depth at
+   * `probeFeed` to verify the screw actually reached depth (part-present /
+   * insertion-depth check). The controller halts on a failed probe (no contact),
+   * giving abort-on-fault behaviour. Off by default (needs a Z probe input).
+   */
+  verifyDepth: boolean;
+  /** Probe feed for the verify-depth G38.2 move (mm/min). */
+  probeFeed: number;
+  /**
+   * Pause (M0) at each point after seating so an operator (or a torque/vision
+   * station) can confirm the screw before continuing — a manual abort-on-fault
+   * gate. Off by default (a continuous run does not stop).
+   */
+  pauseEachScrew: boolean;
+
   /** Decimal places in emitted coordinates (0..6). */
   decimals: number;
   programName: string;
@@ -75,6 +100,10 @@ export function defaultScrewDrivingParams(
     approachFeed: 200.0,
     seatDwellSec: 0.3,
     defaultDepth: -6.0,
+    targetTorque: 0.0,
+    verifyDepth: false,
+    probeFeed: 50.0,
+    pauseEachScrew: false,
     decimals: 3,
     programName: 'hjLabs Screw-Driving',
     ...overrides,
@@ -119,6 +148,7 @@ export function generateScrewDriving(
   const safeZ = Math.max(0, p.safeZ);
   const pushF = fmt(Math.max(1, p.pushFeed), d); // F0 stalls GRBL
   const approachF = fmt(Math.max(1, p.approachFeed), d);
+  const probeF = fmt(Math.max(1, p.probeFeed), d);
   const driverS = fmt(Math.max(0, p.driverRPM), d);
   const pickDwell = fmt(Math.max(0, p.pickDwellSec), d);
   const seatDwell = fmt(Math.max(0, p.seatDwellSec), d);
@@ -135,6 +165,7 @@ export function generateScrewDriving(
   o.push('G90');
   o.push('G94');
   o.push('G17');
+  if (p.targetTorque > 0) o.push(`(Target torque: ${fmt(p.targetTorque, 2)} N.cm — set on the driver clutch)`);
   o.push('M5'); // driver off to start
   o.push(safeZStr); // guaranteed safe height first
 
@@ -161,7 +192,19 @@ export function generateScrewDriving(
     o.push(`G1 Z${fmt(depth, d)} F${pushF}`); // push + drive to depth
     o.push(`G4 P${seatDwell}`); // dwell so the screw seats
     o.push('M5'); // stop the driver
+    // SC1: verify the screw reached depth — probe toward depth; the controller
+    // halts on a failed probe (no contact ⇒ screw stripped / not seated).
+    if (p.verifyDepth) {
+      o.push(`(verify insertion depth — halts on a failed probe)`);
+      o.push(`G38.2 Z${fmt(depth, d)} F${probeF}`);
+    }
     o.push(safeZStr); // retract to safe height
+    // SC1/SC2: optional gate — pause so an operator / torque / vision station can
+    // confirm this screw before the run continues (manual abort-on-fault).
+    if (p.pauseEachScrew) {
+      o.push(`(pause — confirm screw ${n} seated, then resume)`);
+      o.push('M0');
+    }
   }
 
   // ---- Footer -----------------------------------------------------------

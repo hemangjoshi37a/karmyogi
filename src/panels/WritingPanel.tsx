@@ -13,6 +13,12 @@ import {
 } from '../core/textPocket'
 import { outlineContoursToCenterlines } from '../core/centerline'
 import {
+  optimizePenPaths,
+  estimatePlotTime,
+  formatDuration,
+  type OptimizeOptions,
+} from '../core/penOptimize'
+import {
   BUILTIN_ENTRY,
   detectKindByName,
   loadCatalogFont,
@@ -218,6 +224,15 @@ interface WritingDoc {
   underline: boolean
   fontId: string
   genMode: GenMode
+  optMerge?: boolean
+  optSort?: boolean
+  optSimplifyTol?: number
+  optDedupe?: boolean
+  optOcclude?: boolean
+  optReloop?: boolean
+  passes?: number
+  travelFeed?: number
+  penChangeSec?: number
 }
 
 /**
@@ -242,11 +257,16 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 function strokesToGcode(
   strokes: Polyline[],
   origin: { x: number; y: number },
-  pen: { penUpZ: number; penDownZ: number; feedXY: number },
-): string {
+  pen: { penUpZ: number; penDownZ: number; feedXY: number; travelFeed?: number; penChangeSec?: number },
+  optimize?: OptimizeOptions,
+): { gcode: string; paths: Polyline[]; seconds: number } {
+  // W1–W9: run the selected pen-path optimizations (merge/sort/simplify/dedupe/
+  // multipass/occlusion/reloop) BEFORE emitting so the toolpath reflects the
+  // minimized pen-up travel and bolder passes.
+  const optimized = optimize ? optimizePenPaths(strokes, optimize) : strokes
   const tp = new Toolpath()
   tp.name = 'Writing'
-  for (const pl of strokes) {
+  for (const pl of optimized) {
     if (pl.points.length < 2) continue
     const first = pl.points[0]
     tp.rapid({ x: first.x + origin.x, y: first.y + origin.y, z: 0 })
@@ -267,7 +287,23 @@ function strokesToGcode(
     useSpindle: false,
     feedXY: pen.feedXY,
   })
-  return emitter.emitProgram(tp)
+  // W9: plot-time estimate over the SAME ordered, origin-offset motion.
+  const placed = optimized
+    .filter((pl) => pl.points.length >= 2)
+    .map((pl) => {
+      const c = pl.clone()
+      for (const p of c.points) {
+        p.x += origin.x
+        p.y += origin.y
+      }
+      return c
+    })
+  const est = estimatePlotTime(placed, {
+    feedXY: pen.feedXY,
+    travelFeed: pen.travelFeed,
+    penChangeSec: pen.penChangeSec,
+  })
+  return { gcode: emitter.emitProgram(tp), paths: placed, seconds: est.seconds }
 }
 
 /** Carve / Relief milling parameters (mm; feeds mm/min; rpm). */
@@ -374,6 +410,20 @@ export function WritingPanel() {
   const [carveSafeZ, setCarveSafeZ] = usePersistentState('karmyogi.writing.carveSafeZ', 5)
   const [carveStrokeWidth, setCarveStrokeWidth] = usePersistentState('karmyogi.writing.strokeWidth', 1.5)
   const [carveMargin, setCarveMargin] = usePersistentState('karmyogi.writing.margin', 4)
+
+  // Pen-path optimization (W1–W9) params (persisted). Applied to pen modes only.
+  const [optMerge, setOptMerge] = usePersistentState('karmyogi.writing.opt.merge', true)
+  const [optSort, setOptSort] = usePersistentState('karmyogi.writing.opt.sort', true)
+  const [optSimplifyTol, setOptSimplifyTol] = usePersistentState('karmyogi.writing.opt.simplifyTol', 0.05)
+  const [optDedupe, setOptDedupe] = usePersistentState('karmyogi.writing.opt.dedupe', true)
+  const [optOcclude, setOptOcclude] = usePersistentState('karmyogi.writing.opt.occlude', false)
+  const [optReloop, setOptReloop] = usePersistentState('karmyogi.writing.opt.reloop', false)
+  const [passes, setPasses] = usePersistentState('karmyogi.writing.opt.passes', 1)
+  const [travelFeed, setTravelFeed] = usePersistentState('karmyogi.writing.travelFeed', 3000)
+  const [penChangeSec, setPenChangeSec] = usePersistentState('karmyogi.writing.penChangeSec', 0.3)
+  const [showOpt, setShowOpt] = usePersistentState('karmyogi.writing.opt.show', false)
+  // W9: last plot-time estimate (seconds), shown in the Optimize header.
+  const [plotSeconds, setPlotSeconds] = useState(0)
 
   // Styling (persisted).
   const [bold, setBold] = usePersistentState('karmyogi.writing.bold', false)
@@ -646,11 +696,23 @@ export function WritingPanel() {
       charHeight * (lineSpacing > 0 ? lineSpacing : 1.5),
     )
 
-    const gcode = strokesToGcode(
+    const optimizeOpts: OptimizeOptions = {
+      simplifyTol: optSimplifyTol,
+      dedupeTol: optDedupe ? 0.01 : 0,
+      merge: optMerge,
+      occlusion: optOcclude,
+      reloop: optReloop,
+      sort: optSort,
+      startAt: { x: originX, y: originY },
+      passes,
+    }
+    const { gcode, paths: optPaths, seconds } = strokesToGcode(
       styled,
       { x: originX, y: originY },
-      { penUpZ, penDownZ, feedXY: feed },
+      { penUpZ, penDownZ, feedXY: feed, travelFeed, penChangeSec },
+      optimizeOpts,
     )
+    setPlotSeconds(seconds)
     setProgram(WRITING_SECTION, gcode)
 
     const modeLabel =
@@ -660,8 +722,9 @@ export function WritingPanel() {
     let msg = t(
       'writing.info.generatedMode',
       '{mode}: {strokes} path(s), {lines} line(s) → Visualizer.',
-      { mode: modeLabel, strokes: styled.length, lines: lineCount },
+      { mode: modeLabel, strokes: optPaths.length, lines: lineCount },
     )
+    msg += ' ' + t('writing.info.plotTime', '~{time} plot.', { time: formatDuration(seconds) })
     if (centerlineFromOutline)
       msg += ' ' + t('writing.info.centerline', '(centerline derived from the font outline)')
     if (effectiveMode !== genMode)
@@ -687,6 +750,8 @@ export function WritingPanel() {
     fontName, setProgram, builtinStroke,
     carveTool, carveDepth, carveStepdown, carveStepover, carveFeed, carvePlunge,
     carveRpm, carveSafeZ, carveStrokeWidth, carveMargin,
+    optMerge, optSort, optSimplifyTol, optDedupe, optOcclude, optReloop, passes,
+    travelFeed, penChangeSec,
   ])
 
   // Live G-code: always regenerate ~300ms after the last change and push to the
@@ -820,6 +885,8 @@ export function WritingPanel() {
   const doc: WritingDoc = {
     text, charHeight, lineSpacing, letterSpacing, originX, originY, align,
     penUpZ, penDownZ, feed, bold, italic, underline, fontId, genMode,
+    optMerge, optSort, optSimplifyTol, optDedupe, optOcclude, optReloop,
+    passes, travelFeed, penChangeSec,
   }
 
   // Apply a loaded document. `data` is untrusted: validate every field and keep
@@ -845,6 +912,15 @@ export function WritingPanel() {
       if (typeof data.bold === 'boolean') setBold(data.bold)
       if (typeof data.italic === 'boolean') setItalic(data.italic)
       if (typeof data.underline === 'boolean') setUnderline(data.underline)
+      if (typeof data.optMerge === 'boolean') setOptMerge(data.optMerge)
+      if (typeof data.optSort === 'boolean') setOptSort(data.optSort)
+      if (isNum(data.optSimplifyTol)) setOptSimplifyTol(data.optSimplifyTol)
+      if (typeof data.optDedupe === 'boolean') setOptDedupe(data.optDedupe)
+      if (typeof data.optOcclude === 'boolean') setOptOcclude(data.optOcclude)
+      if (typeof data.optReloop === 'boolean') setOptReloop(data.optReloop)
+      if (isNum(data.passes)) setPasses(Math.max(1, Math.round(data.passes)))
+      if (isNum(data.travelFeed)) setTravelFeed(data.travelFeed)
+      if (isNum(data.penChangeSec)) setPenChangeSec(data.penChangeSec)
       if (
         data.genMode === 'stroke' ||
         data.genMode === 'outline' ||
@@ -864,7 +940,8 @@ export function WritingPanel() {
     },
     [t, setText, setCharHeight, setLineSpacing, setLetterSpacing, setOriginX, setOriginY,
       setAlign, setPenUpZ, setPenDownZ, setFeed, setBold, setItalic, setUnderline,
-      setGenMode, setFontId],
+      setGenMode, setFontId, setOptMerge, setOptSort, setOptSimplifyTol, setOptDedupe,
+      setOptOcclude, setOptReloop, setPasses, setTravelFeed, setPenChangeSec],
   )
 
   // ---- color-coded setting PRESETS (text / font / layout) -------------------
@@ -1362,6 +1439,126 @@ export function WritingPanel() {
             )}
           </div>
         </section>
+
+        {/* ---- Optimize (pen-path passes) — pen modes only ---- */}
+        {!isPocketMode(genMode) && (
+        <section className="wr-card wr-span ui-card">
+          <button
+            type="button"
+            className="wr-opt-head ui-sec-head"
+            onClick={() => setShowOpt(!showOpt)}
+            aria-expanded={showOpt}
+          >
+            <span>
+              <span className="ui-caret">
+                <Icon name={showOpt ? 'chevron-down' : 'chevron-right'} size={12} />
+              </span>{' '}
+              {t('writing.opt.title', 'Optimize')}
+            </span>
+            {plotSeconds > 0 && (
+              <span className="wr-opt-time" title={t('writing.opt.timeTip', 'Estimated plot time (feed-rate based, includes pen lifts).')}>
+                ~{formatDuration(plotSeconds)}
+              </span>
+            )}
+          </button>
+          {showOpt && (
+          <div className="wr-card-body">
+            {/* W1/W2/W7/W8: pass toggles */}
+            <div className="wr-opt-toggles" role="group" aria-label={t('writing.opt.passes', 'Optimization passes')}>
+              <button
+                type="button"
+                className={'wr-tgl wr-opt-tgl' + (optMerge ? ' is-active' : '')}
+                aria-pressed={optMerge}
+                onClick={() => setOptMerge(!optMerge)}
+                title={t('writing.opt.merge.tip', 'Merge: join paths whose endpoints touch into longer continuous strokes (fewer pen lifts).')}
+              >{t('writing.opt.merge', 'Merge')}</button>
+              <button
+                type="button"
+                className={'wr-tgl wr-opt-tgl' + (optSort ? ' is-active' : '')}
+                aria-pressed={optSort}
+                onClick={() => setOptSort(!optSort)}
+                title={t('writing.opt.sort.tip', 'Sort: reorder strokes (nearest-neighbour) to minimize pen-up travel between them.')}
+              >{t('writing.opt.sort', 'Sort')}</button>
+              <button
+                type="button"
+                className={'wr-tgl wr-opt-tgl' + (optDedupe ? ' is-active' : '')}
+                aria-pressed={optDedupe}
+                onClick={() => setOptDedupe(!optDedupe)}
+                title={t('writing.opt.dedupe.tip', 'Dedupe: drop coincident/overlapping duplicate vertices.')}
+              >{t('writing.opt.dedupe', 'Dedupe')}</button>
+              <button
+                type="button"
+                className={'wr-tgl wr-opt-tgl' + (optOcclude ? ' is-active' : '')}
+                aria-pressed={optOcclude}
+                onClick={() => setOptOcclude(!optOcclude)}
+                title={t('writing.opt.occlude.tip', 'Hidden-line removal: erase the parts of earlier strokes covered by later closed shapes.')}
+              >{t('writing.opt.occlude', 'Hide hidden')}</button>
+              <button
+                type="button"
+                className={'wr-tgl wr-opt-tgl' + (optReloop ? ' is-active' : '')}
+                aria-pressed={optReloop}
+                onClick={() => setOptReloop(!optReloop)}
+                title={t('writing.opt.reloop.tip', 'Reloop: randomize the start point (seam) of closed shapes so the start/stop blob moves around.')}
+              >{t('writing.opt.reloop', 'Reloop')}</button>
+            </div>
+            <div className="wr-sliders">
+              {/* W2: simplify tolerance */}
+              <WrSlider
+                icon={<span className="wr-glyph">~</span>}
+                label={t('writing.opt.simplify', 'Simplify')}
+                htmlFor="wr-opt-simplify"
+                unit="mm"
+                min={0}
+                max={2}
+                step={0.01}
+                value={optSimplifyTol}
+                onChange={setOptSimplifyTol}
+                title={t('writing.opt.simplify.tip', 'Douglas-Peucker tolerance: drop vertices within this distance of the simplified line. 0 = off.')}
+              />
+              {/* W3: multipass */}
+              <WrSlider
+                icon={<span className="wr-glyph">≡</span>}
+                label={t('writing.opt.passesLbl', 'Passes')}
+                htmlFor="wr-opt-passes"
+                unit="×"
+                min={1}
+                max={8}
+                step={1}
+                value={passes}
+                onChange={(n) => setPasses(Math.max(1, Math.round(n)))}
+                title={t('writing.opt.passesLbl.tip', 'Draw each stroke this many times for bolder, darker lines (pen stays down between passes).')}
+              />
+              {/* W5: travel (pen-up) feed */}
+              <WrSlider
+                icon={<Icon name="upload" size={14} />}
+                label={t('writing.travelFeed', 'Travel feed')}
+                htmlFor="wr-travel-feed"
+                unit="mm/min"
+                min={100}
+                max={12000}
+                step={100}
+                value={travelFeed}
+                onChange={setTravelFeed}
+                title={t('writing.travelFeed.tip', 'Pen-up (rapid travel) feed rate — used for the plot-time estimate.')}
+              />
+              {/* W5: pen lift/lower time (dead-slow) for the estimate */}
+              <WrSlider
+                icon={<Icon name="download" size={14} />}
+                label={t('writing.penChange', 'Pen lift time')}
+                htmlFor="wr-pen-change"
+                unit="s"
+                min={0}
+                max={3}
+                step={0.05}
+                value={penChangeSec}
+                onChange={setPenChangeSec}
+                title={t('writing.penChange.tip', 'Time the pen takes to lift + lower per stroke ("dead slow") — added to the plot-time estimate.')}
+              />
+            </div>
+          </div>
+          )}
+        </section>
+        )}
 
         {/* ---- Placement — origin sliders ---- */}
         <section className="wr-card ui-card">

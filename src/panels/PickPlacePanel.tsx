@@ -28,12 +28,19 @@ import { usePresets } from '../components/presets/usePresets'
 import {
   defaultPnpOp,
   defaultPnpParams,
+  defaultFeeder,
+  defaultNozzleTip,
+  defaultPart,
   generatePickPlace,
   newPnpOpId,
   type PnpHeadType,
   type PnpOp,
   type PnpParams,
+  type PnpFeeder,
+  type PnpNozzleTip,
+  type PnpPart,
 } from '../core/pickPlace'
+import { expandArray } from '../core/arrayDuplicate'
 import { CamEmpty, CamStatus } from '../components/cam/CamUI'
 import { SegControl } from '../components/ui/SegControl'
 import '../styles/pickplace.css'
@@ -111,6 +118,14 @@ function parsePnpParams(v: unknown, base: PanelParams): PanelParams {
     pickDwellMs: numOr(v.pickDwellMs, base.pickDwellMs),
     placeDwellMs: numOr(v.placeDwellMs, base.placeDwellMs),
     rotaryAxis: boolOr(v.rotaryAxis, base.rotaryAxis),
+    blowOff: boolOr(v.blowOff, base.blowOff),
+    blowOffMs: numOr(v.blowOffMs, base.blowOffMs),
+    partPresentCheck: boolOr(v.partPresentCheck, base.partPresentCheck),
+    parkAtEnd: boolOr(v.parkAtEnd, base.parkAtEnd),
+    parkX: numOr(v.parkX, base.parkX),
+    parkY: numOr(v.parkY, base.parkY),
+    discardX: numOr(v.discardX, base.discardX),
+    discardY: numOr(v.discardY, base.discardY),
     decimals: numOr(v.decimals, base.decimals),
   }
 }
@@ -325,6 +340,14 @@ export function PickPlacePanel() {
         pickDwellMs: d.pickDwellMs,
         placeDwellMs: d.placeDwellMs,
         rotaryAxis: d.rotaryAxis,
+        blowOff: d.blowOff,
+        blowOffMs: d.blowOffMs,
+        partPresentCheck: d.partPresentCheck,
+        parkAtEnd: d.parkAtEnd,
+        parkX: d.parkX,
+        parkY: d.parkY,
+        discardX: d.discardX,
+        discardY: d.discardY,
         decimals: d.decimals,
       }
     })(),
@@ -378,6 +401,54 @@ export function PickPlacePanel() {
   }
   const setParam = <K extends keyof PanelParams>(key: K, value: PanelParams[K]) =>
     setParams((p) => ({ ...p, [key]: value }))
+
+  // ---- PP7: panelization (array the whole op set across identical boards) ----
+  const [showPanel, setShowPanel] = useState(false)
+  const [panRows, setPanRows] = usePersistentState('karmyogi.pnp.pan.rows', 2)
+  const [panCols, setPanCols] = usePersistentState('karmyogi.pnp.pan.cols', 2)
+  const [panSpX, setPanSpX] = usePersistentState('karmyogi.pnp.pan.spX', 50)
+  const [panSpY, setPanSpY] = usePersistentState('karmyogi.pnp.pan.spY', 50)
+  // Panelize: each board is a copy of the current op set translated by the panel
+  // pitch. Only the PLACE points are arrayed (parts still come from the same
+  // feeders/pick points); the pick stays fixed while the place steps per board.
+  function applyPanelize() {
+    if (ops.length === 0) return
+    const src = ops.map((op) => ({ x: op.placeX, y: op.placeY, meta: op }))
+    const res = expandArray(src, {
+      kind: 'linear',
+      rows: Math.max(1, Math.floor(panRows)),
+      cols: Math.max(1, Math.floor(panCols)),
+      spacingX: panSpX,
+      spacingY: panSpY,
+    })
+    const next: PnpOp[] = res.points.map((p) => {
+      const base = p.meta as PnpOp
+      return { ...base, id: newPnpOpId(), placeX: p.x, placeY: p.y }
+    })
+    setOps(next)
+    setSelected(-1)
+    setShowPanel(false)
+  }
+
+  // ---- PP1/PP2/PP5: parts / feeder / nozzle library (self-contained) --------
+  const [showLibrary, setShowLibrary] = useState(false)
+  const [feeders, setFeeders] = usePersistentState<PnpFeeder[]>('karmyogi.pnp.feeders', [])
+  const [nozzles, setNozzles] = usePersistentState<PnpNozzleTip[]>('karmyogi.pnp.nozzles', [])
+  const [parts, setParts] = usePersistentState<PnpPart[]>('karmyogi.pnp.parts', [])
+  // Seed a pick→place op straight from a feeder's pick location (PP2 tie-in): the
+  // pick comes from the feeder, the place from the current machine pos / origin.
+  function addOpFromFeeder(f: PnpFeeder) {
+    const op = defaultPnpOp({
+      pickX: f.pickX,
+      pickY: f.pickY,
+      placeX: connected ? wpos.x : f.pickX,
+      placeY: connected ? wpos.y : f.pickY,
+    })
+    if (f.pickRot) op.rotation = f.pickRot
+    setOps((p) => [...p, op])
+    setSelected(ops.length)
+    setShowLibrary(false)
+  }
 
   // ---- color-coded setting PRESETS (motion / head params only) -------------
   // A preset snapshots the GENERATOR SETTINGS (head + Z heights + feeds + grip +
@@ -577,6 +648,19 @@ export function PickPlacePanel() {
               body={setBody('place')}
             />
             <span className="pp-tools-sep" aria-hidden="true" />
+            <ToolButton
+              glyph={<Grip size={16} />}
+              onClick={() => setShowLibrary(true)}
+              title={t('pnp.library', 'Library')}
+              body={t('pnp.library.body', 'Parts, feeders and nozzle tips. Add an op straight from a feeder pick location.')}
+            />
+            <ToolButton
+              glyph={<Icon name="duplicate" />}
+              onClick={() => setShowPanel(true)}
+              disabled={ops.length === 0}
+              title={t('pnp.panelize', 'Panelize')}
+              body={t('pnp.panelize.body', 'Array the whole op set across a rows × cols panel of identical boards (PP7).')}
+            />
             <ToolButton
               glyph={<Settings size={16} />}
               onClick={() => setShowSettings(true)}
@@ -942,6 +1026,152 @@ export function PickPlacePanel() {
       </div>
     </div>
 
+      {/* PP7 — panelization modal. */}
+      <Modal open={showPanel} title={t('pnp.panelize', 'Panelize')} onClose={() => setShowPanel(false)}>
+        <p className="pp-hint">
+          {t('pnp.panelize.intro', 'Repeat the {n}-op board across a rows × cols panel. Place points step per board; pick points stay on the feeders.', { n: ops.length })}
+        </p>
+        <div className="pnp-sgrid">
+          <SliderField icon={<Hash size={15} />} label={t('pnp.panel.rows', 'Rows')} min={1} max={20} step={1}
+            value={panRows} onChange={(n) => setPanRows(Math.max(1, Math.floor(n)))} />
+          <SliderField icon={<Hash size={15} />} label={t('pnp.panel.cols', 'Cols')} min={1} max={20} step={1}
+            value={panCols} onChange={(n) => setPanCols(Math.max(1, Math.floor(n)))} />
+          <SliderField icon={<ArrowUpToLine size={15} />} label={t('pnp.panel.spX', 'Pitch X')} unit={t('unit.mm', 'mm')} min={0} max={Math.max(bedW, 400)} step={1}
+            value={panSpX} onChange={(n) => setPanSpX(n)} />
+          <SliderField icon={<ArrowUpToLine size={15} />} label={t('pnp.panel.spY', 'Pitch Y')} unit={t('unit.mm', 'mm')} min={0} max={Math.max(bedH, 400)} step={1}
+            value={panSpY} onChange={(n) => setPanSpY(n)} />
+        </div>
+        <p className="pp-hint">
+          {t('pnp.panel.result', '→ {n} operations', { n: ops.length * Math.max(1, Math.floor(panRows)) * Math.max(1, Math.floor(panCols)) })}
+        </p>
+        <div className="pp-modal-foot">
+          <button type="button" className="pp-modal-cancel" onClick={() => setShowPanel(false)}>
+            {t('pnp.panel.cancel', 'Cancel')}
+          </button>
+          <button type="button" className="cam-primary" onClick={applyPanelize}>
+            {t('pnp.panel.apply', 'Panelize')}
+          </button>
+        </div>
+      </Modal>
+
+      {/* PP1/PP2/PP5 — parts / feeders / nozzle-tip library. */}
+      <Modal open={showLibrary} title={t('pnp.library', 'Library')} onClose={() => setShowLibrary(false)} width={620}>
+        <div className="pp-lib">
+          {/* Feeders */}
+          <section className="pp-lib-sec">
+            <div className="pp-lib-head">
+              <h4>{t('pnp.lib.feeders', 'Feeders')}</h4>
+              <button type="button" className="cam-primary pp-lib-add" onClick={() => setFeeders((f) => [...f, defaultFeeder()])}>
+                <Icon name="add" size={13} /> {t('pnp.lib.addFeeder', 'Add feeder')}
+              </button>
+            </div>
+            {feeders.length === 0 && <p className="pp-hint">{t('pnp.lib.noFeeders', 'No feeders yet. Add a tape / tube / tray feeder with a pick location.')}</p>}
+            {feeders.map((f, i) => (
+              <div className="pp-lib-row" key={f.id}>
+                <input className="pp-lib-name" value={f.name} aria-label={t('pnp.lib.name', 'Name')}
+                  onChange={(e) => setFeeders((arr) => arr.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                <SegControl<PnpFeeder['type']>
+                  options={[
+                    { value: 'tape', label: t('pnp.lib.tape', 'Tape') },
+                    { value: 'tube', label: t('pnp.lib.tube', 'Tube') },
+                    { value: 'tray', label: t('pnp.lib.tray', 'Tray') },
+                  ]}
+                  value={f.type}
+                  onChange={(v) => setFeeders((arr) => arr.map((x, j) => (j === i ? { ...x, type: v } : x)))}
+                  ariaLabel={t('pnp.lib.feederType', 'Feeder type')}
+                  variant="tonal" size="sm"
+                />
+                <label className="pp-lib-mini"><span>{t('pnp.col.pickX', 'Pick X')}</span>
+                  <input type="number" step="0.1" value={f.pickX}
+                    onChange={(e) => setFeeders((arr) => arr.map((x, j) => (j === i ? { ...x, pickX: num(e.target.value, x.pickX) } : x)))} /></label>
+                <label className="pp-lib-mini"><span>{t('pnp.col.pickY', 'Pick Y')}</span>
+                  <input type="number" step="0.1" value={f.pickY}
+                    onChange={(e) => setFeeders((arr) => arr.map((x, j) => (j === i ? { ...x, pickY: num(e.target.value, x.pickY) } : x)))} /></label>
+                <label className="pp-lib-mini"><span>{t('pnp.lib.rot', 'Rot°')}</span>
+                  <input type="number" step="5" value={f.pickRot}
+                    onChange={(e) => setFeeders((arr) => arr.map((x, j) => (j === i ? { ...x, pickRot: num(e.target.value, x.pickRot) } : x)))} /></label>
+                {f.type === 'tape' && (
+                  <label className="pp-lib-mini"><span>{t('pnp.lib.pitch', 'Pitch')}</span>
+                    <input type="number" step="1" value={f.tapePitch}
+                      onChange={(e) => setFeeders((arr) => arr.map((x, j) => (j === i ? { ...x, tapePitch: num(e.target.value, x.tapePitch) } : x)))} /></label>
+                )}
+                <label className="pp-lib-mini"><span>{t('pnp.lib.count', 'Count')}</span>
+                  <input type="number" step="1" value={f.count}
+                    onChange={(e) => setFeeders((arr) => arr.map((x, j) => (j === i ? { ...x, count: num(e.target.value, x.count) } : x)))} /></label>
+                <button type="button" className="pp-lib-use" onClick={() => addOpFromFeeder(f)} title={t('pnp.lib.use', 'Add op from this feeder')}>
+                  <Crosshair size={14} />
+                </button>
+                <button type="button" className="pp-lib-del" onClick={() => setFeeders((arr) => arr.filter((_, j) => j !== i))} aria-label={t('pnp.row.delete', 'Delete')}>
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+            ))}
+          </section>
+
+          {/* Nozzle tips */}
+          <section className="pp-lib-sec">
+            <div className="pp-lib-head">
+              <h4>{t('pnp.lib.nozzles', 'Nozzle tips')}</h4>
+              <button type="button" className="cam-primary pp-lib-add" onClick={() => setNozzles((n) => [...n, defaultNozzleTip()])}>
+                <Icon name="add" size={13} /> {t('pnp.lib.addNozzle', 'Add nozzle')}
+              </button>
+            </div>
+            {nozzles.length === 0 && <p className="pp-hint">{t('pnp.lib.noNozzles', 'No nozzle tips yet. Add a tip with its ⌀ and calibration offset.')}</p>}
+            {nozzles.map((nz, i) => (
+              <div className="pp-lib-row" key={nz.id}>
+                <input className="pp-lib-name" value={nz.name} aria-label={t('pnp.lib.name', 'Name')}
+                  onChange={(e) => setNozzles((arr) => arr.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                <label className="pp-lib-mini"><span>{t('pnp.lib.dia', '⌀')}</span>
+                  <input type="number" step="0.1" value={nz.diameter}
+                    onChange={(e) => setNozzles((arr) => arr.map((x, j) => (j === i ? { ...x, diameter: num(e.target.value, x.diameter) } : x)))} /></label>
+                <label className="pp-lib-mini"><span>{t('pnp.lib.offX', 'Off X')}</span>
+                  <input type="number" step="0.05" value={nz.offsetX}
+                    onChange={(e) => setNozzles((arr) => arr.map((x, j) => (j === i ? { ...x, offsetX: num(e.target.value, x.offsetX) } : x)))} /></label>
+                <label className="pp-lib-mini"><span>{t('pnp.lib.offY', 'Off Y')}</span>
+                  <input type="number" step="0.05" value={nz.offsetY}
+                    onChange={(e) => setNozzles((arr) => arr.map((x, j) => (j === i ? { ...x, offsetY: num(e.target.value, x.offsetY) } : x)))} /></label>
+                <label className="pp-lib-mini"><span>{t('pnp.lib.offZ', 'Off Z')}</span>
+                  <input type="number" step="0.05" value={nz.offsetZ}
+                    onChange={(e) => setNozzles((arr) => arr.map((x, j) => (j === i ? { ...x, offsetZ: num(e.target.value, x.offsetZ) } : x)))} /></label>
+                <button type="button" className="pp-lib-del" onClick={() => setNozzles((arr) => arr.filter((_, j) => j !== i))} aria-label={t('pnp.row.delete', 'Delete')}>
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+            ))}
+          </section>
+
+          {/* Parts */}
+          <section className="pp-lib-sec">
+            <div className="pp-lib-head">
+              <h4>{t('pnp.lib.parts', 'Parts')}</h4>
+              <button type="button" className="cam-primary pp-lib-add" onClick={() => setParts((p) => [...p, defaultPart()])}>
+                <Icon name="add" size={13} /> {t('pnp.lib.addPart', 'Add part')}
+              </button>
+            </div>
+            {parts.length === 0 && <p className="pp-hint">{t('pnp.lib.noParts', 'No parts yet. Add a component value / package.')}</p>}
+            {parts.map((pt, i) => (
+              <div className="pp-lib-row" key={pt.id}>
+                <input className="pp-lib-name" value={pt.name} aria-label={t('pnp.lib.name', 'Name')}
+                  onChange={(e) => setParts((arr) => arr.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                <input className="pp-lib-name" value={pt.value ?? ''} placeholder={t('pnp.lib.value', 'value')} aria-label={t('pnp.lib.value', 'value')}
+                  onChange={(e) => setParts((arr) => arr.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                <button type="button" className="pp-lib-del" onClick={() => setParts((arr) => arr.filter((_, j) => j !== i))} aria-label={t('pnp.row.delete', 'Delete')}>
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+            ))}
+          </section>
+
+          {/* PP3/PP4 — vision scaffold (camera homography lives in cameraCalib.ts). */}
+          <section className="pp-lib-sec">
+            <h4>{t('pnp.lib.vision', 'Vision (top / bottom)')}</h4>
+            <p className="pp-hint">
+              {t('pnp.lib.visionTodo', 'Top fiducial alignment and bottom part-centering use the shared camera calibration. TODO: wire the fiducial-capture affine + nozzle-centering offset once the camera pipeline is connected to this panel.')}
+            </p>
+          </section>
+        </div>
+      </Modal>
+
       {/* Settings modal: the Motion & {action} params plus the Advanced
           (dwell / rotation / decimals) params, surfaced from the gear toolbar
           button so the main view shows only Operations + Bed preview. */}
@@ -1130,12 +1360,154 @@ export function PickPlacePanel() {
                 {t('pnp.rot.note', 'Rotation is edited per-op in the Operations table.')}
               </p>
 
-              <p className="pp-hint">
-                {t(
-                  'pnp.hint',
-                  'Speed here is the feed rate only. Acceleration is a global machine setting ($120–$122, set in the Motion / Probe panels) and is not written here.',
-                )}
-              </p>
+              {/* PP6 — vacuum part-present sensing + blow-off. */}
+              <div className="pp-rotrow">
+                <span className="pnp-seg-rowlbl">
+                  <Crosshair size={14} aria-hidden="true" />
+                  {t('pnp.partPresent.label', 'Part-present check')}
+                  <InfoTip
+                    topic="pnpField"
+                    title={t('pnp.partPresent.label', 'Part-present check')}
+                    body={t('pnp.partPresent.body', 'After picking, probe (G38.4) expecting no contact to confirm a part is held on the nozzle. The controller halts if the part is missing. Needs a probe / vacuum-sense input.')}
+                  />
+                </span>
+                <SegControl<'off' | 'on'>
+                  options={[
+                    { value: 'off', label: t('pnp.off', 'Off') },
+                    { value: 'on', label: t('pnp.on', 'On') },
+                  ]}
+                  value={params.partPresentCheck ? 'on' : 'off'}
+                  onChange={(v) => setParam('partPresentCheck', v === 'on')}
+                  ariaLabel={t('pnp.partPresent.label', 'Part-present check')}
+                  variant="tonal"
+                  size="sm"
+                  className="pnp-seg pnp-seg-bool"
+                />
+              </div>
+              {params.headType === 'vacuum' && (
+                <div className="pp-rotrow">
+                  <span className="pnp-seg-rowlbl">
+                    <Wind size={14} aria-hidden="true" />
+                    {t('pnp.blowOff.label', 'Blow-off')}
+                    <InfoTip
+                      topic="pnpField"
+                      title={t('pnp.blowOff.label', 'Blow-off')}
+                      body={t('pnp.blowOff.body', 'After releasing, pulse positive air (M8 → dwell → M9) so the part does not cling to the nozzle.')}
+                    />
+                  </span>
+                  <SegControl<'off' | 'on'>
+                    options={[
+                      { value: 'off', label: t('pnp.off', 'Off') },
+                      { value: 'on', label: t('pnp.on', 'On') },
+                    ]}
+                    value={params.blowOff ? 'on' : 'off'}
+                    onChange={(v) => setParam('blowOff', v === 'on')}
+                    ariaLabel={t('pnp.blowOff.label', 'Blow-off')}
+                    variant="tonal"
+                    size="sm"
+                    className="pnp-seg pnp-seg-bool"
+                  />
+                </div>
+              )}
+              {params.blowOff && params.headType === 'vacuum' && (
+                <div className="pnp-sgrid">
+                  <SliderField
+                    icon={<Timer size={15} />}
+                    label={t('pnp.f.blowOffMs', 'Blow-off')}
+                    unit={t('unit.ms', 'ms')}
+                    min={0}
+                    max={1000}
+                    step={25}
+                    value={params.blowOffMs}
+                    onChange={(n) => setParam('blowOffMs', Math.max(0, n))}
+                    info={{
+                      title: t('pnp.f.blowOffMs', 'Blow-off duration'),
+                      body: t('pnp.f.blowOffMs.body', 'Positive-air pulse duration after release.'),
+                    }}
+                  />
+                </div>
+              )}
+          </section>
+
+          {/* PP8 — park + discard locations. */}
+          <section className="pp-settings-group">
+            <h4>{t('pnp.park.title', 'Park & discard')}</h4>
+            <div className="pp-rotrow">
+              <span className="pnp-seg-rowlbl">
+                <MapPin size={14} aria-hidden="true" />
+                {t('pnp.park.atEnd', 'Park at end')}
+                <InfoTip
+                  topic="pnpField"
+                  title={t('pnp.park.atEnd', 'Park at end')}
+                  body={t('pnp.park.atEnd.body', 'Move the head to a safe park location after the last placement (at program end).')}
+                />
+              </span>
+              <SegControl<'off' | 'on'>
+                options={[
+                  { value: 'off', label: t('pnp.off', 'Off') },
+                  { value: 'on', label: t('pnp.on', 'On') },
+                ]}
+                value={params.parkAtEnd ? 'on' : 'off'}
+                onChange={(v) => setParam('parkAtEnd', v === 'on')}
+                ariaLabel={t('pnp.park.atEnd', 'Park at end')}
+                variant="tonal"
+                size="sm"
+                className="pnp-seg pnp-seg-bool"
+              />
+            </div>
+            <div className="pnp-sgrid">
+              <SliderField
+                icon={<ArrowUpToLine size={15} />}
+                label={t('pnp.f.parkX', 'Park X')}
+                unit={t('unit.mm', 'mm')}
+                min={0}
+                max={Math.max(bedW, 400)}
+                step={1}
+                value={params.parkX}
+                onChange={(n) => setParam('parkX', n)}
+              />
+              <SliderField
+                icon={<ArrowUpToLine size={15} />}
+                label={t('pnp.f.parkY', 'Park Y')}
+                unit={t('unit.mm', 'mm')}
+                min={0}
+                max={Math.max(bedH, 400)}
+                step={1}
+                value={params.parkY}
+                onChange={(n) => setParam('parkY', n)}
+              />
+              <SliderField
+                icon={<MapPin size={15} />}
+                label={t('pnp.f.discardX', 'Discard X')}
+                unit={t('unit.mm', 'mm')}
+                min={0}
+                max={Math.max(bedW, 400)}
+                step={1}
+                value={params.discardX}
+                onChange={(n) => setParam('discardX', n)}
+                info={{
+                  title: t('pnp.f.discardX', 'Discard location X'),
+                  body: t('pnp.discard.body', 'Where a failed / unrecognised part is dropped (documentary — used by the operator / future reject flow).'),
+                }}
+              />
+              <SliderField
+                icon={<MapPin size={15} />}
+                label={t('pnp.f.discardY', 'Discard Y')}
+                unit={t('unit.mm', 'mm')}
+                min={0}
+                max={Math.max(bedH, 400)}
+                step={1}
+                value={params.discardY}
+                onChange={(n) => setParam('discardY', n)}
+              />
+            </div>
+
+            <p className="pp-hint">
+              {t(
+                'pnp.hint',
+                'Speed here is the feed rate only. Acceleration is a global machine setting ($120–$122, set in the Motion / Probe panels) and is not written here.',
+              )}
+            </p>
           </section>
         </div>
       </Modal>

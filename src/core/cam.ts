@@ -19,6 +19,13 @@ export interface CamParams {
   surfaceZ: number; // top surface of the stock (mm)
   cutDepth: number; // total depth to remove, >= 0; floor = surfaceZ - cutDepth
   // Depth per pass comes from tool.stepdown; <= 0 means a single full-depth pass.
+  /**
+   * C12 · Stock-to-leave (mm): a finishing allowance kept on the wall. A profile
+   * leaves this much extra material on the cut side (offset by tool radius +
+   * this), a pocket inset shrinks by it, so a later finishing pass can clean it
+   * up. 0 (default) cuts to size. Applied as an XY offset only.
+   */
+  stockToLeave?: number;
 }
 
 export function defaultCamParams(overrides: Partial<CamParams> = {}): CamParams {
@@ -105,6 +112,7 @@ export function profile(contour: Polyline, side: ProfileSide, p: CamParams): Too
     return tp;
   }
 
+  const stl = Math.max(0, p.stockToLeave ?? 0); // C12 finishing allowance (mm)
   let path: Polyline;
   switch (side) {
     case ProfileSide.On:
@@ -112,10 +120,12 @@ export function profile(contour: Polyline, side: ProfileSide, p: CamParams): Too
       path.closed = true;
       break;
     case ProfileSide.Outside:
-      path = offsetPolygon(contour, +toolRadius(p.tool));
+      // Leave stock OUTSIDE the part: offset further out so the wall is oversize.
+      path = offsetPolygon(contour, +(toolRadius(p.tool) + stl));
       break;
     case ProfileSide.Inside:
-      path = offsetPolygon(contour, -toolRadius(p.tool));
+      // Leave stock on the inner wall: don't cut as far in.
+      path = offsetPolygon(contour, -(toolRadius(p.tool) + stl));
       break;
     default:
       // Unknown/legacy side value — degrade safely to ON (follow the contour)
@@ -344,7 +354,10 @@ export function pocket(boundary: Polyline, p: CamParams): Toolpath {
   if (!boundary.closed || boundary.points.length < 3) return tp;
 
   const step = Math.max(kEpsilon, p.tool.stepover) * p.tool.diameter;
-  const rings = insetRings(boundary, toolRadius(p.tool), step);
+  // C12 · stock-to-leave: start the first ring further in so the wall keeps a
+  // finishing allowance for a later pass.
+  const stl = Math.max(0, p.stockToLeave ?? 0);
+  const rings = insetRings(boundary, toolRadius(p.tool) + stl, step);
   if (rings.length === 0) return tp;
 
   const levels = depthLevels(p);

@@ -27,8 +27,15 @@ import {
 } from '../core/vectorize'
 import { Toolpath } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
+import {
+  optimizePenPaths,
+  modulateStrokes,
+  estimatePlotTime,
+  formatDuration,
+} from '../core/penOptimize'
 import { useProgram, useMachine, usePersistentState } from '../store'
 import { grbl } from '../serial/controller'
+import { arrayTransforms } from '../core/arrayDuplicate'
 import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
 import { useTabCommands } from '../machine/tabCommands'
 import { IconButton } from '../components/IconButton'
@@ -201,6 +208,17 @@ interface SignatureSettings {
   penUpZ: number
   penDownZ: number
   feed: number
+  optMerge?: boolean
+  optSort?: boolean
+  optSimplify?: number
+  passes?: number
+  s1Smooth?: number
+  s1Pressure?: number
+  arrayRows?: number
+  arrayCols?: number
+  arrayGapX?: number
+  arrayGapY?: number
+  travelFeed?: number
 }
 
 /**
@@ -335,6 +353,20 @@ export function SignaturePanel() {
   const [feed, setFeed] = usePersistentState('karmyogi.sig.feed', 1500)
   const [showAdvanced, setShowAdvanced] = usePersistentState('karmyogi.sig.showAdvanced', false)
   const [showRaw, setShowRaw] = usePersistentState('karmyogi.sig.showRaw', false)
+  const [showOpt, setShowOpt] = usePersistentState('karmyogi.sig.showOpt', false)
+  // ---- W1/W2 path optimization + S1 modulation + S2 batch array ----
+  const [optMerge, setOptMerge] = usePersistentState('karmyogi.sig.optMerge', true)
+  const [optSort, setOptSort] = usePersistentState('karmyogi.sig.optSort', true)
+  const [optSimplify, setOptSimplify] = usePersistentState('karmyogi.sig.optSimplify', 0.05)
+  const [passes, setPasses] = usePersistentState('karmyogi.sig.passes', 1)
+  const [s1Smooth, setS1Smooth] = usePersistentState('karmyogi.sig.s1Smooth', 0)
+  const [s1Pressure, setS1Pressure] = usePersistentState('karmyogi.sig.s1Pressure', 0)
+  const [arrayRows, setArrayRows] = usePersistentState('karmyogi.sig.arrayRows', 1)
+  const [arrayCols, setArrayCols] = usePersistentState('karmyogi.sig.arrayCols', 1)
+  const [arrayGapX, setArrayGapX] = usePersistentState('karmyogi.sig.arrayGapX', 10)
+  const [arrayGapY, setArrayGapY] = usePersistentState('karmyogi.sig.arrayGapY', 10)
+  const [travelFeed, setTravelFeed] = usePersistentState('karmyogi.sig.travelFeed', 3000)
+  const [plotSeconds, setPlotSeconds] = useState(0)
 
   const [raster, setRaster] = useState<Raster | null>(null)
   const [info, setInfo] = useState(() => t('sig.info.draw', 'Sign in the box above with your mouse, stylus, or finger.'))
@@ -382,9 +414,8 @@ export function SignaturePanel() {
     }
   }, [t])
 
-  // Build mm-space polylines for the active mode, then emit pen G-code and push
-  // it to the store. Returns the polylines (empty if there's nothing to plot).
-  const buildPolys = useCallback((): Polyline[] => {
+  // Build the BASE mm-space polylines for the active mode (before optimization).
+  const buildBasePolys = useCallback((): Polyline[] => {
     if (mode === 'draw') {
       // Strokes are already normalized 0..1, so the mm conversion no longer
       // reads the (possibly-zero) live surface size — just scales into the box.
@@ -405,6 +436,55 @@ export function SignaturePanel() {
   }, [
     mode, strokes, drawW, drawH,
     raster, threshold, invert, tolerance, targetW, targetH, lockAspect,
+  ])
+
+  // Build the FINAL plot polylines: base geometry → S1 stroke modulation (less
+  // mechanical) → W1/W2/W3 path optimization → S2 batch-sign array. All passes
+  // are pure and emitter-safe (they only reshape/reorder XY geometry).
+  const buildPolys = useCallback((): Polyline[] => {
+    let polys = buildBasePolys()
+    if (polys.length === 0) return []
+    // S1 — pressure/speed-modulated replay (smoothing + pressure taper).
+    if (s1Smooth > 0 || s1Pressure > 0) {
+      polys = modulateStrokes(polys, { smoothing: s1Smooth, pressure: s1Pressure })
+    }
+    // W1/W2/W3 — merge touching ends, dedupe, simplify, sort to cut pen-up
+    // travel, then multipass for bolder lines.
+    polys = optimizePenPaths(polys, {
+      simplifyTol: optSimplify,
+      dedupeTol: 0.01,
+      merge: optMerge,
+      sort: optSort,
+      startAt: { x: 0, y: 0 },
+      passes,
+    })
+    // S2 — batch-sign array (rows × cols). A 1×1 array is the identity, so this
+    // is a no-op unless the operator asks for a grid. Bounding-box width/height
+    // set the per-cell pitch (signature size + the requested gap).
+    const rows = Math.max(1, Math.round(arrayRows))
+    const cols = Math.max(1, Math.round(arrayCols))
+    if (rows > 1 || cols > 1) {
+      const b = polysBounds(polys)
+      const spacingX = b.w + Math.max(0, arrayGapX)
+      const spacingY = b.h + Math.max(0, arrayGapY)
+      const transforms = arrayTransforms({
+        kind: 'linear', rows, cols, spacingX, spacingY,
+      })
+      const tiled: Polyline[] = []
+      for (const tr of transforms) {
+        for (const pl of polys) {
+          const c = new Polyline()
+          c.closed = pl.closed
+          for (const p of pl.points) c.add({ x: p.x + tr.dx, y: p.y + tr.dy })
+          tiled.push(c)
+        }
+      }
+      polys = tiled
+    }
+    return polys
+  }, [
+    buildBasePolys, s1Smooth, s1Pressure, optSimplify, optMerge, optSort, passes,
+    arrayRows, arrayCols, arrayGapX, arrayGapY,
   ])
 
   // Generate G-code for the current state. Local preview state (the SVG + raw
@@ -438,6 +518,16 @@ export function SignaturePanel() {
       if (push && !streaming) setProgram(SECTION, gcode)
       setPreview(gcode)
       setPreviewPolys(polys)
+      // W9 — feed-rate plot-time estimate over the ordered, placed motion.
+      const placed = polys.map((pl) => {
+        const c = new Polyline()
+        c.closed = pl.closed
+        for (const p of pl.points) c.add({ x: p.x + originX, y: p.y + originY })
+        return c
+      })
+      setPlotSeconds(
+        estimatePlotTime(placed, { feedXY: feed, travelFeed }).seconds,
+      )
 
       const pts = countPoints(polys)
       const b = polysBounds(polys)
@@ -453,7 +543,7 @@ export function SignaturePanel() {
       )
       return gcode
     },
-    [buildPolys, mode, raster, originX, originY, penUpZ, penDownZ, feed, setProgram, t],
+    [buildPolys, mode, raster, originX, originY, penUpZ, penDownZ, feed, travelFeed, setProgram, t],
   )
 
   // Live G-code: regenerate ~300ms after the last change and push to the store
@@ -642,6 +732,8 @@ export function SignaturePanel() {
     mode, drawW, drawH,
     threshold, invert, targetW, targetH, lockAspect, tolerance,
     originX, originY, penUpZ, penDownZ, feed,
+    optMerge, optSort, optSimplify, passes, s1Smooth, s1Pressure,
+    arrayRows, arrayCols, arrayGapX, arrayGapY, travelFeed,
   })
   // Restore a captured/loaded settings snapshot, coercing each field from the
   // (untrusted) source so a corrupt slot or hand-edited file can never feed a
@@ -662,6 +754,17 @@ export function SignaturePanel() {
     setPenUpZ((prev) => numOr(o.penUpZ, prev))
     setPenDownZ((prev) => numOr(o.penDownZ, prev))
     setFeed((prev) => numOr(o.feed, prev))
+    if (typeof o.optMerge === 'boolean') setOptMerge(o.optMerge)
+    if (typeof o.optSort === 'boolean') setOptSort(o.optSort)
+    setOptSimplify((prev) => numOr(o.optSimplify, prev))
+    setPasses((prev) => Math.max(1, Math.round(numOr(o.passes, prev))))
+    setS1Smooth((prev) => numOr(o.s1Smooth, prev))
+    setS1Pressure((prev) => numOr(o.s1Pressure, prev))
+    setArrayRows((prev) => Math.max(1, Math.round(numOr(o.arrayRows, prev))))
+    setArrayCols((prev) => Math.max(1, Math.round(numOr(o.arrayCols, prev))))
+    setArrayGapX((prev) => numOr(o.arrayGapX, prev))
+    setArrayGapY((prev) => numOr(o.arrayGapY, prev))
+    setTravelFeed((prev) => numOr(o.travelFeed, prev))
   }
   const presets = usePresets<SignatureSettings>({
     storageKey: 'karmyogi.signature.presets',
@@ -1073,6 +1176,158 @@ export function SignaturePanel() {
                 </p>
               )}
             </div>
+          )}
+        </section>
+
+        {/* ---- Optimize & batch (W1/W2/W3 + S1 modulation + S2 array) ---- */}
+        <section className="sig-card sig-card-wide ui-card">
+          <button
+            type="button"
+            className="sig-disclosure sig-opt-head"
+            onClick={() => setShowOpt(!showOpt)}
+            aria-expanded={showOpt}
+          >
+            <span>
+              <span className="sig-caret">
+                <Icon name={showOpt ? 'chevron-down' : 'chevron-right'} size={12} />
+              </span>{' '}
+              {t('sig.opt.title', 'Optimize & batch')}
+            </span>
+            {plotSeconds > 0 && (
+              <span className="sig-opt-time" title={t('sig.opt.timeTip', 'Estimated plot time (feed-rate based, includes pen lifts).')}>
+                ~{formatDuration(plotSeconds)}
+              </span>
+            )}
+          </button>
+          {showOpt && (
+            <>
+              <div className="sig-toggles sig-opt-toggles">
+                <button
+                  type="button"
+                  className={'sig-toggle' + (optMerge ? ' active' : '')}
+                  aria-pressed={optMerge}
+                  onClick={() => setOptMerge(!optMerge)}
+                  title={t('sig.opt.merge.tip', 'Join strokes whose endpoints touch into longer continuous paths (fewer pen lifts).')}
+                >{t('sig.opt.merge', 'Merge')}</button>
+                <button
+                  type="button"
+                  className={'sig-toggle' + (optSort ? ' active' : '')}
+                  aria-pressed={optSort}
+                  onClick={() => setOptSort(!optSort)}
+                  title={t('sig.opt.sort.tip', 'Reorder strokes (nearest-neighbour) to minimize pen-up travel.')}
+                >{t('sig.opt.sort', 'Sort')}</button>
+              </div>
+              <div className="sig-sgrid sig-advanced">
+                <SliderField
+                  icon={<Spline size={14} strokeWidth={1.8} />}
+                  label={t('sig.opt.simplify', 'Simplify')}
+                  htmlFor="sig-opt-simplify"
+                  unit="mm"
+                  min={0}
+                  max={2}
+                  step={0.01}
+                  value={optSimplify}
+                  onChange={(n) => setOptSimplify(clampNum(String(n), optSimplify, 0, 1000))}
+                  title={t('sig.opt.simplify.tip', 'Douglas-Peucker tolerance: drop vertices within this distance of the simplified line. 0 = off.')}
+                />
+                <SliderField
+                  icon={<Spline size={14} strokeWidth={1.8} />}
+                  label={t('sig.opt.passes', 'Passes')}
+                  htmlFor="sig-opt-passes"
+                  unit="×"
+                  min={1}
+                  max={8}
+                  step={1}
+                  value={passes}
+                  onChange={(n) => setPasses(Math.max(1, Math.round(clampNum(String(n), passes, 1, 8))))}
+                  title={t('sig.opt.passes.tip', 'Draw each stroke this many times for bolder, darker lines.')}
+                />
+                <SliderField
+                  icon={<Spline size={14} strokeWidth={1.8} />}
+                  label={t('sig.s1.smooth', 'Smoothing')}
+                  htmlFor="sig-s1-smooth"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={s1Smooth}
+                  onChange={(n) => setS1Smooth(clampNum(String(n), s1Smooth, 0, 1))}
+                  title={t('sig.s1.smooth.tip', 'Round captured corners so motion looks hand-drawn, not mechanical. 0 = off.')}
+                />
+                <SliderField
+                  icon={<Gauge size={14} strokeWidth={1.8} />}
+                  label={t('sig.s1.pressure', 'Pressure')}
+                  htmlFor="sig-s1-pressure"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={s1Pressure}
+                  onChange={(n) => setS1Pressure(clampNum(String(n), s1Pressure, 0, 1))}
+                  title={t('sig.s1.pressure.tip', 'Retrace slow points (tight turns + stroke ends) to lay down more ink there, like a pressed pen nib. 0 = off.')}
+                />
+                <SliderField
+                  icon={<MoveHorizontal size={14} strokeWidth={1.8} />}
+                  label={t('sig.array.cols', 'Columns')}
+                  htmlFor="sig-array-cols"
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={arrayCols}
+                  onChange={(n) => setArrayCols(Math.max(1, Math.round(clampNum(String(n), arrayCols, 1, 100))))}
+                  title={t('sig.array.cols.tip', 'Batch-sign: number of copies across (X).')}
+                />
+                <SliderField
+                  icon={<MoveVertical size={14} strokeWidth={1.8} />}
+                  label={t('sig.array.rows', 'Rows')}
+                  htmlFor="sig-array-rows"
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={arrayRows}
+                  onChange={(n) => setArrayRows(Math.max(1, Math.round(clampNum(String(n), arrayRows, 1, 100))))}
+                  title={t('sig.array.rows.tip', 'Batch-sign: number of copies down (Y).')}
+                />
+                {(arrayCols > 1 || arrayRows > 1) && (
+                  <>
+                    <SliderField
+                      icon={<MoveHorizontal size={14} strokeWidth={1.8} />}
+                      label={t('sig.array.gapX', 'Gap X')}
+                      htmlFor="sig-array-gapx"
+                      unit="mm"
+                      min={0}
+                      max={200}
+                      step={1}
+                      value={arrayGapX}
+                      onChange={(n) => setArrayGapX(clampNum(String(n), arrayGapX, 0, 100000))}
+                      title={t('sig.array.gapX.tip', 'Spacing between copies across (added to the signature width).')}
+                    />
+                    <SliderField
+                      icon={<MoveVertical size={14} strokeWidth={1.8} />}
+                      label={t('sig.array.gapY', 'Gap Y')}
+                      htmlFor="sig-array-gapy"
+                      unit="mm"
+                      min={0}
+                      max={200}
+                      step={1}
+                      value={arrayGapY}
+                      onChange={(n) => setArrayGapY(clampNum(String(n), arrayGapY, 0, 100000))}
+                      title={t('sig.array.gapY.tip', 'Spacing between copies down (added to the signature height).')}
+                    />
+                  </>
+                )}
+                <SliderField
+                  icon={<ArrowUpToLine size={14} strokeWidth={1.8} />}
+                  label={t('sig.travelFeed', 'Travel feed')}
+                  htmlFor="sig-travel-feed"
+                  unit="mm/min"
+                  min={100}
+                  max={12000}
+                  step={100}
+                  value={travelFeed}
+                  onChange={(n) => setTravelFeed(clampNum(String(n), travelFeed, 1, 100000))}
+                  title={t('sig.travelFeed.tip', 'Pen-up (rapid travel) feed rate — used for the plot-time estimate.')}
+                />
+              </div>
+            </>
           )}
         </section>
 

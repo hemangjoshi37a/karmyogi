@@ -8,6 +8,9 @@ import { useBed } from '../store/bed'
 import { useCarveJobs, type CarveJob } from '../store/carveJobs'
 import { buildTimeline } from '../core/simulation'
 import { usePlayback } from '../store/playback'
+import { useHeightmap } from '../store/heightmap'
+import { isComplete } from '../core/heightmap'
+import { grbl } from '../serial/controller'
 import { PlaybackTimeline } from '../components/PlaybackTimeline'
 import { useT } from '../i18n'
 import {
@@ -220,6 +223,30 @@ const IconCamera = (
   <VIcon>
     <path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L18 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z" />
     <circle cx="12" cy="13" r="3.5" />
+  </VIcon>
+)
+// V8 jog-to-point: a target crosshair with a small move pointer.
+const IconJogTo = (
+  <VIcon>
+    <circle cx="12" cy="12" r="6" />
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+    <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+  </VIcon>
+)
+// V10 live readout HUD: a small gauge / dashboard panel.
+const IconHud = (
+  <VIcon>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M7 15a5 5 0 0 1 10 0" />
+    <path d="M12 15l3-3" />
+  </VIcon>
+)
+// V9 heightmap surface: stacked contour lines (terrain relief).
+const IconHeightmap = (
+  <VIcon>
+    <path d="M3 16c3 0 4-3 7-3s4 3 7 3" />
+    <path d="M3 12c3 0 4-3 7-3s4 3 7 3" />
+    <path d="M3 8c3 0 4-3 7-3s4 3 7 3" />
   </VIcon>
 )
 
@@ -484,6 +511,32 @@ export function VisualizerPanel() {
       setLassoMode(false)
     }
   }
+  const toggleJogTo = () => {
+    const next = !jogToMode
+    setJogToMode(next)
+    if (next) {
+      setGizmoOn(false)
+      setLassoMode(false)
+      setPickMode(false)
+    }
+  }
+  // V8 — right-click-to-jog: lift to a safe Z first (so the bit clears the work
+  // on the way), then jog X/Y to the clicked work coordinate. Relative deltas are
+  // computed from the live work position so this rides the existing jog flow
+  // control (no raw G-code). Requires an Idle machine connection.
+  const onJogTo = (x: number, y: number) => {
+    if (!connected) return
+    const m = useMachine.getState()
+    if (m.state !== 'Idle' && m.state !== 'Jog') return
+    const w = m.wpos
+    const safeZ = Math.max(bedH, 5)
+    const dz = safeZ - w.z
+    const feedZ = 800
+    const feedXY = 2400
+    // Safe-Z retract first (only if we're below it), then the XY move.
+    if (dz > 0.01) void grbl.jog({ z: dz, feed: feedZ })
+    void grbl.jog({ x: x - w.x, y: y - w.y, feed: feedXY })
+  }
   // ESC always exits lasso mode (previously you were stuck until you deleted
   // something). Turning the mode off cascades into the Viewer, which clears any
   // pending selection/polygon. (Pick mode handles its own Escape inside the
@@ -505,6 +558,25 @@ export function VisualizerPanel() {
   const [showJobBoxes, setShowJobBoxes] = usePersistentState(
     'karmyogi.viewer.showJobBoxes',
     true,
+  )
+
+  // V10 — live DRO/state HUD overlay inside the viewport (work pos + state +
+  // feed/spindle), handy in fullscreen / on a phone. Persisted; off by default.
+  const [showHud, setShowHud] = usePersistentState('karmyogi.viewer.hud', false)
+  // V9 — overlay the probed auto-leveling surface as a colored relief mesh.
+  const [showHeightmap, setShowHeightmap] = usePersistentState(
+    'karmyogi.viewer.heightmap',
+    true,
+  )
+  // V8 — right-click-to-jog mode: a right-click on the bed jogs the head there
+  // (safe-Z first). Off by default so right-click stays OrbitControls pan/orbit.
+  const [jogToMode, setJogToMode] = useState(false)
+  // The probed surface (read-only from the auto-leveling store). Only overlaid
+  // when complete so a half-probed grid never misrepresents the relief.
+  const heightmap = useHeightmap((s) => s.map)
+  const heightmapReady = useMemo(
+    () => (heightmap && isComplete(heightmap) ? heightmap : null),
+    [heightmap],
   )
 
   // --- Layers / legend overlay (upper-left) ---------------------------------
@@ -892,6 +964,43 @@ export function VisualizerPanel() {
           >
             {IconPick}
           </button>
+          <span className="vz-toolbar-sep" aria-hidden="true" />
+          {/* V8 right-click-to-jog: arm jog-to-point mode (needs a connection). */}
+          <button
+            className={jogToMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+            onClick={toggleJogTo}
+            disabled={!connected}
+            title={t(
+              'vz.jogTo',
+              'Jog to point — right-click anywhere on the bed to move the head there (retracts to safe-Z first)',
+            )}
+            aria-label={t('vz.jogTo', 'Jog to point')}
+            aria-pressed={jogToMode}
+          >
+            {IconJogTo}
+          </button>
+          {/* V10 live DRO/state HUD overlay toggle. */}
+          <button
+            className={showHud ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+            onClick={() => setShowHud((s) => !s)}
+            title={t('vz.hud', 'Live readout — show machine state, position, feed & spindle in the viewport')}
+            aria-label={t('vz.hud', 'Live readout overlay')}
+            aria-pressed={showHud}
+          >
+            {IconHud}
+          </button>
+          {/* V9 heightmap overlay toggle — only meaningful once a surface is probed. */}
+          {heightmapReady && (
+            <button
+              className={showHeightmap ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+              onClick={() => setShowHeightmap((s) => !s)}
+              title={t('vz.heightmap', 'Surface map — overlay the probed auto-leveling relief (low blue → high red)')}
+              aria-label={t('vz.heightmap', 'Surface map overlay')}
+              aria-pressed={showHeightmap}
+            >
+              {IconHeightmap}
+            </button>
+          )}
         </div>
         <Viewer
           ref={ref}
@@ -935,6 +1044,9 @@ export function VisualizerPanel() {
           showRunOutline={showRunOutline}
           runOutlineBounds={dims ? { min: dims.min, max: dims.max } : null}
           runOutlineFit={dims?.fit ?? 'ok'}
+          heightmap={showHeightmap ? heightmapReady : null}
+          jogTo={jogToMode && connected}
+          onJogTo={onJogTo}
         />
         <LegendPanel
           t={t}
@@ -959,13 +1071,22 @@ export function VisualizerPanel() {
             t={t}
           />
         )}
-        {!springActive && <DimensionsOverlay dims={dims} bedW={bedW} bedD={bedD} />}
+        {!springActive && (
+          <DimensionsOverlay
+            dims={dims}
+            bedW={bedW}
+            bedD={bedD}
+            runTime={timeline?.duration ?? null}
+          />
+        )}
         <ToolConeLegend
           showActualTool={showActualTool}
           showSimTool={showSimTool}
           t={t}
         />
+        {showHud && <ViewportHud t={t} />}
       </div>
+      <ToolTimeline timeline={timeline} t={t} />
       <PlaybackTimeline />
     </div>
   )
@@ -1722,15 +1843,146 @@ function fmtArea(mm2: number, t: TFn): string {
   return t('vz.area.mm2', '{v} mm²', { v: Math.round(mm2) })
 }
 
+/** Human-friendly duration: `1h 4m`, `4m 12s`, or `38s`. */
+function fmtDuration(sec: number, t: TFn): string {
+  if (!isFinite(sec) || sec < 0) sec = 0
+  const total = Math.round(sec)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return t('vz.dur.hm', '{h}h {m}m', { h, m })
+  if (m > 0) return t('vz.dur.ms', '{m}m {s}s', { m, s })
+  return t('vz.dur.s', '{s}s', { s })
+}
+
+/**
+ * V10 — live DRO / machine-state HUD overlaid in the viewport (top-left, below
+ * the axis triad). Shows the work position, machine state, feed and spindle so a
+ * fullscreen / phone operator never has to leave the 3D view to read the DRO.
+ *
+ * Subscribes narrowly to the machine store (only the fields it renders), so a
+ * status poll re-renders just this tiny overlay — never the 3D scene. No WebGL,
+ * no per-frame work: it's a plain DOM panel, so it can't affect viewport FPS.
+ */
+function ViewportHud({ t }: { t: TFn }) {
+  const connected = useMachine((s) => s.connection === 'connected')
+  const state = useMachine((s) => s.state)
+  const wpos = useMachine((s) => s.wpos)
+  const feed = useMachine((s) => s.feed)
+  const spindle = useMachine((s) => s.spindle)
+
+  const stateKey = `ctrl.state.${state.toLowerCase()}`
+  const stateLabel = connected ? t(stateKey, state) : t('vz.hud.offline', 'Offline')
+  const fmt = (v: number) => (Math.round(v * 1000) / 1000).toFixed(3)
+
+  return (
+    <div
+      className="vz-hud"
+      role="status"
+      aria-label={t('vz.hud.aria', 'Live machine readout')}
+      data-state={connected ? state : 'Offline'}
+    >
+      <div className="vz-hud-state" data-state={connected ? state : 'Offline'}>
+        <span className="vz-hud-dot" aria-hidden="true" />
+        {stateLabel}
+      </div>
+      <div className="vz-hud-dro">
+        {(['X', 'Y', 'Z'] as const).map((ax) => (
+          <div className="vz-hud-axis" key={ax}>
+            <span className="vz-hud-axislbl">{ax}</span>
+            <span className="vz-hud-axisval">
+              {fmt(ax === 'X' ? wpos.x : ax === 'Y' ? wpos.y : wpos.z)}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="vz-hud-meta">
+        <span title={t('vz.hud.feed', 'Feed rate (mm/min)')}>
+          {t('vz.hud.feedVal', 'F {v}', { v: Math.round(feed) })}
+        </span>
+        <span title={t('vz.hud.spindle', 'Spindle speed (rpm)')}>
+          {t('vz.hud.spindleVal', 'S {v}', { v: Math.round(spindle) })}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * V14 — tool-timeline strip. A thin horizontal bar under the viewport showing
+ * WHERE along the job each tool change (M6 / T) happens, positioned by program
+ * time. Clicking a marker scrubs the playback to that change. Hidden when the
+ * program is single-tool (no changes) so it never adds empty chrome.
+ *
+ * Cheap: derived once per timeline (the markers are precomputed in the core), a
+ * handful of absolutely-positioned DOM nodes, no per-frame work.
+ */
+function ToolTimeline({
+  timeline,
+  t,
+}: {
+  timeline: ReturnType<typeof buildTimeline> | null
+  t: TFn
+}) {
+  const time = usePlayback((s) => s.time)
+  const seek = usePlayback((s) => s.seek)
+  const changes = timeline?.toolChanges ?? []
+  const duration = timeline?.duration ?? 0
+  if (!timeline || duration <= 0 || changes.length === 0) return null
+  const pct = (time / duration) * 100
+
+  return (
+    <div
+      className="vz-tooltl"
+      role="group"
+      aria-label={t('vz.toolTimeline', 'Tool change timeline')}
+    >
+      <span className="vz-tooltl-lbl" aria-hidden="true">
+        {t('vz.toolTimeline.short', 'Tools')}
+      </span>
+      <div className="vz-tooltl-track">
+        {/* Progress fill mirrors the playhead so the strip reads with the transport. */}
+        <span className="vz-tooltl-fill" style={{ width: `${pct}%` }} aria-hidden="true" />
+        {changes.map((c, i) => {
+          const left = (c.t / duration) * 100
+          return (
+            <button
+              key={`${c.line}-${i}`}
+              type="button"
+              className="vz-tooltl-mark"
+              style={{ left: `${left}%` }}
+              title={t('vz.toolTimeline.mark', 'Tool {tool} change · line {line} · {time}', {
+                tool: c.tool,
+                line: c.line,
+                time: fmtDuration(c.t, t),
+              })}
+              aria-label={t('vz.toolTimeline.markAria', 'Jump to tool {tool} change', {
+                tool: c.tool,
+              })}
+              onClick={() => seek(c.t)}
+            >
+              <span className="vz-tooltl-pin" aria-hidden="true" />
+              <span className="vz-tooltl-num">{c.tool}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /** Compact bottom-left overlay reporting program size + bed-fit status. */
 function DimensionsOverlay({
   dims,
   bedW,
   bedD,
+  runTime,
 }: {
   dims: Dims | null
   bedW: number
   bedD: number
+  /** Estimated program run time (seconds) from the playback timeline, or null. */
+  runTime: number | null
 }) {
   const t = useT()
   if (!dims) {
@@ -1781,6 +2033,18 @@ function DimensionsOverlay({
       >
         <span>{fmtArea(dims.area, t)}</span>
       </div>
+      {/* V7 — estimated run time from the simulation timeline (feed-based). */}
+      {runTime != null && runTime > 0 && (
+        <div
+          className="vz-dims-row vz-dims-meta"
+          title={t(
+            'vz.runTime.title',
+            'Estimated run time at programmed feeds (rapids + cuts; before overrides)',
+          )}
+        >
+          <span>{t('vz.runTime', '~{time} run', { time: fmtDuration(runTime, t) })}</span>
+        </div>
+      )}
       <div
         className="vz-dims-row vz-dims-fit"
         data-fit={dims.fit}
@@ -2244,7 +2508,85 @@ const OVERLAY_CSS = `
 .vz-dims-dot[data-fit='warn'] { background: var(--warn); }
 .vz-dims-dot[data-fit='danger'] { background: var(--danger); }
 
+/* V10 — live DRO/state HUD (top-left, under the axis triad). */
+.vz-hud {
+  position: absolute;
+  left: 8px;
+  top: 96px;
+  z-index: 3;
+  pointer-events: none;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 84%, transparent);
+  backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-1);
+  color: var(--fg);
+  min-width: 128px;
+}
+.vz-hud-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;
+}
+.vz-hud-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-muted); flex: 0 0 auto; }
+.vz-hud-state[data-state='Idle'] .vz-hud-dot { background: var(--ok); }
+.vz-hud-state[data-state='Run'] .vz-hud-dot,
+.vz-hud-state[data-state='Jog'] .vz-hud-dot,
+.vz-hud-state[data-state='Home'] .vz-hud-dot { background: var(--accent); }
+.vz-hud-state[data-state='Hold'] .vz-hud-dot,
+.vz-hud-state[data-state='Door'] .vz-hud-dot { background: var(--warn); }
+.vz-hud-state[data-state='Alarm'] .vz-hud-dot { background: var(--danger); }
+.vz-hud-dro { display: flex; flex-direction: column; gap: 2px; }
+.vz-hud-axis { display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.vz-hud-axislbl { width: 12px; color: var(--accent); font-weight: 700; font-size: 11px; }
+.vz-hud-axisval { font-size: 14px; font-weight: 600; letter-spacing: 0.2px; }
+.vz-hud-meta {
+  display: flex; gap: 10px; font-size: 10px; color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* V14 — tool-change timeline strip (between the viewport and the transport). */
+.vz-tooltl {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px 6px;
+  background: var(--bg);
+}
+.vz-tooltl-lbl { font-size: 10px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.4px; flex: 0 0 auto; }
+.vz-tooltl-track {
+  position: relative; flex: 1 1 auto; height: 10px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+.vz-tooltl-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.vz-tooltl-mark {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 0; border: none; background: none; cursor: pointer; line-height: 1;
+}
+.vz-tooltl-pin {
+  width: 3px; height: 16px; border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--bg);
+}
+.vz-tooltl-num {
+  font-size: 9px; font-weight: 700; color: var(--accent);
+  background: var(--bg); border-radius: 3px; padding: 0 2px;
+}
+.vz-tooltl-mark:hover .vz-tooltl-pin { background: var(--fg); }
+
 @media (pointer: coarse), (max-width: 768px) {
+  .vz-hud { top: 88px; min-width: 116px; padding: 8px 11px; }
+  .vz-hud-axisval { font-size: 15px; }
+  .vz-tooltl-pin { height: 18px; width: 4px; }
+  .vz-tooltl-mark { min-width: 16px; }
   .vz-toolbar { gap: 6px; }
   .vz-toolbar-btn { width: 36px; height: 36px; font-size: 18px; }
   .vz-layers-btn { width: auto; }

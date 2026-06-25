@@ -71,6 +71,14 @@ export interface SpringCoilingParams {
    * the finished spring slips off the mandrel. 0 = none (default ~0.5).
    */
   releaseTurns: number;
+  /**
+   * SP3 — initial tension (preload) for EXTENSION springs only, in newtons. The
+   * built-in force that holds the tightly-wound coils closed before any external
+   * load. Documentary: recorded + emitted as a comment (and shown in the readout)
+   * so it travels with the part; the coiler achieves it by tight winding (pitch =
+   * wire diameter). Ignored for compression/torsion springs. 0 = none.
+   */
+  initialTension: number;
   /** Chuck rotational speed (rev/min); the linear feed is derived from this + pitch. */
   chuckRpm: number;
   /** Winding direction of the chuck. */
@@ -98,6 +106,7 @@ export function defaultSpringCoilingParams(
     closeTurnsStart: 1.5,
     closeTurnsEnd: 1.5,
     releaseTurns: 0.5,
+    initialTension: 0,
     chuckRpm: 30,
     direction: 'cw',
     segmentsPerRev: 48,
@@ -199,6 +208,8 @@ export interface SpringInfo {
   coilDiameter: number;
   /** Whether this is a tight-wound type (extension / torsion). */
   tight: boolean;
+  /** SP3: initial tension (N) for extension springs (0 otherwise / when unset). */
+  initialTension: number;
 }
 
 /**
@@ -227,6 +238,8 @@ export function springInfo(params: SpringCoilingParams): SpringInfo {
     wireLength,
     coilDiameter: r.coilDiameter,
     tight: r.tight,
+    initialTension:
+      params.springType === 'extension' ? Math.max(0, params.initialTension ?? 0) : 0,
   };
 }
 
@@ -320,6 +333,10 @@ export function generateSpringMachineGcode(params: Partial<SpringCoilingParams> 
       `body ${fmt(r.bodyTurns, 2)} @ pitch ${fmt(r.bodyPitch, 2)}] ${p.direction})`,
   );
   o.push(`(Rotary axis ${rot} = chuck angle deg; Linear axis ${lin} = axial mm)`);
+  // SP3: extension springs carry an initial tension (preload) — documentary.
+  if (p.springType === 'extension' && p.initialTension > 0) {
+    o.push(`(Initial tension / preload: ${fmt(Math.max(0, p.initialTension), 2)} N — tight-wound)`);
+  }
   o.push('G21'); // mm
   o.push('G90'); // absolute
   o.push('G94'); // units/min feed

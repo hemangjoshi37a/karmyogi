@@ -13,6 +13,7 @@ import { usePresets } from '../components/presets/usePresets'
 import { importDxfString } from '../core/dxf'
 import { nestFootprints, type NestItem, type NestWarning } from '../core/nesting'
 import { distance } from '../core/geometry'
+import { traceBitmap, simplifyPolyline, fitPolylinesToSize, countPoints } from '../core/vectorize'
 import {
   LaserMode,
   LaserPowerMode,
@@ -22,6 +23,12 @@ import {
   countContours,
   placeContours,
   orderContours,
+  optimizeTravel,
+  tabContour,
+  offsetFill,
+  lineFill,
+  contourLayers,
+  FillStyle,
   emitLaserProgram,
   percentFromPower,
   powerFromPercent,
@@ -326,6 +333,23 @@ interface PanelParams {
   pierceTime: number
   airAssist: boolean
   decimals: number
+  // L8 — travel optimization
+  optimizeTravel: boolean
+  // L9 — tabs / bridges
+  tabsOn: boolean
+  tabCount: number
+  tabWidth: number
+  // L11 — fill
+  fill: FillStyle
+  fillSpacing: number
+  fillAngle: number
+  // L14 — rotary
+  rotary: boolean
+  rotaryAxis: 'A' | 'B' | 'C' | 'Y'
+  rotaryDiameter: number
+  // L18 — fiber galvo pulse
+  fiberFrequencyKHz: number
+  fiberPulseNs: number
 }
 
 function defaultsFor(mode: LaserMode): PanelParams {
@@ -344,6 +368,18 @@ function defaultsFor(mode: LaserMode): PanelParams {
     pierceTime: d.pierceTime,
     airAssist: d.airAssist ?? false,
     decimals: d.decimals,
+    optimizeTravel: true,
+    tabsOn: false,
+    tabCount: 4,
+    tabWidth: 0.5,
+    fill: FillStyle.None,
+    fillSpacing: 0.3,
+    fillAngle: 0,
+    rotary: false,
+    rotaryAxis: d.rotaryAxis ?? 'A',
+    rotaryDiameter: d.rotaryDiameter ?? 50,
+    fiberFrequencyKHz: d.fiberFrequencyKHz ?? 30,
+    fiberPulseNs: d.fiberPulseNs ?? 200,
   }
 }
 
@@ -387,6 +423,8 @@ const boolOr = (v: unknown, f: boolean): boolean => (typeof v === 'boolean' ? v 
 
 const VALID_MODES: LaserMode[] = [LaserMode.CO2, LaserMode.Fiber]
 const VALID_POWER_MODES: LaserPowerMode[] = [LaserPowerMode.Dynamic, LaserPowerMode.Constant]
+const VALID_FILLS: FillStyle[] = [FillStyle.None, FillStyle.Line, FillStyle.Offset]
+const VALID_ROT_AXES: Array<'A' | 'B' | 'C' | 'Y'> = ['A', 'B', 'C', 'Y']
 
 /** Narrow unknown into a valid PanelParams, falling back per-field to `base`. */
 function parseParams(v: unknown, base: PanelParams): PanelParams {
@@ -409,6 +447,20 @@ function parseParams(v: unknown, base: PanelParams): PanelParams {
     pierceTime: numOr(v.pierceTime, base.pierceTime),
     airAssist: boolOr(v.airAssist, base.airAssist),
     decimals: numOr(v.decimals, base.decimals),
+    optimizeTravel: boolOr(v.optimizeTravel, base.optimizeTravel),
+    tabsOn: boolOr(v.tabsOn, base.tabsOn),
+    tabCount: numOr(v.tabCount, base.tabCount),
+    tabWidth: numOr(v.tabWidth, base.tabWidth),
+    fill: VALID_FILLS.includes(v.fill as FillStyle) ? (v.fill as FillStyle) : base.fill,
+    fillSpacing: numOr(v.fillSpacing, base.fillSpacing),
+    fillAngle: numOr(v.fillAngle, base.fillAngle),
+    rotary: boolOr(v.rotary, base.rotary),
+    rotaryAxis: VALID_ROT_AXES.includes(v.rotaryAxis as 'A')
+      ? (v.rotaryAxis as 'A' | 'B' | 'C' | 'Y')
+      : base.rotaryAxis,
+    rotaryDiameter: numOr(v.rotaryDiameter, base.rotaryDiameter),
+    fiberFrequencyKHz: numOr(v.fiberFrequencyKHz, base.fiberFrequencyKHz),
+    fiberPulseNs: numOr(v.fiberPulseNs, base.fiberPulseNs),
   }
 }
 
@@ -556,6 +608,9 @@ interface ImgParams {
   scanAngle: ScanAngle
   overscan: number
   bidirectional: boolean
+  scanOffset: number
+  dotMode: boolean
+  dotDwell: number
   widthMm: number
   lockAspect: boolean
   feed: number
@@ -580,6 +635,9 @@ function defaultImgParams(): ImgParams {
     scanAngle: ScanAngle.Horizontal,
     overscan: r.overscan,
     bidirectional: r.bidirectional,
+    scanOffset: r.scanOffset,
+    dotMode: r.dotMode,
+    dotDwell: r.dotDwell,
     widthMm: r.widthMm,
     lockAspect: true,
     feed: r.feed,
@@ -710,6 +768,9 @@ function LaserImageWorkbench() {
       scanAngle: params.scanAngle,
       overscan: Math.max(0, params.overscan),
       bidirectional: params.bidirectional,
+      scanOffset: Math.max(0, params.scanOffset),
+      dotMode: params.dotMode,
+      dotDwell: Math.max(0, params.dotDwell),
       feed: Math.max(1, params.feed),
       dynamicPower: params.dynamicPower,
       sMin: Math.max(0, Math.min(params.sMin, params.sMax)),
@@ -1073,7 +1134,45 @@ function LaserImageWorkbench() {
             />
             {t('laser.img.raster.bidi', 'Bidirectional')}
           </label>
+          <label className="li-toggle" title={t('laser.img.raster.dot.title', 'Fire a short dwell at each lit pixel (perforate / stipple) instead of continuous sweeps. Beam is off between dots.')}>
+            <input
+              type="checkbox"
+              checked={params.dotMode}
+              onChange={(e) => patch({ dotMode: e.target.checked })}
+            />
+            {t('laser.img.raster.dot', 'Dot mode')}
+          </label>
         </div>
+        {(params.bidirectional || params.dotMode) && (
+          <div className="li-fields" style={{ marginTop: 'var(--sp-2)' }}>
+            {params.bidirectional && (
+              <ImgField
+                icon="jog"
+                label={t('laser.img.raster.scanOffset', 'Scan offset')}
+                unit="mm"
+                min={0}
+                max={2}
+                step={0.01}
+                value={params.scanOffset}
+                onChange={(n) => patch({ scanOffset: clamp(n, 0, 2) })}
+                title={t('laser.img.raster.scanOffset.title', 'Shift reverse rows forward to correct bidirectional mis-alignment (mechanical/laser lag). Dial in on a test until edges line up.')}
+              />
+            )}
+            {params.dotMode && (
+              <ImgField
+                icon="pause"
+                label={t('laser.img.raster.dotDwell', 'Dot dwell')}
+                unit="s"
+                min={0.001}
+                max={0.2}
+                step={0.001}
+                value={params.dotDwell}
+                onChange={(n) => patch({ dotDwell: clamp(n, 0.001, 0.2) })}
+                title={t('laser.img.raster.dotDwell.title', 'How long the beam dwells at each dot (G4). Longer = deeper / darker dots.')}
+              />
+            )}
+          </div>
+        )}
       </section>
 
       {/* Power + passes. */}
@@ -1292,9 +1391,33 @@ function LaserVectorWorkbench() {
   const [importError, setImportError] = useState<string>('')
   const [warnings, setWarnings] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const traceInputRef = useRef<HTMLInputElement>(null)
+  // L12 — image trace settings (threshold + simplify tolerance + target size).
+  const [traceThreshold, setTraceThreshold] = usePersistentState<number>('karmyogi.laser.trace.thr', 128)
+  const [traceInvert, setTraceInvert] = usePersistentState<boolean>('karmyogi.laser.trace.inv', false)
+  const [traceSize, setTraceSize] = usePersistentState<number>('karmyogi.laser.trace.size', 80)
+
+  // L2 — layer system. Disabled layers are dropped from the job; the cut order
+  // follows `layerOrder` (drag-free: move-up/down). Re-derived on each import.
+  const [disabledLayers, setDisabledLayers] = useState<Set<string>>(new Set())
+  const [layerOrder, setLayerOrder] = useState<string[]>([])
 
   const bounds = useMemo(() => contoursBounds(contours), [contours])
   const counts = useMemo(() => countContours(contours), [contours])
+  const layers = useMemo(() => contourLayers(contours), [contours])
+  // Per-layer contour counts for the layer list.
+  const layerCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of contours) m.set(c.layer ?? '', (m.get(c.layer ?? '') ?? 0) + 1)
+    return m
+  }, [contours])
+  // Effective ordered+enabled layer list (multi-layer only when >1 layer).
+  const orderedLayers = useMemo(() => {
+    const known = new Set(layers)
+    const fromOrder = layerOrder.filter((l) => known.has(l))
+    const rest = layers.filter((l) => !fromOrder.includes(l))
+    return [...fromOrder, ...rest]
+  }, [layers, layerOrder])
 
   function loadDxfFile(file: File) {
     const reader = new FileReader()
@@ -1307,7 +1430,10 @@ function LaserVectorWorkbench() {
         return
       }
       setImportError('')
-      setContours(drawingToContours(res.drawing))
+      const cs = drawingToContours(res.drawing)
+      setContours(cs)
+      setDisabledLayers(new Set())
+      setLayerOrder(contourLayers(cs))
       setFileName(file.name)
     }
     reader.onerror = () => {
@@ -1316,6 +1442,66 @@ function LaserVectorWorkbench() {
       setImportError(t('laser.dxf.readFail', 'Could not read {name}.', { name: file.name }))
     }
     reader.readAsText(file)
+  }
+
+  // L12 — image trace: decode a raster → binary mask → boundary contours →
+  // simplify → fit to the target mm size → laser cut contours. The traced
+  // outlines become CLOSED cut loops on a single (unnamed) layer.
+  function traceImageFile(file: File) {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const cap = 1000 // working-resolution cap (longest edge)
+      const scale = Math.min(1, cap / Math.max(img.width, img.height))
+      const w = Math.max(1, Math.round(img.width * scale))
+      const h = Math.max(1, Math.round(img.height * scale))
+      const cv = document.createElement('canvas')
+      cv.width = w
+      cv.height = h
+      const ctx = cv.getContext('2d')
+      if (!ctx) {
+        setImportError(t('laser.trace.err.decode', 'Could not decode the image.'))
+        URL.revokeObjectURL(url)
+        return
+      }
+      ctx.drawImage(img, 0, 0, w, h)
+      const data = ctx.getImageData(0, 0, w, h).data
+      const raw = traceBitmap(new Uint8ClampedArray(data), w, h, {
+        threshold: traceThreshold,
+        invert: traceInvert,
+        minContourLength: 8,
+      })
+      if (raw.length === 0) {
+        setContours([])
+        setImportError(t('laser.trace.err.empty', 'No outlines found — adjust the threshold or invert.'))
+        URL.revokeObjectURL(url)
+        return
+      }
+      // Simplify each contour then uniformly fit to the target box (flip Y up).
+      const tol = Math.max(0.5, (w / Math.max(1, traceSize)) * 0.4) // ~0.4mm in px
+      const simplified = raw.map((p) => simplifyPolyline(p, tol))
+      const fitted = fitPolylinesToSize(simplified, traceSize, traceSize, true)
+      const cs: LaserContour[] = fitted
+        .filter((p) => p.points.length >= 2)
+        .map((p) => ({ poly: p, closed: true, layer: '' }))
+      setImportError('')
+      setWarnings([
+        t('laser.trace.warn', 'Traced {n} outlines ({pts} points) — outlines, not centerlines.', {
+          n: cs.length,
+          pts: countPoints(fitted),
+        }),
+      ])
+      setContours(cs)
+      setDisabledLayers(new Set())
+      setLayerOrder([''])
+      setFileName(file.name)
+      URL.revokeObjectURL(url)
+    }
+    img.onerror = () => {
+      setImportError(t('laser.trace.err.load', 'Could not load {name}. Use a PNG or JPG.', { name: file.name }))
+      URL.revokeObjectURL(url)
+    }
+    img.src = url
   }
 
   // ---- Nesting: lay out `quantity` copies of the part on the sheet. -------
@@ -1327,7 +1513,9 @@ function LaserVectorWorkbench() {
   // `nestFootprints` call (it runs an O(n²) hill-climb, so it must not run twice
   // per render — that froze the UI on large Quantity).
   const nest = useMemo(() => {
-    if (contours.length === 0) {
+    // L2: drop contours on disabled layers BEFORE placing.
+    const active = contours.filter((c) => !disabledLayers.has(c.layer ?? ''))
+    if (active.length === 0) {
       return { placed: [] as PlacedContour[], fit: null as null | { fit: number; total: number; overflow: boolean }, warnings: [] as NestWarning[] }
     }
     const qty = clamp(Math.floor(quantity), 1, MAX_QUANTITY)
@@ -1343,20 +1531,61 @@ function LaserVectorWorkbench() {
       for (let i = 0; i < qty; ++i) items.push({ id: `c${i}`, w, h })
       const res = nestFootprints(items, { bedW: sheetW, bedH: sheetH, margin })
       for (const pl of res.placements) {
-        out.push(...placeContours(contours, bounds, pl.x, pl.y))
+        out.push(...placeContours(active, bounds, pl.x, pl.y))
       }
       fit = { fit: res.placements.filter((p) => !p.overflow).length, total: qty, overflow: res.overflow }
       warnings = res.warningCodes
     } else {
       // No nesting → stack all copies at the sheet origin (+margin).
       for (let i = 0; i < qty; ++i) {
-        out.push(...placeContours(contours, bounds, margin, margin))
+        out.push(...placeContours(active, bounds, margin, margin))
       }
     }
-    return { placed: orderContours(out), fit, warnings }
-  }, [contours, bounds, quantity, doNest, sheetW, sheetH, margin])
+    // L2: sort by layer cut order (stable within a layer), then inner-first.
+    const rank = new Map(orderedLayers.map((l, i) => [l, i]))
+    const byLayer = out
+      .map((c, i) => ({ c, i, r: rank.get(c.layer ?? '') ?? 0 }))
+      .sort((a, b) => a.r - b.r || a.i - b.i)
+      .map((x) => x.c)
+    // orderContours (inner-first) is applied per-layer block by re-grouping.
+    const grouped: PlacedContour[] = []
+    let cursor = 0
+    while (cursor < byLayer.length) {
+      const layerName = byLayer[cursor].layer ?? ''
+      let end = cursor
+      while (end < byLayer.length && (byLayer[end].layer ?? '') === layerName) end++
+      grouped.push(...orderContours(byLayer.slice(cursor, end)))
+      cursor = end
+    }
+    return { placed: grouped, fit, warnings }
+  }, [contours, disabledLayers, orderedLayers, bounds, quantity, doNest, sheetW, sheetH, margin])
 
-  const placed = nest.placed
+  // ---- L11 fill + L9 tabs + L8 travel optimization. -----------------------
+  // Applied AFTER nesting/ordering so geometry is final. Fill adds interior cut
+  // paths to closed loops; tabs break closed loops into open segments (leaving
+  // un-cut bridges); travel optimization reorders to minimize beam-off jumps.
+  const placed = useMemo(() => {
+    let out: PlacedContour[] = []
+    for (const c of nest.placed) {
+      // Fill closed loops first (drawn before the perimeter so the outline cut
+      // last keeps the part attached longest).
+      if (c.closed && params.fill !== FillStyle.None && params.fillSpacing > 0) {
+        const fillPaths =
+          params.fill === FillStyle.Offset
+            ? offsetFill(c, params.fillSpacing)
+            : lineFill(c, params.fillSpacing, params.fillAngle)
+        out.push(...fillPaths)
+      }
+      // Tabs break a closed loop into open cut segments with un-cut gaps.
+      if (c.closed && params.tabsOn && params.tabCount > 0 && params.tabWidth > 0) {
+        out.push(...tabContour(c, params.tabCount, params.tabWidth))
+      } else {
+        out.push(c)
+      }
+    }
+    if (params.optimizeTravel) out = optimizeTravel(out)
+    return out
+  }, [nest.placed, params.fill, params.fillSpacing, params.fillAngle, params.tabsOn, params.tabCount, params.tabWidth, params.optimizeTravel])
   const nestFit = nest.fit
 
   // ---- Live G-code (recomputed on any param/DXF change). ------------------
@@ -1378,6 +1607,11 @@ function LaserVectorWorkbench() {
       piercePower: clamp(params.piercePower, 0, sMax),
       pierceTime: params.pierceTime,
       airAssist: params.airAssist,
+      rotary: params.rotary,
+      rotaryAxis: params.rotaryAxis,
+      rotaryDiameter: params.rotaryDiameter,
+      fiberFrequencyKHz: params.mode === LaserMode.Fiber ? params.fiberFrequencyKHz : undefined,
+      fiberPulseNs: params.mode === LaserMode.Fiber ? params.fiberPulseNs : undefined,
       decimals: params.decimals,
       programName: `hjLabs Laser — ${params.mode}`,
     })
@@ -1602,6 +1836,25 @@ function LaserVectorWorkbench() {
               e.target.value = ''
             }}
           />
+          <button
+            type="button"
+            className="cam-secondary"
+            onClick={() => traceInputRef.current?.click()}
+            title={t('laser.trace.btn.title', 'Trace a PNG/JPG bitmap into cut outlines (boundary tracing). Tune threshold below.')}
+          >
+            <Icon name="camera" size={15} /> {t('laser.trace.btn', 'Trace image…')}
+          </button>
+          <input
+            ref={traceInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/bmp,image/gif"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) traceImageFile(f)
+              e.target.value = ''
+            }}
+          />
           {contours.length > 0 && (
             <span className="lp-import-info">
               {t('laser.dxf.info', '{n} contours · {w}×{h} mm', {
@@ -1620,6 +1873,39 @@ function LaserVectorWorkbench() {
             ))}
           </ul>
         )}
+        <details className="lp-trace-opts">
+          <summary title={t('laser.trace.opts.title', 'Settings used when tracing a bitmap into cut outlines.')}>
+            {t('laser.trace.opts', 'Image trace settings')}
+          </summary>
+          <div className="lp-sliders" style={{ marginTop: 'var(--sp-2)' }}>
+            <SliderField
+              icon={<Icon name="settings" size={14} />}
+              label={t('laser.trace.threshold', 'Threshold')}
+              min={0}
+              max={255}
+              step={1}
+              integer
+              value={traceThreshold}
+              onChange={(n) => setTraceThreshold(clamp(Math.floor(n), 0, 255))}
+              title={t('laser.trace.threshold.title', 'Luminance cutoff: pixels darker than this become ink and get outlined (0..255).')}
+            />
+            <SliderField
+              icon={<Icon name="frame" size={14} />}
+              label={t('laser.trace.size', 'Fit size')}
+              unit="mm"
+              min={5}
+              max={500}
+              step={1}
+              value={traceSize}
+              onChange={(n) => setTraceSize(clamp(n, 5, 500))}
+              title={t('laser.trace.size.title', 'Longest dimension the traced result is scaled to (aspect preserved).')}
+            />
+          </div>
+          <label className="lp-toggle" title={t('laser.trace.invert.title', 'Trace light regions on a dark background instead.')}>
+            <input type="checkbox" checked={traceInvert} onChange={(e) => setTraceInvert(e.target.checked)} />
+            {t('laser.trace.invert', 'Invert (light = ink)')}
+          </label>
+        </details>
         {contours.length === 0 && !importError && (
           <CamEmpty
             icon={<Icon name="laser" size={20} />}
@@ -1829,7 +2115,259 @@ function LaserVectorWorkbench() {
             />
             {t('laser.cut.air', 'Air assist (M8/M9)')}
           </label>
+          <label className="lp-toggle" title={t('laser.cut.optimize.title', 'Reorder cuts with a nearest-neighbour walk to minimize beam-off travel between shapes, rotate loop seams next to the previous cut, and reverse open lines. Inner-first ordering is relaxed when on.')}>
+            <input
+              type="checkbox"
+              checked={params.optimizeTravel}
+              onChange={(e) => setParams({ optimizeTravel: e.target.checked })}
+            />
+            {t('laser.cut.optimize', 'Optimize travel')}
+          </label>
         </div>
+      </section>
+
+      {/* L2 — Layers (only when the DXF actually has >1 layer). */}
+      {layers.length > 1 && (
+        <section className="lp-card ui-card">
+          <div className="lp-card-head">
+            <h4 className="ui-sec-head">
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name="copy" size={14} />
+              </span>
+              {t('laser.layers.title', 'Layers')}
+            </h4>
+            <span className="lp-card-count">{t('laser.layers.count', '{n} layers', { n: layers.length })}</span>
+          </div>
+          <p className="lp-hint">
+            {t('laser.layers.hint', 'Grouped by DXF layer. Toggle a layer off to skip it; reorder to set the cut order (top cut first).')}
+          </p>
+          <ul className="lp-layer-list">
+            {orderedLayers.map((ln, i) => {
+              const on = !disabledLayers.has(ln)
+              const label = ln === '' ? t('laser.layers.unnamed', '(no layer)') : ln
+              return (
+                <li key={ln || '__none__'} className={`lp-layer${on ? '' : ' is-off'}`}>
+                  <label className="lp-layer-toggle" title={t('laser.layers.toggle.title', 'Include this layer in the job.')}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) => {
+                        setDisabledLayers((prev) => {
+                          const next = new Set(prev)
+                          if (e.target.checked) next.delete(ln)
+                          else next.add(ln)
+                          return next
+                        })
+                      }}
+                    />
+                    <span className="lp-layer-name">{label}</span>
+                  </label>
+                  <span className="lp-layer-count">{layerCounts.get(ln) ?? 0}</span>
+                  <span className="lp-layer-ord">
+                    <button
+                      type="button"
+                      className="lp-layer-btn"
+                      disabled={i === 0}
+                      title={t('laser.layers.up', 'Cut earlier')}
+                      onClick={() =>
+                        setLayerOrder(() => {
+                          const arr = orderedLayers.slice()
+                          ;[arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]
+                          return arr
+                        })
+                      }
+                    >
+                      <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}>
+                        <Icon name="chevron-down" size={12} />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="lp-layer-btn"
+                      disabled={i === orderedLayers.length - 1}
+                      title={t('laser.layers.down', 'Cut later')}
+                      onClick={() =>
+                        setLayerOrder(() => {
+                          const arr = orderedLayers.slice()
+                          ;[arr[i + 1], arr[i]] = [arr[i], arr[i + 1]]
+                          return arr
+                        })
+                      }
+                    >
+                      <Icon name="chevron-down" size={12} />
+                    </button>
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* L11 — Fill (closed loops only). */}
+      <section className="lp-card ui-card">
+        <div className="lp-card-head">
+          <h4 className="ui-sec-head">
+            <span className="cam-card-ico" aria-hidden="true">
+              <Icon name="duplicate" size={14} />
+            </span>
+            {t('laser.fill.title', 'Fill')}
+          </h4>
+        </div>
+        <div className="lp-segrow">
+          <span className="lp-segrow-label" title={t('laser.fill.mode.title', 'Fill closed loops: line/hatch sweeps parallel lines; offset spirals concentric rings inward (reuses the offset engine). None = outline only.')}>
+            {t('laser.fill.mode', 'Style')}
+          </span>
+          <SegControl
+            ariaLabel={t('laser.fill.mode', 'Fill style')}
+            value={params.fill}
+            onChange={(v) => setParams({ fill: v })}
+            options={[
+              { value: FillStyle.None, label: t('laser.fill.none', 'None'), icon: 'frame' },
+              { value: FillStyle.Line, label: t('laser.fill.line', 'Line'), icon: 'jog' },
+              { value: FillStyle.Offset, label: t('laser.fill.offset', 'Offset'), icon: 'duplicate' },
+            ]}
+          />
+        </div>
+        {params.fill !== FillStyle.None && (
+          <div className="lp-sliders">
+            <SliderField
+              icon={<Icon name="jog" size={14} />}
+              label={t('laser.fill.spacing', 'Spacing')}
+              unit="mm"
+              min={0.05}
+              max={5}
+              step={0.05}
+              value={params.fillSpacing}
+              onChange={(n) => setParams({ fillSpacing: clamp(n, 0.05, 5) })}
+              title={t('laser.fill.spacing.title', 'Gap between fill lines / rings. Smaller = denser (darker) but slower.')}
+            />
+            {params.fill === FillStyle.Line && (
+              <SliderField
+                icon={<Icon name="settings" size={14} />}
+                label={t('laser.fill.angle', 'Angle')}
+                unit="°"
+                min={0}
+                max={180}
+                step={5}
+                integer
+                value={params.fillAngle}
+                onChange={(n) => setParams({ fillAngle: clamp(n, 0, 180) })}
+                title={t('laser.fill.angle.title', 'Direction of the parallel fill lines (0 = horizontal).')}
+              />
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* L9 — Tabs / bridges (closed loops only). */}
+      <section className="lp-card ui-card">
+        <div className="lp-card-head">
+          <h4 className="ui-sec-head">
+            <span className="cam-card-ico" aria-hidden="true">
+              <Icon name="frame" size={14} />
+            </span>
+            {t('laser.tabs.title', 'Tabs / bridges')}
+          </h4>
+          <label className="lp-toggle">
+            <input
+              type="checkbox"
+              checked={params.tabsOn}
+              onChange={(e) => setParams({ tabsOn: e.target.checked })}
+            />
+            {t('laser.tabs.toggle', 'Tabs')}
+          </label>
+        </div>
+        {params.tabsOn ? (
+          <div className="lp-sliders">
+            <SliderField
+              icon={<Icon name="duplicate" size={14} />}
+              label={t('laser.tabs.count', 'Tabs / loop')}
+              min={1}
+              max={12}
+              step={1}
+              integer
+              value={params.tabCount}
+              onChange={(n) => setParams({ tabCount: clamp(Math.floor(n), 1, 12) })}
+              title={t('laser.tabs.count.title', 'Number of un-cut bridges left around each closed loop so the part stays attached to the sheet.')}
+            />
+            <SliderField
+              icon={<Icon name="jog" size={14} />}
+              label={t('laser.tabs.width', 'Tab width')}
+              unit="mm"
+              min={0.1}
+              max={5}
+              step={0.1}
+              value={params.tabWidth}
+              onChange={(n) => setParams({ tabWidth: clamp(n, 0.1, 5) })}
+              title={t('laser.tabs.width.title', 'Length of each un-cut gap. Wider = stronger hold, more to snap off afterwards.')}
+            />
+          </div>
+        ) : (
+          <p className="lp-hint">
+            {t('laser.tabs.hint', 'Leave small un-cut bridges on closed loops so cut-out parts do not drop / shift during the job.')}
+          </p>
+        )}
+      </section>
+
+      {/* L14 — Rotary mode. */}
+      <section className="lp-card ui-card">
+        <div className="lp-card-head">
+          <h4 className="ui-sec-head">
+            <span className="cam-card-ico" aria-hidden="true">
+              <Icon name="settings" size={14} />
+            </span>
+            {t('laser.rotary.title', 'Rotary')}
+          </h4>
+          <label className="lp-toggle">
+            <input
+              type="checkbox"
+              checked={params.rotary}
+              onChange={(e) => setParams({ rotary: e.target.checked })}
+            />
+            {t('laser.rotary.toggle', 'Rotary')}
+          </label>
+        </div>
+        {params.rotary ? (
+          <>
+            <div className="lp-segrow">
+              <span className="lp-segrow-label" title={t('laser.rotary.axis.title', 'Which rotary axis the Y travel is mapped onto. The job wraps around the cylinder on this axis.')}>
+                {t('laser.rotary.axis', 'Axis')}
+              </span>
+              <KitSeg<'A' | 'B' | 'C' | 'Y'>
+                ariaLabel={t('laser.rotary.axis', 'Rotary axis')}
+                value={params.rotaryAxis}
+                onChange={(v) => setParams({ rotaryAxis: v })}
+                options={[
+                  { value: 'A', label: 'A' },
+                  { value: 'B', label: 'B' },
+                  { value: 'C', label: 'C' },
+                  { value: 'Y', label: 'Y' },
+                ]}
+              />
+            </div>
+            <div className="lp-sliders">
+              <SliderField
+                icon={<Icon name="frame" size={14} />}
+                label={t('laser.rotary.diameter', 'Diameter')}
+                unit="mm"
+                min={1}
+                max={500}
+                step={0.5}
+                value={params.rotaryDiameter}
+                onChange={(n) => setParams({ rotaryDiameter: clamp(n, 1, 500) })}
+                title={t('laser.rotary.diameter.title', 'Workpiece diameter. Y travel converts to degrees via π·⌀ / 360 mm per degree ({mm} mm/°).', { mm: ((Math.PI * params.rotaryDiameter) / 360).toFixed(4) })}
+              />
+            </div>
+            <p className="lp-note">
+              {t('laser.rotary.note', 'Y moves become {axis}-axis rotation; X stays linear. Feed is rescaled to deg/min. Set up your rotary chuck and home {axis} before running.', { axis: params.rotaryAxis })}
+            </p>
+          </>
+        ) : (
+          <p className="lp-hint">
+            {t('laser.rotary.hint', 'Engrave/cut on a cylinder: map Y travel to a rotary axis using the workpiece diameter.')}
+          </p>
+        )}
       </section>
 
       {/* Advanced (mode-specific) — collapsed by default to reduce scroll. */}
@@ -1930,6 +2468,44 @@ function LaserVectorWorkbench() {
             : t('laser.focus.note.co2', 'CO2 focus is usually fixed/manual; set a Z here only if your machine focuses by Z.')}
         </p>
       </section>
+
+      {/* L18 — Fiber/galvo pulse (fiber mode only). */}
+      {fiberMode && (
+        <section className="lp-card ui-card">
+          <div className="lp-card-head">
+            <h4 className="ui-sec-head">{t('laser.fiber.title', 'Galvo / Q-pulse (Fiber)')}</h4>
+          </div>
+          <div className="lp-sliders">
+            <SliderField
+              icon={<Icon name="laser" size={14} />}
+              label={t('laser.fiber.freq', 'Frequency')}
+              unit="kHz"
+              min={1}
+              max={200}
+              step={1}
+              integer
+              value={params.fiberFrequencyKHz}
+              onChange={(n) => setParams({ fiberFrequencyKHz: clamp(Math.floor(n), 1, 200) })}
+              title={t('laser.fiber.freq.title', 'Q-switch pulse frequency. Emitted as a header comment — plain GRBL has no pulse word; EZCAD-class controllers consume it.')}
+            />
+            <SliderField
+              icon={<Icon name="pause" size={14} />}
+              label={t('laser.fiber.pulse', 'Q-pulse')}
+              unit="ns"
+              min={1}
+              max={1000}
+              step={1}
+              integer
+              value={params.fiberPulseNs}
+              onChange={(n) => setParams({ fiberPulseNs: clamp(Math.floor(n), 1, 1000) })}
+              title={t('laser.fiber.pulse.title', 'Pulse width (nanoseconds). Header comment only.')}
+            />
+          </div>
+          <p className="lp-note">
+            {t('laser.fiber.note', 'For marking/engraving the fill (Line/Offset) hatches the interior; combine with these pulse settings on a galvo controller.')}
+          </p>
+        </section>
+      )}
       </>
       )}
 

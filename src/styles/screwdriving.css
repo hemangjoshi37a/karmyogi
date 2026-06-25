@@ -759,3 +759,39 @@
     }
   }
 }
+
+/* ── SC3: array-fill modal ─────────────────────────────────────────────── */
+.swd-array-intro {
+  margin: 0 0 12px;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  line-height: 1.4;
+}
+.swd-array-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+.swd-array-count {
+  margin: 12px 0 0;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.swd-array-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.swd-array-cancel {
+  height: var(--ctl-h-touch);
+  padding: 0 14px;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.swd-array-cancel:hover { background: var(--bg-hover); }

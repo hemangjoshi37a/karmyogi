@@ -26,6 +26,142 @@ export type { Point };
 /** What is mounted at the head to grab the part. */
 export type PnpHeadType = 'vacuum' | 'gripper';
 
+// ─────────────────────── PP1: Parts → Packages → Footprints ───────────────────────
+//
+// The OpenPnP-style data backbone. A FOOTPRINT is the physical body geometry
+// (size + height) shared by many parts; a PACKAGE pairs a footprint with the
+// nozzle tip that handles it; a PART is a specific component (a value) using a
+// package. Pure data — the generator only needs the package's body height + the
+// part's pick rotation, but the full hierarchy is modelled so the UI library is
+// real and re-exportable.
+
+/** PP1 — a physical body footprint (e.g. 0805, SOT-23, QFP-32). */
+export interface PnpFootprint {
+  id: string;
+  name: string;
+  /** Body length × width (mm) — for vision/centering + collision sanity. */
+  bodyLength: number;
+  bodyWidth: number;
+  /** Body height (mm) above the board — sets the pick Z relative to the surface. */
+  bodyHeight: number;
+}
+
+/** PP1 — a package: a footprint + the nozzle tip id that handles it. */
+export interface PnpPackage {
+  id: string;
+  name: string;
+  footprintId: string;
+  /** Nozzle-tip id (see PnpNozzleTip) suited to this package; '' = any. */
+  nozzleTipId: string;
+}
+
+/** PP1 — a part: a specific component value mapped to a package. */
+export interface PnpPart {
+  id: string;
+  name: string;
+  packageId: string;
+  /** Component value / MPN (e.g. "10k", "100nF"). */
+  value?: string;
+}
+
+// ─────────────────────── PP5: Nozzle-tip library ───────────────────────
+
+/** PP5 — a nozzle tip + its calibration offset from the head reference. */
+export interface PnpNozzleTip {
+  id: string;
+  name: string;
+  /** Outer ⌀ (mm) of the suction tip — sanity vs the part body. */
+  diameter: number;
+  /** Calibration X/Y/Z offset (mm) from the head reference to this tip. */
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+}
+
+// ─────────────────────── PP2: Feeder library ───────────────────────
+
+/** PP2 — feeder kinds. */
+export type PnpFeederType = 'tape' | 'tube' | 'tray';
+
+/**
+ * PP2 — a feeder that presents parts at a known location. TAPE feeders advance
+ * by `pitch` each pick along a direction; TUBE feeders present the next part at
+ * the same spot; TRAY feeders index a rows×cols grid. The generator reads
+ * `pickX/pickY/pickZ/pickRot` + `count` to source parts; the pitch/advance is
+ * carried for documentation + the UI library (a real machine advances the strip
+ * with its own actuator, emitted here as a comment).
+ */
+export interface PnpFeeder {
+  id: string;
+  name: string;
+  type: PnpFeederType;
+  /** Part id this feeder is loaded with (PP1 link); '' = unassigned. */
+  partId: string;
+  /** Pick location of the FIRST part (mm, absolute). */
+  pickX: number;
+  pickY: number;
+  /** Pick-down Z at the feeder (mm, absolute). */
+  pickZ: number;
+  /** Part orientation as presented by the feeder (deg). */
+  pickRot: number;
+  /** Parts remaining in the feeder. */
+  count: number;
+  /** TAPE: tape pitch (mm) between parts (2/4/8/12…). */
+  tapePitch: number;
+  /** TAPE: advance direction (deg) the strip indexes along. */
+  tapeAngle: number;
+  /** TRAY: grid rows × cols and per-step spacing (mm). */
+  trayRows: number;
+  trayCols: number;
+  traySpacingX: number;
+  traySpacingY: number;
+}
+
+let pnpIdSeq = 0;
+/** A collision-free id for any PnP library entity. */
+export function newPnpId(prefix = 'id'): string {
+  pnpIdSeq += 1;
+  return `${prefix}-${Date.now().toString(36)}-${pnpIdSeq.toString(36)}`;
+}
+
+/** Defaults for a fresh footprint. */
+export function defaultFootprint(o: Partial<PnpFootprint> = {}): PnpFootprint {
+  return { id: newPnpId('fp'), name: 'Footprint', bodyLength: 2, bodyWidth: 1.25, bodyHeight: 0.5, ...o };
+}
+/** Defaults for a fresh package. */
+export function defaultPackage(o: Partial<PnpPackage> = {}): PnpPackage {
+  return { id: newPnpId('pkg'), name: 'Package', footprintId: '', nozzleTipId: '', ...o };
+}
+/** Defaults for a fresh part. */
+export function defaultPart(o: Partial<PnpPart> = {}): PnpPart {
+  return { id: newPnpId('part'), name: 'Part', packageId: '', value: '', ...o };
+}
+/** Defaults for a fresh nozzle tip. */
+export function defaultNozzleTip(o: Partial<PnpNozzleTip> = {}): PnpNozzleTip {
+  return { id: newPnpId('noz'), name: 'Nozzle', diameter: 0.7, offsetX: 0, offsetY: 0, offsetZ: 0, ...o };
+}
+/** Defaults for a fresh feeder. */
+export function defaultFeeder(o: Partial<PnpFeeder> = {}): PnpFeeder {
+  return {
+    id: newPnpId('fdr'),
+    name: 'Feeder',
+    type: 'tape',
+    partId: '',
+    pickX: 0,
+    pickY: 0,
+    pickZ: -1,
+    pickRot: 0,
+    count: 0,
+    tapePitch: 4,
+    tapeAngle: 0,
+    trayRows: 1,
+    trayCols: 1,
+    traySpacingX: 0,
+    traySpacingY: 0,
+    ...o,
+  };
+}
+
 /** One pick→place operation in absolute machine coordinates (mm). */
 export interface PnpOp {
   /**
@@ -95,6 +231,33 @@ export interface PnpParams {
    * Off by default — most 3-axis GRBL machines have no rotary axis.
    */
   rotaryAxis: boolean;
+
+  // ---- PP6: vacuum control + part-present sensing + blow-off ---------------
+  /**
+   * After releasing at the place point, BLOW OFF the part (a short positive-air
+   * pulse) so it does not stick to the nozzle. Emitted as M8 (aux/coolant on) →
+   * dwell → M9, after the M5 release. Off by default.
+   */
+  blowOff: boolean;
+  /** Blow-off pulse duration (ms). */
+  blowOffMs: number;
+  /**
+   * After picking, PROBE down a touch (G38.4 — probe expecting NO contact) to
+   * confirm a part is actually held on the nozzle (part-present sensing). The
+   * controller halts if the expected state isn't met. Off by default (needs a
+   * probe/vacuum-sense input).
+   */
+  partPresentCheck: boolean;
+
+  // ---- PP8: park + discard locations --------------------------------------
+  /** Park the head at a safe location at program end (after the last place). */
+  parkAtEnd: boolean;
+  parkX: number;
+  parkY: number;
+  /** A discard/reject location to drop a failed/unrecognised part (documentary). */
+  discardX: number;
+  discardY: number;
+
   decimals: number;
   programName: string;
 }
@@ -112,6 +275,14 @@ export function defaultPnpParams(overrides: Partial<PnpParams> = {}): PnpParams 
     pickDwellMs: 250,
     placeDwellMs: 250,
     rotaryAxis: false,
+    blowOff: false,
+    blowOffMs: 150,
+    partPresentCheck: false,
+    parkAtEnd: false,
+    parkX: 0,
+    parkY: 0,
+    discardX: 0,
+    discardY: 0,
     decimals: 3,
     programName: 'hjLabs Pick & Place',
     ...overrides,
@@ -176,6 +347,12 @@ export function generatePickPlace(ops: PnpOp[], params: Partial<PnpParams> = {})
     o.push(`G1 Z${fmt(p.pickZ, d)} F${fmt(p.feedZ, d)}`); // lower to pick height
     o.push(`M3 S${fmt(p.gripRpm, d)}`); // grip / vacuum on
     if (p.pickDwellMs > 0) o.push(`G4 P${dwellSeconds(p.pickDwellMs, d)}`);
+    // PP6: confirm a part is actually held — probe expecting NO contact below the
+    // pick height; the controller halts if the part is missing (part-present).
+    if (p.partPresentCheck) {
+      o.push('(part-present check — halts if no part on the nozzle)');
+      o.push(`G38.4 Z${fmt(p.pickZ, d)} F${fmt(p.feedZ, d)}`);
+    }
     o.push(`G0 Z${fmt(p.travelZ, d)}`); // lift to safe Z with part held
 
     // --- place ---
@@ -184,12 +361,23 @@ export function generatePickPlace(ops: PnpOp[], params: Partial<PnpParams> = {})
     o.push(`G1 Z${fmt(p.placeZ, d)} F${fmt(p.feedZ, d)}`); // lower to place height
     o.push('M5'); // release / open
     if (p.placeDwellMs > 0) o.push(`G4 P${dwellSeconds(p.placeDwellMs, d)}`);
+    // PP6: blow-off — a short positive-air pulse so the part doesn't cling.
+    if (p.blowOff && p.headType === 'vacuum') {
+      o.push('M8'); // aux/air on
+      o.push(`G4 P${dwellSeconds(p.blowOffMs, d)}`);
+      o.push('M9'); // aux/air off
+    }
     o.push(`G0 Z${fmt(p.travelZ, d)}`); // lift to safe Z
   }
 
   // ---- Footer -----------------------------------------------------------
   o.push(`G0 Z${fmt(p.travelZ, d)}`);
   o.push('M5');
+  // PP8: park the head at a safe location at program end.
+  if (p.parkAtEnd) {
+    o.push(`(park)`);
+    o.push(`G0 X${fmt(p.parkX, d)} Y${fmt(p.parkY, d)}`);
+  }
   o.push('M30');
 
   return o.join('\n') + '\n';

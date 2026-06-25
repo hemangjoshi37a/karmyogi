@@ -326,6 +326,20 @@ export interface RasterParams {
   overscan: number;
   /** Bidirectional (scan both directions) vs unidirectional (always L→R). */
   bidirectional: boolean;
+  /**
+   * Scan-offset (L15): on bidirectional engraving the laser/mechanics lag means
+   * reverse rows print shifted; this many mm SHIFTS reverse rows forward to
+   * realign them. 0 = none. Only applied when `bidirectional` is true.
+   */
+  scanOffset: number;
+  /**
+   * Dot mode (L15): instead of run-length lit sweeps, fire a short dwell at each
+   * lit pixel centre (G1 to the pixel, then `G4 P<dotDwell>`), beam off between.
+   * Best for perforating / stippling. 0 dwell or false disables it.
+   */
+  dotMode: boolean;
+  /** Dwell time per dot (seconds) when `dotMode` is on. */
+  dotDwell: number;
 
   /** Engraving feed (mm/min). */
   feed: number;
@@ -367,6 +381,9 @@ export function defaultRasterParams(overrides: Partial<RasterParams> = {}): Rast
     scanAngle: ScanAngle.Horizontal,
     overscan: 2,
     bidirectional: true,
+    scanOffset: 0,
+    dotMode: false,
+    dotDwell: 0.005,
     feed: 3000,
     dynamicPower: true,
     sMin: 0,
@@ -517,6 +534,10 @@ export function emitRasterProgram(
           overscan: p.overscan,
           feed: p.feed,
           d,
+          // Shift reverse rows forward by scanOffset to realign bidi lag.
+          sweepShift: p.bidirectional && dir < 0 ? p.scanOffset : 0,
+          dotMode: p.dotMode,
+          dotDwell: p.dotDwell,
         });
       }
     } else {
@@ -541,6 +562,9 @@ export function emitRasterProgram(
           overscan: p.overscan,
           feed: p.feed,
           d,
+          sweepShift: p.bidirectional && dir < 0 ? p.scanOffset : 0,
+          dotMode: p.dotMode,
+          dotDwell: p.dotDwell,
         });
       }
     }
@@ -589,6 +613,12 @@ interface ScanCfg {
   overscan: number;
   feed: number;
   d: number;
+  /** mm to shift this line's sweep coordinates (bidi scan-offset realign). */
+  sweepShift?: number;
+  /** Dot mode: fire a dwell per lit pixel instead of continuous sweeps. */
+  dotMode?: boolean;
+  /** Dwell per dot (s) when dotMode. */
+  dotDwell?: number;
 }
 
 /**
@@ -623,8 +653,13 @@ function emitScanLine(
   while (firstLit < c.count && sArr[firstLit] <= 0) firstLit++;
   while (lastLit >= 0 && sArr[lastLit] <= 0) lastLit--;
 
-  // Sweep-axis world coordinate of a pixel's LEADING edge (cell start).
-  const coordAt = (i: number) => c.start + i * c.pxPitch;
+  // Sweep-axis world coordinate of a pixel's LEADING edge (cell start). The
+  // bidi scan-offset shifts every coordinate of this (reverse) line so the
+  // mechanical lag is compensated and reverse rows realign with forward rows.
+  const shift = c.sweepShift ?? 0;
+  const coordAt = (i: number) => c.start + i * c.pxPitch + shift;
+  // Pixel CENTRE (used by dot mode).
+  const centreAt = (i: number) => c.start + (i + 0.5) * c.pxPitch + shift;
   const fixedWord = `${c.axisStep}${fmt(c.fixed, c.d)}`;
   const reverse = c.dir < 0;
 
@@ -664,6 +699,27 @@ function emitScanLine(
     }
     return '';
   };
+
+  // ---- Dot mode (L15): one dwell per lit pixel, beam off between dots. -----
+  if (c.dotMode && (c.dotDwell ?? 0) > 0) {
+    const dwell = c.dotDwell ?? 0;
+    let lastSdot = -999;
+    for (const i of order) {
+      const s = sArr[i] > 0 ? sArr[i] : 0;
+      if (s <= 0) continue; // skip blanks entirely (no dot)
+      // Travel to the pixel centre with the beam OFF, then fire a dwell.
+      o.push(`G0 ${sweep}${fmtN(centreAt(i))} ${fixedWord} S0`);
+      if (s !== lastSdot) {
+        o.push(`S${s}`);
+        lastSdot = s;
+      }
+      o.push(`G4 P${fmt(dwell, 3)}`);
+      o.push('S0');
+      pathLen += c.pxPitch;
+    }
+    return pathLen;
+  }
+
   while (k < order.length) {
     const i = order[k];
     const s = sArr[i] > 0 ? sArr[i] : 0; // blanks burn at S0

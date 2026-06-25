@@ -761,3 +761,160 @@ export function applyJobPlacement(gcode: string, p: JobPlacement): string {
 
   return out.join('\n')
 }
+
+// ===========================================================================
+// F3 — Two-point alignment transform
+// ===========================================================================
+//
+// Aligns a whole job to a real, imperfectly-placed workpiece by capturing TWO
+// reference features. For each feature the operator records:
+//   • its NOMINAL position in the design (where the toolpath thinks it is), and
+//   • its MEASURED position on the real bed (jog-to-point or camera-click).
+// From the two correspondences we recover a planar SIMILARITY (uniform scale +
+// rotation + translation) and express it as a {@link Placement} that pivots on
+// the design's XY-bbox centre — so feeding it straight into {@link applyPlacement}
+// (or the gizmo) re-places the entire program onto the workpiece.
+//
+// Why a similarity (not a full affine): two points give exactly 4 equations,
+// which fix translation (2) + rotation (1) + uniform scale (1). Shear / non-
+// uniform scale would need a third point (an affine fit) — out of scope for F3,
+// which is the classic "two-point pick" used by LightBurn print-and-cut,
+// OpenPnP fiducials, and bCNC. Pass `lockScale` to ignore the measured distance
+// and keep the design's scale (rotation + translation only) — the common case
+// when the workpiece is the right size but rotated/shifted.
+
+/** One nominal↔measured correspondence for {@link solveTwoPointAlignment}. */
+export interface AlignPoint {
+  /** Where the feature sits in the UNTRANSFORMED design, mm. */
+  nominal: { x: number; y: number }
+  /** Where the same feature actually is on the bed/workpiece, mm. */
+  measured: { x: number; y: number }
+}
+
+/** Diagnostic result of a two-point solve. */
+export interface AlignSolution {
+  /** The placement to feed into {@link applyPlacement} / the gizmo. */
+  placement: Placement
+  /** Recovered rotation, degrees (CCW). */
+  rotDeg: number
+  /** Recovered uniform scale (1 = unchanged; forced to 1 when `lockScale`). */
+  scale: number
+  /**
+   * Residual fit error, mm: after applying the solved transform to both nominal
+   * points, the RMS distance to their measured targets. ~0 for an exact 2-point
+   * similarity; non-zero only when `lockScale` forces a scale that can't satisfy
+   * both distances. Surface this so the operator can sanity-check before Go.
+   */
+  rmsMm: number
+}
+
+/**
+ * Solve a planar similarity from two reference correspondences and return it as
+ * a pivot-relative {@link Placement} ready for {@link applyPlacement}.
+ *
+ * Geometry. With nominal points `n1,n2` and measured `m1,m2`, let
+ * `vn = n2 − n1`, `vm = m2 − m1`. The uniform scale is `s = |vm| / |vn|` and the
+ * rotation is `θ = atan2(vm) − atan2(vn)`. The point map is
+ *   `T(p) = m1 + s·R(θ)·(p − n1)`.
+ * {@link applyPlacement} instead maps `q = pivot + (dx,dy) + s·R(θ)·(p − pivot)`,
+ * so for the SAME map we just translate the constant term: with the pivot being
+ * the design XY-bbox centre `c`,
+ *   `(dx,dy) = m1 + s·R(θ)·(c − n1) − c`.
+ *
+ * @param a       First correspondence.
+ * @param b       Second correspondence.
+ * @param pivot   The placement pivot — pass the design's XY-bbox centre (e.g.
+ *                from {@link programXYBounds}); defaults to the midpoint of the
+ *                two nominal points if omitted.
+ * @param opts    `lockScale` keeps scale at 1 (rotation + translation only),
+ *                fitting the translation to the CENTROID of the two measured
+ *                points so the residual is split evenly between them.
+ * @returns       The solution, or `null` if the two nominal points coincide
+ *                (degenerate — no direction to align to).
+ */
+export function solveTwoPointAlignment(
+  a: AlignPoint,
+  b: AlignPoint,
+  pivot?: { x: number; y: number },
+  opts?: { lockScale?: boolean },
+): AlignSolution | null {
+  const n1 = a.nominal
+  const n2 = b.nominal
+  const m1 = a.measured
+  const m2 = b.measured
+
+  const vnx = n2.x - n1.x
+  const vny = n2.y - n1.y
+  const vmx = m2.x - m1.x
+  const vmy = m2.y - m1.y
+  const dn = Math.hypot(vnx, vny)
+  const dm = Math.hypot(vmx, vmy)
+  if (dn < 1e-9) return null // coincident nominal points → undefined direction
+
+  const lockScale = opts?.lockScale === true
+  const scale = lockScale || dm < 1e-9 ? 1 : dm / dn
+  const angN = Math.atan2(vny, vnx)
+  const angM = Math.atan2(vmy, vmx)
+  const theta = angM - angN // radians, CCW
+  const cos = Math.cos(theta)
+  const sin = Math.sin(theta)
+
+  // Pivot defaults to the nominal midpoint.
+  const px = pivot ? pivot.x : (n1.x + n2.x) / 2
+  const py = pivot ? pivot.y : (n1.y + n2.y) / 2
+
+  // Linear part L(v) = s·R(theta)·v.
+  const lin = (vx: number, vy: number): [number, number] => {
+    const sx = vx * scale
+    const sy = vy * scale
+    return [sx * cos - sy * sin, sx * sin + sy * cos]
+  }
+
+  let dx: number
+  let dy: number
+  if (lockScale) {
+    // Scale locked: a single source point can't satisfy both targets, so anchor
+    // the translation on the CENTROIDS (least-squares-optimal for rotation-only).
+    const ncx = (n1.x + n2.x) / 2
+    const ncy = (n1.y + n2.y) / 2
+    const mcx = (m1.x + m2.x) / 2
+    const mcy = (m1.y + m2.y) / 2
+    const [lx, ly] = lin(px - ncx, py - ncy)
+    // q(pivot) should equal mc + L(pivot − nc); solve dx,dy from applyPlacement.
+    dx = mcx + lx - px
+    dy = mcy + ly - py
+  } else {
+    // Exact 2-point similarity: anchor on the first correspondence.
+    const [lx, ly] = lin(px - n1.x, py - n1.y)
+    dx = m1.x + lx - px
+    dy = m1.y + ly - py
+  }
+
+  const rotDeg = (theta * 180) / Math.PI
+  const placement: Placement = {
+    dx: cleanZero(dx),
+    dy: cleanZero(dy),
+    rotDeg: cleanZero(rotDeg),
+    scale: cleanZero(scale === 0 ? 1 : scale),
+  }
+
+  // Residual: apply the placement map to each nominal and compare to measured.
+  const mapWith = (x: number, y: number): [number, number] => {
+    const [lx, ly] = lin(x - px, y - py)
+    return [px + dx + lx, py + dy + ly]
+  }
+  const e1 = mapWith(n1.x, n1.y)
+  const e2 = mapWith(n2.x, n2.y)
+  const r1 = Math.hypot(e1[0] - m1.x, e1[1] - m1.y)
+  const r2 = Math.hypot(e2[0] - m2.x, e2[1] - m2.y)
+  const rmsMm = Math.sqrt((r1 * r1 + r2 * r2) / 2)
+
+  return { placement, rotDeg, scale: placement.scale, rmsMm }
+}
+
+/** Round to 1e-6 and squash -0, for tidy placement values. */
+function cleanZero(n: number): number {
+  if (!Number.isFinite(n)) return 0
+  const r = Math.round(n * 1e6) / 1e6
+  return r === 0 ? 0 : r
+}

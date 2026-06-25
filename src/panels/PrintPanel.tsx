@@ -38,6 +38,9 @@ import {
   type SliceWorkerRequest,
   type SliceWorkerOutbound,
   type SupportType,
+  type InfillPattern,
+  type HeightModifier,
+  type LayerHeightBand,
   type PreviewLayer,
   type FeatureType,
 } from '../core/slicer'
@@ -77,6 +80,16 @@ interface PrintSettings {
   supportType: SupportType
   supportOverhangAngle: number // degrees from vertical
   arcFitting: boolean
+  // D7 infill pattern + adhesion
+  infillPattern: InfillPattern
+  adhesion: 'none' | 'skirt' | 'brim' | 'raft'
+  brimLoops: number
+  // D10 ironing
+  ironing: boolean
+  // D4 height-range modifiers
+  modifiers: HeightModifier[]
+  // D8 variable layer-height bands (model-relative Z)
+  layerBands: LayerHeightBand[]
 }
 
 const DEFAULTS: PrintSettings = {
@@ -98,6 +111,12 @@ const DEFAULTS: PrintSettings = {
   supportType: 'none',
   supportOverhangAngle: 50,
   arcFitting: false,
+  infillPattern: 'gyroid',
+  adhesion: 'skirt',
+  brimLoops: 8,
+  ironing: false,
+  modifiers: [],
+  layerBands: [],
 }
 
 /** Coerce an (untrusted) value to a finite number, else the fallback. */
@@ -137,7 +156,54 @@ function coercePrintSettings(v: unknown, base: PrintSettings): PrintSettings {
         : base.supportType,
     supportOverhangAngle: Math.max(10, Math.min(80, numOr(o.supportOverhangAngle, base.supportOverhangAngle))),
     arcFitting: boolOr(o.arcFitting, base.arcFitting),
+    infillPattern: INFILL_PATTERNS.includes(o.infillPattern as InfillPattern)
+      ? (o.infillPattern as InfillPattern)
+      : base.infillPattern,
+    adhesion:
+      o.adhesion === 'none' || o.adhesion === 'skirt' || o.adhesion === 'brim' || o.adhesion === 'raft'
+        ? o.adhesion
+        : base.adhesion,
+    brimLoops: Math.max(1, Math.round(numOr(o.brimLoops, base.brimLoops))),
+    ironing: boolOr(o.ironing, base.ironing),
+    modifiers: coerceModifiers(o.modifiers, base.modifiers),
+    layerBands: coerceBands(o.layerBands, base.layerBands),
   }
+}
+
+/** Ordered infill patterns (gyroid first → it's the recommended default). */
+const INFILL_PATTERNS: InfillPattern[] = ['gyroid', 'rectilinear', 'grid', 'triangles', 'concentric']
+
+/** Defensively coerce a persisted height-modifier list (drops bad rows). */
+function coerceModifiers(v: unknown, fallback: HeightModifier[]): HeightModifier[] {
+  if (!Array.isArray(v)) return fallback
+  const out: HeightModifier[] = []
+  for (const r of v) {
+    const o = (r ?? {}) as Record<string, unknown>
+    const minZ = numOr(o.minZ, NaN)
+    const maxZ = numOr(o.maxZ, NaN)
+    if (!Number.isFinite(minZ) || !Number.isFinite(maxZ) || maxZ < minZ) continue
+    const m: HeightModifier = { minZ, maxZ }
+    if (Number.isFinite(numOr(o.infillDensity, NaN))) m.infillDensity = Math.max(0, Math.min(100, o.infillDensity as number))
+    if (Number.isFinite(numOr(o.perimeters, NaN))) m.perimeters = Math.max(1, Math.round(o.perimeters as number))
+    if (INFILL_PATTERNS.includes(o.infillPattern as InfillPattern)) m.infillPattern = o.infillPattern as InfillPattern
+    out.push(m)
+  }
+  return out
+}
+
+/** Defensively coerce a persisted layer-band list (drops bad rows). */
+function coerceBands(v: unknown, fallback: LayerHeightBand[]): LayerHeightBand[] {
+  if (!Array.isArray(v)) return fallback
+  const out: LayerHeightBand[] = []
+  for (const r of v) {
+    const o = (r ?? {}) as Record<string, unknown>
+    const minZ = numOr(o.minZ, NaN)
+    const maxZ = numOr(o.maxZ, NaN)
+    const h = numOr(o.layerHeight, NaN)
+    if (!Number.isFinite(minZ) || !Number.isFinite(maxZ) || maxZ <= minZ || !(h > 0)) continue
+    out.push({ minZ, maxZ, layerHeight: Math.max(0.04, Math.min(0.6, h)) })
+  }
+  return out
 }
 
 /** Object placement on the bed. */
@@ -153,6 +219,15 @@ interface MeshInfo {
 }
 
 const f1 = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : '—')
+
+/** Short labels for the infill-pattern picker (D7). */
+const INFILL_PATTERN_LABELS: Record<InfillPattern, string> = {
+  gyroid: 'Gyroid',
+  rectilinear: 'Lines',
+  grid: 'Grid',
+  triangles: 'Tri',
+  concentric: 'Concentric',
+}
 
 /** Feature → preview colour (shared by the 3D lines and the legend). */
 const FEATURE_COLORS: Record<FeatureType, string> = {
@@ -246,6 +321,7 @@ export function PrintPanel() {
     DEFAULTS,
   )
   const [showAdvanced, setShowAdvanced] = usePersistentState<boolean>('karmyogi.print.showAdvanced', false)
+  const [showModifiers, setShowModifiers] = usePersistentState<boolean>('karmyogi.print.showModifiers', false)
 
   // ---- colour-coded setting PRESETS (slicing/print params, NOT the model) ----
   // Snapshot the current resolved print settings into a serializable preset, and
@@ -287,6 +363,42 @@ export function PrintPanel() {
 
   function set<K extends keyof PrintSettings>(key: K, value: PrintSettings[K]) {
     setSettings((s) => ({ ...s, [key]: value }))
+  }
+
+  // ---- D4 height-range modifiers + D8 layer bands editors ------------------
+  // `placed` (and thus the model height) is computed below; read it lazily.
+  function addModifier() {
+    const top = modelH > 0 ? Math.round(modelH * 10) / 10 : 10
+    setSettings((s) => ({
+      ...s,
+      modifiers: [...s.modifiers, { minZ: 0, maxZ: Math.max(1, Math.round(top / 3)), infillDensity: 80 }],
+    }))
+  }
+  function updateModifier(i: number, patch: Partial<HeightModifier>) {
+    setSettings((s) => ({
+      ...s,
+      modifiers: s.modifiers.map((m, idx) => (idx === i ? { ...m, ...patch } : m)),
+    }))
+  }
+  function removeModifier(i: number) {
+    setSettings((s) => ({ ...s, modifiers: s.modifiers.filter((_, idx) => idx !== i) }))
+  }
+
+  function addBand() {
+    const top = modelH > 0 ? Math.round(modelH * 10) / 10 : 10
+    setSettings((s) => ({
+      ...s,
+      layerBands: [...s.layerBands, { minZ: 0, maxZ: Math.max(1, Math.round(top / 2)), layerHeight: 0.12 }],
+    }))
+  }
+  function updateBand(i: number, patch: Partial<LayerHeightBand>) {
+    setSettings((s) => ({
+      ...s,
+      layerBands: s.layerBands.map((b, idx) => (idx === i ? { ...b, ...patch } : b)),
+    }))
+  }
+  function removeBand(i: number) {
+    setSettings((s) => ({ ...s, layerBands: s.layerBands.filter((_, idx) => idx !== i) }))
   }
 
   // Invalidate the previously sliced G-code whenever the inputs that produced it
@@ -414,6 +526,9 @@ export function PrintPanel() {
     return { mesh: placedMesh, sizeX, sizeY, sizeZ, fits }
   }, [meshInfo, transform, bedX, bedY, bedZ])
 
+  // Placed model height (mm) — seeds sensible defaults for modifiers/bands.
+  const modelH = placed ? placed.sizeZ : 0
+
   // ---- Arrange controls ----------------------------------------------------
   function applyScalePct() {
     const v = parseFloat(scalePct)
@@ -437,6 +552,92 @@ export function PrintPanel() {
   }
   function rotate90() {
     setTransform((t) => ({ ...t, rotZ: (t.rotZ + 90) % 360 }))
+  }
+
+  // ---- D6 auto-orient: lay the dominant flat face on the bed ---------------
+  // Cluster triangle areas by face normal; the heaviest cluster is the model's
+  // largest flat facet. We rotate the mesh so that normal points straight down
+  // (−Z) — i.e. that face becomes the print bottom. This minimizes overhangs and
+  // gives the most stable base, the same heuristic Cura/Bambu "lay flat" use.
+  function autoOrient() {
+    if (!meshInfo) return
+    const tris = meshInfo.mesh.triangles
+    const stride3 = STL_STRIDE * 3
+    // Accumulate area-weighted face normals into coarse direction buckets.
+    const buckets = new Map<string, { nx: number; ny: number; nz: number; area: number }>()
+    for (let o = 0; o < tris.length; o += stride3) {
+      const ax = tris[o], ay = tris[o + 1], az = tris[o + 2]
+      const bx = tris[o + STL_STRIDE], by = tris[o + STL_STRIDE + 1], bz = tris[o + STL_STRIDE + 2]
+      const cx = tris[o + STL_STRIDE * 2], cy = tris[o + STL_STRIDE * 2 + 1], cz = tris[o + STL_STRIDE * 2 + 2]
+      const ux = bx - ax, uy = by - ay, uz = bz - az
+      const vx = cx - ax, vy = cy - ay, vz = cz - az
+      let cnx = uy * vz - uz * vy, cny = uz * vx - ux * vz, cnz = ux * vy - uy * vx
+      const cross = Math.hypot(cnx, cny, cnz)
+      const area = cross * 0.5
+      if (!(area > 1e-9)) continue
+      cnx /= cross; cny /= cross; cnz /= cross
+      // Quantize the normal to ~5° buckets so coplanar facets merge.
+      const k = `${Math.round(cnx * 18)}:${Math.round(cny * 18)}:${Math.round(cnz * 18)}`
+      const cur = buckets.get(k)
+      if (cur) { cur.nx += cnx * area; cur.ny += cny * area; cur.nz += cnz * area; cur.area += area }
+      else buckets.set(k, { nx: cnx * area, ny: cny * area, nz: cnz * area, area })
+    }
+    let best: { nx: number; ny: number; nz: number; area: number } | null = null
+    for (const b of buckets.values()) if (!best || b.area > best.area) best = b
+    if (!best) return
+    // Target: make the dominant normal point to −Z (face down on the bed).
+    let nx = best.nx, ny = best.ny, nz = best.nz
+    const len = Math.hypot(nx, ny, nz) || 1
+    nx /= len; ny /= len; nz /= len
+    const down: [number, number, number] = [0, 0, -1]
+    // Rotation axis = n × down, angle = acos(n·down). Build a rotation matrix.
+    let axx = ny * down[2] - nz * down[1]
+    let axy = nz * down[0] - nx * down[2]
+    let axz = nx * down[1] - ny * down[0]
+    const axl = Math.hypot(axx, axy, axz)
+    const dot = Math.max(-1, Math.min(1, nx * down[0] + ny * down[1] + nz * down[2]))
+    const ang = Math.acos(dot)
+    let m: number[]
+    if (axl < 1e-9) {
+      // Already aligned (face down) → identity; or anti-aligned (face up) → flip 180° about X.
+      m = dot > 0 ? [1, 0, 0, 0, 1, 0, 0, 0, 1] : [1, 0, 0, 0, -1, 0, 0, 0, -1]
+    } else {
+      axx /= axl; axy /= axl; axz /= axl
+      const c = Math.cos(ang), s = Math.sin(ang), t1 = 1 - c
+      m = [
+        t1 * axx * axx + c, t1 * axx * axy - s * axz, t1 * axx * axz + s * axy,
+        t1 * axx * axy + s * axz, t1 * axy * axy + c, t1 * axy * axz - s * axx,
+        t1 * axx * axz - s * axy, t1 * axy * axz + s * axx, t1 * axz * axz + c,
+      ]
+    }
+    // Apply the rotation to a fresh copy of the mesh + recompute its bbox.
+    const src = meshInfo.mesh.triangles
+    const dst = new Float32Array(src.length)
+    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+    for (let i = 0; i < meshInfo.mesh.vertexCount; i++) {
+      const o = i * STL_STRIDE
+      const x = src[o], y = src[o + 1], z = src[o + 2]
+      const rx = m[0] * x + m[1] * y + m[2] * z
+      const ry = m[3] * x + m[4] * y + m[5] * z
+      const rz = m[6] * x + m[7] * y + m[8] * z
+      dst[o] = rx; dst[o + 1] = ry; dst[o + 2] = rz
+      const nox = src[o + 3], noy = src[o + 4], noz = src[o + 5]
+      dst[o + 3] = m[0] * nox + m[1] * noy + m[2] * noz
+      dst[o + 4] = m[3] * nox + m[4] * noy + m[5] * noz
+      dst[o + 5] = m[6] * nox + m[7] * noy + m[8] * noz
+      if (rx < minX) minX = rx; if (ry < minY) minY = ry; if (rz < minZ) minZ = rz
+      if (rx > maxX) maxX = rx; if (ry > maxY) maxY = ry; if (rz > maxZ) maxZ = rz
+    }
+    const oriented: StlMesh = {
+      triangles: dst,
+      vertexCount: meshInfo.mesh.vertexCount,
+      triangleCount: meshInfo.mesh.triangleCount,
+      bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
+      format: meshInfo.mesh.format,
+    }
+    setMeshInfo({ ...meshInfo, mesh: oriented })
+    // The placement pipeline re-centres + drops the base to Z=0, so reset rotZ.
+    setTransform((tf) => ({ ...tf, rotZ: 0 }))
   }
 
   // ---- Slice (off the main thread in a Web Worker, paced + cancellable) ----
@@ -499,8 +700,11 @@ export function PrintPanel() {
       lineWidth: settings.lineWidth,
       perimeters: settings.perimeters,
       infillDensity: settings.infill,
+      infillPattern: settings.infillPattern,
       supportType: settings.supportType,
       supportOverhangAngle: settings.supportOverhangAngle,
+      modifiers: settings.modifiers,
+      layerBands: settings.layerBands,
     }
     const gcodeParams: GcodeParams = {
       layerHeight: settings.layerHeight,
@@ -516,6 +720,9 @@ export function PrintPanel() {
       retractSpeed: settings.retractSpeed,
       fanEnabled: settings.fan,
       skirt: settings.skirt,
+      adhesion: settings.adhesion,
+      brimLoops: settings.brimLoops,
+      ironing: settings.ironing,
       arcFitting: settings.arcFitting,
     }
 
@@ -819,6 +1026,12 @@ export function PrintPanel() {
                 <div className="print-arrange-tools">
                   <IconButton
                     className="print-icon-btn"
+                    icon="⤓"
+                    label={t('print.orient.title', 'Auto-orient — lay the largest flat face on the bed')}
+                    onClick={autoOrient}
+                  />
+                  <IconButton
+                    className="print-icon-btn"
                     icon="⟳"
                     label={t('print.rotate.title', 'Rotate 90° about Z')}
                     onClick={rotate90}
@@ -953,6 +1166,65 @@ export function PrintPanel() {
               />
             </SegRow>
 
+            {/* Infill pattern (D7) — gyroid default. */}
+            <SegRow
+              label={t('print.infillPattern', 'Infill pattern')}
+              title={t('print.infillPattern.title', 'Geometry of the interior fill. Gyroid is strong, light & isotropic (recommended).')}
+            >
+              <SegControl
+                ariaLabel={t('print.infillPattern', 'Infill pattern')}
+                value={settings.infillPattern}
+                options={INFILL_PATTERNS.map((p) => ({ value: p, label: INFILL_PATTERN_LABELS[p] }))}
+                onChange={(v) => set('infillPattern', v)}
+              />
+            </SegRow>
+
+            {/* Adhesion (D7) — skirt / brim / raft on the first layer. */}
+            <SegRow
+              label={t('print.adhesion', 'Bed adhesion')}
+              title={t('print.adhesion.title', 'First-layer helper: skirt primes (no contact), brim grips the outline, raft prints a base mat.')}
+            >
+              <SegControl
+                ariaLabel={t('print.adhesion', 'Bed adhesion')}
+                value={settings.adhesion}
+                options={[
+                  { value: 'none', label: t('print.adhesion.none', 'None') },
+                  { value: 'skirt', label: t('print.adhesion.skirt', 'Skirt') },
+                  { value: 'brim', label: t('print.adhesion.brim', 'Brim') },
+                  { value: 'raft', label: t('print.adhesion.raft', 'Raft') },
+                ]}
+                onChange={(v) => set('adhesion', v)}
+              />
+            </SegRow>
+            {settings.adhesion === 'brim' && (
+              <SliderField
+                label={t('print.brimLoops', 'Brim loops')}
+                unit={t('unit.loops', 'loops')}
+                value={settings.brimLoops}
+                min={1}
+                max={20}
+                step={1}
+                title={t('print.brimLoops.title', 'Number of concentric brim outlines around the part base')}
+                onChange={(v) => set('brimLoops', Math.round(v))}
+              />
+            )}
+
+            {/* Ironing (D10) — smooth top surfaces with a low-flow pass. */}
+            <SegRow
+              label={t('print.ironing', 'Ironing (smooth tops)')}
+              title={t('print.ironing.title', 'Re-traverse finished top surfaces at near-zero flow for a glassy finish. Adds print time.')}
+            >
+              <SegControl
+                ariaLabel={t('print.ironing', 'Ironing')}
+                value={settings.ironing ? 'on' : 'off'}
+                options={[
+                  { value: 'on', label: t('print.toggle.on', 'On') },
+                  { value: 'off', label: t('print.toggle.off', 'Off') },
+                ]}
+                onChange={(v) => set('ironing', v === 'on')}
+              />
+            </SegRow>
+
             {/* Supports (D1) — grid or branching tree under overhangs. */}
             <SegRow
               label={t('print.support', 'Supports')}
@@ -1084,20 +1356,109 @@ export function PrintPanel() {
                   onChange={(v) => set('firstLayerSpeed', v)}
                 />
               </div>
-              <SegRow
-                label={t('print.skirt', 'Skirt')}
-                title={t('print.skirt.title', 'Priming loop around the object on the first layer')}
-              >
-                <SegControl
-                  ariaLabel={t('print.skirt', 'Skirt')}
-                  value={settings.skirt ? 'on' : 'off'}
-                  options={[
-                    { value: 'on', label: t('print.toggle.on', 'On') },
-                    { value: 'off', label: t('print.toggle.off', 'Off') },
-                  ]}
-                  onChange={(v) => set('skirt', v === 'on')}
-                />
-              </SegRow>
+              <p className="print-hint">{t('print.skirt.moved', 'Skirt / brim / raft moved to “Bed adhesion” above.')}</p>
+            </div>
+          )}
+        </section>
+
+        {/* ---- 4b. Modifiers & adaptive layers (D4 + D8, collapsed) ---- */}
+        <section className="print-section ui-card">
+          <button
+            className="print-advanced-toggle"
+            onClick={() => setShowModifiers((v) => !v)}
+            aria-expanded={showModifiers}
+          >
+            <Icon name={showModifiers ? 'chevron-down' : 'chevron-right'} size={14} />{' '}
+            {t('print.mods', 'Height modifiers & adaptive layers')}
+          </button>
+          {showModifiers && (
+            <div className="print-section-body">
+              {/* D4 — per-height-range overrides */}
+              <div className="pr-mods-head">
+                <span className="pr-mods-title" title={t('print.mods.range.title', 'Override infill / walls for a Z height range (mm) — e.g. a solid base')}>
+                  {t('print.mods.range', 'Height-range modifiers')}
+                </span>
+                <button className="print-btn pr-mods-add" onClick={addModifier} title={t('print.mods.add.title', 'Add a height-range override')}>
+                  <Icon name="add" size={13} /> {t('print.mods.add', 'Add range')}
+                </button>
+              </div>
+              {settings.modifiers.length === 0 ? (
+                <p className="print-hint">{t('print.mods.empty', 'No overrides — the whole model uses the settings above. {h}', { h: modelH > 0 ? t('print.mods.modelH', 'Model height ≈ {z} mm.', { z: f1(modelH) }) : '' })}</p>
+              ) : (
+                <div className="pr-mods-list">
+                  {settings.modifiers.map((m, i) => (
+                    <div className="pr-mod-row" key={i}>
+                      <label className="pr-mod-field">
+                        <span>{t('print.mods.minZ', 'Z from')}</span>
+                        <input type="number" step="0.5" min="0" value={m.minZ}
+                          onChange={(e) => updateModifier(i, { minZ: parseFloat(e.target.value) || 0 })} />
+                      </label>
+                      <label className="pr-mod-field">
+                        <span>{t('print.mods.maxZ', 'Z to')}</span>
+                        <input type="number" step="0.5" min="0" value={m.maxZ}
+                          onChange={(e) => updateModifier(i, { maxZ: parseFloat(e.target.value) || 0 })} />
+                      </label>
+                      <label className="pr-mod-field">
+                        <span>{t('print.mods.infill', 'Infill %')}</span>
+                        <input type="number" step="5" min="0" max="100" value={m.infillDensity ?? ''}
+                          placeholder="—"
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value)
+                            updateModifier(i, { infillDensity: Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : undefined })
+                          }} />
+                      </label>
+                      <label className="pr-mod-field">
+                        <span>{t('print.mods.walls', 'Walls')}</span>
+                        <input type="number" step="1" min="1" value={m.perimeters ?? ''}
+                          placeholder="—"
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value)
+                            updateModifier(i, { perimeters: Number.isFinite(v) ? Math.max(1, Math.round(v)) : undefined })
+                          }} />
+                      </label>
+                      <IconButton className="print-icon-btn pr-mod-del" icon="✕"
+                        label={t('print.mods.remove', 'Remove this range')} onClick={() => removeModifier(i)} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* D8 — adaptive layer-height bands */}
+              <div className="pr-mods-head pr-mods-head-2">
+                <span className="pr-mods-title" title={t('print.bands.title', 'Slice a model-Z band at a different layer height — thin for detail, thick for speed')}>
+                  {t('print.bands', 'Adaptive layer height')}
+                </span>
+                <button className="print-btn pr-mods-add" onClick={addBand} title={t('print.bands.add.title', 'Add a variable layer-height band')}>
+                  <Icon name="add" size={13} /> {t('print.bands.add', 'Add band')}
+                </button>
+              </div>
+              {settings.layerBands.length === 0 ? (
+                <p className="print-hint">{t('print.bands.empty', 'No bands — uniform {h} mm layers. Add a band to refine detail zones.', { h: f1(settings.layerHeight) })}</p>
+              ) : (
+                <div className="pr-mods-list">
+                  {settings.layerBands.map((b, i) => (
+                    <div className="pr-mod-row" key={i}>
+                      <label className="pr-mod-field">
+                        <span>{t('print.bands.minZ', 'Z from')}</span>
+                        <input type="number" step="0.5" min="0" value={b.minZ}
+                          onChange={(e) => updateBand(i, { minZ: parseFloat(e.target.value) || 0 })} />
+                      </label>
+                      <label className="pr-mod-field">
+                        <span>{t('print.bands.maxZ', 'Z to')}</span>
+                        <input type="number" step="0.5" min="0" value={b.maxZ}
+                          onChange={(e) => updateBand(i, { maxZ: parseFloat(e.target.value) || 0 })} />
+                      </label>
+                      <label className="pr-mod-field">
+                        <span>{t('print.bands.lh', 'Layer mm')}</span>
+                        <input type="number" step="0.02" min="0.04" max="0.6" value={b.layerHeight}
+                          onChange={(e) => updateBand(i, { layerHeight: parseFloat(e.target.value) || 0.12 })} />
+                      </label>
+                      <IconButton className="print-icon-btn pr-mod-del" icon="✕"
+                        label={t('print.bands.remove', 'Remove this band')} onClick={() => removeBand(i)} />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>

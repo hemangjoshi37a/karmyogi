@@ -59,6 +59,28 @@ export interface SolderPoint {
   feedSeconds: number;
   /** Final-descent geometry: straight plunge or 45° angle of attack. */
   approach: SolderApproach;
+  /**
+   * SO3 — PER-POINT PREHEAT dwell (seconds): once the tip touches the pad, wait
+   * this long BEFORE feeding wire so the joint comes up to temperature (a cold
+   * joint otherwise). Only used in TouchDown mode (the tip must already be in
+   * contact); ignored for PreSolder (the blob is pre-melted off-pad). 0 = none.
+   */
+  preheatSeconds?: number;
+  /**
+   * SO1/SO3 — PER-POINT SETTLE dwell (seconds) after the feeder stops, before the
+   * tip lifts, so the joint solidifies. When undefined the global
+   * `SolderingParams.settleSeconds` applies; a finite value here OVERRIDES it for
+   * this point. 0 = no settle on this point.
+   */
+  settleSeconds?: number;
+  /**
+   * SO1 — PER-POINT ANTI-OOZE retract (mm): immediately after feeding (and the
+   * settle dwell) the tip lifts this far at a controlled feed BEFORE the normal
+   * Free-Z retract, snapping/breaking the molten-solder string so it doesn't
+   * trail across the board (a "dab"). 0/undefined = no anti-ooze lift. The lift
+   * is RELATIVE (added to Touch-Z) and never exceeds Free-Z.
+   */
+  antiOozeMm?: number;
 }
 
 /** Defaults for a fresh soldering point. */
@@ -71,6 +93,8 @@ export function defaultSolderPoint(overrides: Partial<SolderPoint> = {}): Solder
     type: SolderFeedType.TouchDown,
     feedSeconds: 0.5,
     approach: 'plunge',
+    preheatSeconds: 0,
+    antiOozeMm: 0,
     ...overrides,
   };
 }
@@ -82,6 +106,18 @@ export interface SolderingParams {
   feederRPM: number; // emitted as the S word when the feeder runs
   plungeFeed: number; // touch-down feed rate (mm/min)
   settleSeconds: number; // dwell after feeding, before retract (s); 0 = none
+  /**
+   * SO2 — PURGE / PRIME (seconds): before the first point the feeder runs for
+   * this long (at a safe Z, away from the board) to prime the wire to the tip so
+   * the very first joint isn't starved. 0 = skip the prime step.
+   */
+  primeSeconds: number;
+  /**
+   * SO1 — anti-ooze retract feed (mm/min) used for the controlled per-point
+   * lift that breaks the solder string. Distinct from the plunge feed so the
+   * "dab" can be tuned independently. Falls back to plungeFeed when ≤ 0.
+   */
+  antiOozeFeed: number;
   decimals: number;
   programName: string;
 }
@@ -93,6 +129,8 @@ export function defaultSolderingParams(overrides: Partial<SolderingParams> = {})
     feederRPM: 1000.0,
     plungeFeed: 1000.0,
     settleSeconds: 0.0,
+    primeSeconds: 0.0,
+    antiOozeFeed: 0.0,
     decimals: 3,
     programName: 'hjLabs Auto-Soldering',
     ...overrides,
@@ -137,13 +175,18 @@ export function estimateSolderingSeconds(
 ): number {
   const p = defaultSolderingParams(params);
   const plungeFeed = Math.max(0, p.plungeFeed); // mm/min
-  const settle = Math.max(0, p.settleSeconds);
-  let seconds = 0;
+  const globalSettle = Math.max(0, p.settleSeconds);
+  let seconds = Math.max(0, p.primeSeconds); // SO2: one-time feeder prime
   for (const pt of points) {
     const drop = Math.abs(pt.freeZ - pt.touchZ); // mm lowered + raised
     if (plungeFeed > 1e-9) seconds += (drop / plungeFeed) * 60; // plunge (down)
+    seconds += Math.max(0, pt.preheatSeconds ?? 0); // SO3 preheat dwell
     seconds += Math.max(0, pt.feedSeconds); // feeder ON
-    seconds += settle; // settle dwell
+    // Per-point settle overrides the global one when set (SO1/SO3).
+    seconds +=
+      typeof pt.settleSeconds === 'number' && Number.isFinite(pt.settleSeconds)
+        ? Math.max(0, pt.settleSeconds)
+        : globalSettle; // settle dwell
   }
   return seconds;
 }
@@ -378,6 +421,25 @@ function solderPointLines(
     angleRetract.push(`G1 X${fmt(startX, d)} Y${fmt(startY, d)} Z${fmt(zr(pt.freeZ), d)} F${feedF}`);
   }
 
+  // SO3 — effective settle: a finite per-point value OVERRIDES the global one.
+  const settle =
+    typeof pt.settleSeconds === 'number' && Number.isFinite(pt.settleSeconds)
+      ? Math.max(0, pt.settleSeconds)
+      : Math.max(0, p.settleSeconds);
+  // SO3 — per-point preheat dwell (TouchDown only — the tip must be in contact).
+  const preheat = Math.max(0, pt.preheatSeconds ?? 0);
+  // SO1 — anti-ooze "dab": after settling, lift a small amount at a controlled
+  // feed to break the solder string before the full retract. Clamped so it never
+  // overshoots Free-Z (the normal retract still finishes the lift). Feed falls
+  // back to the plunge feed when no dedicated anti-ooze feed is set.
+  const antiOoze = Math.max(0, pt.antiOozeMm ?? 0);
+  const antiOozeZ = Math.min(pt.touchZ + antiOoze, pt.freeZ);
+  const aoFeed = fmt(Math.max(1, p.antiOozeFeed > 0 ? p.antiOozeFeed : p.plungeFeed), d);
+  const antiOozeLine =
+    antiOoze > 0 && antiOozeZ > pt.touchZ
+      ? `G1 Z${fmt(zr(antiOozeZ), d)} F${aoFeed}`
+      : null;
+
   if (pt.type === SolderFeedType.PreSolder) {
     o.push(`(Point ${n}: pre-solder, ${approach}, feed ${fmt(pt.feedSeconds, d)}s)`);
     o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
@@ -386,7 +448,8 @@ function solderPointLines(
     o.push(feed);
     o.push('M5'); // stop feeder
     o.push(...touch); // touch pad to deposit (straight or 45°)
-    if (p.settleSeconds > 0.0) o.push(`G4 P${fmt(p.settleSeconds, d)}`);
+    if (settle > 0.0) o.push(`G4 P${fmt(settle, d)}`);
+    if (antiOozeLine) o.push(antiOozeLine); // SO1 anti-ooze dab before retract
     // Retract: diagonal back out along the 45° approach, else straight up.
     if (angleRetract.length > 0) o.push(...angleRetract);
     else o.push(raise);
@@ -396,10 +459,12 @@ function solderPointLines(
     o.push(preRaise); // ensure raised to a safe travel height (>= safeZ)
     o.push(xy); // move above pad (or its 45° start) at free Z
     o.push(...touch); // touch pad first (straight or 45°)
+    if (preheat > 0.0) o.push(`G4 P${fmt(preheat, d)}`); // SO3 preheat the joint
     o.push(feedOn); // feed wire while in contact
     o.push(feed);
     o.push('M5'); // stop feeder
-    if (p.settleSeconds > 0.0) o.push(`G4 P${fmt(p.settleSeconds, d)}`);
+    if (settle > 0.0) o.push(`G4 P${fmt(settle, d)}`);
+    if (antiOozeLine) o.push(antiOozeLine); // SO1 anti-ooze dab before retract
     // Retract: diagonal back out along the 45° approach, else straight up.
     if (angleRetract.length > 0) o.push(...angleRetract);
     else o.push(raise);
@@ -444,6 +509,14 @@ export function generateSolderingSegments(
   head.push('G17');
   head.push('M5'); // feeder off to start
   head.push(`G0 Z${fmt(zr(p.safeZ), d)}`); // safe height first (relative to datum)
+  // SO2 — PURGE / PRIME: run the feeder at the safe height (tip well clear of the
+  // board) so wire is primed to the tip before the first joint. Skipped when 0.
+  if (p.primeSeconds > 0.0) {
+    head.push(`(Prime feeder ${fmt(p.primeSeconds, d)}s)`);
+    head.push(`M3 S${fmt(p.feederRPM, d)}`);
+    head.push(`G4 P${fmt(p.primeSeconds, d)}`);
+    head.push('M5');
+  }
 
   // ---- Per-point slices --------------------------------------------------
   const segments: SolderingSegment[] = points.map((pt, i) => ({

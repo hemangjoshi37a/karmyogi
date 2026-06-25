@@ -2,7 +2,7 @@
 // Ported from the Qt/C++ reference cadcam/pcbcam.{h,cpp}.
 // Pure TypeScript: no React/DOM/three.js imports.
 
-import { Polyline, Point, BBox, distance, distanceSquared, kEpsilon } from './geometry';
+import { Polyline, Point, BBox, distance, distanceSquared, pointInPolygon, kEpsilon } from './geometry';
 import { Tool, Toolpath, toolRadius } from './toolpath';
 import { offsetPolygon } from './offset';
 import { GerberData, GerberTrace } from './gerber';
@@ -31,6 +31,61 @@ function cutLoop(tp: Toolpath, loop: Polyline, z: number, safeZ: number): void {
   if (loop.closed) tp.feed({ x: start.x, y: start.y, z });
 
   const end = loop.closed ? start : loop.points[loop.points.length - 1];
+  tp.rapid({ x: end.x, y: end.y, z: safeZ });
+}
+
+/**
+ * Cut a closed isolation loop in one or more DEPTH passes (P11 multi-depth) at the
+ * chosen cut DIRECTION (P11 climb/conventional). A V-bit or fragile engraving bit
+ * can rarely reach the full copper-clearance depth in a single plunge on an uneven
+ * board, so `stepdown` (>0) splits the descent into successive passes; `cutZ` is
+ * the final (deepest) negative depth. Each pass re-traces the same loop at a
+ * shallower-then-deeper Z, retracting to safeZ only between *features* (the passes
+ * stay down, plunging to each new level over the loop start).
+ *
+ * DIRECTION: `offsetPolygon(+delta)` returns the CCW boundary that hugs the copper;
+ * traversed as-is the cutter walks CCW (conventional milling around an OUTER copper
+ * island — the cutter's leading edge meets unmachined stock). Reversing the loop
+ * gives CW = climb. We flip a CLONE so the caller's polyline winding is untouched.
+ */
+function cutLoopLayered(
+  tp: Toolpath,
+  loop: Polyline,
+  cutZ: number,
+  safeZ: number,
+  stepdown: number,
+  climb: boolean,
+): void {
+  if (loop.points.length < 2) return;
+  // Choose direction. CCW (positive signed area) = conventional here; climb = CW.
+  let path = loop;
+  const wantCw = climb; // climb → clockwise traversal
+  if (loop.points.length >= 3 && loop.isClockwise() !== wantCw) {
+    path = loop.clone();
+    path.reverse();
+    path.closed = loop.closed;
+  }
+
+  // Depth levels: stepdown increments from the surface down to the final cutZ.
+  const floor = -Math.abs(cutZ);
+  const sd = stepdown > kEpsilon ? stepdown : Math.abs(floor);
+  const levels: number[] = [];
+  let z = -sd;
+  while (z > floor + kEpsilon) {
+    levels.push(z);
+    z -= sd;
+  }
+  levels.push(floor);
+
+  const start = path.points[0];
+  tp.rapid({ x: start.x, y: start.y, z: safeZ });
+  for (const lz of levels) {
+    tp.plunge({ x: start.x, y: start.y, z: lz });
+    for (let i = 1; i < path.points.length; ++i)
+      tp.feed({ x: path.points[i].x, y: path.points[i].y, z: lz });
+    if (path.closed) tp.feed({ x: start.x, y: start.y, z: lz });
+  }
+  const end = path.closed ? start : path.points[path.points.length - 1];
   tp.rapid({ x: end.x, y: end.y, z: safeZ });
 }
 
@@ -239,7 +294,19 @@ function unionCopper(gerber: GerberData): MultiPolygon {
  * fall back to the legacy per-feature isolation (twin offset lines per trace +
  * concentric rings per pad/region) — kept as a safety net should the union ever
  * yield degenerate output for a pathological board.
+ *
+ * `opts` (P11) layers the depth and picks the cut direction:
+ *  - `stepdown` (>0) splits the copper plunge into successive depth passes down
+ *    to `cutZ` (single pass when omitted/0) — gentler on V-bits / uneven boards.
+ *  - `climb` true = climb milling (CW around copper); false/omitted = conventional.
  */
+export interface IsolationOptions {
+  /** Depth per pass (mm, >0). Omitted/0 → a single full-depth pass. */
+  stepdown?: number;
+  /** true = climb (CW); false/undefined = conventional (CCW). */
+  climb?: boolean;
+}
+
 export function isolationRoutes(
   gerber: GerberData,
   tool: Tool,
@@ -247,11 +314,14 @@ export function isolationRoutes(
   cutZ: number,
   passes: number,
   stepoverMm?: number,
-  mergeNets = true
+  mergeNets = true,
+  opts: IsolationOptions = {}
 ): Toolpath {
   const tp = new Toolpath();
   tp.name = 'Isolation';
   if (passes < 1) passes = 1;
+  const stepdown = opts.stepdown != null && opts.stepdown > 0 ? opts.stepdown : 0;
+  const climb = !!opts.climb;
 
   const r = toolRadius(tool);
   // Lateral spacing between successive isolation passes, in mm. Caller passes an
@@ -276,7 +346,7 @@ export function isolationRoutes(
           const loop = offsetPolygon(ring, +delta);
           if (loop.points.length < 3) continue;
           loop.closed = true;
-          cutLoop(tp, loop, cutZ, safeZ);
+          cutLoopLayered(tp, loop, cutZ, safeZ, stepdown, climb);
         }
       }
       return tp;
@@ -284,7 +354,7 @@ export function isolationRoutes(
     // Union produced nothing usable — fall through to per-feature isolation.
   }
 
-  return perFeatureIsolation(gerber, tp, r, step, safeZ, cutZ, passes);
+  return perFeatureIsolation(gerber, tp, r, step, safeZ, cutZ, passes, stepdown, climb);
 }
 
 /**
@@ -302,16 +372,20 @@ function perFeatureIsolation(
   step: number,
   safeZ: number,
   cutZ: number,
-  passes: number
+  passes: number,
+  stepdown = 0,
+  climb = false
 ): Toolpath {
   // ---- Open traces: offset the centreline to each side. ----
+  // Open offset lines have no enclosed area, so climb direction is undefined for
+  // them; they only honour multi-depth (each side cut layered to depth).
   for (const t of gerber.traces) {
     if (t.centreline.points.length < 2) continue;
     for (let pass = 0; pass < passes; ++pass) {
       const d = t.width / 2.0 + r + pass * step;
       for (const sign of [+1, -1]) {
         const side = offsetOpenPolyline(t.centreline, sign * d);
-        if (side.points.length >= 2) cutLoop(tp, side, cutZ, safeZ);
+        if (side.points.length >= 2) cutLoopLayered(tp, side, cutZ, safeZ, stepdown, false);
       }
     }
   }
@@ -337,7 +411,7 @@ function perFeatureIsolation(
       const ring = offsetPolygon(feat, +delta);
       if (ring.points.length < 3) continue;
       ring.closed = true;
-      cutLoop(tp, ring, cutZ, safeZ);
+      cutLoopLayered(tp, ring, cutZ, safeZ, stepdown, climb);
     }
   }
   return tp;
@@ -701,6 +775,348 @@ export function drillGroup(
   const tp = drillHits(sub, safeZ, drillZ, peckDepth);
   tp.name = `Drill Ø${group.diameter.toFixed(2)}`;
   return tp;
+}
+
+// ===========================================================================
+// P4 — Copper-pour / non-copper clearing (NCC)
+// ===========================================================================
+
+/** Point-in-MultiPolygon test (even-odd over every ring; mm). */
+function pointInMultiPolygon(mp: MultiPolygon, x: number, y: number): boolean {
+  let inside = false;
+  for (const poly of mp) {
+    for (const ring of poly) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const xi = ring[i][0];
+        const yi = ring[i][1];
+        const xj = ring[j][0];
+        const yj = ring[j][1];
+        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi || 1e-12) + xi) inside = !inside;
+      }
+    }
+  }
+  return inside;
+}
+
+export interface CopperClearOptions {
+  /** Lateral stepover between raster rows (mm). Defaults to ~0.8 × tool Ø. */
+  stepoverMm?: number;
+  /** Clearance kept between the cutter EDGE and copper (mm), beyond the tool radius. */
+  clearanceMm?: number;
+  /** Depth per pass (mm, >0). Omitted/0 → single full-depth pass. */
+  stepdown?: number;
+  /**
+   * Hard cap on the number of raster rows, so a tiny stepover on a big board can't
+   * lock the UI. When exceeded the stepover is widened to fit (a coarser clear).
+   */
+  maxRows?: number;
+}
+
+/**
+ * P4 — clear the NON-COPPER area (copper pour / ground-plane relief) inside the
+ * board so isolation routing isn't the only thing removing copper: everything that
+ * is NOT copper (and not within the cutter's clearance of copper) is milled away to
+ * `cutZ`, leaving the copper features standing. Reuses the same merged-copper union
+ * the isolation pass builds; the keep-out is that copper grown by (toolRadius +
+ * clearance). Rastered as a boustrophedon (alternating rows) at a shallow copper
+ * depth, in optional multi-depth passes.
+ *
+ * `outline` bounds the clearing region (the board edge); when null the copper
+ * bounding box (grown a little) is used. Copper that the isolation pass already
+ * cut around is left intact — this only flattens the open field between nets.
+ */
+export function copperPourClear(
+  gerber: GerberData,
+  tool: Tool,
+  safeZ: number,
+  cutZ: number,
+  outline: Polyline | null,
+  opts: CopperClearOptions = {},
+): Toolpath {
+  const tp = new Toolpath();
+  tp.name = 'Copper clear';
+  const r = toolRadius(tool);
+  if (r <= kEpsilon) return tp;
+
+  // Merged copper grown outward to the cutter keep-out distance.
+  const merged = unionCopper(gerber);
+  if (merged.length === 0) return tp;
+  const clearance = Math.max(0, opts.clearanceMm ?? 0) + r;
+  const keepOut: MultiPolygon = [];
+  for (const poly of merged) {
+    for (const ring of poly) {
+      if (ring.length < 4) continue;
+      const pl = ringToPolyline(ring);
+      const grown = offsetPolygon(pl, +clearance);
+      if (grown.points.length >= 3) keepOut.push([polylineToRing(grown)]);
+    }
+  }
+
+  // Field bounds: the outline (inset by the tool radius so the cutter stays inside
+  // the board edge) or the copper bbox grown a little.
+  const field = new BBox();
+  if (outline && outline.points.length >= 3) {
+    for (const p of outline.points) field.expand(p);
+  } else {
+    field.expand(gerber.bounds());
+  }
+  if (!field.isValid()) return tp;
+  const minX = field.min.x + r;
+  const maxX = field.max.x - r;
+  const minY = field.min.y + r;
+  const maxY = field.max.y - r;
+  if (!(maxX - minX > kEpsilon && maxY - minY > kEpsilon)) return tp;
+
+  // Stepover + row count guard.
+  let step = opts.stepoverMm != null && opts.stepoverMm > 0 ? opts.stepoverMm : tool.diameter * 0.8;
+  const maxRows = opts.maxRows ?? 2000;
+  const span = maxY - minY;
+  if (span / step > maxRows) step = span / maxRows;
+
+  const outlineForTest = outline && outline.points.length >= 3 ? outline : null;
+  const inField = (x: number, y: number): boolean => {
+    if (outlineForTest && !pointInPolygon(outlineForTest, { x, y })) return false;
+    if (pointInMultiPolygon(keepOut, x, y)) return false;
+    return true;
+  };
+
+  const floor = -Math.abs(cutZ);
+  const sd = opts.stepdown != null && opts.stepdown > 0 ? opts.stepdown : 0;
+  const levels: number[] = [];
+  if (sd > 0) {
+    let z = -sd;
+    while (z > floor + kEpsilon) {
+      levels.push(z);
+      z -= sd;
+    }
+  }
+  levels.push(floor);
+
+  const xStep = Math.max(step * 0.5, 0.1);
+  for (const lz of levels) {
+    let leftToRight = true;
+    for (let y = minY; y <= maxY + 1e-9; y += step) {
+      // Engaged X spans on this row.
+      const spans: { x0: number; x1: number }[] = [];
+      let runStart = NaN;
+      for (let x = minX; x <= maxX + 1e-9; x += xStep) {
+        const on = inField(x, y);
+        if (on && Number.isNaN(runStart)) runStart = x;
+        else if (!on && !Number.isNaN(runStart)) {
+          spans.push({ x0: runStart, x1: x - xStep });
+          runStart = NaN;
+        }
+      }
+      if (!Number.isNaN(runStart)) spans.push({ x0: runStart, x1: maxX });
+      if (spans.length === 0) continue;
+      const ordered = leftToRight ? spans : spans.slice().reverse();
+      for (const sp of ordered) {
+        const a = leftToRight ? sp.x0 : sp.x1;
+        const b = leftToRight ? sp.x1 : sp.x0;
+        if (Math.abs(b - a) < kEpsilon) continue;
+        tp.rapid({ x: a, y, z: safeZ });
+        tp.plunge({ x: a, y, z: lz });
+        tp.feed({ x: b, y, z: lz });
+        tp.rapid({ x: b, y, z: safeZ });
+      }
+      leftToRight = !leftToRight;
+    }
+  }
+  return tp;
+}
+
+// ===========================================================================
+// P6 — Mill-drill / mill-holes (+ slots): holes larger than the bit
+// ===========================================================================
+
+/** A circle (CCW) of radius `r` about `c` as a closed Polyline (mm). */
+function circlePolyline(c: Point, r: number, sides = 32): Polyline {
+  const pl = new Polyline();
+  pl.closed = true;
+  for (let i = 0; i < sides; i++) {
+    const a = (2 * Math.PI * i) / sides;
+    pl.add({ x: c.x + r * Math.cos(a), y: c.y + r * Math.sin(a) });
+  }
+  return pl;
+}
+
+/**
+ * Mill a single round hole of `holeDia` with a smaller end mill (`toolDia`), in
+ * `stepdown` depth passes down to `drillZ`. The bit spirals out from the centre in
+ * concentric rings spaced by `stepoverMm` so the finished bore matches `holeDia`
+ * (the OUTERMOST ring rides at radius holeDia/2 − toolRadius, so the tool edge
+ * reaches the hole wall). Each depth level re-clears every ring. Returns an empty
+ * toolpath when the hole is not actually bigger than the bit.
+ */
+function millOneHole(
+  tp: Toolpath,
+  c: Point,
+  holeDia: number,
+  toolDia: number,
+  safeZ: number,
+  drillZ: number,
+  stepdown: number,
+  stepoverMm: number,
+): void {
+  const tr = toolDia / 2;
+  const outerR = holeDia / 2 - tr;
+  if (outerR <= kEpsilon) return; // bit as big as / bigger than the hole — just drill it
+  const floor = -Math.abs(drillZ);
+  const sd = stepdown > kEpsilon ? stepdown : Math.abs(floor);
+  const step = stepoverMm > kEpsilon ? stepoverMm : tr;
+
+  // Ring radii from the centre outward (centre pilot ring is radius 0 → a plunge).
+  const radii: number[] = [];
+  for (let rr = step; rr < outerR - kEpsilon; rr += step) radii.push(rr);
+  radii.push(outerR);
+
+  const levels: number[] = [];
+  let z = -sd;
+  while (z > floor + kEpsilon) {
+    levels.push(z);
+    z -= sd;
+  }
+  levels.push(floor);
+
+  for (const lz of levels) {
+    // Plunge at centre, then spiral out through each ring at this depth.
+    tp.rapid({ x: c.x, y: c.y, z: safeZ });
+    tp.plunge({ x: c.x, y: c.y, z: lz });
+    for (const rr of radii) {
+      const ring = circlePolyline(c, rr);
+      const s = ring.points[0];
+      tp.feed({ x: s.x, y: s.y, z: lz });
+      for (let i = 1; i < ring.points.length; i++) tp.feed({ x: ring.points[i].x, y: ring.points[i].y, z: lz });
+      tp.feed({ x: s.x, y: s.y, z: lz });
+    }
+    tp.rapid({ x: c.x, y: c.y, z: safeZ });
+  }
+}
+
+export interface MillHolesOptions {
+  /** Mill (instead of drill) any hole whose Ø exceeds toolDia by at least this margin (mm). */
+  minOversizeMm?: number;
+  /** Depth per pass (mm, >0). Omitted/0 → single full-depth pass. */
+  stepdown?: number;
+  /** Lateral spacing between concentric clearing rings (mm). Defaults to tool radius. */
+  stepoverMm?: number;
+}
+
+/**
+ * P6 — mill-drill: for holes that are LARGER than the available end mill, mill the
+ * bore out with concentric rings instead of plunge-drilling (which a small bit
+ * cannot do). Holes at/under the bit Ø are left to the normal {@link drillHits}
+ * drilling pass. Returns the milling toolpath for the oversized holes only (empty
+ * when none qualify). The bit Ø is `toolDia`.
+ */
+export function millHoles(
+  drill: ExcellonData,
+  toolDia: number,
+  safeZ: number,
+  drillZ: number,
+  opts: MillHolesOptions = {},
+): Toolpath {
+  const tp = new Toolpath();
+  tp.name = 'Mill holes';
+  const margin = opts.minOversizeMm != null && opts.minOversizeMm >= 0 ? opts.minOversizeMm : 0.1;
+  const stepdown = opts.stepdown != null && opts.stepdown > 0 ? opts.stepdown : 0;
+  const stepover = opts.stepoverMm != null && opts.stepoverMm > 0 ? opts.stepoverMm : 0;
+  // Mill the larger holes first only matters for tool wear; keep file order but
+  // nearest-neighbour from origin for travel.
+  const oversized = drill.hits.filter((h) => h.diameter > toolDia + margin);
+  if (oversized.length === 0) return tp;
+
+  const n = oversized.length;
+  const used = new Array<boolean>(n).fill(false);
+  let cur: Point = { x: 0, y: 0 };
+  for (let k = 0; k < n; k++) {
+    let best = -1;
+    let bestD = Number.MAX_VALUE;
+    for (let j = 0; j < n; j++) {
+      if (used[j]) continue;
+      const d = distanceSquared(cur, oversized[j].pos);
+      if (d < bestD) {
+        bestD = d;
+        best = j;
+      }
+    }
+    if (best < 0) break;
+    used[best] = true;
+    const h = oversized[best];
+    millOneHole(tp, h.pos, h.diameter, toolDia, safeZ, drillZ, stepdown, stepover);
+    cur = h.pos;
+  }
+  return tp;
+}
+
+/** Count of Excellon hits whose Ø exceeds the bit by `marginMm` (UI badge / DRC). */
+export function oversizedHoleCount(drill: ExcellonData, toolDia: number, marginMm = 0.1): number {
+  return drill.hits.filter((h) => h.diameter > toolDia + marginMm).length;
+}
+
+// ===========================================================================
+// P10 — Units / origin handling: keep-positive + corner/center re-origin
+// ===========================================================================
+
+export type OriginMode = 'asis' | 'keepPositive' | 'corner' | 'center';
+
+/** Translate a Gerber's geometry by (dx, dy) (mm), returning a new GerberData. */
+function translateGerber(g: GerberData, dx: number, dy: number): GerberData {
+  const shift = (pl: Polyline): Polyline => {
+    const out = new Polyline();
+    for (const p of pl.points) out.add({ x: p.x + dx, y: p.y + dy });
+    out.closed = pl.closed;
+    return out;
+  };
+  const out = new GerberData();
+  out.traces = g.traces.map((t): GerberTrace => ({ centreline: shift(t.centreline), width: t.width }));
+  out.pads = g.pads.map(shift);
+  out.regions = g.regions.map(shift);
+  return out;
+}
+
+/** Translate an Excellon set by (dx, dy) (mm), returning a new ExcellonData. */
+function translateExcellon(d: ExcellonData, dx: number, dy: number): ExcellonData {
+  const out = new ExcellonData();
+  out.hits = d.hits.map((h) => ({ pos: { x: h.pos.x + dx, y: h.pos.y + dy }, diameter: h.diameter }));
+  return out;
+}
+
+/**
+ * Compute the (dx, dy) translation (mm) that re-origins a board to the requested
+ * {@link OriginMode}, given the board's overall bounds `b`:
+ *  - 'asis'         → no shift (0,0).
+ *  - 'keepPositive' → shift the min corner up to (0,0) only if any extent is
+ *    negative, so the whole job sits in the +X/+Y quadrant (machines that home to
+ *    a corner can't reach negative work coords). Never moves an already-positive
+ *    board.
+ *  - 'corner'       → move the board's lower-left corner exactly to (0,0).
+ *  - 'center'       → move the board centre to (0,0).
+ *
+ * Returning the delta (rather than transformed geometry) lets the caller apply the
+ * SAME shift consistently to every layer + the drill file so they stay registered.
+ */
+export function originShift(b: BBox, mode: OriginMode): Point {
+  if (!b.isValid() || mode === 'asis') return { x: 0, y: 0 };
+  if (mode === 'corner') return { x: -b.min.x, y: -b.min.y };
+  if (mode === 'center') {
+    const c = b.center();
+    return { x: -c.x, y: -c.y };
+  }
+  // keepPositive: only lift the part that's negative.
+  return { x: b.min.x < 0 ? -b.min.x : 0, y: b.min.y < 0 ? -b.min.y : 0 };
+}
+
+/** Apply an {@link originShift} delta to a Gerber (new object; identity when 0,0). */
+export function reoriginGerber(g: GerberData, delta: Point): GerberData {
+  if (Math.abs(delta.x) <= kEpsilon && Math.abs(delta.y) <= kEpsilon) return g;
+  return translateGerber(g, delta.x, delta.y);
+}
+
+/** Apply an {@link originShift} delta to an Excellon (new object; identity when 0,0). */
+export function reoriginExcellon(d: ExcellonData, delta: Point): ExcellonData {
+  if (Math.abs(delta.x) <= kEpsilon && Math.abs(delta.y) <= kEpsilon) return d;
+  return translateExcellon(d, delta.x, delta.y);
 }
 
 // ===========================================================================

@@ -4,6 +4,8 @@ import { useTabCommands } from '../machine/tabCommands'
 import { useT } from '../i18n'
 import { InfoTip } from '../components/InfoTip'
 import { Icon } from '../components/Icons'
+import { Modal } from '../components/Modal'
+import { expandArray } from '../core/arrayDuplicate'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { PresetRail } from '../components/presets/PresetRail'
 import { PresetSaveBar } from '../components/presets/PresetSaveBar'
@@ -53,6 +55,10 @@ const num = (v: string, fallback: number): number => {
 /** Coerce an (untrusted) value to a finite number, else the fallback. */
 const numOr = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback
+
+/** Coerce an (untrusted) value to a boolean, else the fallback. */
+const boolOr = (v: unknown, fallback: boolean): boolean =>
+  typeof v === 'boolean' ? v : fallback
 
 /** Generator params editable from the panel (programName/metric are fixed here). */
 type EditableParams = Omit<ScrewDrivingParams, 'programName' | 'metric'>
@@ -217,6 +223,10 @@ export function ScrewFittingPanel() {
       approachFeed: d.approachFeed,
       seatDwellSec: d.seatDwellSec,
       defaultDepth: d.defaultDepth,
+      targetTorque: d.targetTorque,
+      verifyDepth: d.verifyDepth,
+      probeFeed: d.probeFeed,
+      pauseEachScrew: d.pauseEachScrew,
       decimals: clampDecimals(d.decimals),
     }
   })())
@@ -240,6 +250,10 @@ export function ScrewFittingPanel() {
       approachFeed: Math.max(0, numOr(o.approachFeed, prev.approachFeed)),
       seatDwellSec: Math.max(0, numOr(o.seatDwellSec, prev.seatDwellSec)),
       defaultDepth: numOr(o.defaultDepth, prev.defaultDepth),
+      targetTorque: Math.max(0, numOr(o.targetTorque, prev.targetTorque)),
+      verifyDepth: boolOr(o.verifyDepth, prev.verifyDepth),
+      probeFeed: Math.max(0, numOr(o.probeFeed, prev.probeFeed)),
+      pauseEachScrew: boolOr(o.pauseEachScrew, prev.pauseEachScrew),
       decimals: clampDecimals(numOr(o.decimals, prev.decimals)),
     }))
   }
@@ -307,6 +321,36 @@ export function ScrewFittingPanel() {
     setSelected(-1)
   }
 
+  // ---- SC3: array / grid fill -----------------------------------------------
+  // Replicate the current screw points across a rows × cols grid (per-point
+  // depth is carried through via the meta payload). With no points yet a single
+  // seed point at the origin (default depth) is used so the grid still fills.
+  const [showArray, setShowArray] = useState(false)
+  const [arrRows, setArrRows] = usePersistentState('karmyogi.screwdrive.arr.rows', 3)
+  const [arrCols, setArrCols] = usePersistentState('karmyogi.screwdrive.arr.cols', 3)
+  const [arrSpX, setArrSpX] = usePersistentState('karmyogi.screwdrive.arr.spX', 20)
+  const [arrSpY, setArrSpY] = usePersistentState('karmyogi.screwdrive.arr.spY', 20)
+  function applyArray() {
+    const seed =
+      points.length > 0
+        ? points
+        : [defaultScrewDrivePoint({ x: 0, y: 0, depth: params.defaultDepth })]
+    const src = seed.map((p) => ({ x: p.x, y: p.y, meta: { depth: p.depth } }))
+    const res = expandArray(src, {
+      kind: 'linear',
+      rows: Math.max(1, Math.floor(arrRows)),
+      cols: Math.max(1, Math.floor(arrCols)),
+      spacingX: arrSpX,
+      spacingY: arrSpY,
+    })
+    const next = res.points.map((p) =>
+      defaultScrewDrivePoint({ x: p.x, y: p.y, depth: (p.meta as { depth: number }).depth }),
+    )
+    setPoints(next)
+    setSelected(-1)
+    setShowArray(false)
+  }
+
   // Sanitised params for generation + preview: clamp decimals and force feeds /
   // dwells / safe-Z non-negative so a typed negative never produces an inverted
   // move or a backwards feed. Depths stay signed (negative = into the work).
@@ -320,6 +364,8 @@ export function ScrewFittingPanel() {
       pushFeed: Math.max(0, params.pushFeed),
       approachFeed: Math.max(0, params.approachFeed),
       seatDwellSec: Math.max(0, params.seatDwellSec),
+      targetTorque: Math.max(0, params.targetTorque),
+      probeFeed: Math.max(0, params.probeFeed),
     }),
     [params],
   )
@@ -387,6 +433,10 @@ export function ScrewFittingPanel() {
         approachFeed: savedParams.approachFeed,
         seatDwellSec: savedParams.seatDwellSec,
         defaultDepth: savedParams.defaultDepth,
+        targetTorque: savedParams.targetTorque,
+        verifyDepth: savedParams.verifyDepth,
+        probeFeed: savedParams.probeFeed,
+        pauseEachScrew: savedParams.pauseEachScrew,
         decimals: clampDecimals(savedParams.decimals),
       })
     }
@@ -522,6 +572,12 @@ export function ScrewFittingPanel() {
             onError={(m) => notify('warn', m)}
           />
           <span className="swd-tools-sep" aria-hidden="true" />
+          <ToolButton
+            glyph={<Icon name="duplicate" />}
+            onClick={() => setShowArray(true)}
+            title={t('screw.toolbar.array', 'Array fill')}
+            body={t('screw.toolbar.array.body', 'Replicate the screw points across a rows × cols grid with set spacing (SC3). With no points yet, fills from the origin.')}
+          />
           <ToolButton
             className={defaultsEffectiveOpen ? 'is-active' : ''}
             glyph={<Icon name="settings" />}
@@ -811,6 +867,95 @@ export function ScrewFittingPanel() {
               />
             </div>
           </div>
+
+          {/* SC1 — torque target + fault handling. */}
+          <div className="swd-card">
+            <div className="swd-card-head">
+              <h4>
+                <Gauge className="cam-card-ico" size={14} strokeWidth={1.9} aria-hidden />
+                {t('screw.fault.title', 'Torque & fault')}
+              </h4>
+              <InfoTip
+                topic="screwFault"
+                title={t('screw.fault.title', 'Torque & fault handling')}
+                body={t('screw.fault.body', 'Target torque is set on the driver clutch and recorded in the program. Verify depth probes after seating (G38.2) and halts on a failed probe — also serving as a part-present check. Pause-each-screw stops (M0) after every screw so an operator or station can confirm it.')}
+              />
+            </div>
+            <div className="swd-fields">
+              <SliderField
+                icon={<Gauge size={14} strokeWidth={1.8} />}
+                label={t('screw.field.torque', 'Target torque')}
+                unit={t('unit.ncm', 'N·cm')}
+                min={0}
+                max={500}
+                step={1}
+                value={params.targetTorque}
+                onChange={(n) => setParams((p) => ({ ...p, targetTorque: Math.max(0, n) }))}
+                info={{
+                  title: t('screw.field.torque', 'Target torque'),
+                  body: t('screw.field.torque.body', 'Driver clutch torque target (N·cm). Recorded in the program as a comment — GRBL has no torque feedback, so set it on the driver itself.'),
+                }}
+              />
+              <SliderField
+                icon={<ChevronsDown size={14} strokeWidth={1.8} />}
+                label={t('screw.field.probeFeed', 'Probe feed')}
+                unit={t('unit.mmPerMin', 'mm/min')}
+                min={1}
+                max={500}
+                step={5}
+                value={params.probeFeed}
+                onChange={(n) => setParams((p) => ({ ...p, probeFeed: Math.max(1, n) }))}
+                info={{
+                  title: t('screw.field.probeFeed', 'Probe feed'),
+                  body: t('screw.field.probeFeed.body', 'Feed used by the verify-depth G38.2 move.'),
+                }}
+              />
+            </div>
+            <div className="sd-enum-row">
+              <span className="sd-enum-lbl">
+                {t('screw.field.verifyDepth', 'Verify depth')}
+                <InfoTip
+                  topic="screwDriveField"
+                  title={t('screw.field.verifyDepth', 'Verify depth')}
+                  body={t('screw.field.verifyDepth.body', 'After seating, probe toward the target depth (G38.2). The controller halts on a failed probe — catching a stripped or unseated screw (and confirming a screw is present). Needs a Z probe input.')}
+                />
+              </span>
+              <SegControl<'on' | 'off'>
+                options={[
+                  { value: 'off', label: t('screw.off', 'Off') },
+                  { value: 'on', label: t('screw.on', 'On') },
+                ]}
+                value={params.verifyDepth ? 'on' : 'off'}
+                onChange={(v) => setParams((p) => ({ ...p, verifyDepth: v === 'on' }))}
+                ariaLabel={t('screw.field.verifyDepth', 'Verify depth')}
+                variant="tonal"
+                size="sm"
+                className="sd-seg"
+              />
+            </div>
+            <div className="sd-enum-row">
+              <span className="sd-enum-lbl">
+                {t('screw.field.pauseEach', 'Pause each screw')}
+                <InfoTip
+                  topic="screwDriveField"
+                  title={t('screw.field.pauseEach', 'Pause each screw')}
+                  body={t('screw.field.pauseEach.body', 'Stop (M0) after each screw is seated so an operator, torque or vision station can confirm it before the run continues — a manual abort-on-fault gate.')}
+                />
+              </span>
+              <SegControl<'on' | 'off'>
+                options={[
+                  { value: 'off', label: t('screw.off', 'Off') },
+                  { value: 'on', label: t('screw.on', 'On') },
+                ]}
+                value={params.pauseEachScrew ? 'on' : 'off'}
+                onChange={(v) => setParams((p) => ({ ...p, pauseEachScrew: v === 'on' }))}
+                ariaLabel={t('screw.field.pauseEach', 'Pause each screw')}
+                variant="tonal"
+                size="sm"
+                className="sd-seg"
+              />
+            </div>
+          </div>
         </section>
       )}
 
@@ -1053,6 +1198,54 @@ export function ScrewFittingPanel() {
           />
         }
       />
+
+      <Modal
+        open={showArray}
+        onClose={() => setShowArray(false)}
+        title={t('screw.array.title', 'Array fill')}
+        width={420}
+      >
+        <p className="swd-array-intro">
+          {points.length > 0
+            ? t('screw.array.intro', 'Replicate the current {n} point(s) across a rows × cols grid.', { n: points.length })
+            : t('screw.array.introSeed', 'Fill a rows × cols grid from the origin (default depth).')}
+        </p>
+        <div className="swd-array-grid">
+          <label className="swd-mini">
+            <span>{t('screw.array.rows', 'Rows')}</span>
+            <input type="number" min={1} step={1} value={arrRows}
+              onChange={(e) => setArrRows(Math.max(1, Math.floor(num(e.target.value, arrRows))))} />
+          </label>
+          <label className="swd-mini">
+            <span>{t('screw.array.cols', 'Cols')}</span>
+            <input type="number" min={1} step={1} value={arrCols}
+              onChange={(e) => setArrCols(Math.max(1, Math.floor(num(e.target.value, arrCols))))} />
+          </label>
+          <label className="swd-mini">
+            <span>{t('screw.array.spX', 'Spacing X')}</span>
+            <input type="number" step={0.5} value={arrSpX}
+              onChange={(e) => setArrSpX(num(e.target.value, arrSpX))} />
+          </label>
+          <label className="swd-mini">
+            <span>{t('screw.array.spY', 'Spacing Y')}</span>
+            <input type="number" step={0.5} value={arrSpY}
+              onChange={(e) => setArrSpY(num(e.target.value, arrSpY))} />
+          </label>
+        </div>
+        <p className="swd-array-count">
+          {t('screw.array.result', '→ {n} screw points', {
+            n: Math.max(1, points.length) * Math.max(1, Math.floor(arrRows)) * Math.max(1, Math.floor(arrCols)),
+          })}
+        </p>
+        <div className="swd-array-foot">
+          <button type="button" className="swd-array-cancel" onClick={() => setShowArray(false)}>
+            {t('screw.array.cancel', 'Cancel')}
+          </button>
+          <button type="button" className="cam-primary" onClick={applyArray}>
+            {t('screw.array.apply', 'Fill grid')}
+          </button>
+        </div>
+      </Modal>
     </div>
   )
 }

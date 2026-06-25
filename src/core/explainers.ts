@@ -109,3 +109,163 @@ export const EXPLAINERS: Record<string, Explainer> = {
 }
 
 export type ExplainerTopic = keyof typeof EXPLAINERS
+
+// ---------------------------------------------------------------------------
+// O8 — Plain-language GRBL ALARM / error explanations.
+//
+// GRBL reports failures as terse numeric codes: `error:20` (line rejected) and
+// `ALARM:1` (state lock). Operators — especially non-experts — have no idea what
+// those mean. These maps turn each code into a short plain-language CAUSE + FIX
+// so the console, the controller error banner, and the Unlock affordance can all
+// explain what happened and what to do. ENGLISH source of truth; rendered via
+// `t('grbl.error.N.title' / '.cause' / '.fix')` so every string stays i18n-able.
+//
+// Codes follow GRBL v1.1 (the firmware family this app targets). Pure data — no
+// React/DOM — so it stays portable with the rest of `src/core/`.
+// ---------------------------------------------------------------------------
+
+/** A decoded GRBL alarm or error: what it is, why it happened, how to fix it. */
+export interface GrblExplanation {
+  /** 'alarm' (machine locked, needs Unlock/Reset) or 'error' (a line was rejected). */
+  kind: 'alarm' | 'error'
+  /** The numeric code (e.g. 1, 9, 20). */
+  code: number
+  /** Short heading, e.g. "Hard limit triggered". */
+  title: string
+  /** One plain sentence: what caused it. */
+  cause: string
+  /** One plain sentence: what to do about it. */
+  fix: string
+}
+
+/** GRBL v1.1 ALARM codes → plain-language cause + fix. */
+export const GRBL_ALARMS: Record<number, { title: string; cause: string; fix: string }> = {
+  1: {
+    title: 'Hard limit triggered',
+    cause: 'A limit switch was hit, so the machine stopped to protect itself — its position is now uncertain.',
+    fix: 'Move the head away from the switch, then Unlock ($X) and re-home ($H) before running anything.',
+  },
+  2: {
+    title: 'Soft limit — move out of bounds',
+    cause: 'A commanded move would have driven past the machine’s travel limits.',
+    fix: 'Unlock ($X), check your work zero and the job size fits the bed, then re-run.',
+  },
+  3: {
+    title: 'Reset while in motion',
+    cause: 'The controller was reset (or lost power) while moving, so its position can no longer be trusted.',
+    fix: 'Unlock ($X) and re-home ($H) to re-establish a known position before cutting.',
+  },
+  4: {
+    title: 'Probe failed (already triggered)',
+    cause: 'A probe move started with the probe already touching — the cycle was aborted for safety.',
+    fix: 'Lift the tool clear of the plate, check wiring, then retry the probe.',
+  },
+  5: {
+    title: 'Probe failed (no contact)',
+    cause: 'The probe travelled its full distance without ever touching the plate.',
+    fix: 'Lower the tool closer to the plate or increase the probe distance, check the clip/wiring, then retry.',
+  },
+  6: {
+    title: 'Homing failed (no switch)',
+    cause: 'The homing cycle didn’t reach a limit switch within the search distance.',
+    fix: 'Check the limit switches and wiring, confirm homing is enabled ($22), then re-home.',
+  },
+  7: {
+    title: 'Homing failed (switch active)',
+    cause: 'A limit switch was still pressed after pulling off during homing.',
+    fix: 'Free the stuck switch, check for a faulty/triggered switch, then re-home.',
+  },
+  8: {
+    title: 'Homing failed (no clear)',
+    cause: 'Homing couldn’t move off the limit switch within the pull-off distance.',
+    fix: 'Increase the pull-off ($27) or free the switch, then re-home.',
+  },
+  9: {
+    title: 'Homing failed (limits not found)',
+    cause: 'The homing cycle never located the limits in the expected direction.',
+    fix: 'Check switch direction/wiring and homing direction ($23), then re-home.',
+  },
+}
+
+/** GRBL v1.1 error (line-rejected) codes → plain-language cause + fix. */
+export const GRBL_ERRORS: Record<number, { title: string; cause: string; fix: string }> = {
+  1: { title: 'Bad G-code letter', cause: 'A command word was missing its expected letter.', fix: 'Fix the offending line — every word needs a valid letter.' },
+  2: { title: 'Bad number format', cause: 'A number in a G-code word was malformed or missing.', fix: 'Correct the number on that line (no missing digits or stray characters).' },
+  3: { title: 'Unsupported “$” command', cause: 'A `$` system command isn’t recognised by this firmware.', fix: 'Check the command spelling; use only `$` settings your GRBL supports.' },
+  4: { title: 'Negative value not allowed', cause: 'A value that must be positive was given as negative.', fix: 'Use a positive number for that setting/word.' },
+  5: { title: 'Homing not enabled', cause: 'A homing command was sent but homing is disabled ($22=0).', fix: 'Enable homing ($22=1) in the GRBL settings, or skip homing.' },
+  6: { title: 'Step pulse too short', cause: 'The step-pulse time setting ($0) is below the minimum.', fix: 'Raise $0 (step pulse, µs) to a valid value.' },
+  7: { title: 'EEPROM read failed', cause: 'Saved settings couldn’t be read; defaults were restored.', fix: 'Re-check / re-save your GRBL settings.' },
+  8: { title: '“$” command needs Idle', cause: 'That `$` command can only run when the machine is idle.', fix: 'Wait until the machine is Idle (or reset), then resend.' },
+  9: { title: 'Locked — homing/alarm', cause: 'G-code motion is locked because the machine is in alarm or hasn’t homed.', fix: 'Unlock ($X) and/or home ($H) first, then resend.' },
+  10: { title: 'Soft limits need homing', cause: 'Soft limits ($20) are on but homing ($22) is off — an unsafe combination.', fix: 'Enable homing ($22=1) too, or turn soft limits off ($20=0).' },
+  11: { title: 'Line too long', cause: 'A single G-code line exceeded the controller’s buffer.', fix: 'Shorten the line / split it; regenerate the program if needed.' },
+  12: { title: 'Step rate too high', cause: 'The requested step rate exceeded the firmware maximum.', fix: 'Lower the max rate ($110–$112) or steps/mm ($100–$102).' },
+  13: { title: 'Safety door ajar', cause: 'A command needs the safety door closed, but it’s open.', fix: 'Close the safety door, then resend.' },
+  14: { title: 'Startup line too long', cause: 'A `$N` startup line exceeded the line buffer.', fix: 'Shorten the startup line ($N0/$N1).' },
+  15: { title: 'Jog distance exceeded', cause: 'A jog target was outside the machine travel.', fix: 'Reduce the jog distance or check soft limits.' },
+  16: { title: 'Bad jog command', cause: 'A `$J=` jog command was malformed.', fix: 'Use a valid `$J=` form (G90/G91 + axis word + F feed).' },
+  17: { title: 'Laser mode needs PWM', cause: 'Laser mode ($32) was set but the spindle pin can’t do PWM.', fix: 'Disable laser mode ($32=0) or use a PWM-capable build.' },
+  20: { title: 'Unsupported G/M command', cause: 'A G-code or M-code on that line isn’t supported by GRBL.', fix: 'Remove/replace the unsupported code; regenerate the program for GRBL.' },
+  21: { title: 'Conflicting modal words', cause: 'Two modal commands of the same group were on one line.', fix: 'Split the conflicting commands onto separate lines.' },
+  22: { title: 'Missing feed rate', cause: 'A feed move (G1/G2/G3) ran with no feed rate set.', fix: 'Add an F feed-rate word before the first cutting move.' },
+  23: { title: 'Command value not integer', cause: 'A G-code expecting a whole number got a fraction.', fix: 'Use a whole number for that command (e.g. P, L, N).' },
+  24: { title: 'Too many words use axes', cause: 'Multiple commands tried to use the axis words at once.', fix: 'Put only one axis-using command per line.' },
+  25: { title: 'Repeated G-code word', cause: 'A word was repeated on the same line.', fix: 'Remove the duplicate word.' },
+  26: { title: 'Missing axis words', cause: 'A move that needs axis words had none.', fix: 'Add the required axis words (e.g. X/Y/Z).' },
+  27: { title: 'Bad line number', cause: 'An N line number was out of the valid range.', fix: 'Use a line number in range, or strip N numbers.' },
+  28: { title: 'Missing P or L value', cause: 'A command needed a P or L value and none was given.', fix: 'Add the required P/L value.' },
+  29: { title: 'Unsupported work coord', cause: 'A work coordinate system (G54–G59) isn’t supported.', fix: 'Use a supported WCS (G54–G59.3 depending on build).' },
+  30: { title: 'G53 needs G0/G1', cause: 'G53 was used without an active G0 or G1 motion.', fix: 'Use G53 with a G0 or G1 move on the same line.' },
+  31: { title: 'Unused axis words', cause: 'Axis words were given to a command that ignores them.', fix: 'Remove the unused axis words from that line.' },
+  32: { title: 'Arc with no plane motion', cause: 'A G2/G3 arc had no movement in the selected plane.', fix: 'Provide proper arc endpoints/offsets in the active plane.' },
+  33: { title: 'Invalid arc geometry', cause: 'The arc target/radius don’t form a valid arc.', fix: 'Fix the arc’s endpoint, I/J/K offsets or R radius.' },
+  34: { title: 'Arc radius error', cause: 'An R-format arc couldn’t be computed (radius too small).', fix: 'Increase the arc radius or use I/J/K offsets instead.' },
+  35: { title: 'Arc missing offsets', cause: 'An I/J/K arc was missing the offsets for the active plane.', fix: 'Add the I/J/K offset words for the arc plane.' },
+  36: { title: 'Unused value words', cause: 'A line had value words no command used.', fix: 'Remove the leftover value words.' },
+  37: { title: 'G43.1 bad axis', cause: 'Dynamic tool-length offset was set on the wrong axis.', fix: 'Apply G43.1 to the configured tool-length axis only.' },
+  38: { title: 'Tool number too large', cause: 'A tool number exceeded the allowed maximum.', fix: 'Use a tool number within range.' },
+}
+
+/**
+ * Decode any GRBL message/error string (e.g. `"ALARM:1"`, `"error:20"`, or a
+ * wrapped form like `error on "G1 …": error:33`) into a plain-language
+ * explanation. Returns `null` when no recognised `error:N` / `ALARM:N` token is
+ * present, so callers can fall back to showing the raw text.
+ */
+export function explainGrblMessage(msg: string | null | undefined): GrblExplanation | null {
+  if (!msg) return null
+  // Match the LAST occurrence so a wrapped "error on …: error:33" resolves to 33.
+  const alarm = /alarm:\s*(\d+)/gi
+  const err = /error:\s*(\d+)/gi
+  let am: RegExpExecArray | null
+  let lastAlarm: number | null = null
+  while ((am = alarm.exec(msg))) lastAlarm = parseInt(am[1], 10)
+  let em: RegExpExecArray | null
+  let lastErr: number | null = null
+  while ((em = err.exec(msg))) lastErr = parseInt(em[1], 10)
+  // An explicit ALARM token wins (it's the more serious, locked state).
+  if (lastAlarm != null) {
+    const e = GRBL_ALARMS[lastAlarm]
+    if (e) return { kind: 'alarm', code: lastAlarm, ...e }
+    return {
+      kind: 'alarm',
+      code: lastAlarm,
+      title: 'Machine alarm',
+      cause: 'The controller entered an alarm state and locked motion.',
+      fix: 'Unlock ($X) and re-home ($H); check limits and wiring if it repeats.',
+    }
+  }
+  if (lastErr != null) {
+    const e = GRBL_ERRORS[lastErr]
+    if (e) return { kind: 'error', code: lastErr, ...e }
+    return {
+      kind: 'error',
+      code: lastErr,
+      title: 'Command rejected',
+      cause: 'GRBL rejected the last command with an unrecognised error code.',
+      fix: 'Check the offending line; consult the GRBL error reference for this code.',
+    }
+  }
+  return null
+}

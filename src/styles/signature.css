@@ -385,6 +385,25 @@
   padding-top: 2px;
 }
 
+/* Optimize & batch header: keep the label left, plot-time chip right. */
+.sig-opt-head {
+  justify-content: space-between;
+}
+.sig-opt-time {
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--sp-1);
+  white-space: nowrap;
+}
+.sig-opt-toggles {
+  padding: 0 var(--sp-1) var(--sp-1);
+}
+
 .sig-info {
   margin: 0;
   font-size: var(--fs-body);

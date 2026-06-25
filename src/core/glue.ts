@@ -16,11 +16,35 @@
 // Pure TypeScript: no React/DOM imports.
 
 import { Polyline, makeCircle, makeRect, pt, type Point } from './geometry';
+import { insetRings } from './offset';
 
 // ---- Shape model ----------------------------------------------------------
 
+/**
+ * Per-shape OVERRIDES that any shape may carry (G4 + G1-area). All optional so
+ * existing shapes / saved docs stay valid.
+ * - `dispenseZ` (G4): a per-shape touch-down Z, overriding the global one — for
+ *   beads on a stepped/uneven workpiece (mirrors the soldering per-point Touch-Z).
+ * - `fill` (G1 area): for CLOSED shapes (triangle / circle / rect), flood the
+ *   interior with concentric offset rings (a "bead area" / potting fill) instead
+ *   of tracing only the outline.
+ */
+export interface ShapeOverrides {
+  /** G4 — per-shape touch-down Z (mm, absolute). Overrides GlueParams.dispenseZ. */
+  dispenseZ?: number;
+  /** G1 — flood a closed shape's interior with concentric rings (area dispense). */
+  fill?: boolean;
+}
+
+/** A single glue DOT (G1): touch down at (x,y), dwell, lift. Volume-controlled. */
+export interface DotShape extends ShapeOverrides {
+  kind: 'dot';
+  x: number;
+  y: number;
+}
+
 /** A straight glue bead from (x1,y1) to (x2,y2). Open trajectory. */
-export interface LineShape {
+export interface LineShape extends ShapeOverrides {
   kind: 'line';
   x1: number;
   y1: number;
@@ -29,13 +53,13 @@ export interface LineShape {
 }
 
 /** A glue bead tracing the closed outline through three vertices. */
-export interface TriangleShape {
+export interface TriangleShape extends ShapeOverrides {
   kind: 'triangle';
   points: [Point, Point, Point];
 }
 
 /** A glue bead tracing a circle of radius r centred at (cx,cy). */
-export interface CircleShape {
+export interface CircleShape extends ShapeOverrides {
   kind: 'circle';
   cx: number;
   cy: number;
@@ -43,7 +67,7 @@ export interface CircleShape {
 }
 
 /** A glue bead tracing the closed outline of a rectangle (corner + size). */
-export interface RectShape {
+export interface RectShape extends ShapeOverrides {
   kind: 'rect';
   x: number;
   y: number;
@@ -51,7 +75,12 @@ export interface RectShape {
   h: number;
 }
 
-export type GlueShape = LineShape | TriangleShape | CircleShape | RectShape;
+export type GlueShape = DotShape | LineShape | TriangleShape | CircleShape | RectShape;
+
+/** True for the closed shapes that support an area (concentric-ring) fill. */
+export function isClosedShape(s: GlueShape): boolean {
+  return s.kind === 'triangle' || s.kind === 'circle' || s.kind === 'rect';
+}
 
 /** Generator policy for a glue-dispense program. */
 export interface GlueParams {
@@ -70,6 +99,34 @@ export interface GlueParams {
   settleMs: number;
   /** Dwell (ms) after tracing, before the dispenser stops, so the bead ends cleanly. 0 = none. */
   postDwellMs: number;
+  /**
+   * G2 — LEAD-IN length (mm): for OPEN beads (line), start the dispenser this far
+   * BEFORE the bead start (along the bead direction) so the glue is already
+   * flowing by the first real point (anti-starve). 0 = start exactly at the
+   * bead. Ignored for closed shapes (their start = end, so no lead is needed).
+   */
+  leadInMm: number;
+  /**
+   * G2 — LEAD-OUT length (mm): keep tracing this far PAST the bead end (along the
+   * exit direction) AFTER the dispenser stops, so the residual pressure tail is
+   * laid down off the joint instead of blobbing at the end (anti-tail). 0 = stop
+   * at the bead end.
+   */
+  leadOutMm: number;
+  /**
+   * G3 — VOLUME MODEL, dot: target glue volume per DOT (mm³). With a dispenser
+   * output of `dispenseRate` volume-units/s this drives the per-dot ON dwell
+   * (= volPerDot / dispenseRate). 0 = use `dotMs` directly instead.
+   */
+  volPerDotMm3: number;
+  /**
+   * G3 — VOLUME MODEL, bead: target glue cross-section per mm of bead (mm³/mm =
+   * mm² section). Used only for the cycle-time / volume ESTIMATE (a traced bead's
+   * flow is feed-rate-governed, not dwell-governed). 0 = no bead-volume estimate.
+   */
+  volPerMmMm3: number;
+  /** Fallback DOT ON dwell (ms) when no volume model is set (volPerDotMm3 = 0). */
+  dotMs: number;
   decimals: number;
   programName: string;
 }
@@ -84,6 +141,11 @@ export function defaultGlueParams(overrides: Partial<GlueParams> = {}): GluePara
     dispenseRate: 1000.0,
     settleMs: 150,
     postDwellMs: 100,
+    leadInMm: 0,
+    leadOutMm: 0,
+    volPerDotMm3: 0,
+    volPerMmMm3: 0,
+    dotMs: 200,
     decimals: 3,
     programName: 'hjLabs Glue Dispense',
     ...overrides,
@@ -98,6 +160,14 @@ export function defaultGlueParams(overrides: Partial<GlueParams> = {}): GluePara
  */
 export function shapeToPolyline(shape: GlueShape): Polyline {
   switch (shape.kind) {
+    case 'dot': {
+      // A dot is a single point — represented as a degenerate one-vertex open
+      // polyline so callers (e.g. the SVG preview) can render it as a marker.
+      const pl = new Polyline();
+      pl.add(pt(shape.x, shape.y));
+      pl.closed = false;
+      return pl;
+    }
     case 'line': {
       const pl = new Polyline();
       pl.add(pt(shape.x1, shape.y1));
@@ -148,15 +218,111 @@ function dwellSeconds(ms: number, decimals: number): string {
   return fmt(Math.max(0, ms) / 1000, decimals);
 }
 
+// ---- Volume model (G3) -----------------------------------------------------
+
+/**
+ * The DOT dispense ON-time (ms) for one dot. When a volume target is set
+ * (`volPerDotMm3` > 0) it's converted via the dispenser output rate
+ * (`dispenseRate` volume-units/s, here treated as mm³/s) to a dwell; otherwise
+ * the explicit `dotMs` is used. Pure; always ≥ 0.
+ */
+export function dotDwellMs(p: GlueParams): number {
+  if (p.volPerDotMm3 > 0 && p.dispenseRate > 0) {
+    return Math.max(0, (p.volPerDotMm3 / p.dispenseRate) * 1000);
+  }
+  return Math.max(0, p.dotMs);
+}
+
+/**
+ * G3 — estimate the total glue VOLUME (mm³) a program will lay down: every dot
+ * contributes `volPerDotMm3`, every traced bead contributes its trajectory
+ * length × `volPerMmMm3` (the per-mm cross-section). Area fills count their full
+ * ring length. Returns 0 when no volume model is configured. Pure.
+ */
+export function estimateGlueVolume(shapes: GlueShape[], params: Partial<GlueParams> = {}): number {
+  const p = defaultGlueParams(params);
+  let vol = 0;
+  for (const s of shapes) {
+    if (s.kind === 'dot') {
+      vol += Math.max(0, p.volPerDotMm3);
+      continue;
+    }
+    if (p.volPerMmMm3 <= 0) continue;
+    for (const poly of shapeTracePolylines(s)) vol += polylineLength(poly) * p.volPerMmMm3;
+  }
+  return vol;
+}
+
+/** Summed segment length of an (already-flattened) polyline trajectory. */
+function polylineLength(pts: Point[]): number {
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) {
+    len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  }
+  return len;
+}
+
+/**
+ * The full set of trace trajectories for a NON-dot shape: just the outline by
+ * default, or the outline PLUS concentric inset rings when the shape is closed
+ * and its `fill` flag is set (G1 area dispense). Each trajectory is a list of XY
+ * points (closed shapes include the closing return to the start). The fill rings
+ * are spaced by the bead width derived from the dispense rate is NOT available
+ * here, so a fixed sensible stepover is used (see `fillStep`).
+ */
+function shapeTracePolylines(shape: GlueShape): Point[][] {
+  if (shape.kind === 'dot') return [];
+  const out: Point[][] = [trajectoryPoints(shape)];
+  if (shape.fill && isClosedShape(shape)) {
+    const boundary = shapeToPolyline(shape);
+    const step = fillStep(shape);
+    for (const ring of insetRings(boundary, step, step)) {
+      const pts = ring.points.map((q) => ({ x: q.x, y: q.y }));
+      if (pts.length > 1) {
+        pts.push({ x: pts[0].x, y: pts[0].y }); // close each ring
+        out.push(pts);
+      }
+    }
+  }
+  return out;
+}
+
+/** Concentric-fill ring spacing (mm) for a closed shape: ~8% of its min span,
+ * clamped to a sensible bead-width range so fills aren't absurdly dense/sparse. */
+function fillStep(shape: GlueShape): number {
+  const pl = shapeToPolyline(shape);
+  const bb = pl.bounds();
+  const span = Math.max(0.1, Math.min(bb.width(), bb.height()));
+  return Math.min(8, Math.max(1, span * 0.08));
+}
+
 // ---- Generator -------------------------------------------------------------
+
+/**
+ * A point `dist` mm beyond `from`, going AWAY from `to` (i.e. along the ray
+ * to→from, extended past `from`). Used for lead-in (a point before a bead's
+ * start, away from its second point) and lead-out (a point past a bead's end,
+ * away from its previous point). Returns `from` for a zero `dist` / degenerate
+ * direction.
+ */
+function extend(from: Point, to: Point, dist: number): Point {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9 || dist <= 0) return { x: from.x, y: from.y };
+  return { x: from.x - (dx / len) * dist, y: from.y - (dy / len) * dist };
+}
 
 /**
  * Produce a complete, safe glue-dispense G-code program for the given shapes.
  *
- * Per shape: rapid XY to the start at travelZ → lower to dispenseZ (plunge feed)
- * → dispenser ON (M3 S<rate>) + optional settle dwell → feed along the
- * trajectory points → optional post-dwell → dispenser OFF (M5) → retract to
- * travelZ. Z and XY never change within the same move.
+ * Per bead shape: rapid XY to the (optional lead-in) start at travelZ → lower to
+ * the dispense Z (per-shape override, else global; plunge feed) → dispenser ON
+ * (M3 S<rate>) + optional settle dwell → feed along the trajectory (plus any
+ * area-fill rings) at the dispense feed → optional post-dwell → dispenser OFF
+ * (M5) → optional lead-out tail → retract to travelZ. A DOT shape touches down,
+ * dwells for the volume/explicit time, then retracts. Z and XY never change
+ * within the same move; a guaranteed travel-Z retract precedes every XY move.
  */
 export function generateGlue(shapes: GlueShape[], params: Partial<GlueParams> = {}): string {
   const p = defaultGlueParams(params);
@@ -177,25 +343,69 @@ export function generateGlue(shapes: GlueShape[], params: Partial<GlueParams> = 
   let n = 0;
   for (const shape of shapes) {
     ++n;
-    const traj = trajectoryPoints(shape);
-    if (traj.length < 2) continue; // nothing to trace
+    // G4 — per-shape touch-down Z overrides the global dispense height.
+    const dispZ =
+      typeof shape.dispenseZ === 'number' && Number.isFinite(shape.dispenseZ)
+        ? shape.dispenseZ
+        : p.dispenseZ;
 
+    // ── DOT (G1): touch down, dwell (volume- or time-controlled), lift. ──
+    if (shape.kind === 'dot') {
+      o.push(`(Shape ${n}: dot)`);
+      o.push(`G0 Z${fmt(p.travelZ, d)}`); // ensure raised before XY travel
+      o.push(`G0 X${fmt(shape.x, d)} Y${fmt(shape.y, d)}`); // travel above the dot
+      o.push(`G1 Z${fmt(dispZ, d)} F${fmt(p.plungeFeed, d)}`); // lower to dot height
+      o.push(`M3 S${fmt(p.dispenseRate, d)}`); // dispenser on
+      o.push(`G4 P${dwellSeconds(dotDwellMs(p), d)}`); // dwell = the dot volume/time
+      o.push('M5'); // dispenser off
+      o.push(`G0 Z${fmt(p.travelZ, d)}`); // retract
+      continue;
+    }
+
+    const trajs = shapeTracePolylines(shape);
+    const traj = trajs[0];
+    if (!traj || traj.length < 2) continue; // nothing to trace
+
+    // G2 — lead-in: for OPEN beads only (closed shapes return to their own
+    // start, so a lead is meaningless). Begin the descent/flow a little before
+    // the bead, along the entry direction, so glue is flowing at the first point.
+    const open = !shape.fill && shape.kind === 'line';
     const start = traj[0];
-    o.push(`(Shape ${n}: ${shape.kind})`);
+    const entry = open && p.leadInMm > 0 ? extend(start, traj[1], p.leadInMm) : start;
+
+    o.push(`(Shape ${n}: ${shape.kind}${shape.fill && isClosedShape(shape) ? ' fill' : ''})`);
     o.push(`G0 Z${fmt(p.travelZ, d)}`); // ensure raised before XY travel
-    o.push(`G0 X${fmt(start.x, d)} Y${fmt(start.y, d)}`); // travel above start
-    o.push(`G1 Z${fmt(p.dispenseZ, d)} F${fmt(p.plungeFeed, d)}`); // lower to bead height
+    o.push(`G0 X${fmt(entry.x, d)} Y${fmt(entry.y, d)}`); // travel above start (+lead-in)
+    o.push(`G1 Z${fmt(dispZ, d)} F${fmt(p.plungeFeed, d)}`); // lower to bead height
     o.push(`M3 S${fmt(p.dispenseRate, d)}`); // dispenser on
     if (p.settleMs > 0) o.push(`G4 P${dwellSeconds(p.settleMs, d)}`);
+    if (entry !== start) o.push(`G1 X${fmt(start.x, d)} Y${fmt(start.y, d)} F${fmt(p.feed, d)}`); // lead-in run
 
-    // Trace the trajectory at the dispense feed (skip the start, already there).
-    for (let i = 1; i < traj.length; ++i) {
-      const q = traj[i];
-      o.push(`G1 X${fmt(q.x, d)} Y${fmt(q.y, d)} F${fmt(p.feed, d)}`);
+    // Trace the outline (and any fill rings). The first trajectory's start is
+    // already the current XY; for each subsequent ring move to its start first.
+    for (let ti = 0; ti < trajs.length; ti++) {
+      const path = trajs[ti];
+      if (path.length < 2) continue;
+      let from = 1;
+      if (ti > 0) {
+        o.push(`G1 X${fmt(path[0].x, d)} Y${fmt(path[0].y, d)} F${fmt(p.feed, d)}`); // step to next ring
+        from = 1;
+      }
+      for (let i = from; i < path.length; ++i) {
+        o.push(`G1 X${fmt(path[i].x, d)} Y${fmt(path[i].y, d)} F${fmt(p.feed, d)}`);
+      }
     }
 
     if (p.postDwellMs > 0) o.push(`G4 P${dwellSeconds(p.postDwellMs, d)}`);
     o.push('M5'); // dispenser off
+    // G2 — lead-out: after the dispenser stops, drag the residual-pressure tail
+    // a little past the bead end (open beads only) so it doesn't blob on the joint.
+    if (open && p.leadOutMm > 0 && traj.length >= 2) {
+      const last = traj[traj.length - 1];
+      const prev = traj[traj.length - 2];
+      const tail = extend(last, prev, p.leadOutMm);
+      o.push(`G1 X${fmt(tail.x, d)} Y${fmt(tail.y, d)} F${fmt(p.feed, d)}`); // lead-out tail
+    }
     o.push(`G0 Z${fmt(p.travelZ, d)}`); // retract to travel height
   }
 

@@ -37,6 +37,12 @@ export enum WeavePattern {
   Circular = 'Circular',
   /** Smooth sinusoidal weave. */
   Sine = 'Sine',
+  /**
+   * Figure-8 (lazy-8): the transverse offset oscillates at the fundamental and
+   * the along-path/binormal at twice the frequency, tracing a ∞ as the torch
+   * advances — a classic robotic-welding weave for wider, well-tied beads.
+   */
+  Figure8 = 'Figure8',
 }
 
 /** A point in 3D machine work coordinates (mm). */
@@ -59,6 +65,21 @@ export interface WeaveSpec {
    * forward travel. Higher pattern speed ⇒ denser weave.
    */
   patternSpeed: number;
+  /**
+   * Edge dwell (seconds) — a G4 pause at EACH transverse extreme of the weave
+   * (the side-walls), so the arc lingers at the toes of the bead for better
+   * side-wall fusion. 0 = none. Ignored for the Straight pattern (no extremes).
+   */
+  edgeDwell?: number;
+  /**
+   * Wire-feed speed (WFS) for this object, in mm/min — a process parameter
+   * recorded per object (and surfaced in the bead summary). Optional; not all
+   * processes feed wire. Carried through to the program as a comment so the
+   * operator/robot post can act on it.
+   */
+  wireFeedSpeed?: number;
+  /** Arc voltage (V) for this object — recorded + emitted as a comment. */
+  voltage?: number;
 }
 
 /** A true 3D weld line (start → end, any angle in space). */
@@ -102,6 +123,9 @@ export function defaultWeldLine(overrides: Partial<WeldLine> = {}): WeldLine {
     pattern: WeavePattern.Zigzag,
     amplitude: 2.0,
     patternSpeed: 600,
+    edgeDwell: 0,
+    wireFeedSpeed: 0,
+    voltage: 0,
     ...overrides,
   };
 }
@@ -117,6 +141,9 @@ export function defaultWeldCircle(overrides: Partial<WeldCircle> = {}): WeldCirc
     pattern: WeavePattern.Zigzag,
     amplitude: 2.0,
     patternSpeed: 600,
+    edgeDwell: 0,
+    wireFeedSpeed: 0,
+    voltage: 0,
     ...overrides,
   };
 }
@@ -140,6 +167,34 @@ export interface WeldingParams {
   preFlowSeconds: number;
   /** Gas post-flow dwell after the arc stops (s); 0 = none. */
   postFlowSeconds: number;
+  /**
+   * Crater-fill dwell (seconds) — after the bead finishes, the arc is held in
+   * place for this long BEFORE M5 to fill the end crater (avoids a craterous,
+   * crack-prone bead end). 0 = none. Runs while the arc is still on.
+   */
+  craterSeconds: number;
+
+  /**
+   * Number of weld PASSES laid over each object (WE2: root/fill/cap). Each pass
+   * re-traces the same path; pass ≥ 2 is offset in Z by `passOffset` so the bead
+   * builds up. 1 = a single pass (the default).
+   */
+  passes: number;
+  /**
+   * Per-pass Z build-up (mm) — each pass after the first is raised by
+   * (passIndex × passOffset) so successive beads stack on the previous ones
+   * (root → fill → cap). 0 keeps every pass on the same plane.
+   */
+  passOffset: number;
+
+  /**
+   * Tack-weld mode — instead of (or before) running continuous beads, deposit
+   * short stationary tacks at evenly-spaced points along each object to hold the
+   * joint. 0 tacks = off (continuous welding only).
+   */
+  tackCount: number;
+  /** Dwell (seconds) the arc is held at each tack point. */
+  tackSeconds: number;
 
   decimals: number;
   programName: string;
@@ -155,6 +210,11 @@ export function defaultWeldingParams(overrides: Partial<WeldingParams> = {}): We
     arcPower: 0.0,
     preFlowSeconds: 0.5,
     postFlowSeconds: 1.0,
+    craterSeconds: 0.0,
+    passes: 1,
+    passOffset: 0.0,
+    tackCount: 0,
+    tackSeconds: 0.5,
     decimals: 3,
     programName: 'hjLabs Welding',
     ...overrides,
@@ -229,10 +289,29 @@ function weaveOffset(
       return { transverse: amp * tri(phase), binormal: 0 };
     case WeavePattern.Circular:
       return { transverse: amp * Math.cos(phase), binormal: amp * Math.sin(phase) };
+    case WeavePattern.Figure8:
+      // Lissajous 1:2 — transverse at the fundamental, binormal at twice the
+      // frequency, tracing a ∞ in the {transverse, binormal} plane as it advances.
+      return { transverse: amp * Math.sin(phase), binormal: amp * 0.5 * Math.sin(2 * phase) };
     case WeavePattern.Straight:
     default:
       return { transverse: 0, binormal: 0 };
   }
+}
+
+/**
+ * Is `phase` (radians) at a transverse EXTREME of the weave (a side-wall toe)?
+ * For sine/figure-8 the extremes are at π/2 + nπ; for zigzag the peaks are at
+ * the same phases. Used to place an optional edge dwell at the toes. Tolerance
+ * `tol` (radians) catches the nearest sampled point to each extreme.
+ */
+function isEdgePhase(pattern: WeavePattern, phase: number, tol: number): boolean {
+  if (pattern === WeavePattern.Straight || pattern === WeavePattern.Circular) return false;
+  let p = phase % (2 * Math.PI);
+  if (p < 0) p += 2 * Math.PI;
+  const d1 = Math.abs(p - Math.PI / 2);
+  const d2 = Math.abs(p - (3 * Math.PI) / 2);
+  return d1 <= tol || d2 <= tol;
 }
 
 /**
@@ -395,6 +474,65 @@ export function sampleObjectPath(obj: WeldObject, params: WeldingParams): WeldPa
   return obj.kind === 'line' ? sampleLinePath(obj, params) : sampleCirclePath(obj, params);
 }
 
+/** A sampled point tagged with whether it sits at a transverse weave extreme. */
+export interface EdgeTaggedPoint {
+  pt: Vec3;
+  /** True at a weave side-wall toe (used to place the optional edge dwell). */
+  edge: boolean;
+}
+
+/**
+ * Re-walk a sampled object path and tag the points nearest each transverse
+ * weave EXTREME (side-wall toe) so the generator can drop an optional edge
+ * dwell there. The geometry is identical to `sampleObjectPath`; only the phase
+ * bookkeeping differs. Returns one EdgeTaggedPoint per sampled point.
+ */
+export function sampleObjectEdges(obj: WeldObject, params: WeldingParams): EdgeTaggedPoint[] {
+  const pts = sampleObjectPath(obj, params);
+  const pattern = obj.kind === 'line' ? obj.pattern : obj.pattern;
+  const amp = obj.amplitude;
+  if (pattern === WeavePattern.Straight || amp <= 0 || pts.length < 2) {
+    return pts.map((pt) => ({ pt, edge: false }));
+  }
+  // Reconstruct the per-point phase from arc-length, matching the samplers.
+  const feed = objectFeed(obj);
+  const L = objectLength(obj);
+  const cycles = cyclesOverLength(L, feed, obj.patternSpeed);
+  const k = L > 1e-9 ? (2 * Math.PI * cycles) / L : 0;
+  // Phase tolerance ≈ half a sample step in phase; based on samples-per-cycle.
+  const spc = Math.max(2, Math.floor(params.segmentsPerCycle));
+  const tol = Math.PI / spc;
+  const n = pts.length - 1;
+  return pts.map((pt, i) => {
+    const s = (L * i) / Math.max(1, n);
+    return { pt, edge: isEdgePhase(pattern, k * s, tol) };
+  });
+}
+
+/** Evenly-spaced tack points along an object's centreline (no weave applied). */
+export function tackPoints(obj: WeldObject, count: number): Vec3[] {
+  const n = Math.max(0, Math.floor(count));
+  if (n <= 0) return [];
+  const out: Vec3[] = [];
+  if (obj.kind === 'line') {
+    const A = obj.start;
+    const B = obj.end;
+    // Place tacks at the centres of n equal segments (never on the very ends).
+    for (let i = 0; i < n; i++) {
+      const u = n === 1 ? 0.5 : (i + 0.5) / n;
+      out.push({ x: A.x + (B.x - A.x) * u, y: A.y + (B.y - A.y) * u, z: A.z + (B.z - A.z) * u });
+    }
+  } else {
+    const C = obj.center;
+    const R = Math.abs(obj.radius);
+    for (let i = 0; i < n; i++) {
+      const theta = (2 * Math.PI * i) / n;
+      out.push({ x: C.x + R * Math.cos(theta), y: C.y + R * Math.sin(theta), z: C.z });
+    }
+  }
+  return out;
+}
+
 /** Is this object degenerate (zero-length line / zero-radius circle)? */
 export function isDegenerate(obj: WeldObject): boolean {
   return obj.kind === 'line' ? lineLength(obj) < 1e-9 : Math.abs(obj.radius) < 1e-9;
@@ -454,6 +592,19 @@ export function generateWelding(
   o.push('M5'); // arc off to start
   o.push(`G0 Z${fmt(p.safeZ, d)}`); // safe height before any XY travel
 
+  const passes = Math.max(1, Math.floor(p.passes));
+  const passOffset = Number.isFinite(p.passOffset) ? p.passOffset : 0;
+  const tackCount = Math.max(0, Math.floor(p.tackCount));
+  const tackSec = Math.max(0, p.tackSeconds);
+  const craterSec = Math.max(0, p.craterSeconds);
+  // Root → fill → cap labels for the first three passes (then numbered).
+  const passLabel = (i: number, total: number): string => {
+    if (total <= 1) return '';
+    if (i === 0) return ' [root]';
+    if (i === total - 1) return ' [cap]';
+    return ` [fill ${i}]`;
+  };
+
   // ---- Per-object sequences ---------------------------------------------
   let n = 0;
   for (const obj of objects) {
@@ -466,45 +617,83 @@ export function generateWelding(
       );
       continue;
     }
-    const path = sampleObjectPath(obj, p);
-    const z = weldZ(obj);
+    const baseZ = weldZ(obj);
     const feed = objectFeed(obj);
-    const start = path[0];
     o.push(
       obj.kind === 'line'
         ? `(Object ${n}: line ${obj.pattern} weave, ${fmt(lineLength(obj), d)}mm)`
         : `(Object ${n}: circle r${fmt(Math.abs(obj.radius), d)} ${obj.pattern} weave, ${fmt(circleLength(obj), d)}mm)`,
     );
+    // Per-object process parameters (WE4): recorded as a comment for the post.
+    const proc: string[] = [];
+    if (obj.wireFeedSpeed && obj.wireFeedSpeed > 0) proc.push(`WFS ${fmt(obj.wireFeedSpeed, d)}mm/min`);
+    if (obj.voltage && obj.voltage > 0) proc.push(`${fmt(obj.voltage, d)}V`);
+    if (proc.length > 0) o.push(`(  process: ${proc.join(', ')})`);
 
-    o.push(`G0 Z${fmt(p.safeZ, d)}`); // ensure raised
-    o.push(`G0 X${fmt(start.x, d)} Y${fmt(start.y, d)}`); // rapid to start at safe-Z
-    o.push(`G1 Z${fmt(z, d)} F${fmt(p.plungeFeed, d)}`); // lower to weld Z
-
-    if (p.useArc) {
-      if (p.preFlowSeconds > 0) o.push(`G4 P${fmt(p.preFlowSeconds, d)}`); // gas pre-flow
-      o.push(arcOn); // strike arc
+    // ---- Tack welds (WE3): short stationary tacks before the bead pass(es). ----
+    if (tackCount > 0) {
+      o.push(`(  ${tackCount} tack(s) @ ${fmt(tackSec, d)}s)`);
+      for (const tp of tackPoints(obj, tackCount)) {
+        o.push(`G0 Z${fmt(p.safeZ, d)}`);
+        o.push(`G0 X${fmt(tp.x, d)} Y${fmt(tp.y, d)}`);
+        o.push(`G1 Z${fmt(tp.z, d)} F${fmt(p.plungeFeed, d)}`);
+        if (p.useArc) {
+          if (p.preFlowSeconds > 0) o.push(`G4 P${fmt(p.preFlowSeconds, d)}`);
+          o.push(arcOn);
+        }
+        if (tackSec > 0) o.push(`G4 P${fmt(tackSec, d)}`);
+        if (p.useArc) {
+          o.push('M5');
+          if (p.postFlowSeconds > 0) o.push(`G4 P${fmt(p.postFlowSeconds, d)}`);
+        }
+        o.push(`G0 Z${fmt(p.safeZ, d)}`);
+      }
     }
 
-    // Weave through the path. The first point coincides with current XY/Z, so
-    // begin from index 1. Emit Z whenever it changes (true 3D moves). The first
-    // feed move carries the feed word.
-    let feedWritten = false;
-    let prevZ = start.z;
-    for (let i = 1; i < path.length; ++i) {
-      const pt = path[i];
-      const feedWord = feedWritten ? '' : ` F${fmt(feed, d)}`;
-      const zChanged = Math.abs(pt.z - prevZ) > 0.5 * Math.pow(10, -d);
-      const zWord = zChanged ? ` Z${fmt(pt.z, d)}` : '';
-      o.push(`G1 X${fmt(pt.x, d)} Y${fmt(pt.y, d)}${zWord}${feedWord}`);
-      feedWritten = true;
-      prevZ = pt.z;
-    }
+    // ---- Bead pass(es) (WE2): re-trace the path, each pass raised by passOffset. ----
+    const edges = sampleObjectEdges(obj, p);
+    const edgeDwell = Math.max(0, obj.edgeDwell ?? 0);
+    for (let pass = 0; pass < passes; pass++) {
+      const zAdd = pass * passOffset;
+      const start = edges[0]?.pt;
+      if (!start) continue;
+      if (passes > 1) o.push(`(  pass ${pass + 1}/${passes}${passLabel(pass, passes)})`);
 
-    if (p.useArc) {
-      o.push('M5'); // stop arc
-      if (p.postFlowSeconds > 0) o.push(`G4 P${fmt(p.postFlowSeconds, d)}`); // gas post-flow
+      o.push(`G0 Z${fmt(p.safeZ, d)}`); // ensure raised
+      o.push(`G0 X${fmt(start.x, d)} Y${fmt(start.y, d)}`); // rapid to start at safe-Z
+      o.push(`G1 Z${fmt(baseZ + zAdd, d)} F${fmt(p.plungeFeed, d)}`); // lower to weld Z
+
+      if (p.useArc) {
+        if (p.preFlowSeconds > 0) o.push(`G4 P${fmt(p.preFlowSeconds, d)}`); // gas pre-flow
+        o.push(arcOn); // strike arc
+      }
+
+      // Weave through the path. The first point coincides with current XY/Z, so
+      // begin from index 1. Emit Z whenever it changes (true 3D moves). The first
+      // feed move carries the feed word. An optional edge dwell pauses at the toes.
+      let feedWritten = false;
+      let prevZ = start.z + zAdd;
+      for (let i = 1; i < edges.length; ++i) {
+        const pt = edges[i].pt;
+        const ptZ = pt.z + zAdd;
+        const feedWord = feedWritten ? '' : ` F${fmt(feed, d)}`;
+        const zChanged = Math.abs(ptZ - prevZ) > 0.5 * Math.pow(10, -d);
+        const zWord = zChanged ? ` Z${fmt(ptZ, d)}` : '';
+        o.push(`G1 X${fmt(pt.x, d)} Y${fmt(pt.y, d)}${zWord}${feedWord}`);
+        feedWritten = true;
+        prevZ = ptZ;
+        if (edgeDwell > 0 && edges[i].edge) o.push(`G4 P${fmt(edgeDwell, d)}`); // side-wall dwell
+      }
+
+      // Crater fill (WE3): hold the arc in place to fill the end crater.
+      if (p.useArc && craterSec > 0) o.push(`G4 P${fmt(craterSec, d)}`);
+
+      if (p.useArc) {
+        o.push('M5'); // stop arc
+        if (p.postFlowSeconds > 0) o.push(`G4 P${fmt(p.postFlowSeconds, d)}`); // gas post-flow
+      }
+      o.push(`G0 Z${fmt(p.safeZ, d)}`); // retract
     }
-    o.push(`G0 Z${fmt(p.safeZ, d)}`); // retract
   }
 
   // ---- Footer -----------------------------------------------------------
@@ -557,17 +746,33 @@ export function estimateWeldingSeconds(
   params: Partial<WeldingParams> = {},
 ): number {
   const p = defaultWeldingParams(params);
+  const passes = Math.max(1, Math.floor(p.passes));
+  const tackCount = Math.max(0, Math.floor(p.tackCount));
   let seconds = 0;
   for (const obj of objects) {
     if (isDegenerate(obj)) continue;
-    const path = sampleObjectPath(obj, p);
+    const edges = sampleObjectEdges(obj, p);
     let len = 0;
-    for (let i = 1; i < path.length; i++) len += len3(sub(path[i], path[i - 1]));
+    let edgeStops = 0;
+    for (let i = 1; i < edges.length; i++) {
+      len += len3(sub(edges[i].pt, edges[i - 1].pt));
+      if (edges[i].edge) edgeStops++;
+    }
     const feed = Math.max(0, objectFeed(obj)); // mm/min
-    if (feed > 1e-9) seconds += (len / feed) * 60;
-    if (p.useArc) {
-      seconds += Math.max(0, p.preFlowSeconds);
-      seconds += Math.max(0, p.postFlowSeconds);
+    const edgeDwell = Math.max(0, obj.edgeDwell ?? 0);
+    for (let pass = 0; pass < passes; pass++) {
+      if (feed > 1e-9) seconds += (len / feed) * 60;
+      seconds += edgeStops * edgeDwell;
+      if (p.useArc) {
+        seconds += Math.max(0, p.preFlowSeconds);
+        seconds += Math.max(0, p.postFlowSeconds);
+        seconds += Math.max(0, p.craterSeconds);
+      }
+    }
+    // Tacks: pre-flow + dwell + post-flow per tack.
+    if (tackCount > 0) {
+      const per = Math.max(0, p.tackSeconds) + (p.useArc ? Math.max(0, p.preFlowSeconds) + Math.max(0, p.postFlowSeconds) : 0);
+      seconds += tackCount * per;
     }
   }
   return seconds;

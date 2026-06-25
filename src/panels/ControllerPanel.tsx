@@ -3,6 +3,7 @@ import { grbl } from '../serial/controller'
 import { RealtimeByte } from '../serial'
 import { useMachine, useSettings, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
+import { useMachines } from '../store/machines'
 import { DroReadout } from '../components/DroReadout'
 import { JogPad, jogKeyToDelta, jogParamsFromDelta, HOLD_DELAY_MS, type JogDelta } from '../components/JogPad'
 import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, SpindleCcwIcon, AxisZeroIcon, GoToZeroIcon, PlusIcon, MinusIcon, OvResetIcon } from '../components/MachineIcons'
@@ -29,6 +30,8 @@ import {
   ListStart,
   Gauge,
   CircleCheck,
+  Download,
+  FileText,
 } from 'lucide-react'
 import { useTeachPoints, type TeachFrame, type TeachPoint } from '../store/teachPoints'
 import { useProgram } from '../store/program'
@@ -40,6 +43,7 @@ import { usePlayback } from '../store/playback'
 import { useNotifications } from '../store/notifications'
 import { CamError } from '../components/cam/CamUI'
 import { availablePanels } from '../app/panelRegistry'
+import { explainGrblMessage } from '../core/explainers'
 import { useT } from '../i18n'
 import '../styles/controller.css'
 import '../styles/teach.css'
@@ -937,12 +941,20 @@ function DiagnosticsSection({
   feed,
   spindle,
   buffer,
+  mpos,
+  wpos,
+  pins,
+  firmware,
 }: {
   connected: boolean
   machineState: string
   feed: number
   spindle: number
   buffer: { plan: number; rx: number } | null
+  mpos: { x: number; y: number; z: number }
+  wpos: { x: number; y: number; z: number }
+  pins: string | null
+  firmware: string | null
 }) {
   const t = useT()
   const [open, setOpen] = usePersistentState('karmyogi.diag.open', false)
@@ -977,6 +989,71 @@ function DiagnosticsSection({
     </div>
   )
 
+  const pinLabel = pins && pins.length > 0 ? pins : t('ctrl.diag.pins.none', 'none')
+
+  // O9 — assemble a self-contained diagnostics report (live telemetry + position
+  // + pin states + firmware + job stats) for support / record-keeping.
+  const buildReport = useCallback(() => {
+    return {
+      generatedAt: new Date().toISOString(),
+      app: 'karmyogi',
+      connected,
+      state: connected ? machineState : 'offline',
+      feed: Math.round(feed),
+      spindle: Math.round(spindle),
+      buffer: buffer ? { plan: buffer.plan, rx: buffer.rx } : null,
+      firmware: firmware ?? null,
+      pins: pins && pins.length ? pins.split('') : [],
+      machinePos: { x: mpos.x, y: mpos.y, z: mpos.z },
+      workPos: { x: wpos.x, y: wpos.y, z: wpos.z },
+      job: streaming
+        ? { line: Math.min(cursor + 1, total), total, percent: Math.round(pct), elapsedMs: elapsed, etaMs: Math.round(eta) }
+        : null,
+    }
+  }, [connected, machineState, feed, spindle, buffer, firmware, pins, mpos, wpos, streaming, cursor, total, pct, elapsed, eta])
+
+  const download = useCallback((name: string, text: string, mime: string) => {
+    const blob = new Blob([text], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  }, [])
+
+  const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+
+  const exportJson = useCallback(() => {
+    download(`karmyogi-diagnostics-${stamp()}.json`, JSON.stringify(buildReport(), null, 2), 'application/json')
+  }, [buildReport, download])
+
+  // A human-readable text report (acts as the printable/PDF-ready report — the
+  // browser's Print-to-PDF turns this into a PDF without a heavy PDF dependency).
+  const exportText = useCallback(() => {
+    const r = buildReport()
+    const lines = [
+      'karmyogi — machine diagnostics report',
+      `Generated: ${r.generatedAt}`,
+      '',
+      `Connection : ${r.connected ? 'connected' : 'offline'}`,
+      `State      : ${r.state}`,
+      `Firmware   : ${r.firmware ?? 'unknown'}`,
+      `Feed       : ${r.feed} mm/min`,
+      `Spindle    : ${r.spindle} rpm`,
+      `Buffer     : ${r.buffer ? `${r.buffer.plan} / ${r.buffer.rx}` : '—'}`,
+      `Input pins : ${r.pins.length ? r.pins.join(', ') : 'none'}`,
+      `Machine pos: X${r.machinePos.x} Y${r.machinePos.y} Z${r.machinePos.z}`,
+      `Work pos   : X${r.workPos.x} Y${r.workPos.y} Z${r.workPos.z}`,
+    ]
+    if (r.job) {
+      lines.push('', `Job line   : ${r.job.line} / ${r.job.total} (${r.job.percent}%)`, `Elapsed    : ${fmtDur(r.job.elapsedMs)}`, `ETA        : ${fmtDur(r.job.etaMs)}`)
+    }
+    download(`karmyogi-diagnostics-${stamp()}.txt`, lines.join('\n'), 'text/plain;charset=utf-8')
+  }, [buildReport, download])
+
   return (
     <section className="mc-section mc-section--bare">
       <div className="teach-section">
@@ -985,7 +1062,7 @@ function DiagnosticsSection({
           className="teach-head"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
-          title={t('ctrl.diag.head.title', 'Live diagnostics — machine state, feed/spindle, buffer and job time/ETA')}
+          title={t('ctrl.diag.head.title', 'Live diagnostics — machine state, feed/spindle, buffer, pins, firmware and job time/ETA')}
         >
           <span className="teach-head-ico">
             <Gauge size={15} aria-hidden="true" />
@@ -1007,6 +1084,8 @@ function DiagnosticsSection({
                 t('ctrl.diag.buffer', 'Buffer'),
                 buffer ? `${buffer.plan} / ${buffer.rx}` : '—',
               )}
+              {stat(t('ctrl.diag.pins', 'Input pins'), pinLabel)}
+              {stat(t('ctrl.diag.firmware', 'Firmware'), firmware ?? t('ctrl.diag.firmware.unknown', 'unknown'))}
             </div>
             {streaming && (
               <>
@@ -1020,6 +1099,27 @@ function DiagnosticsSection({
                 </div>
               </>
             )}
+            {/* O9 — one-click report export (JSON for tooling, text for print/PDF). */}
+            <div className="mc-diag-export">
+              <button
+                type="button"
+                className="mc-btn mc-btn-lead mc-diag-export-btn"
+                onClick={exportJson}
+                title={t('ctrl.diag.export.json.title', 'Download a JSON diagnostics report (machine state, position, pins, firmware, job stats)')}
+              >
+                <Download size={14} aria-hidden="true" />
+                <span>{t('ctrl.diag.export.json', 'Export JSON')}</span>
+              </button>
+              <button
+                type="button"
+                className="mc-btn mc-btn-lead mc-diag-export-btn"
+                onClick={exportText}
+                title={t('ctrl.diag.export.text.title', 'Download a printable text report (use the browser’s Print → Save as PDF)')}
+              >
+                <FileText size={14} aria-hidden="true" />
+                <span>{t('ctrl.diag.export.text', 'Export report')}</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -1044,6 +1144,8 @@ export function ControllerPanel() {
   const machineState = useMachine((s) => s.state)
   const machineError = useMachine((s) => s.error)
   const buffer = useMachine((s) => s.buffer)
+  // O9 — live input-pin states (limit/probe/door) reported in GRBL `Pn:` status.
+  const pins = useMachine((s) => s.pins)
   // Machine-reported active WCS (from a `$G` parser-state poll). Authoritative
   // when known; falls back to the persisted local guess only when unknown.
   const machineWcs = useMachine((s) => s.activeWcs)
@@ -1051,6 +1153,14 @@ export function ControllerPanel() {
   const bedW = useBed((s) => s.width)
   const bedD = useBed((s) => s.depth)
   const bedH = useBed((s) => s.height)
+  // O9 — firmware label of the active machine (for the diagnostics report).
+  const firmware = useMachines((s) => {
+    const m = s.machines.find((e) => e.id === s.activeId)
+    if (!m) return null
+    return m.firmware
+      ? `${m.firmware}${m.firmwareVersion ? ` ${m.firmwareVersion}` : ''}`
+      : null
+  })
 
   const connected = connection === 'connected'
   const decimals = units === 'inch' ? 4 : 3
@@ -1768,12 +1878,43 @@ export function ControllerPanel() {
             operator's request — the DRO + the error alert below are enough.) */}
         <DroReadout wpos={wpos} mpos={mpos} decimals={decimals} unit={units} />
         {/* Last error (e.g. a mid-job disconnect) — prominent, dismissible only
-            by reconnecting / a new action that clears it. */}
-        {machineError && (
-          <div className="mc-error" role="alert">
-            {machineError}
-          </div>
-        )}
+            by reconnecting / a new action that clears it. O8: any GRBL
+            ALARM:/error: code is decoded into a plain-language cause + fix, with
+            an inline Unlock for alarm states. */}
+        {machineError && (() => {
+          const ex = explainGrblMessage(machineError)
+          return (
+            <div className="mc-error" role="alert">
+              <span className="mc-error-raw">{machineError}</span>
+              {ex && (
+                <span className="mc-error-explain">
+                  <strong className="mc-error-explain-title">
+                    {t(`grbl.${ex.kind}.${ex.code}.title`, ex.title)}
+                  </strong>
+                  <span className="mc-error-explain-cause">
+                    {t(`grbl.${ex.kind}.${ex.code}.cause`, ex.cause)}
+                  </span>
+                  <span className="mc-error-explain-fix">
+                    {t('ctrl.error.fix', 'Fix: {fix}', {
+                      fix: t(`grbl.${ex.kind}.${ex.code}.fix`, ex.fix),
+                    })}
+                  </span>
+                  {ex.kind === 'alarm' && connected && (
+                    <button
+                      type="button"
+                      className="mc-error-unlock"
+                      onClick={() => void grbl.unlock()}
+                      title={t('ctrl.error.unlock.title', 'Clear the alarm lock ($X)')}
+                    >
+                      <UnlockIcon />
+                      {t('ctrl.error.unlock', 'Unlock ($X)')}
+                    </button>
+                  )}
+                </span>
+              )}
+            </div>
+          )
+        })()}
       </section>
 
       {/* O12 — Motion lockout. A clear armed/locked guard so jogging/running
@@ -2064,6 +2205,10 @@ export function ControllerPanel() {
         feed={feed}
         spindle={spindle}
         buffer={buffer}
+        mpos={mpos}
+        wpos={wpos}
+        pins={pins.join('')}
+        firmware={firmware}
       />
 
       {/* Spindle (below Jog) */}

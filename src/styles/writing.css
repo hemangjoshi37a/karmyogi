@@ -417,3 +417,52 @@
     }
   }
 }
+
+/* ---- Optimize section (W1–W9 pen-path passes) ---- */
+.wr-opt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.wr-opt-head .ui-caret {
+  display: inline-flex;
+  vertical-align: middle;
+  color: var(--fg-muted);
+}
+.wr-opt-time {
+  font-size: var(--fs-ctl);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--sp-1);
+  white-space: nowrap;
+}
+.wr-opt-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
+}
+.wr-opt-tgl {
+  width: auto;
+  min-width: var(--ctl-h);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-ctl);
+}
+
+@container writingpanel (max-width: 430px) {
+  .wr-opt-toggles .wr-opt-tgl {
+    flex: 1 1 auto;
+    height: var(--ctl-h-touch);
+    min-height: var(--ctl-h-touch);
+  }
+}

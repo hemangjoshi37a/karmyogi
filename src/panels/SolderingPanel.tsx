@@ -79,6 +79,10 @@ interface RowDefaults {
   feedSeconds: number
   type: SolderFeedType
   approach: SolderApproach
+  /** SO3 — default preheat dwell (s, touch-down only) for a fresh point. */
+  preheatSeconds: number
+  /** SO1 — default anti-ooze retract (mm) for a fresh point. */
+  antiOozeMm: number
 }
 
 /** Global generator params held in panel state (programName/metric are fixed). */
@@ -108,7 +112,7 @@ const intNum = (v: string, fallback: number): number => {
 const numOr = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback
 
-const CSV_HEADER = 'x,y,freeZ,touchZ,type,feedSeconds,approach'
+const CSV_HEADER = 'x,y,freeZ,touchZ,type,feedSeconds,approach,preheatSeconds,antiOozeMm'
 
 /**
  * Per-point operation tint for the Program-tab breakdown + the Visualizer's
@@ -120,7 +124,7 @@ const SOLDER_OP_COLOR = '#0891b2'
 /** Serialize the soldering points to a CSV string (header + one row each). */
 function pointsToCsv(points: SolderPoint[]): string {
   const rows = points.map((p) =>
-    [p.x, p.y, p.freeZ, p.touchZ, p.type, p.feedSeconds, p.approach].join(','),
+    [p.x, p.y, p.freeZ, p.touchZ, p.type, p.feedSeconds, p.approach, p.preheatSeconds ?? 0, p.antiOozeMm ?? 0].join(','),
   )
   return [CSV_HEADER, ...rows].join('\n') + '\n'
 }
@@ -185,6 +189,8 @@ function csvToPoints(text: string): SolderPoint[] {
         type: cols[4] ? parseFeedType(cols[4]) : SolderFeedType.TouchDown,
         feedSeconds: num(cols[5], 0.5),
         approach: cols[6] ? parseApproach(cols[6]) : 'plunge',
+        preheatSeconds: cols[7] ? Math.max(0, num(cols[7], 0)) : 0,
+        antiOozeMm: cols[8] ? Math.max(0, num(cols[8], 0)) : 0,
       }),
     )
   }
@@ -319,7 +325,7 @@ function SegField<T extends string>(props: {
 
 /** The per-point columns that support bulk "apply to all". X/Y are excluded —
  *  they are per-point coordinates, never sensibly the same across the board. */
-type BulkField = 'freeZ' | 'touchZ' | 'feedSeconds' | 'type' | 'approach'
+type BulkField = 'freeZ' | 'touchZ' | 'feedSeconds' | 'type' | 'approach' | 'preheatSeconds' | 'antiOozeMm'
 
 /**
  * A small "apply to all" affordance that lives inside a column header. It shows a
@@ -368,14 +374,21 @@ function ColumnBulkEdit(props: {
     }
   }, [open])
 
-  const isNumber = field === 'freeZ' || field === 'touchZ' || field === 'feedSeconds'
+  const isNumber =
+    field === 'freeZ' ||
+    field === 'touchZ' ||
+    field === 'feedSeconds' ||
+    field === 'preheatSeconds' ||
+    field === 'antiOozeMm'
 
   function commit() {
     if (field === 'type') apply({ type: feedType })
     else if (field === 'approach') apply({ approach })
     else {
       const n = num(numVal, 0)
-      const v = field === 'feedSeconds' ? Math.max(0, n) : n
+      // Times/lengths can't be negative; Z fields can.
+      const nonNeg = field === 'feedSeconds' || field === 'preheatSeconds' || field === 'antiOozeMm'
+      const v = nonNeg ? Math.max(0, n) : n
       apply({ [field]: v } as Partial<SolderPoint>)
     }
     setOpen(false)
@@ -507,6 +520,8 @@ export function SolderingPanel() {
     feedSeconds: 0.5,
     type: SolderFeedType.TouchDown,
     approach: 'plunge',
+    preheatSeconds: 0,
+    antiOozeMm: 0,
   })
 
   const [points, setPoints] = useState<SolderPoint[]>([])
@@ -558,6 +573,8 @@ export function SolderingPanel() {
       feederRPM: d.feederRPM,
       plungeFeed: d.plungeFeed,
       settleSeconds: d.settleSeconds,
+      primeSeconds: d.primeSeconds,
+      antiOozeFeed: d.antiOozeFeed,
       // Clamp on load so an out-of-range value can never reach toFixed().
       decimals: clampDecimals(d.decimals),
     }
@@ -578,6 +595,8 @@ export function SolderingPanel() {
       feederRPM: Math.max(0, numOr(pp.feederRPM, prev.feederRPM)),
       plungeFeed: Math.max(0, numOr(pp.plungeFeed, prev.plungeFeed)),
       settleSeconds: Math.max(0, numOr(pp.settleSeconds, prev.settleSeconds)),
+      primeSeconds: Math.max(0, numOr(pp.primeSeconds, prev.primeSeconds)),
+      antiOozeFeed: Math.max(0, numOr(pp.antiOozeFeed, prev.antiOozeFeed)),
       decimals: clampDecimals(numOr(pp.decimals, prev.decimals)),
     }))
     const pd = (p?.defaults ?? {}) as unknown as Record<string, unknown>
@@ -587,6 +606,8 @@ export function SolderingPanel() {
       feedSeconds: Math.max(0, numOr(pd.feedSeconds, prev.feedSeconds)),
       type: pd.type === SolderFeedType.PreSolder ? SolderFeedType.PreSolder : SolderFeedType.TouchDown,
       approach: parseApproach(typeof pd.approach === 'string' ? pd.approach : String(prev.approach)),
+      preheatSeconds: Math.max(0, numOr(pd.preheatSeconds, prev.preheatSeconds ?? 0)),
+      antiOozeMm: Math.max(0, numOr(pd.antiOozeMm, prev.antiOozeMm ?? 0)),
     }))
   }
   const presets = usePresets<SolderingPreset>({
@@ -607,6 +628,8 @@ export function SolderingPanel() {
       feedSeconds: defaults.feedSeconds,
       type: defaults.type,
       approach: defaults.approach,
+      preheatSeconds: Math.max(0, defaults.preheatSeconds ?? 0),
+      antiOozeMm: Math.max(0, defaults.antiOozeMm ?? 0),
     })
   }
 
@@ -1010,6 +1033,8 @@ export function SolderingPanel() {
       decimals: clampDecimals(params.decimals),
       plungeFeed: Math.max(0, params.plungeFeed),
       settleSeconds: Math.max(0, params.settleSeconds),
+      primeSeconds: Math.max(0, params.primeSeconds),
+      antiOozeFeed: Math.max(0, params.antiOozeFeed),
     }),
     [params],
   )
@@ -1557,6 +1582,32 @@ export function SolderingPanel() {
                   body: t('solder.field.feed.body', 'How long the wire feeder runs at each point (seconds).'),
                 }}
               />
+              <NumField
+                label={t('solder.field.preheat', 'Preheat')}
+                unit={t('unit.s', 's')}
+                min={0}
+                max={5}
+                step={0.1}
+                value={defaults.preheatSeconds ?? 0}
+                onChange={(n) => setDefaults((d) => ({ ...d, preheatSeconds: Math.max(0, n) }))}
+                info={{
+                  title: t('solder.field.preheat', 'Preheat'),
+                  body: t('solder.field.preheat.body', 'Dwell (s) after the tip touches the pad, before feeding wire, so the joint heats up (touch-down feed type only). 0 = none.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.antiOoze', 'Anti-ooze')}
+                unit={t('unit.mm', 'mm')}
+                min={0}
+                max={5}
+                step={0.1}
+                value={defaults.antiOozeMm ?? 0}
+                onChange={(n) => setDefaults((d) => ({ ...d, antiOozeMm: Math.max(0, n) }))}
+                info={{
+                  title: t('solder.field.antiOoze', 'Anti-ooze'),
+                  body: t('solder.field.antiOoze.body', 'Quick controlled lift (mm) after feeding to break the molten-solder string before the full retract, so it does not trail across the board. 0 = none.'),
+                }}
+              />
               <SegField<SolderFeedType>
                 label={t('solder.field.feedType', 'Feed type')}
                 value={defaults.type}
@@ -1651,7 +1702,33 @@ export function SolderingPanel() {
                 onChange={(n) => setParams((p) => ({ ...p, settleSeconds: Math.max(0, n) }))}
                 info={{
                   title: t('solder.field.settle', 'Settle'),
-                  body: t('solder.field.settle.body', 'Dwell after each touch-down so the joint settles before lifting.'),
+                  body: t('solder.field.settle.body', 'Dwell after each touch-down so the joint settles before lifting. A per-point value (in the table) overrides this.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.prime', 'Prime')}
+                unit={t('unit.s', 's')}
+                min={0}
+                max={10}
+                step={0.5}
+                value={params.primeSeconds}
+                onChange={(n) => setParams((p) => ({ ...p, primeSeconds: Math.max(0, n) }))}
+                info={{
+                  title: t('solder.field.prime', 'Prime'),
+                  body: t('solder.field.prime.body', 'Run the feeder once for this long at the safe height before the first point, to prime wire to the tip so the first joint is not starved. 0 = skip.'),
+                }}
+              />
+              <NumField
+                label={t('solder.field.antiOozeFeed', 'Anti-ooze feed')}
+                unit={t('unit.mmPerMin', 'mm/min')}
+                min={0}
+                max={2000}
+                step={50}
+                value={params.antiOozeFeed}
+                onChange={(n) => setParams((p) => ({ ...p, antiOozeFeed: Math.max(0, n) }))}
+                info={{
+                  title: t('solder.field.antiOozeFeed', 'Anti-ooze feed'),
+                  body: t('solder.field.antiOozeFeed.body', 'Feed rate (mm/min) for the per-point anti-ooze lift that breaks the solder string. 0 = reuse the plunge feed.'),
                 }}
               />
               <NumField
@@ -1739,13 +1816,25 @@ export function SolderingPanel() {
                     <ColumnBulkEdit field="feedSeconds" label={t('solder.table.feedS', 'Feed s')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.s', 's')} />
                   </span>
                 </th>
+                <th>
+                  <span className="sp-th">
+                    <span className="sp-th-txt">{t('solder.table.preheat', 'Preheat s')}</span>
+                    <ColumnBulkEdit field="preheatSeconds" label={t('solder.table.preheat', 'Preheat s')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.s', 's')} />
+                  </span>
+                </th>
+                <th>
+                  <span className="sp-th">
+                    <span className="sp-th-txt">{t('solder.table.antiOoze', 'Anti-ooze')}</span>
+                    <ColumnBulkEdit field="antiOozeMm" label={t('solder.table.antiOoze', 'Anti-ooze')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.mm', 'mm')} />
+                  </span>
+                </th>
                 <th className="sp-actions-col" aria-label={t('solder.table.actions', 'Actions')} />
               </tr>
             </thead>
             <tbody>
               {points.length === 0 && (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={11}>
                     <CamEmpty
                       icon={<Icon name="add" size={22} />}
                       title={t('solder.empty.title', 'No solder points yet')}
@@ -1829,6 +1918,28 @@ export function SolderingPanel() {
                       value={pt.feedSeconds}
                       onChange={(e) =>
                         updatePoint(i, { feedSeconds: num(e.target.value, pt.feedSeconds) })
+                      }
+                    />
+                  </td>
+                  <td data-label={t('solder.table.preheat', 'Preheat s')}>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={pt.preheatSeconds ?? 0}
+                      onChange={(e) =>
+                        updatePoint(i, { preheatSeconds: Math.max(0, num(e.target.value, pt.preheatSeconds ?? 0)) })
+                      }
+                    />
+                  </td>
+                  <td data-label={t('solder.table.antiOoze', 'Anti-ooze')}>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={pt.antiOozeMm ?? 0}
+                      onChange={(e) =>
+                        updatePoint(i, { antiOozeMm: Math.max(0, num(e.target.value, pt.antiOozeMm ?? 0)) })
                       }
                     />
                   </td>
@@ -1923,6 +2034,14 @@ export function SolderingPanel() {
               <span className="sp-cards-bulk-chip">
                 <span>{t('solder.card.feed', 'Feed')}</span>
                 <ColumnBulkEdit field="feedSeconds" label={t('solder.table.feedS', 'Feed s')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.s', 's')} />
+              </span>
+              <span className="sp-cards-bulk-chip">
+                <span>{t('solder.card.preheat', 'Preheat')}</span>
+                <ColumnBulkEdit field="preheatSeconds" label={t('solder.table.preheat', 'Preheat s')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.s', 's')} />
+              </span>
+              <span className="sp-cards-bulk-chip">
+                <span>{t('solder.card.antiOoze', 'Anti-ooze')}</span>
+                <ColumnBulkEdit field="antiOozeMm" label={t('solder.table.antiOoze', 'Anti-ooze')} count={points.length} apply={applyToAll} t={t} approachOpts={approachOpts} unit={t('unit.mm', 'mm')} />
               </span>
             </div>
           )}
@@ -2024,6 +2143,28 @@ export function SolderingPanel() {
                     min="0"
                     value={pt.feedSeconds}
                     onChange={(e) => updatePoint(i, { feedSeconds: num(e.target.value, pt.feedSeconds) })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </label>
+                <label className="sp-mini">
+                  <span>{t('solder.card.preheat', 'Preheat')}</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={pt.preheatSeconds ?? 0}
+                    onChange={(e) => updatePoint(i, { preheatSeconds: Math.max(0, num(e.target.value, pt.preheatSeconds ?? 0)) })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </label>
+                <label className="sp-mini">
+                  <span>{t('solder.card.antiOoze', 'Anti-ooze')}</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={pt.antiOozeMm ?? 0}
+                    onChange={(e) => updatePoint(i, { antiOozeMm: Math.max(0, num(e.target.value, pt.antiOozeMm ?? 0)) })}
                     onClick={(e) => e.stopPropagation()}
                   />
                 </label>

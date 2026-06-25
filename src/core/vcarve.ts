@@ -600,6 +600,92 @@ function buildCleanup(
   return { tp, segments };
 }
 
+// ---------------------------------------------------------------------------
+// C13 · V-carve INLAY (male/female pair + glue gap).
+//
+// A V-carve inlay is two parts that nest: a FEMALE pocket carved into a base
+// board, and a MALE plug carved (mirrored) from a contrasting board that drops
+// into it. Both use the SAME V-bit so their walls share the bit's angle and mate
+// perfectly. Two parameters make a real inlay glue up tightly:
+//
+//   • FLAT-DEPTH (female) — the female is cut to a constant DEPTH below the
+//     surface so the plug has somewhere to seat; the v-groove walls taper up to
+//     the surface and the plug's matching walls slide in.
+//   • GLUE GAP (male) — the male is carved from a Z plane RAISED by the gap, so
+//     after the plug bottoms out there's a small clearance for glue squeeze-out
+//     and so the visible top seam closes tight. We realise this by SUBTRACTING
+//     the gap from every commanded depth on the male (clamped at 0) and shifting
+//     the start plane up by the gap.
+//
+// We build the male as a MIRRORED copy of the contours (flip X) so the carved
+// plug, when flipped back over, registers onto the female. The female is the
+// plain contours. Both reuse {@link vCarveContours} so the medial-axis depth
+// math, multi-depth passes and safe retracts are identical.
+// ---------------------------------------------------------------------------
+
+export interface VCarveInlayParams extends VCarveParams {
+  /** Glue/fit clearance (mm) applied to the MALE plug so it seats with a gap. */
+  glueGapMm: number;
+  /**
+   * Flat seating depth (mm) added under the female v-groove so the plug has a
+   * floor to bottom out on. 0 → pure v-carve mate (sharp valley).
+   */
+  flatDepthMm?: number;
+}
+
+export interface VCarveInlayResult {
+  /** The FEMALE pocket toolpath (carved into the base board, normal orientation). */
+  female: VCarveResult;
+  /** The MALE plug toolpath (mirrored in X, depth reduced by the glue gap). */
+  male: VCarveResult;
+  warnings: string[];
+}
+
+/** Mirror a contour set across the vertical line x = axisX (for the male plug). */
+function mirrorX(contours: Polyline[], axisX: number): Polyline[] {
+  return contours.map((c) => {
+    const m = c.clone();
+    for (const p of m.points) p.x = 2 * axisX - p.x;
+    return m;
+  });
+}
+
+/**
+ * Generate the MALE + FEMALE halves of a V-carve inlay. Both halves carve with
+ * the same V-bit; the female is the design as-drawn, the male is mirrored and
+ * carved with every depth reduced by `glueGapMm` so the plug seats with a glue
+ * clearance and the top seam closes tight.
+ */
+export function vCarveInlay(contours: Polyline[], params: VCarveInlayParams): VCarveInlayResult {
+  const warnings: string[] = [];
+  const gap = Math.max(0, params.glueGapMm);
+  const flat = Math.max(0, params.flatDepthMm ?? 0);
+
+  // FEMALE — design as drawn, with an optional flat seating floor added to the
+  // hard depth clamp so the v-groove gets a flat bottom to receive the plug.
+  const female = vCarveContours(contours, {
+    ...params,
+    maxDepthMm: params.maxDepthMm + flat,
+  });
+
+  // MALE — mirrored across the contour-set centre so it registers when flipped.
+  const b = boundsOf(contours.filter((c) => c.points.length >= 2));
+  const axisX = b ? (b.minX + b.maxX) / 2 : 0;
+  const mirrored = mirrorX(contours, axisX);
+  // Carve the plug shallower by the glue gap so it bottoms out with clearance.
+  const male = vCarveContours(mirrored, {
+    ...params,
+    surfaceZ: params.surfaceZ - gap,
+    maxDepthMm: Math.max(kEpsilon, params.maxDepthMm - gap),
+  });
+
+  if (gap <= 0) warnings.push('Glue gap is 0 — the inlay may be too tight to assemble; 0.1–0.3mm is typical.');
+  if (female.warnings.length) warnings.push(...female.warnings.map((w) => `Female: ${w}`));
+  if (male.warnings.length) warnings.push(...male.warnings.map((w) => `Male: ${w}`));
+
+  return { female, male, warnings };
+}
+
 /**
  * Generate a V-carve toolpath from CLOSED vector contours. The depth at each
  * medial-axis point is  min(maxDepth, (dist − tipR) / tan(tipHalfAngle)),

@@ -29,6 +29,8 @@ import { useSolderViz } from '../store/solderViz'
 import { ToolpathStartMarker } from './ToolpathStartMarker'
 import { CameraQuatReporter, AxisOverlay } from './AxisOverlay'
 import { RunOutline } from './RunOutline'
+import { HeightmapSurface } from './HeightmapSurface'
+import type { HeightMap } from '../core/heightmap'
 import { prefersReducedMotion } from './reducedMotion'
 import { useViewportShapes } from '../store/viewportShapes'
 import { shapesToGcode } from '../core/viewportShapeGcode'
@@ -268,6 +270,20 @@ export interface ViewerProps {
   runOutlineBounds?: { min: [number, number, number]; max: [number, number, number] } | null
   /** Bed-fit verdict from the panel — colours the outline (ok / warn / danger). */
   runOutlineFit?: 'ok' | 'warn' | 'danger'
+  /**
+   * V9 — probed surface heightmap to overlay as a colored relief mesh (the PCB /
+   * stock auto-leveling grid). null hides it. Read-only: the viewer only renders
+   * the immutable map; probing/warping lives in the heightmap core + store.
+   */
+  heightmap?: HeightMap | null
+  /**
+   * V8 — right-click-to-jog. When true, a right-click (or long-press) on the bed
+   * reports the world XY the user targeted; the panel sends a safe-Z-first jog
+   * there. Default false (right-click stays a free OrbitControls pan/orbit).
+   */
+  jogTo?: boolean
+  /** Called with the targeted work XY (mm) when {@link jogTo} is on and the bed is right-clicked. */
+  onJogTo?: (x: number, y: number) => void
 }
 
 const FOV = 45
@@ -323,6 +339,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     showRunOutline = false,
     runOutlineBounds = null,
     runOutlineFit = 'ok',
+    heightmap = null,
+    jogTo = false,
+    onJogTo,
   },
   ref,
 ) {
@@ -933,6 +952,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       {pick && pickSel.size > 0 && (
         <SelectedSegments segments={parsed.segments} indices={pickSel} />
       )}
+      {/* V9 — probed surface heightmap overlay (colored relief mesh). Hidden for a
+          spring program (no XY bed surface there). One draw call, built once. */}
+      {!isSpringProgram && heightmap && <HeightmapSurface map={heightmap} />}
+      {/* V8 — right-click-to-jog target plane. Invisible bed-sized catcher that
+          reports the world XY of a right-click so the panel can jog there
+          (safe-Z first). Only mounted while the mode is on, so it never steals
+          OrbitControls' right-button pan otherwise. */}
+      {jogTo && onJogTo && (
+        <JogTarget width={width} depth={depth} onJogTo={onJogTo} />
+      )}
       {/* Live camera → 3D overlay (self-gated on the camera-calib store's `enabled`). */}
       <CameraBedPlane />
       <ViewerBridge />
@@ -1161,6 +1190,42 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     </div>
   )
 })
+
+/**
+ * V8 — right-click-to-jog target. An invisible bed-sized plane on z=0 that, on a
+ * RIGHT-click (button 2) or a touch context-menu, reports the world XY the user
+ * targeted. The panel turns that into a safe-Z-first jog. The plane is only
+ * mounted while jog-to mode is on, so OrbitControls keeps the right button for
+ * pan/orbit the rest of the time. No per-frame work — purely event-driven.
+ */
+function JogTarget({
+  width,
+  depth,
+  onJogTo,
+}: {
+  width: number
+  depth: number
+  onJogTo: (x: number, y: number) => void
+}) {
+  return (
+    <mesh
+      // Sit a hair below z=0 so it never z-fights the toolpath/grid, and the
+      // raycast still resolves the XY the user clicked on the work plane.
+      position={[0, 0, -0.02]}
+      onContextMenu={(e) => {
+        e.stopPropagation()
+        // Prevent the browser context menu so the right-click reads as a jog target.
+        const native = e.nativeEvent as MouseEvent
+        native.preventDefault?.()
+        const p = e.point
+        if (Number.isFinite(p.x) && Number.isFinite(p.y)) onJogTo(p.x, p.y)
+      }}
+    >
+      <planeGeometry args={[Math.max(width, 1), Math.max(depth, 1)]} />
+      <meshBasicMaterial visible={false} side={THREE.DoubleSide} />
+    </mesh>
+  )
+}
 
 /**
  * DEV-ONLY: periodically snapshot the 3D canvas and POST it to the bridge
