@@ -149,7 +149,6 @@ function buildSplashI18n(): string {
   }
   return JSON.stringify(out)
 }
-const SPLASH_I18N = buildSplashI18n()
 
 /**
  * Replaces the `__BUILD_VERSION__` / `__BUILD_DATE__` placeholders in the boot
@@ -160,10 +159,13 @@ function splashBuildStamp() {
   return {
     name: 'karmyogi-splash-build-stamp',
     transformIndexHtml(html: string) {
+      // Recompute per call so a dev server reflects locale edits without a
+      // restart; at build it simply runs once.
+      const splashI18n = buildSplashI18n()
       return html
         .replace(
           '</head>',
-          `  <script>window.__SPLASH_I18N__=${SPLASH_I18N}</script>\n  </head>`,
+          `  <script>window.__SPLASH_I18N__=${splashI18n}</script>\n  </head>`,
         )
         .replace(/__BUILD_VERSION__/g, buildVersion)
         .replace(/__BUILD_DATE__/g, buildStamp)

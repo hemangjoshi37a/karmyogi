@@ -553,10 +553,20 @@
           var I18N = window.__SPLASH_I18N__ || {}
           var RTL = { ar: 1, he: 1, fa: 1, ur: 1, sd: 1, ks: 1 }
           var lang = null
+          // 1) URL path pins the language (/gu, /gu/) — the per-locale SEO page;
+          //    matches langFromPath() and WINS over the saved preference.
           try {
-            var st = JSON.parse(localStorage.getItem('karmyogi.lang') || 'null')
-            if (st && st.state && st.state.lang) lang = st.state.lang
+            var seg = decodeURIComponent((location.pathname.split('/')[1] || '')).toLowerCase()
+            if (seg && seg !== 'en' && I18N[seg]) lang = seg
           } catch (e) {}
+          // 2) saved preference (karmyogi.lang)
+          if (!lang) {
+            try {
+              var st = JSON.parse(localStorage.getItem('karmyogi.lang') || 'null')
+              if (st && st.state && st.state.lang) lang = st.state.lang
+            } catch (e) {}
+          }
+          // 3) browser language
           if (!lang && navigator.language) {
             var nav = navigator.language.toLowerCase().split('-')[0]
             if (I18N[nav]) lang = nav
