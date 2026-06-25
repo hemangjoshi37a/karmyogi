@@ -1,10 +1,37 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { grbl } from '../serial/controller'
 import { useConsole, useGrblSettings, useMachine, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
 import { InfoTip } from '../components/InfoTip'
 import { IconButton } from '../components/IconButton'
+import { SegControl } from '../components/ui/SegControl'
+import { SliderField } from '../components/ui/SliderField'
 import { useT } from '../i18n'
+import {
+  defaultProbeParams,
+  zTouchProgram,
+  edgeProgram,
+  cornerProgram,
+  boreProgram,
+  defaultSurfaceParams,
+  surfacingProgram,
+  type WizardKind,
+  type AxisDir,
+  type ProbeParams,
+} from '../core/probing'
+import {
+  probeGrid,
+  snakeOrder,
+  gridForSpacing,
+  defaultSpacing,
+  isComplete,
+  probedCount,
+  zExtent,
+  type HeightMap,
+  type ProbePoint,
+  type ProbeArea,
+} from '../core/heightmap'
+import { useHeightmap } from '../store/heightmap'
 import '../styles/probe.css'
 
 /** Parsed GRBL `[PRB:x,y,z:s]` probe result. `success` is the trailing flag. */
@@ -140,6 +167,574 @@ function settingNumber(
   return v.numeric
 }
 
+type T = ReturnType<typeof useT>
+
+// ===========================================================================
+// O2 — Probing wizard suite (Z-touch / X-edge / Y-edge / corner / center-bore)
+// ===========================================================================
+
+/** Parse a GRBL `[PRB:x,y,z:s]` into machine coords + success. */
+function parsePrb(line: string): { x: number; y: number; z: number; ok: boolean } | undefined {
+  const r = parsePrbLine(line)
+  if (!r) return undefined
+  return { x: r.x, y: r.y, z: r.z, ok: r.success }
+}
+
+const WIZARD_KINDS: { value: WizardKind; label: string; lk: string }[] = [
+  { value: 'z', label: 'Z-touch', lk: 'probe.wiz.z' },
+  { value: 'x', label: 'X edge', lk: 'probe.wiz.x' },
+  { value: 'y', label: 'Y edge', lk: 'probe.wiz.y' },
+  { value: 'corner', label: 'Corner', lk: 'probe.wiz.corner' },
+  { value: 'center', label: 'Bore center', lk: 'probe.wiz.center' },
+]
+
+/**
+ * Guided probing wizard. Builds a safe G38.2 program for the selected routine
+ * (always retracts to safe-Z, never crashes the probe) from the live params,
+ * shows the exact G-code, and runs it line-by-line when connected. The bore
+ * routine collects four touches and offers a "set centre" zero afterward.
+ */
+function WizardSection({
+  t,
+  connected,
+  machineBusy,
+}: {
+  t: T
+  connected: boolean
+  machineBusy: boolean
+}) {
+  const [kind, setKind] = usePersistentState<WizardKind>('karmyogi.probe.wiz.kind', 'z')
+  const [feed, setFeed] = usePersistentState<number>('karmyogi.probe.wiz.feed', 50)
+  const [maxTravel, setMaxTravel] = usePersistentState<number>('karmyogi.probe.wiz.travel', 25)
+  const [safeZ, setSafeZ] = usePersistentState<number>('karmyogi.probe.wiz.safez', 5)
+  const [offset, setOffset] = usePersistentState<number>('karmyogi.probe.wiz.offset', 1)
+  const [xDir, setXDir] = usePersistentState<AxisDir>('karmyogi.probe.wiz.xdir', '-')
+  const [yDir, setYDir] = usePersistentState<AxisDir>('karmyogi.probe.wiz.ydir', '-')
+  const [stepOver, setStepOver] = usePersistentState<number>('karmyogi.probe.wiz.step', 10)
+
+  const params: ProbeParams = defaultProbeParams({ feed, maxTravel, safeZ, offset })
+  const program = useMemo(() => {
+    switch (kind) {
+      case 'z':
+        return zTouchProgram(params)
+      case 'x':
+        return edgeProgram('x', xDir, params)
+      case 'y':
+        return edgeProgram('y', yDir, params)
+      case 'corner':
+        return cornerProgram(xDir, yDir, params, stepOver)
+      case 'center':
+        return boreProgram(params)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, feed, maxTravel, safeZ, offset, xDir, yDir, stepOver])
+
+  const offsetLabel =
+    kind === 'z'
+      ? t('probe.wiz.plate', 'Plate thickness')
+      : t('probe.wiz.radius', 'Tool radius')
+
+  const run = () => {
+    if (!connected || machineBusy || !program) return
+    // Stream the whole guided program line-by-line; each line is queued so the
+    // controller serializes them and the G38.2 touches resolve in order.
+    for (const line of program.gcode.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed === '' || trimmed.startsWith(';')) continue
+      grbl.send(trimmed).catch(() => {})
+    }
+  }
+
+  return (
+    <section className="pr-card pr-card-wide">
+      <header className="pr-card-head">
+        <h4>{t('probe.wiz.title', 'Probing wizard')}</h4>
+        <span className="pr-raw">{t('probe.wiz.tag', 'guided zero')}</span>
+      </header>
+      <p className="pr-hint">
+        {t('probe.wiz.hint', 'Guided touch-off that sets work zero safely. Every routine retracts to safe-Z and never dives the probe.')}
+      </p>
+      <SegControl
+        ariaLabel={t('probe.wiz.kindAria', 'Probing routine')}
+        size="sm"
+        options={WIZARD_KINDS.map((k) => ({ value: k.value, label: t(k.lk, k.label) }))}
+        value={kind}
+        onChange={setKind}
+      />
+      <div className="pr-wiz-grid">
+        <SliderField
+          label={t('probe.wiz.feed', 'Probe feed')}
+          unit="mm/min"
+          min={5}
+          max={300}
+          step={5}
+          value={feed}
+          onChange={setFeed}
+        />
+        <SliderField
+          label={t('probe.wiz.travel', 'Max travel')}
+          unit="mm"
+          min={2}
+          max={80}
+          step={1}
+          value={maxTravel}
+          onChange={setMaxTravel}
+        />
+        <SliderField
+          label={t('probe.wiz.safez', 'Safe-Z')}
+          unit="mm"
+          min={1}
+          max={30}
+          step={0.5}
+          value={safeZ}
+          onChange={setSafeZ}
+        />
+        {kind !== 'center' && (
+          <SliderField
+            label={offsetLabel}
+            unit="mm"
+            min={0}
+            max={10}
+            step={0.1}
+            value={offset}
+            onChange={setOffset}
+          />
+        )}
+        {(kind === 'x' || kind === 'corner') && (
+          <label className="pr-wiz-dir">
+            <span className="pr-field-name">{t('probe.wiz.xdir', 'X approach')}</span>
+            <SegControl
+              ariaLabel={t('probe.wiz.xdirAria', 'X approach direction')}
+              size="sm"
+              options={[
+                { value: '-' as AxisDir, label: t('probe.wiz.minus', '−') },
+                { value: '+' as AxisDir, label: t('probe.wiz.plus', '+') },
+              ]}
+              value={xDir}
+              onChange={setXDir}
+            />
+          </label>
+        )}
+        {(kind === 'y' || kind === 'corner') && (
+          <label className="pr-wiz-dir">
+            <span className="pr-field-name">{t('probe.wiz.ydir', 'Y approach')}</span>
+            <SegControl
+              ariaLabel={t('probe.wiz.ydirAria', 'Y approach direction')}
+              size="sm"
+              options={[
+                { value: '-' as AxisDir, label: t('probe.wiz.minus', '−') },
+                { value: '+' as AxisDir, label: t('probe.wiz.plus', '+') },
+              ]}
+              value={yDir}
+              onChange={setYDir}
+            />
+          </label>
+        )}
+        {kind === 'corner' && (
+          <SliderField
+            label={t('probe.wiz.step', 'Step to Y edge')}
+            unit="mm"
+            min={2}
+            max={50}
+            step={1}
+            value={stepOver}
+            onChange={setStepOver}
+          />
+        )}
+      </div>
+
+      {/* Ordered step list — the operator sees exactly what will happen. */}
+      <ol className="pr-wiz-steps" aria-label={t('probe.wiz.stepsAria', 'Wizard steps')}>
+        {program?.steps.map((s, i) => (
+          <li key={i} className={s.isProbe ? 'probe' : s.setsZero ? 'zero' : ''}>
+            {s.note}
+          </li>
+        ))}
+      </ol>
+
+      <code className="pr-code" aria-label={t('probe.wiz.codeAria', 'Wizard G-code')}>
+        {program?.gcode}
+      </code>
+
+      <div className="pr-row">
+        <button
+          type="button"
+          className="pr-btn primary pr-grow"
+          disabled={!connected || machineBusy}
+          onClick={run}
+          title={t('probe.wiz.runTip', 'Stream this guided routine to the machine')}
+        >
+          {t('probe.wiz.run', 'Run wizard')}
+        </button>
+      </div>
+      <p className="pr-note caution">
+        {t('probe.wiz.safety', 'Clip the probe to the tool and position the bit beside the edge at probing depth before running. The routine alarms (stops) if no contact is found within Max travel — it will not crash the probe.')}
+      </p>
+    </section>
+  )
+}
+
+// ===========================================================================
+// O1/P1 — Heightmap / auto-level probe (general, in the Probe modal)
+// ===========================================================================
+
+type ProbePhase = 'idle' | 'running' | 'done' | 'error'
+
+/**
+ * General-purpose heightmap probe: define a rectangular XY area + grid spacing,
+ * run a safe G38.2 grid (retract to clearance between every point), and store
+ * the resulting surface in the shared heightmap store so any workbench can warp
+ * its program. The PCB panel applies the warp; here we collect + show the map.
+ */
+function HeightmapSection({
+  t,
+  connected,
+  machineBusy,
+  machineState,
+  bedW,
+  bedD,
+}: {
+  t: T
+  connected: boolean
+  machineBusy: boolean
+  machineState: string
+  bedW: number
+  bedD: number
+}) {
+  const map = useHeightmap((s) => s.map)
+  const setMap = useHeightmap((s) => s.setMap)
+  const clearMap = useHeightmap((s) => s.clearMap)
+  const probeFeed = useHeightmap((s) => s.probeFeed)
+  const setProbeFeed = useHeightmap((s) => s.setProbeFeed)
+  const probeDepth = useHeightmap((s) => s.probeDepth)
+  const setProbeDepth = useHeightmap((s) => s.setProbeDepth)
+  const probeClearance = useHeightmap((s) => s.probeClearance)
+  const setProbeClearance = useHeightmap((s) => s.setProbeClearance)
+
+  // The probe area defaults to the bed; the operator narrows it to the stock.
+  const [minX, setMinX] = usePersistentState<number>('karmyogi.probe.hm.minX', 0)
+  const [minY, setMinY] = usePersistentState<number>('karmyogi.probe.hm.minY', 0)
+  const [w, setW] = usePersistentState<number>('karmyogi.probe.hm.w', Math.min(50, bedW || 50))
+  const [d, setD] = usePersistentState<number>('karmyogi.probe.hm.d', Math.min(50, bedD || 50))
+  const area: ProbeArea = useMemo(
+    () => ({ minX, minY, maxX: minX + Math.max(1, w), maxY: minY + Math.max(1, d) }),
+    [minX, minY, w, d],
+  )
+  const [spacing, setSpacing] = usePersistentState<number>(
+    'karmyogi.probe.hm.spacing',
+    Math.round(defaultSpacing(area)),
+  )
+  const grid = useMemo(() => gridForSpacing(area, spacing), [area, spacing])
+  const total = grid.nx * grid.ny
+
+  const [phase, setPhase] = useState<ProbePhase>('idle')
+  const [status, setStatus] = useState('')
+  const [statusErr, setStatusErr] = useState(false)
+  const [done, setDone] = useState(0)
+
+  const cycle = useRef<{ seq: ProbePoint[]; idx: number; work: HeightMap; abort: boolean } | null>(
+    null,
+  )
+  const lastSeen = useRef(0)
+
+  const probedNow = map ? probedCount(map) : 0
+  const complete = !!map && isComplete(map)
+  const z = map ? zExtent(map) : { min: 0, max: 0 }
+
+  const finish = (okFlag: boolean) => {
+    const c = cycle.current
+    cycle.current = null
+    if (!c) return
+    if (okFlag) {
+      setMap(c.work)
+      setPhase('done')
+      const e = zExtent(c.work)
+      setStatusErr(false)
+      setStatus(
+        t('probe.hm.done', 'Probed {n} points — surface warp {warp} mm (Z {min}…{max}).', {
+          n: c.seq.length,
+          warp: (e.max - e.min).toFixed(3),
+          min: e.min.toFixed(3),
+          max: e.max.toFixed(3),
+        }),
+      )
+    }
+  }
+
+  const probeNext = () => {
+    const c = cycle.current
+    if (!c || c.abort) return
+    if (c.idx >= c.seq.length) {
+      finish(true)
+      return
+    }
+    const p = c.seq[c.idx]
+    setDone(c.idx)
+    grbl.send(`G0 Z${probeClearance.toFixed(3)}`).catch(() => {})
+    grbl.send(`G0 X${p.x.toFixed(3)} Y${p.y.toFixed(3)}`).catch(() => {})
+    grbl.send(`G38.2 Z${(-Math.abs(probeDepth)).toFixed(3)} F${Math.abs(probeFeed)}`).catch(() => {})
+  }
+
+  useEffect(() => {
+    const entries = useConsole.getState().entries
+    lastSeen.current = entries.length ? entries[entries.length - 1].id : 0
+    const unsub = useConsole.subscribe((s) => {
+      const c = cycle.current
+      if (!c || c.abort) return
+      for (const e of s.entries) {
+        if (e.id <= lastSeen.current) continue
+        lastSeen.current = e.id
+        if (e.dir !== 'recv') continue
+        const prb = parsePrb(e.text)
+        if (!prb) continue
+        if (!prb.ok) {
+          c.abort = true
+          cycle.current = null
+          setPhase('error')
+          setStatusErr(true)
+          setStatus(
+            t('probe.hm.noContact', 'No contact at point {i} — cycle stopped. Check wiring / Z range.', {
+              i: c.idx + 1,
+            }),
+          )
+          return
+        }
+        const pt = c.seq[c.idx]
+        const node = c.work.points.find((n) => n.ix === pt.ix && n.iy === pt.iy)
+        // Convert to work frame: WPos = MPos − WCO.
+        if (node) node.z = prb.z - useMachine.getState().wco.z
+        c.idx++
+        grbl.send(`G0 Z${probeClearance.toFixed(3)}`).catch(() => {})
+        probeNext()
+      }
+    })
+    return unsub
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (phase === 'running' && machineState === 'Alarm' && cycle.current) {
+      cycle.current.abort = true
+      cycle.current = null
+      setPhase('error')
+      setStatusErr(true)
+      setStatus(t('probe.hm.alarm', 'Alarmed during probing — Unlock ($X) and check the probe.'))
+    }
+  }, [machineState, phase, t])
+
+  useEffect(() => {
+    if (!connected && cycle.current) {
+      cycle.current.abort = true
+      cycle.current = null
+      setPhase('idle')
+    }
+  }, [connected])
+
+  const start = () => {
+    if (!connected || machineBusy) {
+      setStatusErr(true)
+      setStatus(t('probe.hm.connectFirst', 'Connect (and free the machine) before probing.'))
+      return
+    }
+    const fresh = probeGrid(area, grid)
+    const seq = snakeOrder(fresh)
+    cycle.current = { seq, idx: 0, work: fresh, abort: false }
+    setDone(0)
+    setPhase('running')
+    setStatusErr(false)
+    setStatus(t('probe.hm.probing', 'Probing {n} points… keep clear. Slow on purpose.', { n: seq.length }))
+    probeNext()
+  }
+
+  const abort = () => {
+    if (cycle.current) cycle.current.abort = true
+    cycle.current = null
+    setPhase('idle')
+    setStatus(t('probe.hm.aborted', 'Probe cycle stopped.'))
+    grbl.send(`G0 Z${probeClearance.toFixed(3)}`).catch(() => {})
+  }
+
+  const running = phase === 'running'
+
+  return (
+    <section className="pr-card pr-card-wide">
+      <header className="pr-card-head">
+        <h4>{t('probe.hm.title', 'Auto-level / heightmap probe')}</h4>
+        <span className="pr-raw">{t('probe.hm.tag', 'grid → surface')}</span>
+      </header>
+      <p className="pr-hint">
+        {t('probe.hm.hint', 'Probe a grid over an area to map surface tilt/warp. The map is shared with the PCB workbench, which warps cut Z to follow it (bilinear).')}
+      </p>
+      <div className="pr-wiz-grid">
+        <SliderField label={t('probe.hm.minX', 'Origin X')} unit="mm" min={0} max={Math.max(10, bedW || 300)} step={1} value={minX} onChange={setMinX} />
+        <SliderField label={t('probe.hm.minY', 'Origin Y')} unit="mm" min={0} max={Math.max(10, bedD || 300)} step={1} value={minY} onChange={setMinY} />
+        <SliderField label={t('probe.hm.w', 'Width')} unit="mm" min={2} max={Math.max(10, bedW || 300)} step={1} value={w} onChange={setW} />
+        <SliderField label={t('probe.hm.d', 'Depth')} unit="mm" min={2} max={Math.max(10, bedD || 300)} step={1} value={d} onChange={setD} />
+        <SliderField label={t('probe.hm.spacing', 'Grid spacing')} unit="mm" min={2} max={50} step={1} value={spacing} onChange={setSpacing} />
+        <SliderField label={t('probe.hm.feed', 'Probe feed')} unit="mm/min" min={5} max={300} step={5} value={probeFeed} onChange={setProbeFeed} />
+        <SliderField label={t('probe.hm.depth', 'Probe depth')} unit="mm" min={0.5} max={20} step={0.5} value={probeDepth} onChange={setProbeDepth} />
+        <SliderField label={t('probe.hm.clear', 'Clearance Z')} unit="mm" min={0.5} max={20} step={0.5} value={probeClearance} onChange={setProbeClearance} />
+      </div>
+      <p className="pr-hint pr-hm-grid-line">
+        {t('probe.hm.gridInfo', 'Grid: {nx} × {ny} = {total} points', { nx: grid.nx, ny: grid.ny, total })}
+        {running && ` — ${t('probe.hm.progress', '{done}/{total}', { done, total })}`}
+      </p>
+      <div className="pr-row">
+        {!running ? (
+          <button type="button" className="pr-btn primary pr-grow" disabled={!connected || machineBusy} onClick={start} title={t('probe.hm.runTip', 'Run the G38.2 probe grid')}>
+            {t('probe.hm.run', '⌗ Run probe grid')}
+          </button>
+        ) : (
+          <button type="button" className="pr-btn danger pr-grow" onClick={abort}>
+            {t('probe.hm.stop', '■ Stop probing')}
+          </button>
+        )}
+        {map && !running && (
+          <IconButton className="pr-icon-btn" icon="✕" label={t('probe.hm.clear2', 'Clear map')} onClick={clearMap} />
+        )}
+      </div>
+      {map && (
+        <p className="pr-note" role="status" aria-live="polite">
+          {complete
+            ? t('probe.hm.mapComplete', '✓ Surface mapped: {n} points, warp {warp} mm (Z {min}…{max}).', {
+                n: probedNow,
+                warp: (z.max - z.min).toFixed(3),
+                min: z.min.toFixed(3),
+                max: z.max.toFixed(3),
+              })
+            : t('probe.hm.mapPartial', '{n} / {total} points probed.', { n: probedNow, total: map.points.length })}
+          <span className="pr-sub">{t('probe.hm.applyNote', 'Apply the warp in the PCB workbench (Auto-leveling section).')}</span>
+        </p>
+      )}
+      {status && (
+        <p className={`pr-note${statusErr ? ' caution' : ''}`} role="status" aria-live="polite">
+          {status}
+        </p>
+      )}
+    </section>
+  )
+}
+
+// ===========================================================================
+// O3 — Surfacing / wasteboard-flatten generator
+// ===========================================================================
+
+/** Surfacing toolpath generator: raster a rectangular area to flatten stock. */
+function SurfacingSection({
+  t,
+  connected,
+  machineBusy,
+  bedW,
+  bedD,
+}: {
+  t: T
+  connected: boolean
+  machineBusy: boolean
+  bedW: number
+  bedD: number
+}) {
+  const [minX, setMinX] = usePersistentState<number>('karmyogi.probe.surf.minX', 0)
+  const [minY, setMinY] = usePersistentState<number>('karmyogi.probe.surf.minY', 0)
+  const [w, setW] = usePersistentState<number>('karmyogi.probe.surf.w', Math.min(80, bedW || 80))
+  const [d, setD] = usePersistentState<number>('karmyogi.probe.surf.d', Math.min(80, bedD || 80))
+  const [tool, setTool] = usePersistentState<number>('karmyogi.probe.surf.tool', 6)
+  const [stepFrac, setStepFrac] = usePersistentState<number>('karmyogi.probe.surf.step', 0.4)
+  const [depth, setDepth] = usePersistentState<number>('karmyogi.probe.surf.depth', 0.5)
+  const [dpp, setDpp] = usePersistentState<number>('karmyogi.probe.surf.dpp', 0.3)
+  const [feed, setFeed] = usePersistentState<number>('karmyogi.probe.surf.feed', 800)
+  const [rpm, setRpm] = usePersistentState<number>('karmyogi.probe.surf.rpm', 12000)
+  const [along, setAlong] = usePersistentState<'x' | 'y'>('karmyogi.probe.surf.along', 'x')
+
+  const result = useMemo(() => {
+    const params = defaultSurfaceParams({
+      toolDiameter: tool,
+      stepoverFrac: stepFrac,
+      depth,
+      depthPerPass: dpp,
+      feed,
+      rpm,
+      along,
+    })
+    return surfacingProgram(
+      { minX, minY, maxX: minX + Math.max(1, w), maxY: minY + Math.max(1, d) },
+      params,
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minX, minY, w, d, tool, stepFrac, depth, dpp, feed, rpm, along])
+
+  const run = () => {
+    if (!connected || machineBusy) return
+    for (const line of result.gcode.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed === '' || trimmed.startsWith(';')) continue
+      grbl.send(trimmed).catch(() => {})
+    }
+  }
+
+  return (
+    <section className="pr-card pr-card-wide">
+      <header className="pr-card-head">
+        <h4>{t('probe.surf.title', 'Surfacing / flatten')}</h4>
+        <span className="pr-raw">{t('probe.surf.tag', 'face stock')}</span>
+      </header>
+      <p className="pr-hint">
+        {t('probe.surf.hint', 'Raster a flat face across a rectangular area to flatten stock or a wasteboard. Conservative multi-pass, safe-Z between passes.')}
+      </p>
+      <div className="pr-wiz-grid">
+        <SliderField label={t('probe.surf.minX', 'Origin X')} unit="mm" min={0} max={Math.max(10, bedW || 300)} step={1} value={minX} onChange={setMinX} />
+        <SliderField label={t('probe.surf.minY', 'Origin Y')} unit="mm" min={0} max={Math.max(10, bedD || 300)} step={1} value={minY} onChange={setMinY} />
+        <SliderField label={t('probe.surf.w', 'Width')} unit="mm" min={2} max={Math.max(10, bedW || 300)} step={1} value={w} onChange={setW} />
+        <SliderField label={t('probe.surf.d', 'Depth')} unit="mm" min={2} max={Math.max(10, bedD || 300)} step={1} value={d} onChange={setD} />
+        <SliderField label={t('probe.surf.tool', 'Tool ⌀')} unit="mm" min={0.5} max={50} step={0.5} value={tool} onChange={setTool} />
+        <SliderField label={t('probe.surf.step', 'Stepover')} unit="×⌀" min={0.1} max={0.9} step={0.05} value={stepFrac} onChange={setStepFrac} />
+        <SliderField label={t('probe.surf.depth', 'Total depth')} unit="mm" min={0} max={10} step={0.1} value={depth} onChange={setDepth} />
+        <SliderField label={t('probe.surf.dpp', 'Depth / pass')} unit="mm" min={0.05} max={5} step={0.05} value={dpp} onChange={setDpp} />
+        <SliderField label={t('probe.surf.feed', 'Feed')} unit="mm/min" min={50} max={3000} step={50} value={feed} onChange={setFeed} />
+        <SliderField label={t('probe.surf.rpm', 'Spindle')} unit="rpm" min={0} max={30000} step={500} value={rpm} onChange={setRpm} />
+        <label className="pr-wiz-dir">
+          <span className="pr-field-name">{t('probe.surf.along', 'Raster along')}</span>
+          <SegControl
+            ariaLabel={t('probe.surf.alongAria', 'Raster direction')}
+            size="sm"
+            options={[
+              { value: 'x' as const, label: 'X' },
+              { value: 'y' as const, label: 'Y' },
+            ]}
+            value={along}
+            onChange={setAlong}
+          />
+        </label>
+      </div>
+      <p className="pr-hint pr-hm-grid-line">
+        {t('probe.surf.stats', '{lines} raster lines × {passes} passes — stepover {so} mm, ~{len} m of cut', {
+          lines: result.rasterLines,
+          passes: result.passes,
+          so: result.stepover.toFixed(2),
+          len: (result.cutLength / 1000).toFixed(1),
+        })}
+      </p>
+      <code className="pr-code" aria-label={t('probe.surf.codeAria', 'Surfacing G-code preview')}>
+        {result.gcode.split('\n').slice(0, 8).join('\n')}
+        {result.gcode.split('\n').length > 8 ? '\n…' : ''}
+      </code>
+      <div className="pr-row">
+        <button
+          type="button"
+          className="pr-btn primary pr-grow"
+          disabled={!connected || machineBusy}
+          onClick={run}
+          title={t('probe.surf.runTip', 'Stream the surfacing program to the machine')}
+        >
+          {t('probe.surf.run', '▶ Run surfacing')}
+        </button>
+      </div>
+      <p className="pr-note caution">
+        {t('probe.surf.safety', 'Zero Z at the TOP of the stock first. The cutter centre is inset by its radius so the edge just reaches the bounds; passes retract to safe-Z. Set spindle to 0 for a manually-started router.')}
+      </p>
+    </section>
+  )
+}
+
 export function ProbePanel() {
   const t = useT()
   const connection = useMachine((s) => s.connection)
@@ -152,6 +747,9 @@ export function ProbePanel() {
   const bedH = useBed((s) => s.height)
 
   const connected = connection === 'connected'
+  // Machine is "busy" (can't accept a new probe / surfacing job) while running,
+  // jogging, homing or held — the wizard/heightmap/surfacing buttons gate on this.
+  const machineBusy = state === 'Run' || state === 'Jog' || state === 'Home' || state === 'Hold'
 
   // Probe parameters (persisted so they survive a refresh). Thickness defaults
   // to a common 1 mm touch-plate so a first-time probe doesn't silently zero at
@@ -642,6 +1240,22 @@ export function ProbePanel() {
           {probed && ' ' + t('probe.z.lastSent', 'Last probe sent — check the console / "Show last probe".')}
         </p>
       </section>
+
+      {/* O2 — guided probing wizard (Z / X / Y / corner / center). */}
+      <WizardSection t={t} connected={connected} machineBusy={machineBusy} />
+
+      {/* O1/P1 — auto-level / heightmap grid probe. */}
+      <HeightmapSection
+        t={t}
+        connected={connected}
+        machineBusy={machineBusy}
+        machineState={state}
+        bedW={bedW}
+        bedD={bedD}
+      />
+
+      {/* O3 — surfacing / wasteboard flatten generator. */}
+      <SurfacingSection t={t} connected={connected} machineBusy={machineBusy} bedW={bedW} bedD={bedD} />
 
       {/* 2.5 Auto-detect workspace — home, then learn the work-area size. */}
       <section className="pr-card">

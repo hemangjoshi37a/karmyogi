@@ -9,8 +9,29 @@ import { HomeIcon, UnlockIcon, ResetIcon, PauseIcon, PlayIcon, SpindleCwIcon, Sp
 import { InfoTip } from '../components/InfoTip'
 import { SegControl } from '../components/ui/SegControl'
 import { SliderField } from '../components/ui/SliderField'
-import { Gamepad2, Crosshair, Navigation, RefreshCw, Trash2, ChevronDown, Keyboard, X } from 'lucide-react'
+import {
+  Gamepad2,
+  Crosshair,
+  Navigation,
+  RefreshCw,
+  Trash2,
+  ChevronDown,
+  Keyboard,
+  X,
+  Droplets,
+  Snowflake,
+  Wind,
+  SquareParking,
+  Lock,
+  LockOpen,
+  ShieldAlert,
+  Wrench,
+  ListStart,
+  Gauge,
+  CircleCheck,
+} from 'lucide-react'
 import { useTeachPoints, type TeachFrame, type TeachPoint } from '../store/teachPoints'
+import { useProgram } from '../store/program'
 import { GamepadModal } from '../components/GamepadModal'
 import { useGamepad, type GamepadAction, type GamepadHandlers } from '../machine/useGamepad'
 import { useGamepadMap, padBindings, controlGlyph, tokenPressed, type GamepadActionId, type PadFamily } from '../store/gamepadMap'
@@ -420,6 +441,592 @@ function TeachSection({
   )
 }
 
+/** Coolant output state — purely a UI/optimistic mirror (GRBL doesn't report it). */
+type CoolantState = 'off' | 'flood' | 'mist'
+
+/**
+ * O11 — Coolant / aux outputs + safe Park.
+ *
+ * Flood (M8) / Mist (M7) toggle the GRBL coolant outputs; Off (M9) clears both.
+ * Park retracts Z to the safe height FIRST and then rapids to a configured
+ * machine-coordinate park position (defaults to machine zero), so the head moves
+ * clear of the work for tool/material changes. State is reflected on the chips.
+ */
+function CoolantParkSection({
+  motionEnabled,
+  busy,
+  machineState,
+  safeZ,
+}: {
+  motionEnabled: boolean
+  busy: boolean
+  machineState: string
+  safeZ: number
+}) {
+  const t = useT()
+  // Optimistic coolant mirror — GRBL gives no coolant feedback, so we track the
+  // last command we sent. Cleared on disconnect by the parent (motionEnabled).
+  const [coolant, setCoolant] = useState<CoolantState>('off')
+  // Park position (machine coordinates, mm), persisted. Empty == use machine zero.
+  const [parkX, setParkX] = usePersistentState('karmyogi.park.x', 0)
+  const [parkY, setParkY] = usePersistentState('karmyogi.park.y', 0)
+
+  useEffect(() => {
+    if (!motionEnabled) setCoolant('off')
+  }, [motionEnabled])
+
+  const setCool = useCallback(
+    (next: CoolantState) => {
+      if (!grbl.isConnected) return
+      const cmd = next === 'flood' ? 'M8' : next === 'mist' ? 'M7' : 'M9'
+      setCoolant(next)
+      void grbl.send(cmd)
+    },
+    [],
+  )
+
+  // SAFETY: retract Z to the safe height in WORK coords first, then rapid to the
+  // park position in MACHINE coords (G53) so it's independent of the work zero.
+  const park = useCallback(() => {
+    if (!grbl.isConnected) return
+    const z = Number.isFinite(safeZ) ? safeZ : DEFAULT_SAFE_Z
+    if (busy) {
+      const ok = window.confirm(
+        t('ctrl.park.confirmBusy', 'Machine is {state}. Retract Z and park anyway?', { state: machineState }),
+      )
+      if (!ok) return
+    }
+    Promise.resolve()
+      .then(() => grbl.send(`G90 G0 Z${z}`))
+      .then(() => grbl.send(`G53 G90 G0 X${(parkX || 0).toFixed(3)} Y${(parkY || 0).toFixed(3)}`))
+      .catch(() => {})
+  }, [busy, machineState, safeZ, parkX, parkY, t])
+
+  return (
+    <section className="mc-section">
+      <h4 className="ui-sec-head">{t('ctrl.coolant.head', 'Coolant & park')}</h4>
+      <div className="mc-aux-row" role="group" aria-label={t('ctrl.coolant.aria', 'Coolant outputs')}>
+        <button
+          type="button"
+          className={`mc-btn mc-btn-lead mc-aux-btn${coolant === 'flood' ? ' primary' : ''}`}
+          disabled={!motionEnabled}
+          aria-pressed={coolant === 'flood'}
+          onClick={() => setCool(coolant === 'flood' ? 'off' : 'flood')}
+          title={t('ctrl.coolant.flood.title', 'Flood coolant on (M8) — click again to turn off (M9)')}
+        >
+          <Droplets size={15} aria-hidden="true" />
+          <span>{t('ctrl.coolant.flood', 'Flood')}</span>
+          <span className="mc-btn-cmd" aria-hidden="true">M8</span>
+        </button>
+        <button
+          type="button"
+          className={`mc-btn mc-btn-lead mc-aux-btn${coolant === 'mist' ? ' primary' : ''}`}
+          disabled={!motionEnabled}
+          aria-pressed={coolant === 'mist'}
+          onClick={() => setCool(coolant === 'mist' ? 'off' : 'mist')}
+          title={t('ctrl.coolant.mist.title', 'Mist coolant on (M7) — click again to turn off (M9)')}
+        >
+          <Snowflake size={15} aria-hidden="true" />
+          <span>{t('ctrl.coolant.mist', 'Mist')}</span>
+          <span className="mc-btn-cmd" aria-hidden="true">M7</span>
+        </button>
+        <button
+          type="button"
+          className="mc-btn mc-btn-lead mc-aux-btn"
+          disabled={!motionEnabled || coolant === 'off'}
+          onClick={() => setCool('off')}
+          title={t('ctrl.coolant.off.title', 'Coolant off (M9)')}
+        >
+          <Wind size={15} aria-hidden="true" />
+          <span>{t('ctrl.coolant.off', 'Off')}</span>
+          <span className="mc-btn-cmd" aria-hidden="true">M9</span>
+        </button>
+      </div>
+      <div className="mc-park-row">
+        <button
+          type="button"
+          className="mc-btn mc-btn-lead mc-park-btn"
+          disabled={!motionEnabled}
+          onClick={park}
+          title={t('ctrl.park.title', 'Park — retract Z to the safe height, then rapid to the park position (G53 machine coords)')}
+        >
+          <SquareParking size={16} aria-hidden="true" />
+          <span>{t('ctrl.park', 'Park')}</span>
+        </button>
+        <span className="mc-park-fields">
+          <label className="mc-park-field">
+            <span aria-hidden="true">X</span>
+            <input
+              className="mc-input mc-park-input"
+              type="number"
+              step={1}
+              value={parkX}
+              onChange={(e) => setParkX(Number(e.target.value) || 0)}
+              aria-label={t('ctrl.park.x.aria', 'Park X (machine mm)')}
+              title={t('ctrl.park.x.title', 'Park X position in machine coordinates (mm)')}
+            />
+          </label>
+          <label className="mc-park-field">
+            <span aria-hidden="true">Y</span>
+            <input
+              className="mc-input mc-park-input"
+              type="number"
+              step={1}
+              value={parkY}
+              onChange={(e) => setParkY(Number(e.target.value) || 0)}
+              aria-label={t('ctrl.park.y.aria', 'Park Y (machine mm)')}
+              title={t('ctrl.park.y.title', 'Park Y position in machine coordinates (mm)')}
+            />
+          </label>
+        </span>
+      </div>
+    </section>
+  )
+}
+
+/** A tool-change wizard step. */
+const TC_STEPS = ['hold', 'change', 'probe', 'resume'] as const
+type TcStep = (typeof TC_STEPS)[number]
+
+/**
+ * O4 — Tool-change (M6) wizard.
+ *
+ * A guided, step-by-step manual tool change: (1) pause + retract Z and move to a
+ * tool-change position; (2) prompt the operator to change the bit; (3) optionally
+ * re-probe tool length at a Z-probe position; (4) resume. Each step is explicit
+ * and only the relevant machine command is sent, so nothing moves unexpectedly.
+ * Collapsible (disclosure rule) so it stays out of the way until needed.
+ */
+function ToolChangeSection({
+  motionEnabled,
+  safeZ,
+}: {
+  motionEnabled: boolean
+  safeZ: number
+}) {
+  const t = useT()
+  const [open, setOpen] = usePersistentState('karmyogi.toolchange.open', false)
+  const [active, setActive] = useState(false)
+  const [stepIdx, setStepIdx] = useState(0)
+  // Tool-change position (machine coords) + whether to include the probe step.
+  const [tcX, setTcX] = usePersistentState('karmyogi.toolchange.x', 0)
+  const [tcY, setTcY] = usePersistentState('karmyogi.toolchange.y', 0)
+  const [doProbe, setDoProbe] = usePersistentState('karmyogi.toolchange.probe', false)
+  // Z-probe feed + max travel for the optional tool-length re-probe (G38.2).
+  const [probeFeed] = usePersistentState('karmyogi.toolchange.probeFeed', 50)
+  const [probeMax] = usePersistentState('karmyogi.toolchange.probeMax', 25)
+
+  const steps: TcStep[] = doProbe ? ['hold', 'change', 'probe', 'resume'] : ['hold', 'change', 'resume']
+  const step = steps[Math.min(stepIdx, steps.length - 1)]
+
+  const begin = useCallback(() => {
+    setActive(true)
+    setStepIdx(0)
+  }, [])
+  const cancel = useCallback(() => {
+    setActive(false)
+    setStepIdx(0)
+  }, [])
+
+  // SAFETY: pause (feed hold), retract Z to safe height (work coords), then rapid
+  // to the tool-change position in machine coords (G53).
+  const doPause = useCallback(() => {
+    if (!grbl.isConnected) return
+    const z = Number.isFinite(safeZ) ? safeZ : DEFAULT_SAFE_Z
+    void grbl.feedHold()
+    Promise.resolve()
+      .then(() => grbl.send(`G90 G0 Z${z}`))
+      .then(() => grbl.send(`G53 G90 G0 X${(tcX || 0).toFixed(3)} Y${(tcY || 0).toFixed(3)}`))
+      .catch(() => {})
+    setStepIdx((i) => i + 1)
+  }, [safeZ, tcX, tcY])
+
+  // Optional tool-length re-probe: straight-probe down (G38.2) then zero Z.
+  const doProbeNow = useCallback(() => {
+    if (!grbl.isConnected) return
+    Promise.resolve()
+      .then(() => grbl.send(`G38.2 Z-${Math.abs(probeMax) || 25} F${Math.abs(probeFeed) || 50}`))
+      .then(() => grbl.send('G10 L20 P0 Z0'))
+      .catch(() => {})
+    setStepIdx((i) => i + 1)
+  }, [probeFeed, probeMax])
+
+  const doResume = useCallback(() => {
+    if (!grbl.isConnected) return
+    void grbl.resume()
+    setActive(false)
+    setStepIdx(0)
+  }, [])
+
+  return (
+    <section className="mc-section mc-section--bare">
+      <div className="teach-section">
+        <button
+          type="button"
+          className="teach-head"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          title={t('ctrl.tc.head.title', 'Tool-change wizard — guided pause, move, change and (optional) re-probe')}
+        >
+          <span className="teach-head-ico">
+            <Wrench size={15} aria-hidden="true" />
+          </span>
+          <span className="teach-head-title">{t('ctrl.tc.head', 'Tool change')}</span>
+          {active && <span className="teach-count">{stepIdx + 1}/{steps.length}</span>}
+          <span className="teach-head-ico teach-head-chev">
+            <ChevronDown size={16} aria-hidden="true" />
+          </span>
+        </button>
+
+        {open && (
+          <div className="teach-body">
+            {!active ? (
+              <>
+                <div className="mc-tc-config">
+                  <span className="mc-park-fields">
+                    <label className="mc-park-field">
+                      <span aria-hidden="true">X</span>
+                      <input
+                        className="mc-input mc-park-input"
+                        type="number"
+                        step={1}
+                        value={tcX}
+                        onChange={(e) => setTcX(Number(e.target.value) || 0)}
+                        aria-label={t('ctrl.tc.x.aria', 'Tool-change X (machine mm)')}
+                        title={t('ctrl.tc.x.title', 'Tool-change X position in machine coordinates (mm)')}
+                      />
+                    </label>
+                    <label className="mc-park-field">
+                      <span aria-hidden="true">Y</span>
+                      <input
+                        className="mc-input mc-park-input"
+                        type="number"
+                        step={1}
+                        value={tcY}
+                        onChange={(e) => setTcY(Number(e.target.value) || 0)}
+                        aria-label={t('ctrl.tc.y.aria', 'Tool-change Y (machine mm)')}
+                        title={t('ctrl.tc.y.title', 'Tool-change Y position in machine coordinates (mm)')}
+                      />
+                    </label>
+                  </span>
+                  <label className="mc-tc-probe-opt">
+                    <input
+                      type="checkbox"
+                      checked={doProbe}
+                      onChange={(e) => setDoProbe(e.target.checked)}
+                    />
+                    <span>{t('ctrl.tc.probe.opt', 'Re-probe tool length')}</span>
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  className="teach-capture"
+                  disabled={!motionEnabled}
+                  onClick={begin}
+                  title={t('ctrl.tc.start.title', 'Start the guided tool-change sequence')}
+                >
+                  <Wrench size={15} aria-hidden="true" />
+                  {t('ctrl.tc.start', 'Start tool change')}
+                </button>
+              </>
+            ) : (
+              <div className="mc-tc-wizard">
+                <ol className="mc-tc-steps">
+                  {steps.map((s, i) => (
+                    <li
+                      key={s}
+                      className={`mc-tc-step${i === stepIdx ? ' is-active' : ''}${i < stepIdx ? ' is-done' : ''}`}
+                    >
+                      <span className="mc-tc-step-num" aria-hidden="true">
+                        {i < stepIdx ? <CircleCheck size={13} /> : i + 1}
+                      </span>
+                      <span className="mc-tc-step-label">
+                        {s === 'hold'
+                          ? t('ctrl.tc.step.hold', 'Pause & move to change position')
+                          : s === 'change'
+                            ? t('ctrl.tc.step.change', 'Change the tool')
+                            : s === 'probe'
+                              ? t('ctrl.tc.step.probe', 'Re-probe tool length')
+                              : t('ctrl.tc.step.resume', 'Resume the job')}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <div className="mc-tc-action">
+                  {step === 'hold' && (
+                    <button type="button" className="teach-capture" disabled={!motionEnabled} onClick={doPause}>
+                      {t('ctrl.tc.do.hold', 'Pause & retract to change position')}
+                    </button>
+                  )}
+                  {step === 'change' && (
+                    <>
+                      <p className="mc-tc-prompt">
+                        {t('ctrl.tc.prompt.change', 'Mount the new tool now. The spindle is stopped and the head is parked. When ready, continue.')}
+                      </p>
+                      <button type="button" className="teach-capture" onClick={() => setStepIdx((i) => i + 1)}>
+                        {t('ctrl.tc.do.changed', 'Tool changed — continue')}
+                      </button>
+                    </>
+                  )}
+                  {step === 'probe' && (
+                    <button type="button" className="teach-capture" disabled={!motionEnabled} onClick={doProbeNow}>
+                      {t('ctrl.tc.do.probe', 'Probe down & set Z zero (G38.2)')}
+                    </button>
+                  )}
+                  {step === 'resume' && (
+                    <button type="button" className="teach-capture" disabled={!motionEnabled} onClick={doResume}>
+                      {t('ctrl.tc.do.resume', 'Resume the job (~)')}
+                    </button>
+                  )}
+                  <button type="button" className="teach-clear" onClick={cancel}>
+                    {t('ctrl.tc.cancel', 'Cancel')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * O5 — Start-from-line / job recovery.
+ *
+ * Pick any line of the currently loaded program and resume the job there. A SAFE
+ * preamble is prepended: restore modal state (G21 mm / G90 absolute / G94 feed)
+ * and lift Z to the safe height FIRST, so a recovered job never plunges from an
+ * unknown modal state. Collapsible; only enabled when a program is loaded.
+ */
+function StartFromLineSection({
+  motionEnabled,
+  safeZ,
+}: {
+  motionEnabled: boolean
+  safeZ: number
+}) {
+  const t = useT()
+  const lines = useProgram((s) => s.lines)
+  const streaming = useProgram((s) => s.streaming)
+  const [open, setOpen] = usePersistentState('karmyogi.startline.open', false)
+  const [line, setLine] = useState(1)
+
+  const total = lines.length
+  const clamped = Math.min(Math.max(1, line), Math.max(1, total))
+  const preview = total > 0 ? lines[clamped - 1] : ''
+
+  const start = useCallback(() => {
+    if (!grbl.isConnected || total === 0) return
+    const idx = clamped - 1
+    const z = Number.isFinite(safeZ) ? safeZ : DEFAULT_SAFE_Z
+    if (
+      !window.confirm(
+        t(
+          'ctrl.startline.confirm',
+          'Start the job from line {n} of {total}? A safe preamble (units/absolute/feed-mode + safe-Z lift) runs first.',
+          { n: clamped, total },
+        ),
+      )
+    )
+      return
+    // SAFETY preamble: restore modal state then lift to safe Z BEFORE the slice.
+    const preamble = ['G21 G90 G94 G17', `G0 Z${z}`]
+    grbl.startProgram([...preamble, ...lines.slice(idx)], { startIndex: idx })
+  }, [clamped, total, lines, safeZ, t])
+
+  return (
+    <section className="mc-section mc-section--bare">
+      <div className="teach-section">
+        <button
+          type="button"
+          className="teach-head"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          title={t('ctrl.startline.head.title', 'Start the loaded job from an arbitrary line, with a safe modal-restore preamble')}
+        >
+          <span className="teach-head-ico">
+            <ListStart size={15} aria-hidden="true" />
+          </span>
+          <span className="teach-head-title">{t('ctrl.startline.head', 'Start from line')}</span>
+          {total > 0 && <span className="teach-count">{total}</span>}
+          <span className="teach-head-ico teach-head-chev">
+            <ChevronDown size={16} aria-hidden="true" />
+          </span>
+        </button>
+
+        {open && (
+          <div className="teach-body">
+            {total === 0 ? (
+              <div className="teach-empty">
+                {t('ctrl.startline.empty', 'No program loaded. Load a job in the Program tab, then choose a line to resume from.')}
+              </div>
+            ) : (
+              <>
+                <div className="mc-field">
+                  <span className="mc-label">{t('ctrl.startline.line', 'Line')}</span>
+                  <input
+                    className="mc-input mc-input-grow"
+                    type="number"
+                    min={1}
+                    max={total}
+                    step={1}
+                    value={clamped}
+                    onChange={(e) => setLine(Math.min(total, Math.max(1, Number(e.target.value) || 1)))}
+                    aria-label={t('ctrl.startline.line.aria', 'Start line number')}
+                    title={t('ctrl.startline.line.title', 'The 1-based line to resume from')}
+                  />
+                  <span className="mc-unit">/ {total}</span>
+                </div>
+                <input
+                  className="mc-input mc-startline-slider"
+                  type="range"
+                  min={1}
+                  max={total}
+                  step={1}
+                  value={clamped}
+                  onChange={(e) => setLine(Number(e.target.value) || 1)}
+                  aria-label={t('ctrl.startline.slider.aria', 'Start line')}
+                />
+                <code className="mc-startline-preview" title={preview}>
+                  {preview || ' '}
+                </code>
+                <p className="mc-tc-prompt">
+                  {t('ctrl.startline.note', 'Safe preamble: G21 G90 G94 G17 + lift to safe-Z run before the chosen line.')}
+                </p>
+                <button
+                  type="button"
+                  className="teach-capture"
+                  disabled={!motionEnabled || streaming}
+                  onClick={start}
+                  title={t('ctrl.startline.start.title', 'Stream the job from the chosen line with the safe preamble')}
+                >
+                  <ListStart size={15} aria-hidden="true" />
+                  {t('ctrl.startline.start', 'Start from line {n}', { n: clamped })}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/** Format milliseconds as m:ss / h:mm:ss. */
+function fmtDur(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0:00'
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
+}
+
+/**
+ * O9 — Live diagnostics / run stats.
+ *
+ * A compact grid of live machine telemetry: state, feed, spindle, planner/RX
+ * buffer, and — while a job streams — elapsed time, progress %, and an ETA
+ * extrapolated from the elapsed/progress ratio. Read-only; no commands sent.
+ */
+function DiagnosticsSection({
+  connected,
+  machineState,
+  feed,
+  spindle,
+  buffer,
+}: {
+  connected: boolean
+  machineState: string
+  feed: number
+  spindle: number
+  buffer: { plan: number; rx: number } | null
+}) {
+  const t = useT()
+  const [open, setOpen] = usePersistentState('karmyogi.diag.open', false)
+  const streaming = useProgram((s) => s.streaming)
+  const cursor = useProgram((s) => s.cursor)
+  const total = useProgram((s) => s.lines.length)
+
+  // Track job start time + elapsed (1 Hz tick while streaming).
+  const startRef = useRef<number | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (streaming) {
+      if (startRef.current === null) startRef.current = Date.now()
+    } else {
+      startRef.current = null
+      setElapsed(0)
+      return
+    }
+    const id = setInterval(() => {
+      if (startRef.current !== null) setElapsed(Date.now() - startRef.current)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [streaming])
+
+  const pct = streaming && total > 0 ? Math.min(100, Math.max(0, ((cursor + 1) / total) * 100)) : 0
+  const eta = streaming && pct > 1 ? (elapsed / pct) * (100 - pct) : 0
+
+  const stat = (label: string, value: string) => (
+    <div className="mc-diag-cell">
+      <span className="mc-diag-label">{label}</span>
+      <span className="mc-diag-val">{value}</span>
+    </div>
+  )
+
+  return (
+    <section className="mc-section mc-section--bare">
+      <div className="teach-section">
+        <button
+          type="button"
+          className="teach-head"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          title={t('ctrl.diag.head.title', 'Live diagnostics — machine state, feed/spindle, buffer and job time/ETA')}
+        >
+          <span className="teach-head-ico">
+            <Gauge size={15} aria-hidden="true" />
+          </span>
+          <span className="teach-head-title">{t('ctrl.diag.head', 'Diagnostics')}</span>
+          {streaming && <span className="teach-count">{Math.round(pct)}%</span>}
+          <span className="teach-head-ico teach-head-chev">
+            <ChevronDown size={16} aria-hidden="true" />
+          </span>
+        </button>
+
+        {open && (
+          <div className="teach-body">
+            <div className="mc-diag-grid">
+              {stat(t('ctrl.diag.state', 'State'), connected ? machineState : t('ctrl.diag.offline', 'Offline'))}
+              {stat(t('ctrl.diag.feed', 'Feed'), `${Math.round(feed)} mm/min`)}
+              {stat(t('ctrl.diag.spindle', 'Spindle'), `${Math.round(spindle)} rpm`)}
+              {stat(
+                t('ctrl.diag.buffer', 'Buffer'),
+                buffer ? `${buffer.plan} / ${buffer.rx}` : '—',
+              )}
+            </div>
+            {streaming && (
+              <>
+                <div className="mc-diag-progress" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+                  <span className="mc-diag-progress-fill" style={{ width: `${pct}%` }} />
+                </div>
+                <div className="mc-diag-grid">
+                  {stat(t('ctrl.diag.line', 'Line'), `${Math.min(cursor + 1, total)} / ${total}`)}
+                  {stat(t('ctrl.diag.elapsed', 'Elapsed'), fmtDur(elapsed))}
+                  {stat(t('ctrl.diag.eta', 'ETA'), eta > 0 ? fmtDur(eta) : '—')}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 /**
  * Controller panel: connection, DRO, jog pad, home/unlock/reset, and
  * feed/rapid/spindle overrides. Touch-friendly and fully keyboard-operable
@@ -436,6 +1043,7 @@ export function ControllerPanel() {
   const overrides = useMachine((s) => s.overrides)
   const machineState = useMachine((s) => s.state)
   const machineError = useMachine((s) => s.error)
+  const buffer = useMachine((s) => s.buffer)
   // Machine-reported active WCS (from a `$G` parser-state poll). Authoritative
   // when known; falls back to the persisted local guess only when unknown.
   const machineWcs = useMachine((s) => s.activeWcs)
@@ -451,6 +1059,14 @@ export function ControllerPanel() {
   // Realtime overrides are meaningless (and ignored) in Alarm/Door — disable
   // them there, but keep them live during Run/Hold (their whole purpose).
   const overridesUsable = connected && machineState !== 'Alarm' && machineState !== 'Door'
+  // O12 — motion lockout. A UI safety guard: while LOCKED, every control that
+  // commands machine motion (jog pad, go-to-zero, zero, spindle-on, coolant,
+  // park, tool-change, start-from-line, gamepad jog) is disabled until the
+  // operator explicitly ARMS motion. Persisted so it survives reloads; defaults
+  // to locked so a fresh session can't be jogged by an accidental keypress.
+  const [locked, setLocked] = usePersistentState('karmyogi.ctrl.locked', true)
+  // The single gate the motion controls read instead of bare `connected`.
+  const motionEnabled = connected && !locked
   const unitMm = t('ctrl.unit.mm', 'mm')
   const unitMmMin = t('ctrl.unit.mmmin', 'mm/min')
   const unitRpm = t('ctrl.unit.rpm', 'RPM')
@@ -524,10 +1140,11 @@ export function ControllerPanel() {
       spindleOff()
       return
     }
-    if (busy) return
+    // Starting the spindle while motion is locked out is refused (O12).
+    if (busy || locked) return
     setSpindleWanted(true)
     spindleOn()
-  }, [spindleRunning, busy, spindleOn, spindleOff])
+  }, [spindleRunning, busy, locked, spindleOn, spindleOff])
 
   // Distance (mm) used for a continuous (held) jog. GRBL feeds this as a long
   // move that we cancel (0x85) on release, so the machine keeps moving only
@@ -540,13 +1157,13 @@ export function ControllerPanel() {
     maxTravel > 0 ? maxTravel : CONTINUOUS_JOG_MAX_MM,
   )
 
-  // A single precise step (a tap).
+  // A single precise step (a tap). Refused while motion is locked out (O12).
   const doJog = useCallback(
     (delta: JogDelta) => {
-      if (!grbl.isConnected) return
+      if (!grbl.isConnected || locked) return
       void grbl.jog(jogParamsFromDelta(delta, jogFeed))
     },
-    [jogFeed],
+    [jogFeed, locked],
   )
 
   // A continuous jog (a hold): jog a large distance in the DIRECTION of the
@@ -557,7 +1174,7 @@ export function ControllerPanel() {
   // magnitude-scaled feed. Motion continues until cancelJog() (0x85) flushes it.
   const doJogHold = useCallback(
     (delta: JogDelta, feed: number = jogFeed) => {
-      if (!grbl.isConnected) return
+      if (!grbl.isConnected || locked) return
       const big: JogDelta = {}
       // Preserve direction by scaling each component by the SAME factor (the
       // largest component reaches continuousJogMm), so a diagonal stick vector
@@ -571,7 +1188,7 @@ export function ControllerPanel() {
       // (0x85); force it past the discrete-jog flood cap.
       void grbl.jog(jogParamsFromDelta(big, feed), { force: true })
     },
-    [jogFeed, continuousJogMm],
+    [jogFeed, continuousJogMm, locked],
   )
 
   // Immediately stop / flush any in-progress jog (GRBL 0x85).
@@ -662,7 +1279,7 @@ export function ControllerPanel() {
   // tool never drags through the workpiece or clamps. Sends the retract and the
   // XY rapid as two lines: `G90 G0 Z<safe>` then `G90 G0 X0 Y0`.
   const goToZero = useCallback(() => {
-    if (!grbl.isConnected) return
+    if (!grbl.isConnected || locked) return
     const z = Number.isFinite(safeZ) ? safeZ : DEFAULT_SAFE_Z
     if (busy) {
       const ok = window.confirm(
@@ -676,7 +1293,7 @@ export function ControllerPanel() {
       .then(() => grbl.send(`G90 G0 Z${z}`))
       .then(() => grbl.send('G90 G0 X0 Y0'))
       .catch(() => {})
-  }, [busy, machineState, safeZ, t])
+  }, [busy, machineState, safeZ, locked, t])
 
   // ---- Game controller (Gamepad API) ----
   // STEP_SIZES drives the LB/RB step-size cycling so it matches the on-screen
@@ -1159,6 +1776,40 @@ export function ControllerPanel() {
         )}
       </section>
 
+      {/* O12 — Motion lockout. A clear armed/locked guard so jogging/running
+          can't happen by accident. While LOCKED the jog pad, go-to-zero,
+          spindle-on, coolant, park, tool-change and start-from-line are
+          disabled; Home/Unlock/Reset stay available for recovery. */}
+      <section className="mc-section mc-section--bare">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={!locked}
+          className={`mc-lockout${locked ? ' is-locked' : ' is-armed'}`}
+          onClick={() => setLocked((v) => !v)}
+          title={
+            locked
+              ? t('ctrl.lockout.locked.title', 'Motion is LOCKED — jog/run are disabled. Click to ARM motion.')
+              : t('ctrl.lockout.armed.title', 'Motion is ARMED — jog/run are enabled. Click to LOCK motion.')
+          }
+        >
+          <span className="mc-lockout-ico" aria-hidden="true">
+            {locked ? <Lock size={18} /> : <LockOpen size={18} />}
+          </span>
+          <span className="mc-lockout-text">
+            <span className="mc-lockout-title">
+              {locked ? t('ctrl.lockout.locked', 'Motion locked') : t('ctrl.lockout.armed', 'Motion armed')}
+            </span>
+            <span className="mc-lockout-sub">
+              {locked
+                ? t('ctrl.lockout.locked.sub', 'Jog & run disabled — click to arm')
+                : t('ctrl.lockout.armed.sub', 'Jog & run enabled — click to lock')}
+            </span>
+          </span>
+          {locked && <ShieldAlert className="mc-lockout-badge" size={16} aria-hidden="true" />}
+        </button>
+      </section>
+
       {/* Machine commands — no card chrome / no title; spacing preserved. */}
       <section className="mc-section mc-section--bare">
         <div className="mc-row mc-row--6">
@@ -1342,7 +1993,7 @@ export function ControllerPanel() {
               />
             )}
           <JogPad
-            disabled={!connected}
+            disabled={!motionEnabled}
             step={step}
             onJog={doJog}
             onJogHold={doJogHold}
@@ -1351,7 +2002,7 @@ export function ControllerPanel() {
               <button
                 type="button"
                 className="mc-btn mc-btn-icon mc-goto-zero"
-                disabled={!connected}
+                disabled={!motionEnabled}
                 onClick={goToZero}
                 aria-label={t('coord.quick.goto', 'Go to zero')}
                 title={t('coord.quick.gotoTitle', 'Retract Z to the safe height, then rapid to work zero (X0 Y0)')}
@@ -1392,6 +2043,29 @@ export function ControllerPanel() {
         safeZ={safeZ}
       />
 
+      {/* O11 — Coolant outputs + safe Park. */}
+      <CoolantParkSection
+        motionEnabled={motionEnabled}
+        busy={busy}
+        machineState={machineState}
+        safeZ={safeZ}
+      />
+
+      {/* O4 — Tool-change wizard (collapsible). */}
+      <ToolChangeSection motionEnabled={motionEnabled} safeZ={safeZ} />
+
+      {/* O5 — Start-from-line / job recovery (collapsible). */}
+      <StartFromLineSection motionEnabled={motionEnabled} safeZ={safeZ} />
+
+      {/* O9 — Live diagnostics / run stats (collapsible). */}
+      <DiagnosticsSection
+        connected={connected}
+        machineState={machineState}
+        feed={feed}
+        spindle={spindle}
+        buffer={buffer}
+      />
+
       {/* Spindle (below Jog) */}
       <section className="mc-section">
         <div className="mc-row tight mc-spindle-head">
@@ -1401,7 +2075,7 @@ export function ControllerPanel() {
             role="switch"
             aria-checked={spindleRunning}
             className={`mc-switch has-kbd${spindleRunning ? ' on' : ''}${gpCls('spindle')}`}
-            disabled={!connected || (busy && !spindleRunning)}
+            disabled={!connected || ((busy || locked) && !spindleRunning)}
             onClick={spindleToggle}
             title={
               spindleRunning

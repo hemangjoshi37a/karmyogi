@@ -346,6 +346,12 @@ export interface RasterParams {
   useFocusZ: boolean;
   focusZ: number;
 
+  /**
+   * Air-assist: emit `M8` (air on) right after the safe header and `M9` (off)
+   * at program end. Auxiliary output only — never gates the beam.
+   */
+  airAssist: boolean;
+
   /** Coordinate precision. */
   decimals: number;
   programName: string;
@@ -370,6 +376,7 @@ export function defaultRasterParams(overrides: Partial<RasterParams> = {}): Rast
     zPerPass: 0,
     useFocusZ: false,
     focusZ: 0,
+    airAssist: false,
     decimals: 3,
     programName: 'hjLabs Laser Raster',
     ...overrides,
@@ -461,6 +468,7 @@ export function emitRasterProgram(
   o.push('G94');
   o.push('G17');
   o.push('M5 S0'); // beam OFF
+  if (p.airAssist) o.push('M8'); // air assist on (auxiliary; never gates the beam)
   if (p.useFocusZ) {
     o.push('(Focus height)');
     o.push(`G0 Z${fmt(Math.max(0, p.focusZ), d)}`);
@@ -542,6 +550,7 @@ export function emitRasterProgram(
   // ---- Footer -------------------------------------------------------------
   o.push('G0 X0 Y0 S0'); // park
   o.push('M5 S0');
+  if (p.airAssist) o.push('M9'); // air assist off
   o.push('M30');
 
   const gcode = o.join('\n') + '\n';

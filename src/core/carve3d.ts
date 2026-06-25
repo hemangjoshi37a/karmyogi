@@ -34,6 +34,8 @@ export const MAX_HEIGHTMAP_CELLS = 1_500_000;
 export const MAX_GRID_DIM = 1200;
 /** Refuse meshes above this triangle count for carving (heightmap build). */
 export const MAX_CARVE_TRIANGLES = 1_500_000;
+/** Hard cap on the number of constant-Z waterline levels (guards near-vertical walls). */
+export const MAX_WATERLINE_LEVELS = 400;
 
 export type ToolType = 'ball' | 'flat';
 
@@ -102,6 +104,74 @@ export interface Carve3DParams {
    * down to the grid pitch.
    */
   heightmapPitch?: number;
+  /**
+   * Finishing STRATEGY (toolpath-engine upgrade §2):
+   *   • 'raster'    — the legacy parallel raster that rides the heightmap. Finishes
+   *                   shallow / top-facing relief well but leaves coarse "stair"
+   *                   marks on steep / near-vertical walls (the raster stepover is
+   *                   measured in XY, so on a vertical wall consecutive lines are a
+   *                   whole wall-height apart).
+   *   • 'waterline' — constant-Z (Z-level) contour passes: slice the heightmap at
+   *                   stepped Z planes and follow each iso-height contour. Finishes
+   *                   steep walls beautifully (the pass spacing is measured along Z)
+   *                   but wastes time on shallow tops.
+   *   • 'hybrid'    — the best of both: the raster finishes the SHALLOW / top areas
+   *                   and waterline finishes only the STEEP regions, blended on a
+   *                   per-cell slope threshold. RECOMMENDED for relief carving.
+   * Default 'raster' to keep existing verified callers byte-for-byte identical
+   * unless they opt in.
+   */
+  finishStrategy?: 'raster' | 'waterline' | 'hybrid';
+  /**
+   * Surface-slope angle (degrees from HORIZONTAL) above which a region counts as a
+   * "steep wall" for the waterline / hybrid finish. In 'hybrid' the raster skips
+   * cells steeper than this and waterline handles them; in pure 'waterline' it is
+   * unused (every covered cell is contoured). Default 55°.
+   */
+  steepAngleDeg?: number;
+  /**
+   * Vertical pass spacing (mm) for the waterline contours (the constant-Z step).
+   * When omitted it derives from the finishing stepover scaled by the steep angle
+   * so the scallop along the wall matches the requested surface quality. Floored at
+   * a small value so a near-vertical wall never produces a pathological number of
+   * levels (also hard-capped by {@link MAX_WATERLINE_LEVELS}).
+   */
+  waterlineStepZ?: number;
+  /**
+   * ADAPTIVE / TROCHOIDAL roughing (toolpath-engine upgrade §2). When true the
+   * roughing pass limits the radial tool engagement so the cutter is never buried
+   * full-width in a corner or slot — instead of slamming the full stepover into
+   * tight stock it takes a lighter peeling/trochoidal motion there. Constant-
+   * engagement clearing protects a small bit in hard stock and lets the operator
+   * push feeds. Default false → the legacy full-engagement raster roughing, so
+   * existing callers are unchanged.
+   */
+  adaptiveRoughing?: boolean;
+  /**
+   * Target radial engagement as a FRACTION of the tool diameter (0..1) for adaptive
+   * roughing — the maximum width of stock the cutter removes per pass. Lower =
+   * gentler/safer, more passes. Default 0.4 (40% of the diameter), the typical
+   * constant-engagement HSM value. Ignored when {@link adaptiveRoughing} is false.
+   */
+  engagementFrac?: number;
+  /**
+   * RETRACT COALESCING (toolpath-engine upgrade §2). When > 0, links between
+   * adjacent passes/components that cannot stay engaged in stock lift only to a
+   * LOCAL CLEARANCE plane this far above the higher of the two surfaces — instead
+   * of all the way to the full safe-Z — provided the straight hop between them is
+   * SHORT (≤ {@link linkMaxHopMm}) and the clearance plane clears all stock the hop
+   * crosses. Long hops, or any hop that can't be proven clear, STILL retract to the
+   * guaranteed safe-Z. Default 0 → every link uses full safe-Z (legacy behaviour),
+   * so the safe-Z guarantee for current callers is untouched.
+   */
+  linkClearanceMm?: number;
+  /**
+   * Maximum straight-line XY hop distance (mm) eligible for the coalesced
+   * clearance-plane retract above. Hops longer than this always use the full safe-Z
+   * so a long rapid is never run at a low clearance. Default 0 (paired with
+   * {@link linkClearanceMm}); a sensible value is a few tool diameters.
+   */
+  linkMaxHopMm?: number;
 }
 
 export function defaultCarve3DParams(overrides: Partial<Carve3DParams> = {}): Carve3DParams {
@@ -124,6 +194,12 @@ export function defaultCarve3DParams(overrides: Partial<Carve3DParams> = {}): Ca
     maxStraightPlungeMm: 0.5,
     finishPattern: 'serpentine',
     leadInMm: 0,
+    finishStrategy: 'raster',
+    steepAngleDeg: 55,
+    adaptiveRoughing: false,
+    engagementFrac: 0.4,
+    linkClearanceMm: 0,
+    linkMaxHopMm: 0,
     ...overrides,
   };
 }
@@ -998,6 +1074,17 @@ interface CutEntryOpts {
    * (serpentine — alternates direction, mixing climb + conventional).
    */
   oneWay?: boolean;
+  /**
+   * RETRACT COALESCING. When > 0, a link between two engaged runs that cannot stay
+   * down in stock may lift only to a LOCAL clearance plane this far above the
+   * surface — instead of the full safe-Z — when the straight hop between the runs
+   * is short (≤ {@link linkMaxHopMm}) and the clearance plane clears every cell the
+   * hop crosses. 0 → always retract to the full safe-Z (legacy). See
+   * {@link Carve3DParams.linkClearanceMm}.
+   */
+  linkClearanceMm?: number;
+  /** Max straight XY hop (mm) eligible for the coalesced clearance retract. */
+  linkMaxHopMm?: number;
 }
 
 function cutComponent(
@@ -1027,6 +1114,10 @@ function cutComponent(
   let exitX = comp.cx;
   let exitY = comp.cy;
   let flip = startFlip;
+  // Set by linkHop when it coalesces a retract: the tool is already positioned over
+  // the next entry cell at the clearance plane, so enterAt can descend from there
+  // instead of lifting back to the full safe-Z. Consumed (cleared) by enterAt.
+  let hoppedClearance = false;
 
   /**
    * Is the straight cell-path between two cells fully engaged? Sampled at 4× cell
@@ -1174,6 +1265,49 @@ function cutComponent(
       down = false;
     }
   };
+
+  // RETRACT COALESCING: a clearance plane just above ALL stock (the stock top is
+  // the highest material that can exist; `topZ` references it to Z 0). A hop run at
+  // this plane is provably above every uncut surface, so it is SAFE while being far
+  // shorter than a full safe-Z lift. Used only for SHORT hops (long rapids always
+  // keep the guaranteed full safe-Z). Clamped to never exceed the real safe-Z.
+  const linkClearance = Math.max(0, entry.linkClearanceMm ?? 0);
+  const linkMaxHop = Math.max(0, entry.linkMaxHopMm ?? 0);
+  const clearanceZ = Math.min(safeZ, entry.topZ + linkClearance);
+  /**
+   * Reposition the tool from the current DOWN point to the entry cell (eIx,iy) of
+   * the next run when no in-stock engaged route exists. Coalesces the retract: when
+   * enabled and the straight hop is short, it lifts only to the local clearance
+   * plane, rapids across, and lets `enterAt` re-descend from there — saving the full
+   * safe-Z up/down cycle. Otherwise it falls back to the full safe-Z retract. Either
+   * way the tool ends UP (ready for `enterAt`, which itself guarantees clearance).
+   */
+  const linkHop = (eIx: number, iy: number): void => {
+    if (
+      down &&
+      linkClearance > 0 &&
+      clearanceZ < safeZ - 1e-6 &&
+      clearanceZ > entry.topZ - 1e-6
+    ) {
+      const fx = wx(curIx);
+      const fy = wy(curIy);
+      const tx = wx(eIx);
+      const ty = wy(iy);
+      const hop = Math.hypot(tx - fx, ty - fy);
+      if (hop <= linkMaxHop + 1e-6) {
+        // Lift to the clearance plane, rapid across (above all possible stock),
+        // and leave the tool there; `enterAt` rapids/ramps down from this height.
+        tp.rapid({ x: fx, y: fy, z: clearanceZ });
+        tp.rapid({ x: tx, y: ty, z: clearanceZ });
+        down = false;
+        hoppedClearance = true; // enterAt may skip its own lift-to-safeZ
+        curIx = eIx;
+        curIy = iy;
+        return;
+      }
+    }
+    retract();
+  };
   const tanRamp = Math.tan((Math.max(1, Math.min(30, entry.rampAngleDeg)) * Math.PI) / 180);
   const maxStraight = Math.max(0, entry.maxStraightPlungeMm);
 
@@ -1193,8 +1327,13 @@ function cutComponent(
     const zTarget = zAt(eIx, iy);
     const startZ = Math.min(entry.entryStartZ, entry.topZ);
     const drop = startZ - zTarget; // >= 0 normally
-    // Rapid to safe-Z over the entry first (guaranteed clearance).
-    tp.rapid({ x: wx(eIx), y: ry, z: safeZ });
+    // Clearance plane to enter FROM. Normally the full safe-Z (guaranteed clearance
+    // over the entry). When the preceding link was COALESCED (linkHop placed the
+    // tool over this exact cell at the lower clearance plane, already above all
+    // stock), descend from there instead of lifting back to safe-Z.
+    const enterFromZ = hoppedClearance ? clearanceZ : safeZ;
+    hoppedClearance = false;
+    tp.rapid({ x: wx(eIx), y: ry, z: enterFromZ });
 
     const far = eIx === run.ix0 ? run.ix1 : run.ix0;
     const dir = far >= eIx ? 1 : -1;
@@ -1454,7 +1593,7 @@ function cutComponent(
         const way = engagedLink(curIx, curIy, entryIx, run.iy);
         if (way) linkDown(way);
         else {
-          retract();
+          linkHop(entryIx, run.iy);
           enterAt(run, entryIx);
         }
       }
@@ -1499,7 +1638,7 @@ function cutComponent(
       const way = engagedLink(curIx, curIy, bestEntryIx, run.iy);
       if (way) linkDown(way);
       else {
-        retract();
+        linkHop(bestEntryIx, run.iy);
         enterAt(run, bestEntryIx);
       }
     }
@@ -1681,7 +1820,20 @@ function buildRoughing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; le
   // Roughing clears bulk stock, so it may use a coarser stepover than finishing.
   const roughStep =
     params.roughStepover && params.roughStepover > 0 ? params.roughStepover : params.stepover;
-  const step = Math.max(roughStep, dx, 0.1);
+  // ADAPTIVE / TROCHOIDAL roughing: cap the radial engagement at engagementFrac of
+  // the tool diameter so the cutter is never buried full-width in a corner/slot. The
+  // raster line spacing IS the radial width of new stock each pass removes, so
+  // limiting the stepover to the engagement width gives constant-engagement clearing
+  // (a peeling/light-radial motion) that reuses the proven serpentine path verbatim.
+  // The legacy full-engagement roughing stepover is the default (adaptive off).
+  let step = Math.max(roughStep, dx, 0.1);
+  if (params.adaptiveRoughing) {
+    const frac = Math.min(Math.max(params.engagementFrac ?? 0.4, 0.05), 1);
+    const engageWidth = Math.max(params.toolDiameter * frac, dx, 0.1);
+    // Constant engagement only ever TIGHTENS the stepover (never coarsens it), so a
+    // deliberately coarse roughStep can't override the engagement cap.
+    step = Math.min(step, engageWidth);
+  }
   const floorZ = hm.zTop - Math.max(0, params.maxDepth);
   const safeZ = params.safeZ;
   const cutTol = 1e-3;
@@ -1766,6 +1918,8 @@ function buildRoughing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; le
       topZ: hm.zTop,
       entryStartZ: Math.min(hm.zTop, level + stepdown),
       surfaceMode: false,
+      linkClearanceMm: params.linkClearanceMm ?? 0,
+      linkMaxHopMm: params.linkMaxHopMm ?? 0,
     };
     let comps = labelComponents(engaged, nx, usedRows, hm.minX, hm.minY, dx, dy);
     // Secondary gate: a component whose USED-ROW footprint is below ~one tool
@@ -1790,11 +1944,305 @@ function buildRoughing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; le
 }
 
 /**
+ * Per-cell "steep" mask: 1 where the heightmap surface slope exceeds
+ * `steepAngleDeg` from horizontal (a near-vertical wall the raster finishes
+ * poorly). Slope is the central-difference gradient magnitude of the surface Z
+ * over the cell pitch; angle = atan(|∇z|). Only COVERED cells with a covered
+ * neighbour are evaluated (a wall needs surface on both sides). Pure.
+ */
+function computeSteepMask(hm: Heightmap, steepAngleDeg: number): Uint8Array {
+  const { nx, ny, dx, dy, z, covered } = hm;
+  const steep = new Uint8Array(nx * ny);
+  const tanSteep = Math.tan((Math.min(Math.max(steepAngleDeg, 1), 89) * Math.PI) / 180);
+  for (let iy = 0; iy < ny; iy++) {
+    for (let ix = 0; ix < nx; ix++) {
+      const c = iy * nx + ix;
+      if (!covered[c]) continue;
+      // Central differences, falling back to one-sided at the borders. A neighbour
+      // that is air contributes no gradient (treat as same height) so the model
+      // edge against background isn't spuriously flagged steep.
+      const xl = ix > 0 && covered[c - 1] ? z[c - 1] : z[c];
+      const xr = ix < nx - 1 && covered[c + 1] ? z[c + 1] : z[c];
+      const yl = iy > 0 && covered[c - nx] ? z[c - nx] : z[c];
+      const yr = iy < ny - 1 && covered[c + nx] ? z[c + nx] : z[c];
+      const gx = (xr - xl) / (2 * dx);
+      const gy = (yr - yl) / (2 * dy);
+      const grad = Math.hypot(gx, gy);
+      if (grad >= tanSteep) steep[c] = 1;
+    }
+  }
+  return steep;
+}
+
+/**
+ * WATERLINE / CONSTANT-Z finishing. Slices the heightmap at stepped Z planes and
+ * follows each iso-height contour, so the pass spacing is measured along Z — giving
+ * a fine, even finish on STEEP / near-vertical walls that the XY-spaced raster
+ * scallops badly. Contours are extracted by marching squares over the (optionally
+ * steep-masked) covered cells, chained into polylines, and cut at their constant Z
+ * with a ramp/plunge entry. Appends onto `tp`. Returns the contour-pass count.
+ *
+ * SAFETY: every contour is a closed/open feed loop at a fixed Z ≤ 0 over real
+ * surface; entries use the shared ramp/plunge (no deep vertical plunge), and every
+ * inter-contour reposition lifts to the full safe-Z (these are arbitrary hops, never
+ * coalesced). The Z levels are hard-capped by {@link MAX_WATERLINE_LEVELS}.
+ */
+function buildWaterline(
+  tp: Toolpath,
+  hm: Heightmap,
+  params: Carve3DParams,
+  restrictMask: Uint8Array | null,
+): number {
+  const { nx, ny, dx, dy, z, covered } = hm;
+  const safeZ = params.safeZ;
+  const floorZ = hm.zTop - Math.max(0, params.maxDepth);
+  const roughFloor = Math.max(floorZ, Number.isFinite(hm.deepest) ? hm.deepest : floorZ);
+  const reliefDepth = Math.max(0, hm.zTop - roughFloor);
+  if (reliefDepth <= 1e-4) return 0;
+
+  // Vertical pass spacing. Derive from the finishing stepover scaled by the steep
+  // angle so the along-wall scallop matches the requested surface quality: on a wall
+  // at angle θ, an XY stepover `s` corresponds to a Z spacing s·tan(θ). Floor it so a
+  // near-vertical wall never explodes the level count, and honour an explicit
+  // waterlineStepZ. Hard-capped by MAX_WATERLINE_LEVELS.
+  const steepAngle = Math.min(Math.max(params.steepAngleDeg ?? 55, 1), 89);
+  let stepZ =
+    params.waterlineStepZ && params.waterlineStepZ > 0
+      ? params.waterlineStepZ
+      : Math.max(params.stepover, 0.05) * Math.tan((steepAngle * Math.PI) / 180);
+  stepZ = Math.max(stepZ, 0.1);
+  if (reliefDepth / stepZ > MAX_WATERLINE_LEVELS) stepZ = reliefDepth / MAX_WATERLINE_LEVELS;
+
+  const wx = (gx: number) => hm.minX + gx * dx;
+  const wy = (gy: number) => hm.minY + gy * dy;
+  const tanRamp = Math.tan((Math.max(1, Math.min(30, params.rampAngleDeg ?? 3)) * Math.PI) / 180);
+  const maxStraight = Math.max(0, params.maxStraightPlungeMm ?? 0.5);
+
+  // Sample the surface Z at a grid corner (cell centre), treating uncovered/air or
+  // restricted-out cells as ABOVE the stock top so a contour never strays into them.
+  const sampleZ = (ix: number, iy: number): number => {
+    const c = iy * nx + ix;
+    if (!covered[c]) return hm.zTop + 1e3;
+    if (restrictMask && !restrictMask[c]) return hm.zTop + 1e3;
+    return z[c];
+  };
+
+  // Linear interpolation factor where the iso-level crosses the edge a→b.
+  const lerp = (za: number, zb: number, level: number): number => {
+    const d = zb - za;
+    if (Math.abs(d) < 1e-9) return 0.5;
+    const t = (level - za) / d;
+    return t < 0 ? 0 : t > 1 ? 1 : t;
+  };
+
+  let passes = 0;
+  let prevX = hm.minX;
+  let prevY = hm.minY;
+  let down = false;
+  let curX = 0;
+  let curY = 0;
+
+  const retract = () => {
+    if (down) {
+      tp.rapid({ x: curX, y: curY, z: safeZ });
+      down = false;
+    }
+  };
+  // Ramp/plunge entry to a contour start at (sx,sy,level) using the run toward the
+  // contour's first segment for the ramp direction. No deep vertical plunge.
+  const enter = (sx: number, sy: number, level: number, nx2: number, ny2: number) => {
+    tp.rapid({ x: sx, y: sy, z: safeZ });
+    const drop = hm.zTop - level;
+    if (drop <= maxStraight + 1e-6 || tanRamp <= 1e-6) {
+      let zNow = hm.zTop;
+      const cap = maxStraight > 1e-6 ? maxStraight : drop + 1;
+      while (zNow - level > cap + 1e-6) {
+        zNow -= cap;
+        tp.plunge({ x: sx, y: sy, z: zNow });
+      }
+      tp.plunge({ x: sx, y: sy, z: level });
+    } else {
+      // Linear ramp toward the next contour vertex (and back), descending to level.
+      const dirx = nx2 - sx;
+      const diry = ny2 - sy;
+      const segLen = Math.hypot(dirx, diry) || 1;
+      const need = drop / tanRamp; // horizontal run for the descent
+      const ux = dirx / segLen;
+      const uy = diry / segLen;
+      const reach = Math.min(need / 2, segLen); // out-and-back within the first seg
+      tp.feed({ x: sx, y: sy, z: hm.zTop });
+      const steps = Math.max(2, Math.ceil((reach * 2) / Math.max(dx, dy)));
+      for (let s = 1; s <= steps; s++) {
+        const t = s / steps;
+        // Triangle wave 0→1→0 over the out-and-back, descending linearly.
+        const tri = t <= 0.5 ? t * 2 : (1 - t) * 2;
+        const zHere = hm.zTop - drop * t;
+        tp.feed({ x: sx + ux * reach * tri, y: sy + uy * reach * tri, z: zHere });
+      }
+      tp.feed({ x: sx, y: sy, z: level });
+    }
+    down = true;
+    curX = sx;
+    curY = sy;
+  };
+
+  let zL = hm.zTop - stepZ;
+  while (zL > roughFloor - 1e-6) {
+    const level = zL < roughFloor ? roughFloor : zL;
+    // Extract marching-squares contour segments at this Z over covered/in-mask cells.
+    const segs = marchingSquares(sampleZ, nx, ny, level, wx, wy, lerp);
+    if (segs.length > 0) {
+      // Chain segments into polylines, drop ones shorter than the tool can ride.
+      const minLen = Math.max(params.toolDiameter * 0.5, dx, dy);
+      const loops = chainSegments(segs, Math.min(dx, dy) * 0.5);
+      // Order loops by nearest start to the previous exit so hops are short.
+      loops.sort((a, b) => {
+        const da = (a[0].x - prevX) ** 2 + (a[0].y - prevY) ** 2;
+        const db = (b[0].x - prevX) ** 2 + (b[0].y - prevY) ** 2;
+        return da - db;
+      });
+      for (const loop of loops) {
+        // Polyline length gate.
+        let len = 0;
+        for (let i = 1; i < loop.length; i++) {
+          len += Math.hypot(loop[i].x - loop[i - 1].x, loop[i].y - loop[i - 1].y);
+        }
+        if (len < minLen || loop.length < 2) continue;
+        retract();
+        enter(loop[0].x, loop[0].y, level, loop[1].x, loop[1].y);
+        for (let i = 1; i < loop.length; i++) {
+          tp.feed({ x: loop[i].x, y: loop[i].y, z: level });
+          curX = loop[i].x;
+          curY = loop[i].y;
+        }
+        prevX = curX;
+        prevY = curY;
+        passes++;
+      }
+    }
+    if (level <= roughFloor + 1e-9) break;
+    zL -= stepZ;
+  }
+  retract();
+  return passes;
+}
+
+/**
+ * Marching squares over the heightmap: for each cell quad, emit the line segment(s)
+ * where the surface Z crosses `level`. Returns world-space segments [{ax,ay},{bx,by}].
+ * `sampleZ(ix,iy)` returns the surface Z at a grid node (air/out-of-mask returns a
+ * very large value so the contour stays inside real, in-mask surface). Pure.
+ */
+interface Seg { ax: number; ay: number; bx: number; by: number; }
+function marchingSquares(
+  sampleZ: (ix: number, iy: number) => number,
+  nx: number,
+  ny: number,
+  level: number,
+  wx: (gx: number) => number,
+  wy: (gy: number) => number,
+  lerp: (za: number, zb: number, level: number) => number,
+): Seg[] {
+  const segs: Seg[] = [];
+  for (let iy = 0; iy < ny - 1; iy++) {
+    for (let ix = 0; ix < nx - 1; ix++) {
+      // Corner Z values: below the level = "inside" (material deeper than the plane).
+      const zTL = sampleZ(ix, iy + 1);
+      const zTR = sampleZ(ix + 1, iy + 1);
+      const zBR = sampleZ(ix + 1, iy);
+      const zBL = sampleZ(ix, iy);
+      // A corner is "below" the level (solid below the slicing plane) when its
+      // surface dips below it. Skip quads with any air/out corner (huge sentinel)
+      // so contours don't cross the masked boundary erratically.
+      const SENT = 1e2;
+      if (zTL > SENT || zTR > SENT || zBR > SENT || zBL > SENT) continue;
+      let code = 0;
+      if (zBL < level) code |= 1;
+      if (zBR < level) code |= 2;
+      if (zTR < level) code |= 4;
+      if (zTL < level) code |= 8;
+      if (code === 0 || code === 15) continue;
+      // Edge crossing world points. Edges: bottom(BL-BR), right(BR-TR), top(TL-TR),
+      // left(BL-TL). Parameterise along the edge then map to world.
+      const ptBottom = () => ({ x: wx(ix + lerp(zBL, zBR, level)), y: wy(iy) });
+      const ptRight = () => ({ x: wx(ix + 1), y: wy(iy + lerp(zBR, zTR, level)) });
+      const ptTop = () => ({ x: wx(ix + lerp(zTL, zTR, level)), y: wy(iy + 1) });
+      const ptLeft = () => ({ x: wx(ix), y: wy(iy + lerp(zBL, zTL, level)) });
+      const push = (p: { x: number; y: number }, q: { x: number; y: number }) =>
+        segs.push({ ax: p.x, ay: p.y, bx: q.x, by: q.y });
+      switch (code) {
+        case 1: case 14: push(ptLeft(), ptBottom()); break;
+        case 2: case 13: push(ptBottom(), ptRight()); break;
+        case 3: case 12: push(ptLeft(), ptRight()); break;
+        case 4: case 11: push(ptRight(), ptTop()); break;
+        case 6: case 9: push(ptBottom(), ptTop()); break;
+        case 7: case 8: push(ptLeft(), ptTop()); break;
+        case 5: push(ptLeft(), ptTop()); push(ptBottom(), ptRight()); break;
+        case 10: push(ptLeft(), ptBottom()); push(ptRight(), ptTop()); break;
+        default: break;
+      }
+    }
+  }
+  return segs;
+}
+
+/**
+ * Chain unordered marching-squares segments into polylines by joining endpoints
+ * that coincide within `tol` (a spatial-hash on quantised endpoints, O(segments)).
+ * Returns polylines (open or closed). Pure, deterministic (segments are consumed in
+ * input order so output order is stable).
+ */
+function chainSegments(segs: Seg[], tol: number): { x: number; y: number }[][] {
+  const q = (v: number) => Math.round(v / Math.max(tol, 1e-6));
+  const key = (x: number, y: number) => `${q(x)},${q(y)}`;
+  // Adjacency: endpoint key → list of (segIndex, whichEnd).
+  const ends = new Map<string, number[]>();
+  const add = (k: string, i: number) => {
+    let a = ends.get(k);
+    if (!a) ends.set(k, (a = []));
+    a.push(i);
+  };
+  for (let i = 0; i < segs.length; i++) {
+    add(key(segs[i].ax, segs[i].ay), i);
+    add(key(segs[i].bx, segs[i].by), i);
+  }
+  const used = new Uint8Array(segs.length);
+  const loops: { x: number; y: number }[][] = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = 1;
+    const poly: { x: number; y: number }[] = [
+      { x: segs[i].ax, y: segs[i].ay },
+      { x: segs[i].bx, y: segs[i].by },
+    ];
+    // Extend forward from the tail.
+    for (;;) {
+      const tail = poly[poly.length - 1];
+      const cand = ends.get(key(tail.x, tail.y));
+      let next = -1;
+      if (cand) for (const j of cand) { if (!used[j]) { next = j; break; } }
+      if (next < 0) break;
+      used[next] = 1;
+      const s = segs[next];
+      // Append the far endpoint of the matched segment.
+      if (q(s.ax) === q(tail.x) && q(s.ay) === q(tail.y)) poly.push({ x: s.bx, y: s.by });
+      else poly.push({ x: s.ax, y: s.ay });
+    }
+    loops.push(poly);
+  }
+  return loops;
+}
+
+/**
  * Finishing: a continuous serpentine raster that rides the heightmap surface. The
  * engaged region (covered cells whose surface lies below the stock top) is
  * connected-component labelled; each component is cut with a serpentine that
  * follows the surface cell-by-cell and links rows while staying on the surface
  * (only over already-engaged cells). Components are ordered nearest-neighbour.
+ *
+ * STRATEGY (toolpath-engine upgrade §2): 'raster' (legacy, default), 'waterline'
+ * (constant-Z contours only — best for steep walls), or 'hybrid' (raster on the
+ * shallow/top areas + waterline on the steep walls). See {@link Carve3DParams}.
  */
 function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; lines: number } {
   const tp = new Toolpath();
@@ -1806,17 +2254,41 @@ function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; l
   const cutTol = 1e-3;
   const clampZ = (v: number) => (v < floorZ ? floorZ : v > hm.zTop ? hm.zTop : v);
   const alongX = params.finishDir === 'x';
+  const strategy = params.finishStrategy ?? 'raster';
 
-  // Engaged mask: covered cells whose surface dips below the stock top.
+  // Steep-wall mask drives the hybrid split (raster does shallow/top, waterline does
+  // steep) and is computed lazily only when a waterline component is requested.
+  const steepMask =
+    strategy === 'raster' ? null : computeSteepMask(hm, params.steepAngleDeg ?? 55);
+
+  // Engaged mask: covered cells whose surface dips below the stock top. In HYBRID,
+  // steep cells are handed to the waterline pass, so the raster engages only the
+  // shallow/top cells (avoids the coarse stair-stepping raster leaves on walls). In
+  // pure WATERLINE the raster engages NOTHING (the waterline pass does everything).
   const engaged = new Uint8Array(nx * ny);
   let any = false;
-  for (let i = 0; i < engaged.length; i++) {
-    if (covered[i] && z[i] < -cutTol) {
+  if (strategy !== 'waterline') {
+    for (let i = 0; i < engaged.length; i++) {
+      if (!(covered[i] && z[i] < -cutTol)) continue;
+      if (strategy === 'hybrid' && steepMask && steepMask[i]) continue; // waterline handles it
       engaged[i] = 1;
       any = true;
     }
   }
-  if (!any) return { tp, lines: 0 };
+  // Helper: append the waterline pass for this strategy and return its contour count.
+  const appendWaterline = (): number => {
+    if (strategy === 'raster') return 0;
+    // hybrid → restrict waterline to steep cells; waterline → all covered cells.
+    const mask = strategy === 'hybrid' ? steepMask : null;
+    return buildWaterline(tp, hm, params, mask);
+  };
+  if (!any) {
+    // No raster work (flat-everywhere relief, or pure waterline). Still run the
+    // waterline contours, then finish.
+    const wl = appendWaterline();
+    if (wl > 0) simplifyToolpath(tp);
+    return { tp, lines: wl };
+  }
 
   // Drop STL-noise specks (isolated 1–few-cell slivers) before labelling so they
   // never earn a spurious plunge ("random drilling").
@@ -1839,6 +2311,8 @@ function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; l
     entryStartZ: hm.zTop, // finishing has no prior clearing — ramp from the top
     surfaceMode: true,
     oneWay: (params.finishPattern ?? 'serpentine') === 'climb',
+    linkClearanceMm: params.linkClearanceMm ?? 0,
+    linkMaxHopMm: params.linkMaxHopMm ?? 0,
   };
 
   // The serpentine scans along X (rows of constant Y) or along Y (transpose).
@@ -1880,6 +2354,7 @@ function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; l
         if (engaged[base + ix]) { lines++; break; }
       }
     }
+    lines += appendWaterline(); // hybrid/waterline: add the constant-Z wall passes
     simplifyToolpath(tp);
     return { tp, lines };
   }
@@ -1931,6 +2406,7 @@ function buildFinishing(hm: Heightmap, params: Carve3DParams): { tp: Toolpath; l
       if (engaged[iy * nx + ix]) { lines++; break; }
     }
   }
+  lines += appendWaterline(); // hybrid/waterline: add the constant-Z wall passes
   simplifyToolpath(tp);
   return { tp, lines };
 }

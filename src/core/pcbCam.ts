@@ -2,11 +2,11 @@
 // Ported from the Qt/C++ reference cadcam/pcbcam.{h,cpp}.
 // Pure TypeScript: no React/DOM/three.js imports.
 
-import { Polyline, Point, distance, distanceSquared, kEpsilon } from './geometry';
+import { Polyline, Point, BBox, distance, distanceSquared, kEpsilon } from './geometry';
 import { Tool, Toolpath, toolRadius } from './toolpath';
 import { offsetPolygon } from './offset';
-import { GerberData } from './gerber';
-import { ExcellonData } from './excellon';
+import { GerberData, GerberTrace } from './gerber';
+import { ExcellonData, DrillHit } from './excellon';
 import polygonClipping from 'polygon-clipping';
 import type { MultiPolygon, Ring } from 'polygon-clipping';
 
@@ -611,3 +611,286 @@ function cutLoopWithTabs(
 
   tp.rapid({ x: first.x, y: first.y, z: safeZ });
 }
+
+// ===========================================================================
+// P3 — V-bit isolation depth-from-width
+// ===========================================================================
+
+/**
+ * A V-shaped engraving bit cuts a groove whose WIDTH grows with depth. The cross
+ * section is a flat tip of diameter `tipDia` followed by two faces at half-angle
+ * `θ/2` (θ = full included tip angle). At a plunge depth `Z` below the surface the
+ * cut width is:
+ *
+ *   width(Z) = tipDia + 2 · Z · tan(θ/2)
+ *
+ * For isolation routing we want a specific copper-clearance WIDTH; this inverts
+ * the relation to give the plunge depth (a POSITIVE magnitude, mm) that yields it:
+ *
+ *   Z = (width − tipDia) / (2 · tan(θ/2))
+ *
+ * Returns 0 when the desired width is already covered by the flat tip (or the
+ * inputs are degenerate) — the caller negates it into the cut Z. A 90° bit has
+ * tan(45°)=1, so a 0.2 mm groove (0 tip) needs 0.1 mm depth — matching FlatCAM.
+ */
+export function vbitDepthForWidth(width: number, tipAngleDeg: number, tipDia = 0): number {
+  if (!Number.isFinite(width) || !Number.isFinite(tipAngleDeg)) return 0;
+  const halfRad = (Math.max(1, Math.min(179, tipAngleDeg)) / 2) * (Math.PI / 180);
+  const tan = Math.tan(halfRad);
+  if (tan <= kEpsilon) return 0;
+  const extra = width - Math.max(0, tipDia);
+  if (extra <= 0) return 0;
+  return extra / (2 * tan);
+}
+
+/**
+ * The effective cut WIDTH a V-bit produces at a given plunge depth (the forward
+ * relation of {@link vbitDepthForWidth}) — used by the UI's tool-width calculator
+ * and by DRC to know the real isolation gap a V-bit setup will clear.
+ */
+export function vbitWidthAtDepth(depth: number, tipAngleDeg: number, tipDia = 0): number {
+  if (!Number.isFinite(depth) || depth <= 0) return Math.max(0, tipDia);
+  const halfRad = (Math.max(1, Math.min(179, tipAngleDeg)) / 2) * (Math.PI / 180);
+  return Math.max(0, tipDia) + 2 * depth * Math.tan(halfRad);
+}
+
+// ===========================================================================
+// P5 — Drill grouping by tool diameter
+// ===========================================================================
+
+/** Drill hits grouped by their tool diameter (one machinable group per drill bit). */
+export interface DrillGroup {
+  diameter: number; // mm
+  hits: DrillHit[];
+}
+
+/**
+ * Group an Excellon set into per-diameter buckets, ascending by size. The
+ * operator fits ONE drill bit per group, so emitting a separate program (or a
+ * paused stage) per group means the holes for a given bit are drilled together —
+ * no impossible mid-program bit changes. Hits within a group keep their order;
+ * {@link drillHits} re-optimises travel per group when emitting.
+ */
+export function groupDrillHits(drill: ExcellonData): DrillGroup[] {
+  const byDia = new Map<number, DrillHit[]>();
+  for (const h of drill.hits) {
+    const key = Math.round(h.diameter * 1000) / 1000;
+    const arr = byDia.get(key);
+    if (arr) arr.push(h);
+    else byDia.set(key, [h]);
+  }
+  return [...byDia.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([diameter, hits]) => ({ diameter, hits }));
+}
+
+/**
+ * Emit a drilling toolpath for a SINGLE drill group (one bit). Travel-optimised
+ * nearest-neighbour ordering + optional peck — identical safe motion to
+ * {@link drillHits}, but scoped to one diameter so the group can become its own
+ * paused stage / program.
+ */
+export function drillGroup(
+  group: DrillGroup,
+  safeZ: number,
+  drillZ: number,
+  peckDepth = 0
+): Toolpath {
+  const sub = new ExcellonData();
+  sub.hits = group.hits;
+  const tp = drillHits(sub, safeZ, drillZ, peckDepth);
+  tp.name = `Drill Ø${group.diameter.toFixed(2)}`;
+  return tp;
+}
+
+// ===========================================================================
+// P8 — Double-sided: mirror geometry about an axis
+// ===========================================================================
+
+export type MirrorAxis = 'x' | 'y';
+
+function mirrorPoint(p: Point, axis: MirrorAxis, c: number): Point {
+  return axis === 'y'
+    ? { x: 2 * c - p.x, y: p.y } // flip about a vertical line x = c (mirror X)
+    : { x: p.x, y: 2 * c - p.y }; // flip about a horizontal line y = c (mirror Y)
+}
+
+function mirrorPolyline(pl: Polyline, axis: MirrorAxis, c: number): Polyline {
+  const out = new Polyline();
+  // Reverse winding so an outer ring stays an outer ring after the reflection
+  // (a mirror inverts orientation); preserves correct offset direction downstream.
+  for (let i = pl.points.length - 1; i >= 0; i--) out.add(mirrorPoint(pl.points[i], axis, c));
+  out.closed = pl.closed;
+  return out;
+}
+
+/**
+ * Mirror a copper Gerber about the board's mid-line on `axis` (P8 double-sided).
+ * The flip axis defaults to the geometry centre so the mirrored bottom layer
+ * registers on top of the front when the operator physically turns the stock
+ * over about that same axis. Pass an explicit `axisCoord` (e.g. derived from the
+ * board OUTLINE, or from two alignment-hole X/Y) to register against a shared
+ * datum instead of each layer's own extents.
+ *
+ * Used to machine the BOTTOM copper from the TOP setup's coordinate frame after
+ * a physical flip: the operator mills the front, flips the board about `axis`,
+ * re-zeroes, and runs this mirrored bottom program.
+ */
+export function mirrorGerber(gerber: GerberData, axis: MirrorAxis, axisCoord?: number): GerberData {
+  const b = gerber.bounds();
+  const c = axisCoord != null && Number.isFinite(axisCoord)
+    ? axisCoord
+    : axis === 'y'
+    ? b.center().x
+    : b.center().y;
+  const out = new GerberData();
+  out.traces = gerber.traces.map(
+    (t): GerberTrace => ({ centreline: mirrorPolyline(t.centreline, axis, c), width: t.width }),
+  );
+  out.pads = gerber.pads.map((p) => mirrorPolyline(p, axis, c));
+  out.regions = gerber.regions.map((r) => mirrorPolyline(r, axis, c));
+  return out;
+}
+
+/** Mirror an Excellon drill set about `axis` (for drilling from the flipped side). */
+export function mirrorExcellon(drill: ExcellonData, axis: MirrorAxis, axisCoord?: number): ExcellonData {
+  const b = drill.bounds();
+  const c = axisCoord != null && Number.isFinite(axisCoord)
+    ? axisCoord
+    : axis === 'y'
+    ? b.center().x
+    : b.center().y;
+  const out = new ExcellonData();
+  out.hits = drill.hits.map((h) => ({ pos: mirrorPoint(h.pos, axis, c), diameter: h.diameter }));
+  return out;
+}
+
+// ===========================================================================
+// P12 — DRC-lite (pre-generate checks)
+// ===========================================================================
+
+export type DrcSeverity = 'error' | 'warning' | 'info';
+
+export interface DrcIssue {
+  severity: DrcSeverity;
+  message: string;
+}
+
+export interface DrcInput {
+  /** Effective isolation tool/groove width (mm): the bit Ø, or a V-bit's width@Z. */
+  toolWidth: number;
+  copper?: GerberData | null;
+  drill?: ExcellonData | null;
+  /** Smallest drill bit the operator actually has (mm), to flag tiny holes. */
+  minDrillBit?: number;
+}
+
+/** Min centre-to-centre distance between any two of the supplied points (mm). */
+function minPointSpacing(pts: Point[]): number {
+  let m = Infinity;
+  for (let i = 0; i < pts.length; i++)
+    for (let j = i + 1; j < pts.length; j++) {
+      const d = distance(pts[i], pts[j]);
+      if (d < m) m = d;
+    }
+  return m;
+}
+
+/**
+ * DRC-lite: cheap, conservative pre-flight checks surfaced as warnings BEFORE
+ * generating G-code. Catches the common ways an isolation/drill job silently
+ * fails: a cutter wider than the smallest copper gap (so it shorts adjacent
+ * nets), tiny holes below the available bit, and a missing copper/drill input.
+ *
+ * The copper-gap estimate is conservative and bounded: it measures the closest
+ * approach between DISTINCT copper bodies by sampling the unioned outline rings'
+ * vertices (capped, so a dense board stays responsive). It can under-report on
+ * pathological boards, so it is a WARNING, never a hard block.
+ */
+export function drcCheck(input: DrcInput): DrcIssue[] {
+  const issues: DrcIssue[] = [];
+  const { toolWidth, copper, drill } = input;
+
+  if (copper) {
+    const merged = unionCopper(copper);
+    // Collect outer-ring vertices of each distinct copper body (cap per board).
+    const bodies: Point[][] = [];
+    for (const poly of merged) {
+      if (!poly.length || poly[0].length < 4) continue;
+      bodies.push(poly[0].map(([x, y]) => ({ x, y })));
+    }
+    if (bodies.length >= 2) {
+      // Closest approach between distinct bodies = the smallest copper gap.
+      const CAP = 600; // vertices/body sampled — bounds the O(n·m) probe
+      let gap = Infinity;
+      for (let a = 0; a < bodies.length; a++) {
+        const A = bodies[a].length > CAP ? sampleEvenly(bodies[a], CAP) : bodies[a];
+        for (let b = a + 1; b < bodies.length; b++) {
+          const B = bodies[b].length > CAP ? sampleEvenly(bodies[b], CAP) : bodies[b];
+          for (const pa of A)
+            for (const pb of B) {
+              const d = distance(pa, pb);
+              if (d < gap) gap = d;
+            }
+        }
+      }
+      if (Number.isFinite(gap)) {
+        if (toolWidth > gap + kEpsilon) {
+          issues.push({
+            severity: 'error',
+            message: `Cutter width ${toolWidth.toFixed(3)} mm is wider than the smallest copper gap ≈ ${gap.toFixed(3)} mm — it will short adjacent nets. Use a smaller bit (or a shallower V-bit depth).`,
+          });
+        } else if (toolWidth > gap * 0.8) {
+          issues.push({
+            severity: 'warning',
+            message: `Cutter width ${toolWidth.toFixed(3)} mm is close to the smallest copper gap ≈ ${gap.toFixed(3)} mm — isolation may be marginal.`,
+          });
+        }
+      }
+    } else if (bodies.length === 1) {
+      issues.push({
+        severity: 'info',
+        message: 'Copper merges into a single net — no inter-net gap to violate (check this is intended).',
+      });
+    }
+  } else {
+    issues.push({ severity: 'info', message: 'No copper layer assigned — isolation DRC skipped.' });
+  }
+
+  if (drill && drill.hits.length > 0) {
+    const dias = drill.toolDiameters();
+    const smallest = dias.length ? Math.min(...dias) : 0;
+    const minBit = input.minDrillBit;
+    if (minBit != null && smallest > 0 && smallest < minBit - kEpsilon) {
+      issues.push({
+        severity: 'warning',
+        message: `Smallest hole Ø${smallest.toFixed(2)} mm is below your smallest drill bit Ø${minBit.toFixed(2)} mm — those holes can't be drilled directly (mill them, or fit a finer bit).`,
+      });
+    }
+    // Overlapping holes (centre spacing < the bit) usually means a slot exported
+    // as drills — drilling them risks bit deflection / breakout.
+    if (drill.hits.length >= 2) {
+      const sp = minPointSpacing(drill.hits.map((h) => h.pos));
+      if (Number.isFinite(sp) && sp < smallest - kEpsilon && smallest > 0) {
+        issues.push({
+          severity: 'warning',
+          message: `Two holes are ${sp.toFixed(2)} mm apart — closer than the bit Ø${smallest.toFixed(2)} mm. This is likely a routed slot; drilling may break the bit.`,
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
+/** Evenly subsample a vertex list down to ≤ `n` points (keeps shape, bounds cost). */
+function sampleEvenly(pts: Point[], n: number): Point[] {
+  if (pts.length <= n) return pts;
+  const out: Point[] = [];
+  const step = pts.length / n;
+  for (let i = 0; i < n; i++) out.push(pts[Math.floor(i * step)]);
+  return out;
+}
+
+/** Re-export BBox helper consumers occasionally need alongside the CAM ops. */
+export { BBox };

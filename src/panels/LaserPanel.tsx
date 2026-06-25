@@ -42,6 +42,7 @@ import {
   type ImageAdjust,
   type RasterParams,
 } from '../core/laserImage'
+import { emitTestGrid, type TestGridParams } from '../core/laserTestGrid'
 import { CamBusy, CamEmpty, CamError } from '../components/cam/CamUI'
 import { SliderField as KitSlider } from '../components/ui/SliderField'
 import { SegControl as KitSeg } from '../components/ui/SegControl'
@@ -150,6 +151,166 @@ function SegControl<T extends string>(props: {
   )
 }
 
+/**
+ * Material test-grid card (L4) — sweeps POWER × FEED across a grid of filled
+ * tiles so the operator can dial in settings for a new material. Self-contained:
+ * it owns its own persisted sweep settings and, on "Send to Program", emits a
+ * safe test program (`emitTestGrid`) into the shared Program store so the
+ * Visualizer renders it and the Program tab streams it. `defaults` seeds the
+ * sweep ranges from the surrounding workbench (power/feed/sMax/mode/air).
+ */
+function LaserTestGridCard(props: { defaults: Partial<TestGridParams> }) {
+  const t = useT()
+  const setProgram = useProgram((s) => s.setProgram)
+  const streaming = useProgram((s) => s.streaming)
+  const [open, setOpen] = usePersistentState<boolean>('karmyogi.laser.testgrid.open', false)
+  const [grid, setGrid] = usePersistentState<{
+    powerSteps: number
+    feedSteps: number
+    powerMin: number
+    feedMinFrac: number // feedMin as a fraction of the workbench feed (0..1)
+    tileMm: number
+    gapMm: number
+  }>('karmyogi.laser.testgrid', {
+    powerSteps: 5,
+    feedSteps: 5,
+    powerMin: 200,
+    feedMinFrac: 0.25,
+    tileMm: 8,
+    gapMm: 2,
+  })
+
+  const sMax = Math.max(1, props.defaults.sMax ?? 1000)
+  const feedMax = Math.max(1, props.defaults.feedMax ?? 6000)
+  const params: Partial<TestGridParams> = {
+    ...props.defaults,
+    powerSteps: clamp(Math.floor(grid.powerSteps), 1, 12),
+    feedSteps: clamp(Math.floor(grid.feedSteps), 1, 12),
+    powerMin: clamp(grid.powerMin, 0, sMax),
+    powerMax: sMax,
+    feedMin: clamp(Math.round(feedMax * grid.feedMinFrac), 1, feedMax),
+    feedMax,
+    sMax,
+    tileMm: clamp(grid.tileMm, 1, 50),
+    gapMm: clamp(grid.gapMm, 0, 20),
+  }
+  const result = useMemo(() => emitTestGrid(params), [JSON.stringify(params)])
+
+  const send = useCallback(() => {
+    if (streaming) return
+    setProgram('laser', result.gcode)
+  }, [streaming, setProgram, result.gcode])
+
+  return (
+    <section className="lp-card ui-card">
+      <div className="lp-card-head">
+        <h4 className="ui-sec-head">
+          <span className="cam-card-ico" aria-hidden="true">
+            <Icon name="duplicate" size={14} />
+          </span>
+          {t('laser.testgrid.title', 'Material test grid')}
+        </h4>
+        <button
+          type="button"
+          className="lp-advanced-toggle"
+          style={{ margin: 0, padding: '2px 6px' }}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} />
+        </button>
+      </div>
+      {open && (
+        <>
+          <p className="lp-hint">
+            {t(
+              'laser.testgrid.hint',
+              'Burns a grid of tiles sweeping power (→ columns, up to S-max) and feed (↑ rows). Pick the cleanest tile, then copy its power/feed.',
+            )}
+          </p>
+          <div className="lp-sliders">
+            <KitSlider
+              label={t('laser.testgrid.cols', 'Power steps')}
+              min={1}
+              max={12}
+              step={1}
+              value={grid.powerSteps}
+              onChange={(n) => setGrid((g) => ({ ...g, powerSteps: clamp(Math.floor(n), 1, 12) }))}
+              title={t('laser.testgrid.cols.title', 'Number of power columns (low → S-max).')}
+            />
+            <KitSlider
+              label={t('laser.testgrid.rows', 'Feed steps')}
+              min={1}
+              max={12}
+              step={1}
+              value={grid.feedSteps}
+              onChange={(n) => setGrid((g) => ({ ...g, feedSteps: clamp(Math.floor(n), 1, 12) }))}
+              title={t('laser.testgrid.rows.title', 'Number of feed rows (low → the workbench feed).')}
+            />
+            <KitSlider
+              label={t('laser.testgrid.pmin', 'Power min')}
+              unit="S"
+              min={0}
+              max={sMax}
+              step={5}
+              value={Math.min(grid.powerMin, sMax)}
+              onChange={(n) => setGrid((g) => ({ ...g, powerMin: clamp(n, 0, sMax) }))}
+              title={t('laser.testgrid.pmin.title', 'Lowest power (leftmost column). The rightmost is S-max ({s}).', { s: sMax })}
+            />
+            <KitSlider
+              label={t('laser.testgrid.fmin', 'Feed min')}
+              unit="%"
+              min={5}
+              max={100}
+              step={5}
+              value={Math.round(grid.feedMinFrac * 100)}
+              onChange={(n) => setGrid((g) => ({ ...g, feedMinFrac: clamp(n, 5, 100) / 100 }))}
+              title={t('laser.testgrid.fmin.title', 'Slowest feed (bottom row) as a % of the workbench feed ({f} mm/min). Top row = full feed.', { f: feedMax })}
+            />
+            <KitSlider
+              label={t('laser.testgrid.tile', 'Tile')}
+              unit="mm"
+              min={1}
+              max={50}
+              step={0.5}
+              value={grid.tileMm}
+              onChange={(n) => setGrid((g) => ({ ...g, tileMm: clamp(n, 1, 50) }))}
+              title={t('laser.testgrid.tile.title', 'Size of each square tile.')}
+            />
+            <KitSlider
+              label={t('laser.testgrid.gap', 'Gap')}
+              unit="mm"
+              min={0}
+              max={20}
+              step={0.5}
+              value={grid.gapMm}
+              onChange={(n) => setGrid((g) => ({ ...g, gapMm: clamp(n, 0, 20) }))}
+              title={t('laser.testgrid.gap.title', 'Gap between tiles.')}
+            />
+          </div>
+          <p className="lp-hint">
+            {t('laser.testgrid.summary', '{tiles} tiles · {w}×{h} mm · {lines} lines', {
+              tiles: result.tiles,
+              w: result.widthMm.toFixed(0),
+              h: result.heightMm.toFixed(0),
+              lines: result.lines,
+            })}
+          </p>
+          <button
+            type="button"
+            className="cam-primary"
+            disabled={streaming}
+            onClick={send}
+            title={t('laser.testgrid.send.title', 'Replace the current Program with this test grid (Visualizer + Program tab).')}
+          >
+            <Icon name="chevron-right" size={15} /> {t('laser.testgrid.send', 'Send grid to Program')}
+          </button>
+        </>
+      )}
+    </section>
+  )
+}
+
 /** The combined-laser params persisted to localStorage. */
 interface PanelParams {
   mode: LaserMode
@@ -163,6 +324,7 @@ interface PanelParams {
   pierce: boolean
   piercePower: number
   pierceTime: number
+  airAssist: boolean
   decimals: number
 }
 
@@ -180,6 +342,7 @@ function defaultsFor(mode: LaserMode): PanelParams {
     pierce: d.pierce,
     piercePower: d.piercePower,
     pierceTime: d.pierceTime,
+    airAssist: d.airAssist ?? false,
     decimals: d.decimals,
   }
 }
@@ -244,6 +407,7 @@ function parseParams(v: unknown, base: PanelParams): PanelParams {
     pierce: boolOr(v.pierce, base.pierce),
     piercePower: numOr(v.piercePower, base.piercePower),
     pierceTime: numOr(v.pierceTime, base.pierceTime),
+    airAssist: boolOr(v.airAssist, base.airAssist),
     decimals: numOr(v.decimals, base.decimals),
   }
 }
@@ -402,6 +566,7 @@ interface ImgParams {
   zPerPass: number
   useFocusZ: boolean
   focusZ: number
+  airAssist: boolean
   decimals: number
 }
 
@@ -425,6 +590,7 @@ function defaultImgParams(): ImgParams {
     zPerPass: r.zPerPass,
     useFocusZ: r.useFocusZ,
     focusZ: r.focusZ,
+    airAssist: r.airAssist,
     decimals: r.decimals,
   }
 }
@@ -552,6 +718,7 @@ function LaserImageWorkbench() {
       zPerPass: params.zPerPass,
       useFocusZ: params.useFocusZ,
       focusZ: params.focusZ,
+      airAssist: params.airAssist ?? false,
       decimals: params.decimals,
       programName: `hjLabs Laser raster — ${src?.name ?? 'image'}`,
     }
@@ -1045,8 +1212,29 @@ function LaserImageWorkbench() {
               <i>mm</i>
             </span>
           )}
+          <label className="li-toggle" title={t('laser.img.power.air.title', 'Switch the air-assist solenoid on for the whole job (M8 at start, M9 at end). Auxiliary output — never gates the beam.')}>
+            <input
+              type="checkbox"
+              checked={params.airAssist ?? false}
+              onChange={(e) => patch({ airAssist: e.target.checked })}
+            />
+            {t('laser.img.power.air', 'Air assist (M8/M9)')}
+          </label>
         </div>
       </section>
+
+      <LaserTestGridCard
+        defaults={{
+          sMax: Math.max(params.sMin, params.sMax),
+          powerMax: Math.max(params.sMin, params.sMax),
+          feedMin: Math.max(1, Math.round(params.feed / 4)),
+          feedMax: Math.max(1, params.feed),
+          lineInterval: dpiToInterval(params.dpi),
+          dynamicPower: params.dynamicPower,
+          airAssist: params.airAssist ?? false,
+          decimals: params.decimals,
+        }}
+      />
 
       <p className="li-safety">
         <span className="li-safety-ico" aria-hidden>
@@ -1189,6 +1377,7 @@ function LaserVectorWorkbench() {
       pierce: params.pierce,
       piercePower: clamp(params.piercePower, 0, sMax),
       pierceTime: params.pierceTime,
+      airAssist: params.airAssist,
       decimals: params.decimals,
       programName: `hjLabs Laser — ${params.mode}`,
     })
@@ -1631,6 +1820,16 @@ function LaserVectorWorkbench() {
             ]}
           />
         </div>
+        <div className="lp-toggle-row">
+          <label className="lp-toggle" title={t('laser.cut.air.title', 'Switch the air-assist solenoid on for the whole job (M8 at start, M9 at end). Auxiliary output — never gates the beam.')}>
+            <input
+              type="checkbox"
+              checked={params.airAssist}
+              onChange={(e) => setParams({ airAssist: e.target.checked })}
+            />
+            {t('laser.cut.air', 'Air assist (M8/M9)')}
+          </label>
+        </div>
       </section>
 
       {/* Advanced (mode-specific) — collapsed by default to reduce scroll. */}
@@ -1733,6 +1932,18 @@ function LaserVectorWorkbench() {
       </section>
       </>
       )}
+
+      <LaserTestGridCard
+        defaults={{
+          sMax: Math.max(1, params.sMax),
+          powerMax: Math.max(1, params.sMax),
+          feedMin: Math.max(1, Math.round(params.cutFeed / 4)),
+          feedMax: Math.max(1, params.cutFeed),
+          dynamicPower: params.powerMode === LaserPowerMode.Dynamic,
+          airAssist: params.airAssist,
+          decimals: params.decimals,
+        }}
+      />
 
       <p className="lp-safety">
         {t('laser.safety', 'Safety: laser OFF (M5 S0) during all travel; beam on (M3/M4 S…) only on cut feeds; requires GRBL laser mode $32=1.')}

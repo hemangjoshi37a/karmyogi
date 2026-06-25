@@ -1335,3 +1335,201 @@
   border: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
   border-radius: 7px;
 }
+
+/* ============================================================================
+   Operational / machinist-safety controls (O4/O5/O9/O11/O12)
+   ========================================================================== */
+
+/* ---- O12 — Motion lockout guard ---------------------------------------- */
+.mc-lockout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.mc-lockout.is-locked {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+.mc-lockout.is-armed {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
+}
+.mc-lockout:hover { filter: brightness(1.06); }
+.mc-lockout-ico { display: inline-flex; flex: 0 0 auto; }
+.mc-lockout-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.mc-lockout-title { font-weight: 700; font-size: var(--fs-ctl, 12px); }
+.mc-lockout-sub { font-size: 10px; opacity: 0.85; color: var(--fg-muted); }
+.mc-lockout-badge { margin-left: auto; flex: 0 0 auto; }
+
+/* ---- O11 — Coolant + park ---------------------------------------------- */
+.mc-aux-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.mc-aux-btn {
+  flex-direction: column;
+  gap: 2px;
+  min-height: 46px;
+  padding: 5px 4px;
+}
+.mc-aux-btn > svg { flex: 0 0 auto; }
+.mc-aux-btn .mc-btn-cmd { opacity: 0.65; }
+.mc-aux-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.mc-aux-btn.primary .mc-btn-cmd { color: var(--accent-fg); opacity: 0.85; }
+
+.mc-park-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.mc-park-btn {
+  flex: 0 0 auto;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  font-weight: 600;
+}
+.mc-park-fields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+}
+.mc-park-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex: 1 1 0;
+  min-width: 0;
+}
+.mc-park-field > span { font-weight: 600; }
+.mc-park-input {
+  width: 100%;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- O4 — Tool-change wizard ------------------------------------------- */
+.mc-tc-config {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.mc-tc-probe-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  cursor: pointer;
+  user-select: none;
+}
+.mc-tc-wizard { display: flex; flex-direction: column; gap: 10px; }
+.mc-tc-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mc-tc-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  opacity: 0.7;
+}
+.mc-tc-step.is-active { color: var(--fg); opacity: 1; font-weight: 600; }
+.mc-tc-step.is-done { color: var(--ok); opacity: 0.95; }
+.mc-tc-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.mc-tc-step.is-active .mc-tc-step-num { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); color: var(--accent); }
+.mc-tc-step.is-done .mc-tc-step-num { border-color: var(--ok); color: var(--ok); }
+.mc-tc-action { display: flex; flex-direction: column; gap: 8px; }
+.mc-tc-prompt {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+
+/* ---- O5 — Start-from-line ---------------------------------------------- */
+.mc-startline-slider { width: 100%; padding: 0; }
+.mc-startline-preview {
+  display: block;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 22px;
+}
+
+/* ---- O9 — Diagnostics --------------------------------------------------- */
+.mc-diag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  gap: 6px;
+}
+.mc-diag-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  min-width: 0;
+}
+.mc-diag-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); }
+.mc-diag-val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-diag-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.mc-diag-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+/* Mobile: coolant chips reflow to a tighter grid; park fields stack. */
+@media (max-width: 520px) {
+  .mc-park-row { flex-wrap: wrap; }
+  .mc-park-fields { width: 100%; }
+}

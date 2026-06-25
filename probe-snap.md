@@ -1,0 +1,964 @@
+- generic [ref=e3]:
+  - alert [ref=e4]
+  - banner [ref=e5]:
+    - button "About karmyogi (source, license, report a bug)" [ref=e6] [cursor=pointer]:
+      - img "karmyogi — meditating yogi mark" [ref=e7]
+      - generic [ref=e8]: karmyogi
+    - generic [ref=e1315]:
+      - combobox "Controller firmware" [ref=e1316] [cursor=pointer]:
+        - option "GRBL"
+        - option "FluidNC" [selected]
+        - option "grblHAL"
+        - option "Marlin — experimental"
+        - option "Smoothieware — experimental"
+        - option "Masso G3 Touch — experimental"
+        - option "Ruida — experimental"
+        - option "EzCAD / BJJCZ (galvo fiber) — experimental"
+        - option "Cypcut / FSCUT (fiber gantry) — experimental"
+      - button "USB driver downloads" [ref=e1318] [cursor=pointer]:
+        - img [ref=e1319]
+      - combobox "USB baud rate" [ref=e1322] [cursor=pointer]:
+        - option "9600"
+        - option "19200"
+        - option "38400"
+        - option "57600"
+        - option "115200 — default" [selected]
+        - option "230400"
+        - option "250000"
+        - option "500000"
+        - option "1000000"
+        - option "Custom…"
+      - status [ref=e1324]: disconnected
+      - generic [ref=e1325]:
+        - button "Connect" [expanded] [ref=e1326] [cursor=pointer]:
+          - text: Connect
+          - img [ref=e1328]
+        - menu [ref=e2826]:
+          - generic [ref=e2827]: Connect to machine
+          - menuitem "USB cable Web Serial — the standard wired connection." [ref=e2828] [cursor=pointer]:
+            - img [ref=e2830]
+            - generic [ref=e2836]:
+              - generic [ref=e2837]: USB cable
+              - generic [ref=e2838]: Web Serial — the standard wired connection.
+          - menuitem "Bluetooth Not in this browser — on iPhone/iPad use the Wi-Fi bridge below." [disabled] [ref=e2839]:
+            - img [ref=e2841]
+            - generic [ref=e2843]:
+              - generic [ref=e2844]: Bluetooth
+              - generic [ref=e2845]: Not in this browser — on iPhone/iPad use the Wi-Fi bridge below.
+          - generic [ref=e2847]:
+            - generic [ref=e2848]:
+              - img [ref=e2850]
+              - text: Wi-Fi (WebSocket)
+            - generic [ref=e2855]:
+              - textbox "Host or IP (e.g. 192.168.1.50)" [ref=e2856]
+              - textbox "Port (auto)" [ref=e2857]
+            - button "Connect over Wi-Fi" [disabled] [ref=e2858] [cursor=pointer]
+            - generic [ref=e2859]: For ESP3D / FluidNC / MKS DLC32. Leave the port blank to auto-detect (tries 81, 82, 8080, 80) — or type it if you know it.
+            - generic [ref=e2860]: Telnet (raw TCP, port 23) can’t be opened from a browser — there is no API. It needs a WebSocket↔TCP bridge/relay; use Wi-Fi (WebSocket) above, which covers ESP3D / FluidNC networked GRBL.
+            - generic [ref=e2862]:
+              - generic [ref=e2863]: Scan network for controllers
+              - generic [ref=e2864]:
+                - textbox "Subnet base (first three octets)" [ref=e2865]:
+                  - /placeholder: Subnet (e.g. 192.168.1)
+                - generic [ref=e2866]: .0–255
+              - button "Scan" [disabled] [ref=e2867] [cursor=pointer]
+          - menuitem "Mock device In-browser GRBL simulator — try the app with no hardware." [ref=e2869] [cursor=pointer]:
+            - img [ref=e2871]
+            - generic [ref=e2873]:
+              - generic [ref=e2874]: Mock device
+              - generic [ref=e2875]: In-browser GRBL simulator — try the app with no hardware.
+      - button "Machines" [ref=e1331] [cursor=pointer]:
+        - generic [ref=e1332]: Machines
+        - img [ref=e1334]
+      - 'button "Server bridge: relay this browser’s machine to the karmyogi dev server so it can read state and send commands — OFF" [ref=e1336] [cursor=pointer]':
+        - img [ref=e1338]
+      - button "Probe & limits" [active] [ref=e1343] [cursor=pointer]:
+        - img [ref=e1345]
+      - button "Motion Settings" [ref=e1347] [cursor=pointer]:
+        - img [ref=e1349]
+    - generic [ref=e1352]:
+      - generic [ref=e1353]:
+        - button "Open / reopen panels" [ref=e1355] [cursor=pointer]:
+          - img [ref=e1357]
+        - button "Reset dock layout to default" [ref=e1359] [cursor=pointer]:
+          - img [ref=e1361]
+        - generic "UI zoom" [ref=e1364]:
+          - button "Zoom out" [ref=e1365] [cursor=pointer]:
+            - img [ref=e1367]
+          - button "Reset zoom" [ref=e1368] [cursor=pointer]: 100%
+          - button "Zoom in" [ref=e1369] [cursor=pointer]:
+            - img [ref=e1371]
+      - generic [ref=e1372]:
+        - generic "Language — English" [ref=e1373] [cursor=pointer]:
+          - img [ref=e1375]
+          - combobox "Language — English" [ref=e1378]:
+            - option "English" [selected]
+            - option "हिन्दी"
+            - option "বাংলা"
+            - option "తెలుగు"
+            - option "मराठी"
+            - option "தமிழ்"
+            - option "اردو"
+            - option "ગુજરાતી"
+            - option "ಕನ್ನಡ"
+            - option "ଓଡ଼ିଆ"
+            - option "മലയാളം"
+            - option "ਪੰਜਾਬੀ"
+            - option "অসমীয়া"
+            - option "मैथिली"
+            - option "संस्कृतम्"
+            - option "नेपाली"
+            - option "कोंकणी"
+            - option "سنڌي"
+            - option "डोगरी"
+            - option "মৈতৈলোন"
+            - option "भोजपुरी"
+            - option "کٲشُر"
+            - option "ᱥᱟᱱᱛᱟᱲᱤ"
+            - option "बड़ो"
+            - option "中文"
+            - option "Español"
+            - option "العربية"
+            - option "Português"
+            - option "Русский"
+            - option "日本語"
+            - option "Deutsch"
+            - option "Français"
+            - option "Bahasa Indonesia"
+            - option "한국어"
+            - option "Italiano"
+            - option "Türkçe"
+            - option "Tiếng Việt"
+            - option "ไทย"
+            - option "Polski"
+            - option "Українська"
+            - option "فارسی"
+            - option "Nederlands"
+            - option "Filipino"
+            - option "Kiswahili"
+            - option "Bahasa Melayu"
+            - option "Hausa"
+            - option "አማርኛ"
+            - option "Yorùbá"
+            - option "မြန်မာ"
+            - option "עברית"
+            - option "Ελληνικά"
+            - option "Română"
+            - option "Magyar"
+            - option "Čeština"
+        - button "Switch to dark theme" [ref=e1379] [cursor=pointer]:
+          - img [ref=e1381]
+      - generic [ref=e1383]:
+        - button "Notifications" [ref=e1385] [cursor=pointer]:
+          - img [ref=e1387]
+        - button "Sign in with Google" [ref=e1391] [cursor=pointer]:
+          - img [ref=e1392]
+  - generic [ref=e1397]:
+    - generic [ref=e1414]:
+      - generic [ref=e1417]:
+        - generic [ref=e1419]:
+          - generic "Import one or more STL models — each becomes a job that auto-nests on the bed and carves in a single combined program. DXF / vector files do 2D engrave · profile · pocket." [ref=e1422] [cursor=pointer]:
+            - img [ref=e1423]
+            - generic [ref=e1428]: 2D/3D Carving
+          - generic "Soldering" [ref=e1431] [cursor=pointer]:
+            - img [ref=e1432]
+            - generic [ref=e1435]: Soldering
+          - generic "Screw Fitting" [ref=e1438] [cursor=pointer]:
+            - img [ref=e1439]
+            - generic [ref=e1442]: Screw Fitting
+          - generic "Bore / Drill / Hole" [ref=e1445] [cursor=pointer]:
+            - img [ref=e1446]
+            - generic [ref=e1453]: Bore / Drill / Hole
+          - generic "PCB" [ref=e1456] [cursor=pointer]:
+            - img [ref=e1457]
+            - generic [ref=e1464]: PCB
+          - generic "Glue Dispense" [ref=e1467] [cursor=pointer]:
+            - img [ref=e1468]
+            - generic [ref=e1471]: Glue Dispense
+          - generic "Move parts from a pick point to a place point — the head grabs with the spindle output (M3 on / M5 off). Build the operations; the program auto-syncs to the Visualizer and Program tab for streaming." [ref=e1474] [cursor=pointer]:
+            - img [ref=e1475]
+            - generic [ref=e1482]: Pick & Place
+          - generic "Signature" [ref=e1485] [cursor=pointer]:
+            - img [ref=e1486]
+            - generic [ref=e1489]: Signature
+          - generic "3D Printing" [ref=e1492] [cursor=pointer]:
+            - img [ref=e1493]
+            - generic [ref=e1498]: 3D Printing
+          - generic "Laser Cutting" [ref=e1501] [cursor=pointer]:
+            - img [ref=e1502]
+            - generic [ref=e1504]:
+              - generic [ref=e1505]: Laser Cutting
+              - img [ref=e1507]
+          - generic "Welding" [ref=e1511] [cursor=pointer]:
+            - img [ref=e1512]
+            - generic [ref=e1515]: Welding
+          - generic "Camera" [ref=e1518] [cursor=pointer]:
+            - img [ref=e1519]
+            - generic [ref=e1523]: Camera
+          - generic "Spring Coiling" [ref=e1526] [cursor=pointer]:
+            - img [ref=e1527]
+            - generic [ref=e1531]: Spring Coiling
+        - generic [ref=e1535] [cursor=pointer]:
+          - img [ref=e1536]
+          - generic [ref=e1538]: "10"
+      - generic [ref=e1545]:
+        - generic "Visualizer" [ref=e1553] [cursor=pointer]:
+          - img [ref=e1554]
+          - generic [ref=e1557]:
+            - generic [ref=e1558]: Visualizer
+            - img [ref=e1560]
+        - generic [ref=e1569]:
+          - generic [ref=e1571]:
+            - generic "Program" [ref=e1577] [cursor=pointer]:
+              - img [ref=e1578]
+              - generic [ref=e1583]:
+                - generic [ref=e1584]: Program
+                - img [ref=e1586]
+            - generic [ref=e1591]:
+              - generic [ref=e1593]:
+                - generic [ref=e1594]:
+                  - button "Reset start line to 1" [ref=e1595] [cursor=pointer]:
+                    - img [ref=e1596]
+                  - spinbutton "Start line / current line" [ref=e1599]: "1"
+                  - button "Frame — connect the machine first." [disabled] [ref=e1601]:
+                    - img [ref=e1603]
+                  - button "Stream" [disabled] [ref=e1608] [cursor=pointer]:
+                    - img [ref=e1609]
+                    - text: Stream
+                  - button "Pause" [disabled] [ref=e1611] [cursor=pointer]:
+                    - img [ref=e1612]
+                  - button "Abort" [disabled] [ref=e1613] [cursor=pointer]:
+                    - img [ref=e1614]
+                - generic [ref=e1616]:
+                  - status [ref=e1617]
+                  - generic "Program progress" [ref=e1618]:
+                    - generic [ref=e1619]:
+                      - progressbar
+                    - generic [ref=e1620]: 0 / 2011 (0%)
+                  - generic "Estimated total run time" [ref=e1621]:
+                    - generic [ref=e1622]: ⏱
+                    - text: ~5m 36s
+              - generic [ref=e1624]:
+                - generic [ref=e1625]:
+                  - generic [ref=e1626]: Sections
+                  - generic [ref=e1627]: 5 sections
+                  - button "Upload a G-code file as a new section" [ref=e1631] [cursor=pointer]:
+                    - img [ref=e1632]
+                - list [ref=e2348]:
+                  - listitem [ref=e2349]:
+                    - generic [ref=e2350]:
+                      - generic "Toolpath line colour in the 3D viewer" [ref=e2351] [cursor=pointer]:
+                        - textbox "Toolpath colour for section welding" [ref=e2352]: "#0284c7"
+                      - button "▸ welding 1621 lines" [ref=e2353] [cursor=pointer]:
+                        - generic [ref=e2354]: ▸
+                        - generic "welding" [ref=e2355]
+                        - generic [ref=e2356]: 1621 lines
+                      - button "Frame — connect the machine first." [disabled] [ref=e2358]:
+                        - img [ref=e2360]
+                      - button "Copy G-code for welding" [ref=e2365] [cursor=pointer]:
+                        - img [ref=e2366]
+                      - button "Download G-code for welding" [ref=e2369] [cursor=pointer]:
+                        - img [ref=e2370]
+                      - button "Delete section welding" [ref=e2372] [cursor=pointer]:
+                        - img [ref=e2373]
+                  - listitem [ref=e2377]:
+                    - generic [ref=e2378]:
+                      - generic "Toolpath line colour in the 3D viewer" [ref=e2379] [cursor=pointer]:
+                        - textbox "Toolpath colour for section step_block — 3D Carving" [ref=e2380]: "#b45309"
+                      - button "▸ step_block — 3D Carving 96 lines" [ref=e2381] [cursor=pointer]:
+                        - generic [ref=e2382]: ▸
+                        - generic "step_block — 3D Carving" [ref=e2383]
+                        - generic [ref=e2384]: 96 lines
+                      - button "Frame — connect the machine first." [disabled] [ref=e2386]:
+                        - img [ref=e2388]
+                      - button "Copy G-code for step_block — 3D Carving" [ref=e2393] [cursor=pointer]:
+                        - img [ref=e2394]
+                      - button "Download G-code for step_block — 3D Carving" [ref=e2397] [cursor=pointer]:
+                        - img [ref=e2398]
+                      - button "Delete section step_block — 3D Carving" [ref=e2400] [cursor=pointer]:
+                        - img [ref=e2401]
+                  - listitem [ref=e2405]:
+                    - generic [ref=e2406]:
+                      - generic "Toolpath line colour in the 3D viewer" [ref=e2407] [cursor=pointer]:
+                        - textbox "Toolpath colour for section step_block — 3D Carving (2)" [ref=e2408]: "#6d28d9"
+                      - button "▸ step_block — 3D Carving (2) 96 lines" [ref=e2409] [cursor=pointer]:
+                        - generic [ref=e2410]: ▸
+                        - generic "step_block — 3D Carving (2)" [ref=e2411]
+                        - generic [ref=e2412]: 96 lines
+                      - button "Frame — connect the machine first." [disabled] [ref=e2414]:
+                        - img [ref=e2416]
+                      - button "Copy G-code for step_block — 3D Carving (2)" [ref=e2421] [cursor=pointer]:
+                        - img [ref=e2422]
+                      - button "Download G-code for step_block — 3D Carving (2)" [ref=e2425] [cursor=pointer]:
+                        - img [ref=e2426]
+                      - button "Delete section step_block — 3D Carving (2)" [ref=e2428] [cursor=pointer]:
+                        - img [ref=e2429]
+                  - listitem [ref=e2433]:
+                    - generic [ref=e2434]:
+                      - generic "Toolpath line colour in the 3D viewer" [ref=e2435] [cursor=pointer]:
+                        - textbox "Toolpath colour for section step_block — 3D Carving (3)" [ref=e2436]: "#047857"
+                      - button "▸ step_block — 3D Carving (3) 96 lines" [ref=e2437] [cursor=pointer]:
+                        - generic [ref=e2438]: ▸
+                        - generic "step_block — 3D Carving (3)" [ref=e2439]
+                        - generic [ref=e2440]: 96 lines
+                      - button "Frame — connect the machine first." [disabled] [ref=e2442]:
+                        - img [ref=e2444]
+                      - button "Copy G-code for step_block — 3D Carving (3)" [ref=e2449] [cursor=pointer]:
+                        - img [ref=e2450]
+                      - button "Download G-code for step_block — 3D Carving (3)" [ref=e2453] [cursor=pointer]:
+                        - img [ref=e2454]
+                      - button "Delete section step_block — 3D Carving (3)" [ref=e2456] [cursor=pointer]:
+                        - img [ref=e2457]
+                  - listitem [ref=e2461]:
+                    - generic [ref=e2462]:
+                      - generic "Toolpath line colour in the 3D viewer" [ref=e2463] [cursor=pointer]:
+                        - textbox "Toolpath colour for section step_block — 3D Carving (4)" [ref=e2464]: "#be123c"
+                      - button "▸ step_block — 3D Carving (4) 97 lines" [ref=e2465] [cursor=pointer]:
+                        - generic [ref=e2466]: ▸
+                        - generic "step_block — 3D Carving (4)" [ref=e2467]
+                        - generic [ref=e2468]: 97 lines
+                      - button "Frame — connect the machine first." [disabled] [ref=e2470]:
+                        - img [ref=e2472]
+                      - button "Copy G-code for step_block — 3D Carving (4)" [ref=e2477] [cursor=pointer]:
+                        - img [ref=e2478]
+                      - button "Download G-code for step_block — 3D Carving (4)" [ref=e2481] [cursor=pointer]:
+                        - img [ref=e2482]
+                      - button "Delete section step_block — 3D Carving (4)" [ref=e2484] [cursor=pointer]:
+                        - img [ref=e2485]
+          - generic [ref=e1652]:
+            - generic "Console" [ref=e1658] [cursor=pointer]:
+              - img [ref=e1659]
+              - generic [ref=e1661]:
+                - generic [ref=e1662]: Console
+                - img [ref=e1664]
+            - generic [ref=e1669]:
+              - search [ref=e1670]:
+                - img [ref=e1672]
+                - searchbox "Search console messages" [ref=e1675]
+                - button "Copy transcript" [disabled] [ref=e1676]:
+                  - img [ref=e1677]
+                - button "Toggle quick commands" [pressed] [ref=e1680] [cursor=pointer]:
+                  - img [ref=e1681]
+                - button "Clear console" [disabled] [ref=e1683]:
+                  - img [ref=e1684]
+              - generic "Console messages" [ref=e1689]:
+                - generic [ref=e1691]:
+                  - img [ref=e1693]
+                  - generic [ref=e1695]: No messages yet
+                  - generic [ref=e1696]: Connect a machine and send a command — replies appear here.
+              - paragraph [ref=e1697]:
+                - text: Raw GRBL console — type any G-code or
+                - code [ref=e1698]: $
+                - text: command (advanced).
+              - group "Quick commands" [ref=e1699]:
+                - button "Send $$" [disabled] [ref=e1700]: $$
+                - button "Send $H" [disabled] [ref=e1701]: $H
+                - button "Send $X" [disabled] [ref=e1702]: $X
+                - button "Send $G" [disabled] [ref=e1703]: $G
+                - button "Send G0 X0 Y0" [disabled] [ref=e1704]: G0 X0 Y0
+                - button "Send ?" [disabled] [ref=e1705]: "?"
+                - button "Edit macros" [ref=e1706] [cursor=pointer]:
+                  - img [ref=e1707]
+              - generic [ref=e1710]:
+                - textbox "Message the controller" [disabled] [ref=e1711]:
+                  - /placeholder: Connect to send commands
+                - button "Send command" [disabled] [ref=e1712]:
+                  - img [ref=e1713]
+      - generic [ref=e1717]:
+        - generic "Controller" [ref=e1723] [cursor=pointer]:
+          - img [ref=e1724]
+          - generic [ref=e1726]:
+            - generic [ref=e1727]: Controller
+            - img [ref=e1729]
+        - generic "Machine controller" [ref=e1734]:
+          - generic [ref=e1735]:
+            - table "Digital read-out" [ref=e1737]:
+              - generic [ref=e1738]: Axis
+              - generic [ref=e1739]:
+                - text: Work (mm)
+                - button "What is “Work zero (origin)”?" [ref=e1741]:
+                  - img [ref=e1742]
+              - generic [ref=e1746]: Machine (mm)
+              - generic [ref=e1747]:
+                - generic [ref=e1748]: X
+                - generic [ref=e1749]: "0.000"
+                - generic [ref=e1750]: "0.000"
+              - generic [ref=e1751]:
+                - generic [ref=e1752]: "Y"
+                - generic [ref=e1753]: "0.000"
+                - generic [ref=e1754]: "0.000"
+              - generic [ref=e1755]:
+                - generic [ref=e1756]: Z
+                - generic [ref=e1757]: "0.000"
+                - generic [ref=e1758]: "0.000"
+            - switch "Motion locked Jog & run disabled — click to arm" [ref=e1760] [cursor=pointer]:
+              - img [ref=e1762]
+              - generic [ref=e1765]:
+                - generic [ref=e1766]: Motion locked
+                - generic [ref=e1767]: Jog & run disabled — click to arm
+              - img [ref=e1768]
+            - generic [ref=e1771]:
+              - button "Home" [disabled] [ref=e1772]:
+                - img [ref=e1773]
+                - generic [ref=e1777]: Home
+                - generic [ref=e1778]: $H
+                - generic: h
+              - button "Unlock" [disabled] [ref=e1779]:
+                - img [ref=e1780]
+                - generic [ref=e1784]: Unlock
+                - generic [ref=e1785]: $X
+                - generic: u
+              - button "Reset" [disabled] [ref=e1786]:
+                - img [ref=e1787]
+                - generic [ref=e1790]: Reset
+                - generic [ref=e1791]: ⌃X
+                - generic: r
+              - button "Hold" [disabled] [ref=e1792]:
+                - img [ref=e1793]
+                - generic [ref=e1794]: Hold
+                - generic [ref=e1795]: "!"
+                - generic: "!"
+              - button "Resume" [disabled] [ref=e1796]:
+                - img [ref=e1797]
+                - generic [ref=e1799]: Resume
+                - generic [ref=e1800]: ~
+                - generic: ~
+              - button "Zero" [disabled] [ref=e1801]:
+                - img [ref=e1802]
+                - generic [ref=e1804]: Zero
+                - generic [ref=e1805]: G10
+                - generic: z
+            - generic [ref=e1806]:
+              - heading "Jog" [level=4] [ref=e1807]
+              - generic [ref=e1808]:
+                - generic [ref=e1809]: Step
+                - group "Jog step (mm)" [ref=e1810]:
+                  - button "0.1" [ref=e1811] [cursor=pointer]:
+                    - text: "0.1"
+                    - generic: "1"
+                  - button "1" [pressed] [ref=e1812] [cursor=pointer]:
+                    - text: "1"
+                    - generic: "2"
+                  - button "10" [ref=e1813] [cursor=pointer]:
+                    - text: "10"
+                    - generic: "3"
+                  - button "100" [ref=e1814] [cursor=pointer]:
+                    - text: "100"
+                    - generic: "4"
+                - generic [ref=e1815]: mm
+              - generic "Jog feed rate (mm/min) — how fast jog moves run. Drag the slider or type a value." [ref=e1816]:
+                - generic [ref=e1817]: Feed
+                - slider "Feed" [ref=e1818] [cursor=pointer]: "1001"
+                - spinbutton "Feed" [ref=e1819]: "1000"
+                - generic [ref=e1820]: mm/min
+              - generic "How far a press-and-hold jog travels before repeating — capped to machine travel (300 mm). Drag the slider or type a value." [ref=e1821]:
+                - generic [ref=e1822]: Hold dist
+                - slider "Hold dist" [ref=e1823] [cursor=pointer]: "1001"
+                - spinbutton "Hold dist" [ref=e1824]: "1000"
+                - generic [ref=e1825]: mm
+              - group "Work coordinate system" [ref=e1826]:
+                - button "G54 work coordinate system" [disabled] [pressed] [ref=e1827]:
+                  - generic [ref=e1828]: W1
+                  - generic [ref=e1829]: G54
+                - button "G55 work coordinate system" [disabled] [ref=e1830]:
+                  - generic [ref=e1831]: W2
+                  - generic [ref=e1832]: G55
+                - button "G56 work coordinate system" [disabled] [ref=e1833]:
+                  - generic [ref=e1834]: W3
+                  - generic [ref=e1835]: G56
+                - button "G57 work coordinate system" [disabled] [ref=e1836]:
+                  - generic [ref=e1837]: W4
+                  - generic [ref=e1838]: G57
+                - button "G58 work coordinate system" [disabled] [ref=e1839]:
+                  - generic [ref=e1840]: W5
+                  - generic [ref=e1841]: G58
+                - button "G59 work coordinate system" [disabled] [ref=e1842]:
+                  - generic [ref=e1843]: W6
+                  - generic [ref=e1844]: G59
+              - generic [ref=e1845]:
+                - generic [ref=e1847]:
+                  - group "XY jog" [ref=e1848]:
+                    - button "Jog ↖" [disabled] [ref=e1849] [cursor=pointer]: ↖
+                    - button "Jog Y+" [disabled] [ref=e1850] [cursor=pointer]: Y+
+                    - button "Jog ↗" [disabled] [ref=e1851] [cursor=pointer]: ↗
+                    - button "Jog X−" [disabled] [ref=e1852] [cursor=pointer]: X−
+                    - button "Cancel jog" [disabled] [ref=e1853] [cursor=pointer]: ⨯
+                    - button "Jog X+" [disabled] [ref=e1854] [cursor=pointer]: X+
+                    - button "Jog ↙" [disabled] [ref=e1855] [cursor=pointer]: ↙
+                    - button "Jog Y−" [disabled] [ref=e1856] [cursor=pointer]: Y−
+                    - button "Jog ↘" [disabled] [ref=e1857] [cursor=pointer]: ↘
+                  - group "Z jog" [ref=e1858]:
+                    - button "Jog Z+" [disabled] [ref=e1859] [cursor=pointer]: Z+
+                    - button "Jog Z−" [disabled] [ref=e1860] [cursor=pointer]: Z−
+                    - button "Go to zero" [disabled] [ref=e1862]:
+                      - img [ref=e1863]
+                - group "Work Offset (WCO)" [ref=e1867]:
+                  - button "Zero X" [disabled] [ref=e1868]:
+                    - img [ref=e1869]
+                    - generic [ref=e1871]: Zero X
+                  - button "Zero Y" [disabled] [ref=e1872]:
+                    - img [ref=e1873]
+                    - generic [ref=e1875]: Zero Y
+                  - button "Zero Z" [disabled] [ref=e1876]:
+                    - img [ref=e1877]
+                    - generic [ref=e1879]: Zero Z
+              - generic [ref=e1880]:
+                - generic [ref=e1881]: Arrows jog · PgUp/Dn Z · Esc cancel
+                - button "Shortcuts" [ref=e1882] [cursor=pointer]:
+                  - img [ref=e1883]
+                  - generic [ref=e1885]: "?"
+                  - generic [ref=e1886]: Shortcuts
+            - button "Teach points" [ref=e1889] [cursor=pointer]:
+              - img [ref=e1891]
+              - generic [ref=e1893]: Teach points
+              - img [ref=e1895]
+            - generic [ref=e1897]:
+              - heading "Coolant & park" [level=4] [ref=e1898]
+              - group "Coolant outputs" [ref=e1899]:
+                - button "Flood" [disabled] [ref=e1900]:
+                  - img [ref=e1901]
+                  - generic [ref=e1904]: Flood
+                  - generic [ref=e1905]: M8
+                - button "Mist" [disabled] [ref=e1906]:
+                  - img [ref=e1907]
+                  - generic [ref=e1920]: Mist
+                  - generic [ref=e1921]: M7
+                - button "Off" [disabled] [ref=e1922]:
+                  - img [ref=e1923]
+                  - generic [ref=e1927]: "Off"
+                  - generic [ref=e1928]: M9
+              - generic [ref=e1929]:
+                - button "Park" [disabled] [ref=e1930]:
+                  - img [ref=e1931]
+                  - generic [ref=e1934]: Park
+                - generic [ref=e1935]:
+                  - generic [ref=e1936]:
+                    - generic [ref=e1937]: X
+                    - spinbutton "Park X (machine mm)" [ref=e1938]: "0"
+                  - generic [ref=e1939]:
+                    - generic [ref=e1940]: "Y"
+                    - spinbutton "Park Y (machine mm)" [ref=e1941]: "0"
+            - button "Tool change" [ref=e1944] [cursor=pointer]:
+              - img [ref=e1946]
+              - generic [ref=e1948]: Tool change
+              - img [ref=e1950]
+            - button "Start from line 2011" [ref=e2489] [cursor=pointer]:
+              - img [ref=e1956]
+              - generic [ref=e1959]: Start from line
+              - generic [ref=e2490]: "2011"
+              - img [ref=e1961]
+            - button "Diagnostics" [ref=e1965] [cursor=pointer]:
+              - img [ref=e1967]
+              - generic [ref=e1970]: Diagnostics
+              - img [ref=e1972]
+            - generic [ref=e1974]:
+              - generic [ref=e1975]:
+                - switch "Spindle off (click to start)" [disabled] [ref=e1976]:
+                  - generic: s
+                - radiogroup "Spindle output mode" [ref=e1978]:
+                  - radio "Spindle" [ref=e1979] [cursor=pointer]
+                  - radio "PWM" [checked] [ref=e1980] [cursor=pointer]
+                - group "Spindle direction" [ref=e1981]:
+                  - button "Clockwise (M3)" [disabled] [pressed] [ref=e1982]:
+                    - img [ref=e1983]
+                  - button "Counter-clockwise (M4)" [disabled] [ref=e1986]:
+                    - img [ref=e1987]
+              - generic [ref=e1990]:
+                - generic [ref=e1991]: PWM
+                - button "What is “PWM duty (%)”?" [ref=e1993]:
+                  - img [ref=e1994]
+                - spinbutton "PWM duty percent" [disabled] [ref=e1998]: "100"
+                - generic [ref=e1999]: "%"
+            - generic [ref=e2000]:
+              - heading "Overrides" [level=4] [ref=e2001]
+              - generic [ref=e2002]:
+                - generic [ref=e2003]:
+                  - text: Feed
+                  - button "What is “Feed override”?" [ref=e2005]:
+                    - img [ref=e2006]
+                - generic [ref=e2010]: 100%
+                - button "Feed override minus 10" [disabled] [ref=e2011]:
+                  - img [ref=e2012]
+                  - generic: "["
+                - button "Feed override reset" [disabled] [ref=e2013]:
+                  - img [ref=e2014]
+                  - generic: \
+                - button "Feed override plus 10" [disabled] [ref=e2017]:
+                  - img [ref=e2018]
+                  - generic: "]"
+                - generic [ref=e2019]:
+                  - text: Rapid
+                  - button "What is “Rapid override”?" [ref=e2021]:
+                    - img [ref=e2022]
+                - generic [ref=e2026]: 100%
+                - button "Rapid override 25 percent" [disabled] [ref=e2027]: "25"
+                - button "Rapid override 50 percent" [disabled] [ref=e2028]: "50"
+                - button "Rapid override 100 percent" [disabled] [ref=e2029]: "100"
+                - generic [ref=e2030]:
+                  - text: Spindle
+                  - button "What is “Spindle override”?" [ref=e2032]:
+                    - img [ref=e2033]
+                - generic [ref=e2037]: 100%
+                - button "Spindle override minus 10" [disabled] [ref=e2038]:
+                  - img [ref=e2039]
+                - button "Spindle override reset" [disabled] [ref=e2040]:
+                  - img [ref=e2041]
+                - button "Spindle override plus 10" [disabled] [ref=e2044]:
+                  - img [ref=e2045]
+              - generic [ref=e2046]:
+                - generic [ref=e2047]: Feed 0 mm/min
+                - generic [ref=e2048]: Spindle 0 rpm
+            - button "Game controller Not connected" [ref=e2050] [cursor=pointer]:
+              - img [ref=e2051]
+              - generic [ref=e2053]:
+                - generic [ref=e2054]: Game controller
+                - generic [ref=e2055]: Not connected
+    - option "Profile-outside" [selected]
+    - option "Profile-inside"
+    - option "Pocket"
+    - option "Engrave"
+    - option "Clear-out"
+    - option "Cutout"
+    - option "Profile-outside" [selected]
+    - option "Profile-inside"
+    - option "Pocket"
+    - option "Engrave"
+    - option "Clear-out"
+    - option "Cutout"
+    - option "Profile-outside" [selected]
+    - option "Profile-inside"
+    - option "Pocket"
+    - option "Engrave"
+    - option "Clear-out"
+    - option "Cutout"
+    - option "Profile-outside" [selected]
+    - option "Profile-inside"
+    - option "Pocket"
+    - option "Engrave"
+    - option "Clear-out"
+    - option "Cutout"
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside" [selected]
+    - option "Profile-inside"
+    - option "Pocket"
+    - option "Engrave"
+    - option "Clear-out"
+    - option "Cutout"
+    - option "Profile-outside" [selected]
+    - option "Profile-inside"
+    - option "Pocket"
+    - option "Engrave"
+    - option "Clear-out"
+    - option "Cutout"
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "Profile-outside (needs flat)" [disabled] [selected]
+    - option "Profile-inside (needs flat)" [disabled]
+    - option "Pocket (needs flat)" [disabled]
+    - option "Engrave"
+    - option "Clear-out (needs flat)" [disabled]
+    - option "Cutout (needs flat)" [disabled]
+    - option "🔲 Flat / end mill" [selected]
+    - option "⚫ Ball nose"
+    - option "▽ V-bit"
+    - option "✒ Engraving"
+    - option "🪡 Drill"
+    - option "Plunge ↓" [selected]
+    - option "45° front"
+    - option "45° right"
+    - option "45° left"
+    - option "45° back"
+    - generic [ref=e2058]:
+      - radiogroup "Laser workbench" [ref=e2060]:
+        - radio "Vector cut" [ref=e2061] [cursor=pointer]:
+          - img [ref=e2062]
+          - text: Vector cut
+        - radio "Image engrave" [checked] [ref=e2067] [cursor=pointer]:
+          - img [ref=e2068]
+          - text: Image engrave
+      - generic [ref=e2071]:
+        - banner [ref=e2072]:
+          - generic [ref=e2073]:
+            - img [ref=e2075]
+            - text: Image raster engraving
+          - button "Frame — connect the machine first." [disabled] [ref=e2079]:
+            - img [ref=e2081]
+            - generic [ref=e2086]: Frame
+        - generic [ref=e2087]:
+          - generic [ref=e2088]: No image loaded
+          - generic "Lines auto-synced to the Program tab." [ref=e2089]:
+            - img [ref=e2090]
+            - text: Program
+        - generic [ref=e2092]:
+          - heading "Preview" [level=4] [ref=e2094]:
+            - img [ref=e2096]
+            - text: Preview
+          - generic [ref=e2100]:
+            - img [ref=e2102]
+            - paragraph [ref=e2105]: Load a PNG or JPG to see the live dithered preview — exactly what the laser will burn.
+          - button "Load image…" [ref=e2107] [cursor=pointer]:
+            - img [ref=e2108]
+            - text: Load image…
+        - generic [ref=e2110]:
+          - heading "Image" [level=4] [ref=e2112]:
+            - img [ref=e2114]
+            - text: Image
+          - generic [ref=e2117]:
+            - generic "Lighten or darken the whole image before dithering (−100…100)." [ref=e2118]:
+              - generic [ref=e2119]: Brightness
+              - slider "Brightness" [ref=e2120] [cursor=pointer]: "0"
+              - spinbutton "Brightness" [ref=e2121]: "0"
+            - generic "Expand or compress the tonal range around mid-grey (−100…100)." [ref=e2122]:
+              - generic [ref=e2123]: Contrast
+              - slider "Contrast" [ref=e2124] [cursor=pointer]: "0"
+              - spinbutton "Contrast" [ref=e2125]: "0"
+            - generic "Midtone curve. <1 darkens mids, >1 lightens them (0.1…3)." [ref=e2126]:
+              - generic [ref=e2127]: Gamma
+              - slider "Gamma" [ref=e2128] [cursor=pointer]: "1"
+              - spinbutton "Gamma" [ref=e2129]: "1"
+          - generic "Swap black and white — engrave the negative." [ref=e2131] [cursor=pointer]:
+            - checkbox "Invert" [ref=e2132]
+            - text: Invert
+        - generic [ref=e2133]:
+          - heading "Dither" [level=4] [ref=e2135]:
+            - img [ref=e2137]
+            - text: Dither
+          - radiogroup "Dither mode" [ref=e2140]:
+            - radio "Threshold" [ref=e2141] [cursor=pointer]
+            - radio "Ordered" [ref=e2142] [cursor=pointer]
+            - radio "Floyd–Steinberg" [checked] [ref=e2143] [cursor=pointer]
+            - radio "Jarvis" [ref=e2144] [cursor=pointer]
+            - radio "Stucki" [ref=e2145] [cursor=pointer]
+            - radio "Atkinson" [ref=e2146] [cursor=pointer]
+            - radio "Newsprint" [ref=e2147] [cursor=pointer]
+            - radio "Grayscale" [ref=e2148] [cursor=pointer]
+        - generic [ref=e2149]:
+          - heading "Raster" [level=4] [ref=e2151]:
+            - img [ref=e2153]
+            - text: Raster
+          - generic [ref=e2158]:
+            - generic "Engraved output width (X). Height follows the image aspect ratio." [ref=e2159]:
+              - generic [ref=e2160]: Width
+              - slider "Width" [ref=e2161] [cursor=pointer]: "80"
+              - spinbutton "Width" [ref=e2162]: "80"
+              - generic [ref=e2163]: mm
+            - generic "Lines per inch. Interval = 0.100 mm. Higher = finer + slower." [ref=e2164]:
+              - generic [ref=e2165]: DPI
+              - slider "DPI" [ref=e2166] [cursor=pointer]: "250"
+              - spinbutton "DPI" [ref=e2167]: "254"
+              - generic [ref=e2168]: dpi
+            - generic "Extra travel past each end of a line so the head is at full speed over edge pixels (avoids edge over-burn)." [ref=e2169]:
+              - generic [ref=e2170]: Overscan
+              - slider "Overscan" [ref=e2171] [cursor=pointer]: "2"
+              - spinbutton "Overscan" [ref=e2172]: "2"
+              - generic [ref=e2173]: mm
+          - generic [ref=e2174]:
+            - 'generic "Scan-line direction: horizontal (sweep X) or vertical (sweep Y)." [ref=e2175]': Scan angle
+            - radiogroup "Scan angle" [ref=e2176]:
+              - radio "0° (horizontal)" [checked] [ref=e2177] [cursor=pointer]
+              - radio "90° (vertical)" [ref=e2178] [cursor=pointer]
+          - generic "Engrave on both sweep directions (faster) vs always left-to-right (more consistent, slower)." [ref=e2180] [cursor=pointer]:
+            - checkbox "Bidirectional" [checked] [ref=e2181]
+            - text: Bidirectional
+        - generic [ref=e2182]:
+          - heading "Power" [level=4] [ref=e2184]:
+            - img [ref=e2186]
+            - text: Power
+          - generic [ref=e2188]:
+            - generic "Engraving speed for every scan line (G1 F…)." [ref=e2189]:
+              - generic [ref=e2190]: Feed
+              - slider "Feed" [ref=e2191] [cursor=pointer]: "3001"
+              - spinbutton "Feed" [ref=e2192]: "3000"
+              - generic [ref=e2193]: mm/min
+            - generic "Power for the LIGHTEST tone. Keep low (often 0) so white stays unburnt. (0% of S-max)" [ref=e2194]:
+              - generic [ref=e2195]: S-min (white)
+              - slider "S-min (white)" [ref=e2196] [cursor=pointer]: "0"
+              - spinbutton "S-min (white)" [ref=e2197]: "0"
+              - generic [ref=e2198]: S
+            - generic "Power for the DARKEST tone (also your GRBL $30 ceiling)." [ref=e2199]:
+              - generic [ref=e2200]: S-max (black)
+              - slider "S-max (black)" [ref=e2201] [cursor=pointer]: "1001"
+              - spinbutton "S-max (black)" [ref=e2202]: "1000"
+              - generic [ref=e2203]: S
+            - generic "How many times the whole image is engraved." [ref=e2204]:
+              - generic [ref=e2205]: Passes
+              - slider "Passes" [ref=e2206] [cursor=pointer]: "1"
+              - spinbutton "Passes" [ref=e2207]: "1"
+            - generic "Coordinate precision in the emitted G-code." [ref=e2208]:
+              - generic [ref=e2209]: Decimals
+              - slider "Decimals" [ref=e2210] [cursor=pointer]: "3"
+              - spinbutton "Decimals" [ref=e2211]: "3"
+          - generic [ref=e2212]:
+            - generic "M4 dynamic scales power with feed (recommended for engraving — even shading through accel); M3 is constant power." [ref=e2213]: Power mode
+            - radiogroup "Power mode" [ref=e2214]:
+              - radio "M4 dynamic" [checked] [ref=e2215] [cursor=pointer]:
+                - img [ref=e2216]
+                - text: M4 dynamic
+              - radio "M3 constant" [ref=e2218] [cursor=pointer]:
+                - img [ref=e2219]
+                - text: M3 constant
+          - generic [ref=e2223]:
+            - generic "Move Z to a fixed focus height at program start (no negative Z — there is no safe-Z retract before it)." [ref=e2224] [cursor=pointer]:
+              - checkbox "Set focus Z" [ref=e2225]
+              - text: Set focus Z
+            - generic "Switch the air-assist solenoid on for the whole job (M8 at start, M9 at end). Auxiliary output — never gates the beam." [ref=e2226] [cursor=pointer]:
+              - checkbox "Air assist (M8/M9)" [checked] [ref=e2227]
+              - text: Air assist (M8/M9)
+        - generic [ref=e2229]:
+          - heading "Material test grid" [level=4] [ref=e2230]:
+            - img [ref=e2232]
+            - text: Material test grid
+          - button [ref=e2235] [cursor=pointer]:
+            - img [ref=e2236]
+        - paragraph [ref=e2272]:
+          - img [ref=e2274]
+          - generic [ref=e2276]: "Safety: never leave a firing laser unattended and always wear rated eye protection. Beam is OFF (S0/M5) on every travel and at program end; it fires only on scan moves. Requires GRBL laser mode $32=1, and S-max should not exceed your $30 ceiling."
+    - option "No cameras found" [selected]
+    - generic [ref=e2279]:
+      - generic [ref=e2280]:
+        - generic [ref=e2281]:
+          - button "Fit to toolpath" [ref=e2282] [cursor=pointer]:
+            - img [ref=e2283]
+          - button "Top view" [ref=e2290] [cursor=pointer]:
+            - img [ref=e2291]
+          - button "Front view" [ref=e2294] [cursor=pointer]:
+            - img [ref=e2295]
+          - button "Right view" [ref=e2297] [cursor=pointer]:
+            - img [ref=e2298]
+          - button "Isometric view" [ref=e2301] [cursor=pointer]:
+            - img [ref=e2302]
+          - button "Run outline" [ref=e2306] [cursor=pointer]:
+            - img [ref=e2307]
+          - button "Bed size" [ref=e2311] [cursor=pointer]:
+            - img [ref=e2312]
+          - button "More tools" [ref=e2316] [cursor=pointer]:
+            - img [ref=e2317]
+          - button "Place job" [ref=e2322] [cursor=pointer]:
+            - img [ref=e2323]
+          - button "Lasso delete" [ref=e2328] [cursor=pointer]:
+            - img [ref=e2329]
+          - button "Pick delete" [ref=e2333] [cursor=pointer]:
+            - img [ref=e2334]
+        - generic [ref=e2336]:
+          - generic [ref=e2819]:
+            - button "X300mm" [ref=e2822]
+            - button "Y200mm" [ref=e2823]
+            - button "Z100mm" [ref=e2824]
+          - generic:
+            - img:
+              - generic:
+                - generic: X
+              - generic:
+                - generic: "Y"
+              - generic:
+                - generic: Z
+        - group "Layers" [ref=e2340]:
+          - button "Layers" [ref=e2341] [cursor=pointer]:
+            - img [ref=e2343]
+            - generic [ref=e2345]: Layers
+        - status "Program dimensions" [ref=e2491]:
+          - generic "Width (X) × Depth (Y) of the loaded program's bounding box, in mm" [ref=e2492]:
+            - generic [ref=e2493]: "179.9"
+            - generic [ref=e2494]: ×
+            - generic [ref=e2495]: "81.5"
+            - generic [ref=e2496]: mm
+          - generic "Z range (top→bottom) and total cut depth, in mm" [ref=e2497]:
+            - generic [ref=e2498]: Z -5…5 (10)
+          - generic "Footprint area covered by the toolpath" [ref=e2499]:
+            - generic [ref=e2500]: 146.7 cm²
+          - generic "Whether the program fits within the machine work area (bed 300×200 mm)" [ref=e2501]:
+            - generic [ref=e2503]: fits bed 300×200
+        - note "Tool cone legend":
+          - generic:
+            - generic:
+              - img
+            - text: Machine (live)
+          - generic:
+            - generic:
+              - img
+            - text: Simulation
+      - generic [ref=e2504]:
+        - generic [ref=e2505]:
+          - button "Jump to start" [ref=e2506] [cursor=pointer]:
+            - img [ref=e2508]
+          - button "Previous segment" [ref=e2511] [cursor=pointer]:
+            - img [ref=e2513]
+          - button "Play" [ref=e2516] [cursor=pointer]:
+            - img [ref=e2518]
+          - button "Next segment" [ref=e2520] [cursor=pointer]:
+            - img [ref=e2522]
+          - button "Jump to end" [ref=e2525] [cursor=pointer]:
+            - img [ref=e2527]
+          - button "Loop" [ref=e2530] [cursor=pointer]:
+            - img [ref=e2532]
+        - slider "Scrub timeline" [ref=e2538] [cursor=pointer]: "0"
+        - generic "Elapsed and total time" [ref=e2539]: 0:00 / 5:36
+        - radiogroup "Playback speed" [ref=e2540]:
+          - radio "0.25×" [ref=e2541] [cursor=pointer]
+          - radio "0.5×" [ref=e2542] [cursor=pointer]
+          - radio "1×" [checked] [ref=e2543] [cursor=pointer]
+          - radio "2×" [ref=e2544] [cursor=pointer]
+          - radio "4×" [ref=e2545] [cursor=pointer]

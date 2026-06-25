@@ -847,3 +847,137 @@
    W-B). The bespoke local `.cc-slider` copy + its private ::-webkit-slider-thumb
    / ::-moz-range-* blocks were removed; the rows stack in a single column via
    `.pcb-op-params` above. */
+
+/* ===========================================================================
+   Roadmap depth — P3 V-bit · P5 drill grouping · P8 double-sided ·
+   P9 layer viewer · P12 DRC-lite. Reuses the panel's tokens + chrome.
+   =========================================================================== */
+
+/* Per-role layer colours (light + dark via tokens). */
+.pcb-lv {
+  --pcb-copper: #c8772e;
+  --pcb-pad: #e0a23c;
+  --pcb-drill: #2b6fe0;
+  --pcb-outline: #1aa179;
+}
+:root[data-theme='dark'] .pcb-lv,
+.theme-dark .pcb-lv {
+  --pcb-copper: #e08a3c;
+  --pcb-pad: #f2bb5a;
+  --pcb-drill: #5aa0ff;
+  --pcb-outline: #2bd6a3;
+}
+
+/* --- inline checkbox row (shared by V-bit / grouping / two-sided) --- */
+.pcb-check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-body);
+  cursor: pointer;
+  user-select: none;
+  min-height: 36px;
+}
+.pcb-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  flex: none;
+}
+.pcb-op-check {
+  margin: var(--sp-1) 0 var(--sp-2);
+}
+.pcb-vbit-readout {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- P9 layer viewer --- */
+.pcb-lv-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.pcb-lv-tog {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+.pcb-lv-tog.on {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.pcb-lv-sw {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex: none;
+}
+.pcb-lv-tog:not(.on) .pcb-lv-sw {
+  opacity: 0.35;
+}
+.pcb-lv-svg {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* --- P12 DRC-lite --- */
+.pcb-chip-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.pcb-chip-err {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.pcb-drc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.pcb-drc-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.pcb-drc-item svg {
+  flex: none;
+  margin-top: 2px;
+}
+.pcb-drc-error {
+  color: var(--danger);
+  border-color: var(--border-danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.pcb-drc-warning {
+  color: var(--warn);
+  border-color: var(--border-warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+.pcb-drc-info {
+  color: var(--fg-muted);
+}

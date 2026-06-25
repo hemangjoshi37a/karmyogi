@@ -288,11 +288,22 @@ export interface SliceWarning {
   params?: Record<string, number>;
 }
 
+/** How (if at all) to generate support material under overhangs. */
+export type SupportType = 'none' | 'grid' | 'tree';
+
 export interface SliceParams {
   layerHeight: number;        // mm
   lineWidth: number;          // mm (extrusion width)
   perimeters: number;         // wall loops
   infillDensity: number;      // 0..100 (%)
+  /** Support generation strategy (default 'none'). */
+  supportType?: SupportType;
+  /**
+   * Overhang threshold (degrees from vertical). Faces steeper than this from
+   * vertical (i.e. flatter / more horizontal-facing-down) need support.
+   * Default 50°.
+   */
+  supportOverhangAngle?: number;
   /** Optional override of the slice height (mm). Defaults to mesh Z extent. */
   // (no field — derived from mesh bbox)
 }
@@ -304,6 +315,8 @@ export interface SliceLayer {
   perimeters: Polyline[];
   /** Rectilinear infill lines (open 2-point polylines). */
   infill: Polyline[];
+  /** Support-material toolpaths for this layer (open lines / loops). */
+  support?: Polyline[];
 }
 
 export interface SliceResult {
@@ -515,6 +528,163 @@ function buildInfill(boundary: Polyline, spacing: number, angleDeg: number): Pol
   return lines;
 }
 
+// ============================================================================
+// Support generation (grid + tree)
+// ============================================================================
+//
+// Strategy (pure, deterministic): we find OVERHANG sample points — downward-
+// facing triangle centroids whose face is flatter than the overhang threshold —
+// and treat each as a point that must be held up from below. A grid support
+// fills the overhang footprint per layer with a sparse rectilinear pattern; a
+// tree support consolidates nearby overhang points into branching columns that
+// merge as they descend toward the bed (fewer, thicker contacts → less plastic,
+// easier removal). Both are clipped to z < the overhang height so they only
+// exist beneath the feature they hold up.
+
+/** An overhang sample needing support: an XY anchor that must be reached from below up to `zTop`. */
+interface OverhangPoint {
+  x: number;
+  y: number;
+  /** Top Z (mm) the support must reach (the underside of the overhang). */
+  zTop: number;
+}
+
+/**
+ * Collect overhang anchor points from a placed mesh: triangle centroids whose
+ * face normal points sufficiently downward (the face overhangs). `overhangDeg`
+ * is measured from vertical — a normal at exactly -Z is a 90° overhang (a flat
+ * ceiling); we flag faces whose downward tilt exceeds the threshold. Points
+ * within ~one nozzle of the bed are skipped (they rest on the bed).
+ */
+function collectOverhangs(mesh: StlMesh, overhangDeg: number, layerH: number): OverhangPoint[] {
+  const out: OverhangPoint[] = [];
+  const tris = mesh.triangles;
+  const stride3 = STL_STRIDE * 3;
+  const zMin = mesh.bbox.min[2];
+  // Face needs support when its downward angle from vertical exceeds threshold.
+  // nz is the (normalized) Z of the outward normal. A downward face has nz < 0.
+  // The angle the face makes with horizontal: a flat ceiling has nz = -1.
+  // Support when nz < -sin(overhangDeg) (steeper overhang → more negative nz).
+  const cutoff = -Math.sin((overhangDeg * Math.PI) / 180);
+  for (let o = 0; o < tris.length; o += stride3) {
+    const nz = tris[o + 5]; // normal is shared across the 3 verts (per-face)
+    if (!(nz < cutoff)) continue;
+    const ax = tris[o], ay = tris[o + 1], az = tris[o + 2];
+    const bx = tris[o + STL_STRIDE], by = tris[o + STL_STRIDE + 1], bz = tris[o + STL_STRIDE + 2];
+    const cx = tris[o + STL_STRIDE * 2], cy = tris[o + STL_STRIDE * 2 + 1], cz = tris[o + STL_STRIDE * 2 + 2];
+    const zTop = (az + bz + cz) / 3;
+    // Skip overhangs resting on (or essentially at) the bed.
+    if (zTop - zMin < layerH * 1.5) continue;
+    out.push({ x: (ax + bx + cx) / 3, y: (ay + by + cy) / 3, zTop });
+  }
+  return out;
+}
+
+/**
+ * Cluster overhang points into a coarse grid (cell ≈ `spacing`) and keep one
+ * representative per occupied cell (the highest zTop, so a pillar reaches the
+ * uppermost overhang it serves). Returns deduplicated anchors.
+ */
+function clusterOverhangs(pts: OverhangPoint[], spacing: number): OverhangPoint[] {
+  const cell = Math.max(spacing, 1);
+  const best = new Map<string, OverhangPoint>();
+  for (const p of pts) {
+    const k = `${Math.round(p.x / cell)}:${Math.round(p.y / cell)}`;
+    const cur = best.get(k);
+    if (!cur || p.zTop > cur.zTop) best.set(k, p);
+  }
+  return [...best.values()];
+}
+
+/**
+ * Build GRID supports: for each layer below an overhang, draw a sparse
+ * rectilinear pattern over the union footprint of all overhang anchors active
+ * at that height. Implemented per-layer as short vertical/horizontal dashes
+ * around each anchor cell so the result is printable open lines.
+ */
+function buildGridSupportForLayer(anchors: OverhangPoint[], z: number, spacing: number, lineWidth: number): Polyline[] {
+  const out: Polyline[] = [];
+  const half = spacing * 0.5;
+  for (const a of anchors) {
+    if (z >= a.zTop - lineWidth) continue; // only below the overhang
+    // A small "#" of two crossing strokes per anchor cell — sparse but stable.
+    const h = new Polyline();
+    h.add({ x: a.x - half, y: a.y });
+    h.add({ x: a.x + half, y: a.y });
+    out.push(h);
+    const v = new Polyline();
+    v.add({ x: a.x, y: a.y - half });
+    v.add({ x: a.x, y: a.y + half });
+    out.push(v);
+  }
+  return out;
+}
+
+/** A node in a tree-support trunk: a contact at the top tapering to the bed. */
+interface TreeBranch {
+  /** XY at the overhang contact (top). */
+  topX: number;
+  topY: number;
+  /** XY at the bed (base) — pulled toward the cluster centroid for stability. */
+  baseX: number;
+  baseY: number;
+  zTop: number;
+  zBase: number;
+}
+
+/**
+ * Build TREE supports: cluster overhang anchors, then for each cluster create a
+ * branch whose top sits under the overhang and whose base drifts toward the
+ * shared cluster centroid as it descends (so nearby branches lean together into
+ * a trunk). Each branch is realized at slice time as a short circle/segment at
+ * its interpolated XY for the current layer Z.
+ */
+function buildTreeBranches(anchors: OverhangPoint[], spacing: number, zMin: number): TreeBranch[] {
+  if (anchors.length === 0) return [];
+  // Group anchors into clusters by a coarser grid so branches merge.
+  const groupCell = Math.max(spacing * 2.5, 1);
+  const groups = new Map<string, OverhangPoint[]>();
+  for (const a of anchors) {
+    const k = `${Math.round(a.x / groupCell)}:${Math.round(a.y / groupCell)}`;
+    const arr = groups.get(k);
+    if (arr) arr.push(a);
+    else groups.set(k, [a]);
+  }
+  const branches: TreeBranch[] = [];
+  for (const g of groups.values()) {
+    let gx = 0, gy = 0;
+    for (const a of g) { gx += a.x; gy += a.y; }
+    gx /= g.length; gy /= g.length;
+    for (const a of g) {
+      branches.push({
+        topX: a.x, topY: a.y,
+        baseX: gx, baseY: gy, // lean toward the shared trunk
+        zTop: a.zTop, zBase: zMin,
+      });
+    }
+  }
+  return branches;
+}
+
+/** Tree branch toolpath at a given Z: a tiny ring at the interpolated XY. */
+function treeBranchAtZ(b: TreeBranch, z: number, radius: number): Polyline | null {
+  if (z >= b.zTop - 1e-6 || z < b.zBase - 1e-6) return null;
+  const span = b.zTop - b.zBase;
+  // 0 at base, 1 at top.
+  const t = span > 1e-6 ? (z - b.zBase) / span : 1;
+  const x = b.baseX + (b.topX - b.baseX) * t;
+  const y = b.baseY + (b.topY - b.baseY) * t;
+  // A small square loop (cheap, printable) around the branch centre.
+  const r = radius;
+  const pl = new Polyline();
+  pl.add({ x: x - r, y: y - r });
+  pl.add({ x: x + r, y: y - r });
+  pl.add({ x: x + r, y: y + r });
+  pl.add({ x: x - r, y: y + r });
+  pl.closed = true;
+  return pl;
+}
+
 /**
  * Slice a triangle mesh into printable layers. The mesh is sliced in its own
  * coordinate frame; the caller is responsible for having transformed vertices
@@ -573,6 +743,23 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
   // Infill spacing from density: 100% -> lineWidth spacing; lower -> wider.
   const infillSpacing = density <= 0 ? Infinity : (lineWidth * 100) / density;
 
+  // ---- Supports (optional) -------------------------------------------------
+  const supportType: SupportType = params.supportType ?? 'none';
+  const supportSpacing = Math.max(lineWidth * 6, 3); // sparse columns
+  const treeRingR = Math.max(lineWidth * 1.5, 0.6);
+  let gridAnchors: OverhangPoint[] = [];
+  let treeBranches: TreeBranch[] = [];
+  if (supportType !== 'none') {
+    const overhangDeg = params.supportOverhangAngle ?? 50;
+    const raw = collectOverhangs(mesh, overhangDeg, layerH);
+    const clustered = clusterOverhangs(raw, supportSpacing);
+    if (supportType === 'grid') {
+      gridAnchors = clustered;
+    } else {
+      treeBranches = buildTreeBranches(clustered, supportSpacing, zMin);
+    }
+  }
+
   let degenerateLayers = 0;
 
   for (let li = 0; li < nLayers; li++) {
@@ -609,19 +796,35 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
       }
     }
 
-    if (segs.length < 3) {
-      degenerateLayers++;
-      continue;
-    }
-
-    const contours = stitchContours(segs, stitchQ);
-    if (contours.length === 0) {
-      degenerateLayers++;
-      continue;
-    }
-
     const z = (li + 1) * layerH; // print height for this layer (top of slab, >0)
-    const layer: SliceLayer = { z, perimeters: [], infill: [] };
+
+    // Support toolpaths for this layer (built even on layers with no model
+    // contour, so columns reach the bed under a floating overhang).
+    let support: Polyline[] | undefined;
+    if (supportType === 'grid' && gridAnchors.length) {
+      const s = buildGridSupportForLayer(gridAnchors, z, supportSpacing, lineWidth);
+      if (s.length) support = s;
+    } else if (supportType === 'tree' && treeBranches.length) {
+      const s: Polyline[] = [];
+      for (const b of treeBranches) {
+        const ring = treeBranchAtZ(b, z, treeRingR);
+        if (ring) s.push(ring);
+      }
+      if (s.length) support = s;
+    }
+
+    const contours = segs.length >= 3 ? stitchContours(segs, stitchQ) : [];
+    if (contours.length === 0) {
+      // No model on this layer, but support may still need to print here.
+      if (support && support.length) {
+        result.layers.push({ z, perimeters: [], infill: [], support });
+      } else {
+        degenerateLayers++;
+      }
+      continue;
+    }
+
+    const layer: SliceLayer = { z, perimeters: [], infill: [], support };
 
     for (const contour of contours) {
       if (contour.points.length < 3) continue;
@@ -643,7 +846,7 @@ export function sliceMesh(mesh: StlMesh, params: SliceParams, onProgress?: Slice
       }
     }
 
-    if (layer.perimeters.length > 0 || layer.infill.length > 0) {
+    if (layer.perimeters.length > 0 || layer.infill.length > 0 || (layer.support && layer.support.length > 0)) {
       result.layers.push(layer);
     }
   }
@@ -689,10 +892,95 @@ export interface GcodeParams {
   fanEnabled: boolean;
   // Skirt
   skirt: boolean;
+  /**
+   * Emit G2/G3 arcs for curved runs of perimeter points (shrinks G-code +
+   * smooths motion on controllers that support arc interpolation). Off by
+   * default; line moves are always valid, arcs are an opt-in optimisation.
+   */
+  arcFitting?: boolean;
+  /** Max chord deviation (mm) an arc may have from the original points. Default 0.05. */
+  arcTolerance?: number;
   // Origin offset applied to all XY (so caller can centre the part on the bed).
   offsetX?: number;
   offsetY?: number;
   decimals?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Arc fitting (G2/G3) — fit circular arcs to runs of near-cocircular points.
+// ---------------------------------------------------------------------------
+
+/** A fitted span of a polyline: either a straight move to `end` or an arc. */
+export interface FittedMove {
+  end: Point;
+  /** Present for arc moves: circle centre, CCW flag (G3) vs CW (G2). */
+  arc?: { center: Point; ccw: boolean };
+}
+
+/** Circle through 3 points, or null if (near-)colinear. */
+function circleFrom3(a: Point, b: Point, c: Point): { cx: number; cy: number; r: number } | null {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < 1e-9) return null;
+  const a2 = a.x * a.x + a.y * a.y;
+  const b2 = b.x * b.x + b.y * b.y;
+  const c2 = c.x * c.x + c.y * c.y;
+  const cx = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d;
+  const cy = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d;
+  const r = Math.hypot(a.x - cx, a.y - cy);
+  return { cx, cy, r };
+}
+
+/**
+ * Fit a sequence of XY points (an open or already-unrolled closed loop) into a
+ * minimal list of moves: greedily extend an arc as long as every intermediate
+ * point stays within `tol` of the candidate circle and the turn direction is
+ * consistent; otherwise emit a line. Pure + deterministic. Points are assumed
+ * to start AT the current position (caller is already there), so the first
+ * returned move begins from `pts[0]`.
+ */
+export function fitArcs(pts: Point[], tol: number): FittedMove[] {
+  const moves: FittedMove[] = [];
+  const n = pts.length;
+  if (n < 2) return moves;
+  let i = 0;
+  while (i < n - 1) {
+    // Try to grow an arc starting at i spanning at least 2 more points.
+    let bestEnd = -1;
+    let bestCircle: { cx: number; cy: number; r: number } | null = null;
+    let bestCcw = false;
+    if (i + 2 < n) {
+      // Seed the circle from i, i+1, i+2 and extend while points stay on it.
+      let j = i + 2;
+      let circle = circleFrom3(pts[i], pts[i + 1], pts[j]);
+      while (circle && j < n) {
+        // Validate every point i..j against this circle.
+        let ok = circle.r > 1e-3 && circle.r < 1e5;
+        if (ok) {
+          for (let k = i; k <= j; k++) {
+            const dr = Math.abs(Math.hypot(pts[k].x - circle.cx, pts[k].y - circle.cy) - circle.r);
+            if (dr > tol) { ok = false; break; }
+          }
+        }
+        if (!ok) break;
+        bestEnd = j;
+        bestCircle = circle;
+        // Determine sweep direction from the cross product of the first turn.
+        const ux = pts[i + 1].x - pts[i].x, uy = pts[i + 1].y - pts[i].y;
+        const vx = pts[i + 2].x - pts[i + 1].x, vy = pts[i + 2].y - pts[i + 1].y;
+        bestCcw = ux * vy - uy * vx > 0;
+        j++;
+        if (j < n) circle = circleFrom3(pts[i], pts[Math.floor((i + j) / 2)], pts[j]);
+      }
+    }
+    if (bestEnd > i + 1 && bestCircle) {
+      moves.push({ end: pts[bestEnd], arc: { center: { x: bestCircle.cx, y: bestCircle.cy }, ccw: bestCcw } });
+      i = bestEnd;
+    } else {
+      moves.push({ end: pts[i + 1] });
+      i++;
+    }
+  }
+  return moves;
 }
 
 /** Format a number, snapping near-zero to avoid "-0.000". */
@@ -790,14 +1078,49 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams, onProgress
     lastY = y;
   };
 
+  // Extruding ARC move to (x,y) about `center` (G2 cw / G3 ccw), using I/J
+  // (centre offset from the current point). E advances by the arc length so the
+  // bead volume matches; arc length = radius × swept angle.
+  const arcTo = (x: number, y: number, center: Point, ccw: boolean, feed: number) => {
+    if (Number.isNaN(lastX)) { lastX = x; lastY = y; return; }
+    const i = center.x - lastX;
+    const j = center.y - lastY;
+    const r = Math.hypot(i, j);
+    // Swept angle from start→end about centre (sign per direction).
+    const a0 = Math.atan2(lastY - center.y, lastX - center.x);
+    const a1 = Math.atan2(y - center.y, x - center.x);
+    let sweep = a1 - a0;
+    if (ccw) { while (sweep <= 0) sweep += 2 * Math.PI; }
+    else { while (sweep >= 0) sweep -= 2 * Math.PI; }
+    const arcLen = Math.abs(sweep) * r;
+    e += arcLen * ePerMm;
+    // G2 = clockwise, G3 = counter-clockwise.
+    out.push(`${ccw ? 'G3' : 'G2'} X${f(x + offX)} Y${f(y + offY)} I${f(i)} J${f(j)} E${f(e)} F${f(feed)}`);
+    lastX = x;
+    lastY = y;
+  };
+
+  const arcFit = params.arcFitting === true;
+  const arcTol = params.arcTolerance ?? 0.05;
+
   // Print a single open/closed polyline as: travel to first point, extrude rest.
-  const printPath = (pl: Polyline, feed: number) => {
+  // When arc-fitting is on, perimeter runs are condensed into G2/G3 arcs.
+  const printPath = (pl: Polyline, feed: number, allowArcs = false) => {
     const pts = pl.points;
     if (pts.length < 2) return;
     travelTo(pts[0].x, pts[0].y, params.travelSpeed);
     unretractMove();
-    for (let i = 1; i < pts.length; i++) extrudeTo(pts[i].x, pts[i].y, feed);
-    if (pl.closed) extrudeTo(pts[0].x, pts[0].y, feed); // close the loop
+    // Build the ordered point list to traverse (append the closing vertex).
+    const seq = pl.closed ? [...pts, pts[0]] : pts;
+    if (allowArcs && arcFit && seq.length > 3) {
+      const moves = fitArcs(seq, arcTol);
+      for (const mv of moves) {
+        if (mv.arc) arcTo(mv.end.x, mv.end.y, mv.arc.center, mv.arc.ccw, feed);
+        else extrudeTo(mv.end.x, mv.end.y, feed);
+      }
+    } else {
+      for (let i = 1; i < seq.length; i++) extrudeTo(seq[i].x, seq[i].y, feed);
+    }
   };
 
   // ---- Optional skirt (around the first layer's footprint) ------------------
@@ -842,8 +1165,14 @@ export function sliceToGcode(slice: SliceResult, params: GcodeParams, onProgress
 
     if (isFirst && params.skirt) drawSkirt();
 
-    // Perimeters first (better surface), then infill.
-    for (const w of layer.perimeters) printPath(w, speed);
+    // Support first (printed before the model on each layer so the nozzle isn't
+    // dragging over fresh part walls). Support never uses arc-fitting.
+    if (layer.support && layer.support.length) {
+      out.push('; support');
+      for (const sp of layer.support) printPath(sp, speed);
+    }
+    // Perimeters (arc-fittable) for surface quality, then infill (straight).
+    for (const w of layer.perimeters) printPath(w, speed, true);
     for (const fpath of layer.infill) printPath(fpath, speed);
   }
 
@@ -906,6 +1235,7 @@ export function estimatePrint(slice: SliceResult, params: GcodeParams): PrintEst
     let layerLen = 0;
     for (const w of layer.perimeters) layerLen += pathLen(w);
     for (const f of layer.infill) layerLen += pathLen(f);
+    if (layer.support) for (const s of layer.support) layerLen += pathLen(s);
     printLenMm += layerLen;
     if (feed > 0) timeMin += layerLen / feed;
     // Per-layer Z move + a small travel allowance.
@@ -922,6 +1252,160 @@ export function estimatePrint(slice: SliceResult, params: GcodeParams): PrintEst
     filamentGrams,
     timeSeconds: timeMin * 60,
   };
+}
+
+// ============================================================================
+// Feature-typed preview segments (D3 — layer / feature preview)
+// ============================================================================
+
+/** Which feature a previewed move belongs to (drives the preview colour). */
+export type FeatureType = 'perimeter' | 'infill' | 'support' | 'travel';
+
+/** One previewed move: a polyline of XY points at layer height `z`, with a type. */
+export interface PreviewSegment {
+  type: FeatureType;
+  z: number;
+  /** Flat [x0,y0, x1,y1, …] coordinate pairs (cheap to ship + render). */
+  pts: number[];
+}
+
+/** Preview geometry grouped per layer, ready for the 3D layer scrubber. */
+export interface PreviewLayer {
+  z: number;
+  segments: PreviewSegment[];
+}
+
+/**
+ * Build lightweight, feature-typed preview geometry from a slice result for the
+ * 3D layer scrubber. Perimeters/infill/support are emitted as typed polylines,
+ * and the travel hops BETWEEN printed paths are reconstructed as 'travel'
+ * segments (so the preview can show rapids). Coordinates carry the same XY
+ * offset the emitter applies, so the preview lines up with the toolpath.
+ */
+export function buildPreviewLayers(slice: SliceResult, offsetX = 0, offsetY = 0): PreviewLayer[] {
+  const layers: PreviewLayer[] = [];
+  const flat = (pl: Polyline): number[] => {
+    const a: number[] = [];
+    for (const p of pl.points) a.push(p.x + offsetX, p.y + offsetY);
+    if (pl.closed && pl.points.length) a.push(pl.points[0].x + offsetX, pl.points[0].y + offsetY);
+    return a;
+  };
+  for (const layer of slice.layers) {
+    const segments: PreviewSegment[] = [];
+    let prevEnd: [number, number] | null = null;
+    const emit = (pl: Polyline, type: FeatureType) => {
+      if (pl.points.length < 2) return;
+      const pts = flat(pl);
+      // Travel from the previous path's end to this path's start.
+      const sx = pts[0], sy = pts[1];
+      if (prevEnd && (prevEnd[0] !== sx || prevEnd[1] !== sy)) {
+        segments.push({ type: 'travel', z: layer.z, pts: [prevEnd[0], prevEnd[1], sx, sy] });
+      }
+      segments.push({ type, z: layer.z, pts });
+      prevEnd = [pts[pts.length - 2], pts[pts.length - 1]];
+    };
+    if (layer.support) for (const s of layer.support) emit(s, 'support');
+    for (const w of layer.perimeters) emit(w, 'perimeter');
+    for (const f of layer.infill) emit(f, 'infill');
+    layers.push({ z: layer.z, segments });
+  }
+  return layers;
+}
+
+// ============================================================================
+// Pressure-advance / linear-advance calibration pattern (D9)
+// ============================================================================
+
+export interface PaTestParams {
+  /** Marlin (M900 K) vs Klipper (SET_PRESSURE_ADVANCE) flavour of the command. */
+  firmware: 'marlin' | 'klipper';
+  startK: number;       // first PA/K value
+  endK: number;         // last PA/K value
+  steps: number;        // number of swept lines (>=2)
+  // Geometry
+  lineLength: number;   // mm, length of each test line's fast section
+  lineSpacing: number;  // mm, Y spacing between swept lines
+  // Print params reused from the main settings
+  layerHeight: number;
+  lineWidth: number;
+  filamentDiameter: number;
+  nozzleTemp: number;
+  bedTemp: number;
+  slowSpeed: number;    // mm/min (start/end of each line)
+  fastSpeed: number;    // mm/min (middle of each line — reveals PA error)
+  // Bed centring
+  bedX: number;
+  bedY: number;
+}
+
+/**
+ * Generate a pressure-advance / linear-advance calibration print: a fan of
+ * horizontal lines, each printed at a different PA value, where every line has a
+ * slow→fast→slow speed profile. The PA value that yields uniform extrusion at
+ * the fast↔slow transitions is the calibrated one. Emits valid, safe FDM G-code
+ * (heat + wait, prime, per-line PA command, safe end). Pure (no DOM).
+ */
+export function generatePaTest(p: PaTestParams): string {
+  const dec = 3;
+  const f = (v: number) => fmt(v, dec);
+  const steps = Math.max(2, Math.floor(p.steps));
+  const ePerMm = extrusionPerMm(p.lineWidth, p.layerHeight, p.filamentDiameter);
+  const out: string[] = [];
+
+  // Centre the pattern on the bed.
+  const totalY = (steps - 1) * p.lineSpacing;
+  const x0 = p.bedX / 2 - p.lineLength / 2;
+  const slowLen = Math.min(20, p.lineLength * 0.25);
+  const x1 = x0 + slowLen;
+  const x2 = x0 + p.lineLength - slowLen;
+  const x3 = x0 + p.lineLength;
+  const yStart = p.bedY / 2 - totalY / 2;
+
+  out.push('; karmyogi pressure-advance / linear-advance calibration');
+  out.push(`; ${p.firmware} sweep K=${p.startK}..${p.endK} over ${steps} lines`);
+  out.push('G21 ; mm');
+  out.push('G90 ; absolute positioning');
+  out.push('M82 ; absolute extrusion');
+  out.push(`M140 S${f(p.bedTemp)} ; set bed temp`);
+  out.push(`M104 S${f(p.nozzleTemp)} ; set hotend temp`);
+  out.push(`M190 S${f(p.bedTemp)} ; wait for bed`);
+  out.push(`M109 S${f(p.nozzleTemp)} ; wait for hotend`);
+  out.push('G28 ; home all axes');
+  out.push('G92 E0 ; zero extruder');
+  out.push('M107 ; fan off');
+  out.push(`G1 Z${f(p.layerHeight)} F${f(p.slowSpeed)}`);
+  out.push(`G1 E${f(2)} F${f(p.slowSpeed)} ; prime`);
+
+  let e = 2;
+  const extrude = (fromX: number, toX: number, y: number, feed: number) => {
+    e += Math.abs(toX - fromX) * ePerMm;
+    out.push(`G1 X${f(toX)} Y${f(y)} E${f(e)} F${f(feed)}`);
+  };
+
+  for (let i = 0; i < steps; i++) {
+    const k = p.startK + ((p.endK - p.startK) * i) / (steps - 1);
+    const y = yStart + i * p.lineSpacing;
+    out.push(`; line ${i + 1}/${steps}  K=${k.toFixed(4)}`);
+    if (p.firmware === 'marlin') out.push(`M900 K${k.toFixed(4)} ; set linear advance`);
+    else out.push(`SET_PRESSURE_ADVANCE ADVANCE=${k.toFixed(4)} ; set pressure advance`);
+    // Travel to the line start.
+    out.push(`G1 E${f(e - 0.8)} F${f(p.slowSpeed)} ; retract`);
+    out.push(`G0 X${f(x0)} Y${f(y)} F${f(Math.max(p.fastSpeed, p.slowSpeed))}`);
+    out.push(`G1 E${f(e)} F${f(p.slowSpeed)} ; unretract`);
+    // slow → fast → slow profile.
+    extrude(x0, x1, y, p.slowSpeed);
+    extrude(x1, x2, y, p.fastSpeed);
+    extrude(x2, x3, y, p.slowSpeed);
+  }
+
+  out.push('; end');
+  out.push('M104 S0 ; hotend off');
+  out.push('M140 S0 ; bed off');
+  out.push('M107 ; fan off');
+  out.push(`G1 Z${f(p.layerHeight + 10)} F${f(p.slowSpeed)} ; raise Z`);
+  out.push('G28 X Y ; park');
+  out.push('M84 ; disable steppers');
+  return out.join('\n') + '\n';
 }
 
 // ============================================================================
@@ -970,6 +1454,8 @@ export interface SliceWorkerDone {
   warnings: SliceWarning[];
   /** Filament + time estimate (omitted when no layers were produced). */
   estimate?: PrintEstimate;
+  /** Feature-typed per-layer preview geometry for the 3D layer scrubber. */
+  preview?: PreviewLayer[];
 }
 
 export interface SliceWorkerError {

@@ -195,6 +195,16 @@
   cursor: pointer;
 }
 
+/* Standalone toggle row (e.g. air assist) — left-aligned, not floated right. */
+.lp-toggle-row {
+  display: flex;
+  align-items: center;
+  margin-top: var(--sp-2);
+}
+.lp-toggle-row .lp-toggle {
+  margin-left: 0;
+}
+
 /* ───────────────────────── hints / warnings ───────────────────────── */
 .lp-hint {
   margin: 0;

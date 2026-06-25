@@ -77,6 +77,33 @@ const IconIso = (
     <path d="M12 3v9M12 12l8-4.5M12 12l-8-4.5" />
   </VIcon>
 )
+// Top view: looking straight down onto a square (plan).
+const IconViewTop = (
+  <VIcon>
+    <rect x="5" y="5" width="14" height="14" rx="1" />
+    <path d="M5 9.5h14M9.5 5v14" opacity="0.55" />
+  </VIcon>
+)
+// Front view: an elevation — a face-on rectangle with a ground line.
+const IconViewFront = (
+  <VIcon>
+    <rect x="5" y="6" width="14" height="10" rx="1" />
+    <path d="M3 20h18" />
+  </VIcon>
+)
+// Right view: an elevation seen edge-on (a thin profile + depth hint).
+const IconViewRight = (
+  <VIcon>
+    <path d="M9 6h6l3 3v7a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1V6z" />
+    <path d="M15 6v3h3" />
+  </VIcon>
+)
+// Run-outline / footprint: a dashed bounding rectangle on a baseline (the bed).
+const IconRunOutline = (
+  <VIcon>
+    <path d="M4 7h3M9 7h3M14 7h3M19 7v3M19 12v3M17 17h-3M12 17H9M7 17H4M4 15v-3M4 10V7" />
+  </VIcon>
+)
 // Bed size: a ruler / measure frame.
 const IconBed = (
   <VIcon>
@@ -318,6 +345,13 @@ export function VisualizerPanel() {
   const [showDimensions, setShowDimensions] = usePersistentState(
     'karmyogi.viewer.showDimensions',
     true,
+  )
+  // O6 run-outline / bounds preview: draw the program's XY footprint on the bed
+  // (colour-coded by bed-fit) so the operator sees placement before running.
+  // Persisted so the operator's preference survives reloads.
+  const [showRunOutline, setShowRunOutline] = usePersistentState(
+    'karmyogi.viewer.showRunOutline',
+    false,
   )
 
   // Add a viewport primitive at the bed centre (0,0); it auto-selects so its
@@ -730,6 +764,34 @@ export function VisualizerPanel() {
           >
             {IconFit}
           </button>
+          <span className="vz-toolbar-sep" aria-hidden="true" />
+          {/* V5 preset camera views — a compact cluster that snaps the camera to
+              Top / Front / Right / Iso (smooth, reduced-motion-gated). They drive
+              the same OrbitControls/camera as the orientation cube. */}
+          <button
+            className="vz-toolbar-btn"
+            onClick={() => ref.current?.setView('top')}
+            title={t('vz.top', 'Top view')}
+            aria-label={t('vz.top', 'Top view')}
+          >
+            {IconViewTop}
+          </button>
+          <button
+            className="vz-toolbar-btn"
+            onClick={() => ref.current?.setView('front')}
+            title={t('vz.front', 'Front view')}
+            aria-label={t('vz.front', 'Front view')}
+          >
+            {IconViewFront}
+          </button>
+          <button
+            className="vz-toolbar-btn"
+            onClick={() => ref.current?.setView('right')}
+            title={t('vz.right', 'Right view')}
+            aria-label={t('vz.right', 'Right view')}
+          >
+            {IconViewRight}
+          </button>
           <button
             className="vz-toolbar-btn"
             onClick={() => ref.current?.setView('iso')}
@@ -738,8 +800,23 @@ export function VisualizerPanel() {
           >
             {IconIso}
           </button>
-          {/* Top/front view buttons removed — the orientation cube (upper-right)
-              now covers all named views (faces/edges/corners). */}
+          <span className="vz-toolbar-sep" aria-hidden="true" />
+          {/* O6 run-outline: latch the program-footprint preview on the bed. */}
+          <button
+            className={
+              showRunOutline ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
+            }
+            onClick={() => setShowRunOutline((s) => !s)}
+            disabled={!hasProgram}
+            title={t(
+              'vz.runOutline',
+              'Run outline — show the program footprint on the bed before running',
+            )}
+            aria-label={t('vz.runOutline', 'Run outline')}
+            aria-pressed={showRunOutline}
+          >
+            {IconRunOutline}
+          </button>
           <span className="vz-toolbar-sep" aria-hidden="true" />
           <BedSizeControl />
           {/* Overflow menu for the secondary controls. */}
@@ -855,6 +932,9 @@ export function VisualizerPanel() {
           sectionVisibility={sectionVisibility}
           showShapes={showModel}
           showBed={showBed}
+          showRunOutline={showRunOutline}
+          runOutlineBounds={dims ? { min: dims.min, max: dims.max } : null}
+          runOutlineFit={dims?.fit ?? 'ok'}
         />
         <LegendPanel
           t={t}

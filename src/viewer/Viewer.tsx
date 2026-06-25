@@ -28,6 +28,8 @@ import { SolderScene } from './SolderScene'
 import { useSolderViz } from '../store/solderViz'
 import { ToolpathStartMarker } from './ToolpathStartMarker'
 import { CameraQuatReporter, AxisOverlay } from './AxisOverlay'
+import { RunOutline } from './RunOutline'
+import { prefersReducedMotion } from './reducedMotion'
 import { useViewportShapes } from '../store/viewportShapes'
 import { shapesToGcode } from '../core/viewportShapeGcode'
 import { useProgram } from '../store/program'
@@ -37,9 +39,19 @@ import { gcodeToPolylines, type Segment, type Bounds } from './gcodeToPolylines'
 import {
   frameBounds,
   fitToBounds,
+  boundsCenter,
+  boundsRadius,
+  fitDistance,
   type Bounds3,
   type ViewName,
 } from './viewControls'
+
+/**
+ * Preset camera views exposed by the toolbar (V5). A superset of viewControls'
+ * `ViewName` — `right` is computed locally here (looking along -X onto the YZ
+ * plane) so the pure helper module stays unchanged.
+ */
+export type PresetView = ViewName | 'right'
 import { useSettings } from '../store'
 import { useBed } from '../store/bed'
 
@@ -68,8 +80,8 @@ function OrientationGizmo({ theme }: { theme: string }) {
 export interface ViewerHandle {
   /** Fit the toolpath to the viewport, keeping the current angle. */
   fit: () => void
-  /** Jump to a named view (isometric / top / front), reframed to bounds. */
-  setView: (view: ViewName) => void
+  /** Snap to a named preset view (iso / top / front / right), reframed to bounds. */
+  setView: (view: PresetView) => void
 }
 
 export interface ViewerProps {
@@ -245,6 +257,17 @@ export interface ViewerProps {
    * cube). Default true.
    */
   showBed?: boolean
+  /**
+   * O6 run-outline / bounds preview: draw the loaded program's XY bounding
+   * rectangle flat on the bed so the operator sees the footprint (and whether it
+   * fits the bed) BEFORE running. Default false. The panel supplies the already-
+   * computed program bounds (`runOutlineBounds`) so the viewer never re-parses.
+   */
+  showRunOutline?: boolean
+  /** Program XY bounds for the run-outline (panel-computed; reused, not re-parsed). */
+  runOutlineBounds?: { min: [number, number, number]; max: [number, number, number] } | null
+  /** Bed-fit verdict from the panel — colours the outline (ok / warn / danger). */
+  runOutlineFit?: 'ok' | 'warn' | 'danger'
 }
 
 const FOV = 45
@@ -297,6 +320,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     sectionVisibility,
     showShapes = true,
     showBed = true,
+    showRunOutline = false,
+    runOutlineBounds = null,
+    runOutlineFit = 'ok',
   },
   ref,
 ) {
@@ -414,7 +440,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   const apiRef = useRef<ViewerHandle>({ fit: () => {}, setView: () => {} })
   useImperativeHandle(ref, () => ({
     fit: () => apiRef.current.fit(),
-    setView: (v) => apiRef.current.setView(v),
+    setView: (v: PresetView) => apiRef.current.setView(v),
   }))
 
 
@@ -781,6 +807,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
               job not starting at zero — so we recompute from the moves themselves. */}
           {showDimensions && dimExtent && (
             <Dimensions bounds={dimExtent} dark={theme === 'dark'} />
+          )}
+          {/* O6 run-outline: the program's XY footprint drawn flat on the bed,
+              colour-coded by bed-fit, so the operator can judge placement before
+              running. Bounds + verdict come pre-computed from the panel. */}
+          {showRunOutline && runOutlineBounds && (
+            <RunOutline bounds={runOutlineBounds} fit={runOutlineFit} dark={theme === 'dark'} />
           )}
         </>
       )}
@@ -1248,8 +1280,21 @@ function ViewController({
   const boundsRef = useRef(bounds)
   boundsRef.current = bounds
 
+  // V5 smooth view transition. A handler stashes the destination camera pose
+  // here; useFrame eases toward it (position + orbit target). Gated on
+  // prefers-reduced-motion — when set, we snap instantly (anim left null).
+  const anim = useRef<{
+    fromPos: THREE.Vector3
+    toPos: THREE.Vector3
+    fromTgt: THREE.Vector3
+    toTgt: THREE.Vector3
+    t: number
+    dur: number
+  } | null>(null)
+
   useEffect(() => {
-    const apply = (pos: [number, number, number], target: [number, number, number]) => {
+    const snap = (pos: [number, number, number], target: [number, number, number]) => {
+      anim.current = null
       camera.position.set(pos[0], pos[1], pos[2])
       camera.up.set(0, 0, 1)
       if (controls) {
@@ -1257,6 +1302,26 @@ function ViewController({
         controls.update()
       } else {
         camera.lookAt(new THREE.Vector3(target[0], target[1], target[2]))
+      }
+    }
+
+    // Animate toward the pose unless the user prefers reduced motion (snap).
+    const apply = (pos: [number, number, number], target: [number, number, number]) => {
+      if (prefersReducedMotion()) {
+        snap(pos, target)
+        return
+      }
+      camera.up.set(0, 0, 1)
+      const curTgt = controls
+        ? controls.target.clone()
+        : new THREE.Vector3(0, 0, 0)
+      anim.current = {
+        fromPos: camera.position.clone(),
+        toPos: new THREE.Vector3(pos[0], pos[1], pos[2]),
+        fromTgt: curTgt,
+        toTgt: new THREE.Vector3(target[0], target[1], target[2]),
+        t: 0,
+        dur: 0.45,
       }
     }
 
@@ -1269,11 +1334,43 @@ function ViewController({
       apply(v.position, v.target)
     }
 
-    apiRef.current.setView = (view: ViewName) => {
+    apiRef.current.setView = (view: PresetView) => {
+      // `right` isn't in the pure helper's ViewName set, so frame it locally
+      // (looking along -X onto the YZ plane, Z up) using the shared math.
+      if (view === 'right') {
+        const b: Bounds3 =
+          boundsRef.current ?? {
+            min: [0, 0, 0],
+            max: [bedSize[0], bedSize[1], bedSize[2]],
+          }
+        const target = boundsCenter(b)
+        const dist = fitDistance(boundsRadius(b), FOV)
+        apply([target[0] + dist, target[1], target[2]], target)
+        return
+      }
       const v = frameBounds(boundsRef.current, view, FOV, bedSize)
       apply(v.position, v.target)
     }
   }, [camera, controls, apiRef, bedSize])
+
+  // Ease the camera toward the stashed destination (smootherstep). Updating the
+  // OrbitControls target each frame keeps orbiting in sync after the transition.
+  useFrame((_, delta) => {
+    const a = anim.current
+    if (!a) return
+    a.t = Math.min(1, a.t + delta / a.dur)
+    const x = a.t
+    const e = x * x * x * (x * (x * 6 - 15) + 10) // smootherstep
+    camera.position.lerpVectors(a.fromPos, a.toPos, e)
+    if (controls) {
+      controls.target.lerpVectors(a.fromTgt, a.toTgt, e)
+      controls.update()
+    } else {
+      const tg = a.fromTgt.clone().lerp(a.toTgt, e)
+      camera.lookAt(tg)
+    }
+    if (a.t >= 1) anim.current = null
+  })
 
   return null
 }

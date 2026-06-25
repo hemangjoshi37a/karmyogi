@@ -84,6 +84,14 @@ export interface LaserParams {
   /** Pierce dwell time (seconds), emitted as G4 P<sec>. */
   pierceTime: number;
 
+  // ---- Air assist ---------------------------------------------------------
+  /**
+   * Turn an air-assist solenoid on for the whole job: `M8` (flood/air) right
+   * after the safe header, `M9` (off) at program end. Off by default; never
+   * gates the beam — purely an auxiliary output.
+   */
+  airAssist?: boolean;
+
   // ---- Output formatting --------------------------------------------------
   decimals: number;
   programName: string;
@@ -105,6 +113,7 @@ export function defaultLaserParams(mode: LaserMode = LaserMode.CO2, overrides: P
     pierce: fiber, // CO2 usually no pierce; fiber pierces before each contour
     piercePower: fiber ? 1000 : 700,
     pierceTime: fiber ? 0.3 : 0.2,
+    airAssist: false,
     decimals: 3,
     programName: 'hjLabs Laser Cutting',
     ...overrides,
@@ -255,6 +264,7 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
   o.push('G94'); // feed per minute
   o.push('G17'); // XY plane
   o.push('M5 S0'); // laser OFF to start (safe)
+  if (p.airAssist) o.push('M8'); // air assist on (auxiliary; never gates the beam)
 
   // Focus-Z at program start (Z used only for focus, never as on/off). Clamp to
   // >= 0 in the CORE (not just the UI) so a loaded/edited file with a negative
@@ -323,6 +333,7 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
   // ---- Footer -------------------------------------------------------------
   o.push('M5 S0'); // laser OFF at program end
   if (p.useFocusZ) o.push(`G0 Z${fmt(Math.max(0, p.focusZ), d)}`); // keep at focus height
+  if (p.airAssist) o.push('M9'); // air assist off
   o.push('M30');
 
   return o.join('\n') + '\n';

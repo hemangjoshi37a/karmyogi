@@ -29,6 +29,7 @@ import '../styles/cam.css'
 import {
   parseStl,
   STL_STRIDE,
+  generatePaTest,
   type StlMesh,
   type SliceParams,
   type GcodeParams,
@@ -36,7 +37,19 @@ import {
   type PrintEstimate,
   type SliceWorkerRequest,
   type SliceWorkerOutbound,
+  type SupportType,
+  type PreviewLayer,
+  type FeatureType,
 } from '../core/slicer'
+import {
+  resolvePreset,
+  PRESET_MATERIALS,
+  PRESET_QUALITIES,
+  MATERIAL_LABELS,
+  QUALITY_LABELS,
+  type PresetMaterial,
+  type PresetQuality,
+} from '../core/printPresets'
 import '../styles/print.css'
 
 // Z build height (mm). X/Y come from the shared bed config; Z has no separate
@@ -60,6 +73,10 @@ interface PrintSettings {
   firstLayerTemp: number
   firstLayerSpeed: number // mm/min
   skirt: boolean
+  // roadmap depth
+  supportType: SupportType
+  supportOverhangAngle: number // degrees from vertical
+  arcFitting: boolean
 }
 
 const DEFAULTS: PrintSettings = {
@@ -78,6 +95,9 @@ const DEFAULTS: PrintSettings = {
   firstLayerTemp: 215,
   firstLayerSpeed: 900,
   skirt: true,
+  supportType: 'none',
+  supportOverhangAngle: 50,
+  arcFitting: false,
 }
 
 /** Coerce an (untrusted) value to a finite number, else the fallback. */
@@ -111,6 +131,12 @@ function coercePrintSettings(v: unknown, base: PrintSettings): PrintSettings {
     firstLayerTemp: Math.max(0, numOr(o.firstLayerTemp, base.firstLayerTemp)),
     firstLayerSpeed: Math.max(1, numOr(o.firstLayerSpeed, base.firstLayerSpeed)),
     skirt: boolOr(o.skirt, base.skirt),
+    supportType:
+      o.supportType === 'grid' || o.supportType === 'tree' || o.supportType === 'none'
+        ? o.supportType
+        : base.supportType,
+    supportOverhangAngle: Math.max(10, Math.min(80, numOr(o.supportOverhangAngle, base.supportOverhangAngle))),
+    arcFitting: boolOr(o.arcFitting, base.arcFitting),
   }
 }
 
@@ -127,6 +153,14 @@ interface MeshInfo {
 }
 
 const f1 = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : '—')
+
+/** Feature → preview colour (shared by the 3D lines and the legend). */
+const FEATURE_COLORS: Record<FeatureType, string> = {
+  perimeter: '#5e8bd6',
+  infill: '#e0a040',
+  support: '#9a6cd0',
+  travel: '#4a5160',
+}
 
 /** A labelled row pairing a caption with a segmented control. */
 function SegRow({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
@@ -238,6 +272,19 @@ export function PrintPanel() {
   const [estimate, setEstimate] = useState<PrintEstimate | null>(null)
   const [showGcode, setShowGcode] = useState(false)
 
+  // ---- D2 material × quality presets ---------------------------------------
+  const [presetMat, setPresetMat] = usePersistentState<PresetMaterial>('karmyogi.print.preset.mat', 'pla')
+  const [presetQual, setPresetQual] = usePersistentState<PresetQuality>('karmyogi.print.preset.qual', 'standard')
+  function applyMaterialPreset() {
+    const patch = resolvePreset(presetMat, presetQual)
+    setSettings((s) => ({ ...s, ...patch }))
+  }
+
+  // ---- D3 layer / feature preview ------------------------------------------
+  // Feature-typed per-layer geometry from the last slice + the scrub position.
+  const [previewLayers, setPreviewLayers] = useState<PreviewLayer[] | null>(null)
+  const [previewIdx, setPreviewIdx] = useState(0)
+
   function set<K extends keyof PrintSettings>(key: K, value: PrintSettings[K]) {
     setSettings((s) => ({ ...s, [key]: value }))
   }
@@ -248,9 +295,10 @@ export function PrintPanel() {
   // skip this while a slice is in flight (doSlice manages lastGcode itself).
   useEffect(() => {
     if (slicing) return
-    if (lastGcode || estimate) {
+    if (lastGcode || estimate || previewLayers) {
       setLastGcode(null)
       setEstimate(null)
+      setPreviewLayers(null)
       setStatus('')
     }
     // Intentionally omit lastGcode/estimate/slicing from deps: this fires on the
@@ -444,12 +492,15 @@ export function PrintPanel() {
     setStatus(t('print.status.slicing', 'Slicing…'))
     setLastGcode(null)
     setEstimate(null)
+    setPreviewLayers(null)
 
     const sliceParams: SliceParams = {
       layerHeight: settings.layerHeight,
       lineWidth: settings.lineWidth,
       perimeters: settings.perimeters,
       infillDensity: settings.infill,
+      supportType: settings.supportType,
+      supportOverhangAngle: settings.supportOverhangAngle,
     }
     const gcodeParams: GcodeParams = {
       layerHeight: settings.layerHeight,
@@ -465,6 +516,7 @@ export function PrintPanel() {
       retractSpeed: settings.retractSpeed,
       fanEnabled: settings.fan,
       skirt: settings.skirt,
+      arcFitting: settings.arcFitting,
     }
 
     let worker: Worker
@@ -504,6 +556,9 @@ export function PrintPanel() {
         setProgram(name, msg.gcode)
         setLastGcode({ name, text: msg.gcode, lines: msg.lines })
         setEstimate(msg.estimate ?? null)
+        const pv = msg.preview ?? null
+        setPreviewLayers(pv)
+        setPreviewIdx(pv ? pv.length - 1 : 0)
         const warn = msg.warnings.length
           ? t('print.status.warnings', ' ({n} warning(s))', { n: msg.warnings.length })
           : ''
@@ -551,6 +606,39 @@ export function PrintPanel() {
       gcodeParams,
     }
     worker.postMessage(req, [tris.buffer])
+  }
+
+  // ---- D9 pressure-advance / linear-advance calibration generator ---------
+  const [paFirmware, setPaFirmware] = usePersistentState<'marlin' | 'klipper'>('karmyogi.print.pa.fw', 'marlin')
+  function genPaTest() {
+    const gcode = generatePaTest({
+      firmware: paFirmware,
+      startK: 0,
+      endK: paFirmware === 'marlin' ? 1.0 : 0.1,
+      steps: 11,
+      lineLength: Math.min(80, bedX * 0.6),
+      lineSpacing: 5,
+      layerHeight: settings.layerHeight,
+      lineWidth: settings.lineWidth,
+      filamentDiameter: settings.filamentDiameter,
+      nozzleTemp: settings.nozzleTemp,
+      bedTemp: settings.bedTemp,
+      slowSpeed: 1200,
+      fastSpeed: settings.printSpeed > 3000 ? settings.printSpeed : 4800,
+      bedX,
+      bedY,
+    })
+    const name = `pa-calibration-${paFirmware}.gcode`
+    setProgram(name, gcode)
+    const lines = gcode.split('\n').length
+    setLastGcode({ name, text: gcode, lines })
+    setEstimate(null)
+    setPreviewLayers(null)
+    setStatus(
+      t('print.pa.done', 'Generated a {fw} PA/LA calibration print → shown in Visualizer & Program.', {
+        fw: paFirmware === 'marlin' ? 'Marlin (M900 K)' : 'Klipper',
+      }),
+    )
   }
 
   function downloadGcode() {
@@ -757,9 +845,36 @@ export function PrintPanel() {
           </section>
         )}
 
-        {/* ---- 3. Print settings ---- */}
+        {/* ---- 3. Material / quality presets (D2) ---- */}
         <section className="print-section ui-card">
-          <h3 className="ui-sec-head"><Icon name="settings" size={14} className="cam-card-ico" /> {t('print.settings.title', '3 · Print settings')}</h3>
+          <h3 className="ui-sec-head"><Icon name="duplicate" size={14} className="cam-card-ico" /> {t('print.preset.title', '3 · Material preset')}</h3>
+          <div className="print-section-body">
+            <SegRow label={t('print.preset.material', 'Material')} title={t('print.preset.material.title', 'Sets temps, fan & retraction for the filament family')}>
+              <SegControl
+                ariaLabel={t('print.preset.material', 'Material')}
+                value={presetMat}
+                options={PRESET_MATERIALS.map((m) => ({ value: m, label: MATERIAL_LABELS[m] }))}
+                onChange={setPresetMat}
+              />
+            </SegRow>
+            <SegRow label={t('print.preset.quality', 'Quality')} title={t('print.preset.quality.title', 'Sets layer height, line width & speed')}>
+              <SegControl
+                ariaLabel={t('print.preset.quality', 'Quality')}
+                value={presetQual}
+                options={PRESET_QUALITIES.map((q) => ({ value: q, label: QUALITY_LABELS[q] }))}
+                onChange={setPresetQual}
+              />
+            </SegRow>
+            <button className="print-btn primary print-preset-apply" onClick={applyMaterialPreset}>
+              <Icon name="duplicate" size={15} /> {t('print.preset.apply', 'Apply {mat} · {qual}', { mat: MATERIAL_LABELS[presetMat], qual: QUALITY_LABELS[presetQual] })}
+            </button>
+            <p className="print-hint">{t('print.preset.hint', 'Applies a tuned starting point — every value stays editable below.')}</p>
+          </div>
+        </section>
+
+        {/* ---- 4. Print settings ---- */}
+        <section className="print-section ui-card">
+          <h3 className="ui-sec-head"><Icon name="settings" size={14} className="cam-card-ico" /> {t('print.settings.title', '4 · Print settings')}</h3>
           <div className="print-section-body">
             <div className="pr-sfields">
               <SliderField
@@ -835,6 +950,51 @@ export function PrintPanel() {
                   { value: 'off', label: t('print.toggle.off', 'Off') },
                 ]}
                 onChange={(v) => set('fan', v === 'on')}
+              />
+            </SegRow>
+
+            {/* Supports (D1) — grid or branching tree under overhangs. */}
+            <SegRow
+              label={t('print.support', 'Supports')}
+              title={t('print.support.title', 'Generate support material under steep overhangs')}
+            >
+              <SegControl
+                ariaLabel={t('print.support', 'Supports')}
+                value={settings.supportType}
+                options={[
+                  { value: 'none', label: t('print.support.none', 'None') },
+                  { value: 'grid', label: t('print.support.grid', 'Grid') },
+                  { value: 'tree', label: t('print.support.tree', 'Tree') },
+                ]}
+                onChange={(v) => set('supportType', v as SupportType)}
+              />
+            </SegRow>
+            {settings.supportType !== 'none' && (
+              <SliderField
+                label={t('print.support.angle', 'Overhang angle')}
+                unit={t('unit.deg', '°')}
+                value={settings.supportOverhangAngle}
+                min={20}
+                max={70}
+                step={5}
+                title={t('print.support.angle.title', 'Faces steeper than this (from vertical) get supported')}
+                onChange={(v) => set('supportOverhangAngle', v)}
+              />
+            )}
+
+            {/* Arc fitting (D5) — G2/G3 for curved perimeters. */}
+            <SegRow
+              label={t('print.arc', 'Arc fitting (G2/G3)')}
+              title={t('print.arc.title', 'Fit arcs to curved perimeters — smaller G-code, smoother motion. Off by default.')}
+            >
+              <SegControl
+                ariaLabel={t('print.arc', 'Arc fitting')}
+                value={settings.arcFitting ? 'on' : 'off'}
+                options={[
+                  { value: 'on', label: t('print.toggle.on', 'On') },
+                  { value: 'off', label: t('print.toggle.off', 'Off') },
+                ]}
+                onChange={(v) => set('arcFitting', v === 'on')}
               />
             </SegRow>
           </div>
@@ -944,7 +1104,7 @@ export function PrintPanel() {
 
         {/* ---- 5. Slice & send (full-width: primary action bar + g-code) ---- */}
         <section className="print-section print-card-wide ui-card">
-          <h3 className="ui-sec-head"><Icon name="play" size={14} className="cam-card-ico" /> {t('print.slice.title', '4 · Slice & print')}</h3>
+          <h3 className="ui-sec-head"><Icon name="play" size={14} className="cam-card-ico" /> {t('print.slice.title', '5 · Slice & print')}</h3>
           <div className="print-section-body">
             <div className="print-actions">
               <button className="print-btn primary" onClick={doSlice} disabled={!placed || slicing}>
@@ -969,6 +1129,26 @@ export function PrintPanel() {
               >
                 <Icon name="download" size={15} /> {t('print.download', 'Download .gcode')}
               </button>
+              <div className="print-pa">
+                <SegControl
+                  ariaLabel={t('print.pa.firmware', 'PA firmware')}
+                  size="sm"
+                  value={paFirmware}
+                  options={[
+                    { value: 'marlin', label: t('print.pa.marlin', 'Marlin') },
+                    { value: 'klipper', label: t('print.pa.klipper', 'Klipper') },
+                  ]}
+                  onChange={setPaFirmware}
+                />
+                <button
+                  className="print-btn"
+                  onClick={genPaTest}
+                  disabled={slicing}
+                  title={t('print.pa.title', 'Generate a pressure-advance / linear-advance calibration print (sweeps the PA value)')}
+                >
+                  <Icon name="settings" size={15} /> {t('print.pa.btn', 'PA/LA test')}
+                </button>
+              </div>
               <button
                 className="print-btn print-send"
                 onClick={sendToMachine}
@@ -1077,10 +1257,39 @@ export function PrintPanel() {
 
             <p className="print-note">
               {t('print.note.pre', 'Note: this is a')} <strong>{t('print.note.basic', 'basic FDM slicer')}</strong>{' '}
-              {t('print.note.post', '(inset perimeters + alternating 0/90° rectilinear infill) for hobby GRBL-based printers — not a production slicer (no supports, bridging, or adaptive layers). Always sanity-check the toolpath in the Visualizer before printing.')}
+              {t('print.note.post2', '(inset perimeters + 0/90° rectilinear infill, optional grid/tree supports & arc fitting) for hobby GRBL-based printers — not a production slicer (no bridging or adaptive layers). Always sanity-check the toolpath in the Visualizer before printing.')}
             </p>
           </div>
         </section>
+
+        {/* ---- 6. Layer / feature preview (D3) ---- */}
+        {previewLayers && previewLayers.length > 0 && (
+          <section className="print-section print-card-wide ui-card">
+            <h3 className="ui-sec-head"><Icon name="eye" size={14} className="cam-card-ico" /> {t('print.preview.title', '6 · Layer preview')}</h3>
+            <div className="print-section-body">
+              <div className="print-viewport">
+                <LayerPreview layers={previewLayers} upto={previewIdx} bedX={bedX} bedY={bedY} />
+              </div>
+              <SliderField
+                label={t('print.preview.layer', 'Layer')}
+                value={previewIdx + 1}
+                min={1}
+                max={previewLayers.length}
+                step={1}
+                unit={t('print.preview.of', '/ {n}', { n: previewLayers.length })}
+                title={t('print.preview.scrub.title', 'Scrub the printed layers')}
+                onChange={(v) => setPreviewIdx(Math.max(0, Math.min(previewLayers.length - 1, Math.round(v) - 1)))}
+              />
+              <div className="print-legend">
+                <span className="print-legend-item"><i className="print-swatch" style={{ background: FEATURE_COLORS.perimeter }} /> {t('print.legend.perimeter', 'Perimeter')}</span>
+                <span className="print-legend-item"><i className="print-swatch" style={{ background: FEATURE_COLORS.infill }} /> {t('print.legend.infill', 'Infill')}</span>
+                <span className="print-legend-item"><i className="print-swatch" style={{ background: FEATURE_COLORS.support }} /> {t('print.legend.support', 'Support')}</span>
+                <span className="print-legend-item"><i className="print-swatch" style={{ background: FEATURE_COLORS.travel }} /> {t('print.legend.travel', 'Travel')}</span>
+                <span className="print-legend-z">{t('print.preview.z', 'Z = {z} mm', { z: f1(previewLayers[previewIdx]?.z ?? 0) })}</span>
+              </div>
+            </div>
+          </section>
+        )}
         </div>
       </div>
     </div>
@@ -1177,6 +1386,92 @@ function MeshPreview({
           flatShading
         />
       </mesh>
+      <OrbitControls makeDefault enableDamping dampingFactor={0.1} target={camTarget} />
+    </Canvas>
+  )
+}
+
+/**
+ * Layer / feature preview (D3): renders the sliced toolpaths up to (and
+ * including) layer `upto`, one line-segment geometry per feature type so each
+ * is coloured by {@link FEATURE_COLORS}. The full geometry per feature is built
+ * once per (layers, upto) change — never per animation frame — by concatenating
+ * every previewed move into a non-indexed LineSegments buffer.
+ */
+function LayerPreview({
+  layers,
+  upto,
+  bedX,
+  bedY,
+}: {
+  layers: PreviewLayer[]
+  upto: number
+  bedX: number
+  bedY: number
+}) {
+  // Build one Float32 position buffer per feature type, up to the scrub layer.
+  const geoms = useMemo(() => {
+    const acc: Record<FeatureType, number[]> = { perimeter: [], infill: [], support: [], travel: [] }
+    const end = Math.min(upto, layers.length - 1)
+    for (let li = 0; li <= end; li++) {
+      const layer = layers[li]
+      const z = layer.z
+      for (const seg of layer.segments) {
+        const bucket = acc[seg.type]
+        const p = seg.pts
+        // Expand the polyline into discrete line segments (a→b, b→c, …).
+        for (let k = 0; k + 3 < p.length; k += 2) {
+          bucket.push(p[k], p[k + 1], z, p[k + 2], p[k + 3], z)
+        }
+      }
+    }
+    const out: { type: FeatureType; geom: THREE.BufferGeometry }[] = []
+    ;(Object.keys(acc) as FeatureType[]).forEach((type) => {
+      if (acc[type].length === 0) return
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(acc[type]), 3))
+      out.push({ type, geom: g })
+    })
+    return out
+  }, [layers, upto])
+
+  // Dispose old geometries when they change to avoid GPU leaks.
+  useEffect(() => {
+    return () => {
+      for (const g of geoms) g.geom.dispose()
+    }
+  }, [geoms])
+
+  const camTarget: [number, number, number] = [bedX / 2, bedY / 2, 20]
+
+  return (
+    <Canvas
+      style={{ height: '100%', width: '100%' }}
+      camera={{ position: [bedX / 2 + 180, -180, 180], up: [0, 0, 1], fov: 45, near: 0.1, far: 5000 }}
+      onCreated={({ camera }) => camera.lookAt(...camTarget)}
+    >
+      <color attach="background" args={['#15181c']} />
+      <ambientLight intensity={0.8} />
+      <group position={[bedX / 2, bedY / 2, 0]}>
+        <Grid
+          args={[bedX, bedY]}
+          cellSize={10}
+          cellThickness={0.6}
+          cellColor="#3a4250"
+          sectionSize={50}
+          sectionThickness={1.1}
+          sectionColor="#515c6e"
+          rotation={[Math.PI / 2, 0, 0]}
+          infiniteGrid={false}
+          fadeDistance={Math.max(bedX, bedY) * 3}
+          fadeStrength={1}
+        />
+      </group>
+      {geoms.map(({ type, geom }) => (
+        <lineSegments key={type} geometry={geom}>
+          <lineBasicMaterial color={FEATURE_COLORS[type]} transparent opacity={type === 'travel' ? 0.35 : 0.95} />
+        </lineSegments>
+      ))}
       <OrbitControls makeDefault enableDamping dampingFactor={0.1} target={camTarget} />
     </Canvas>
   )

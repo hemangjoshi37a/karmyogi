@@ -463,6 +463,57 @@
   color: var(--fg-muted);
 }
 
+/* --- D2 preset apply button: full-width primary --- */
+.print-preset-apply {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  align-self: flex-start;
+}
+
+/* --- D9 PA/LA test: firmware switch + button as one inline group --- */
+.print-pa {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.print-pa .print-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* --- D3 feature legend under the layer preview --- */
+.print-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+.print-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.print-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--fg) 20%, transparent);
+}
+.print-legend-z {
+  margin-left: auto;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- narrow panel (≤560px): one column of cards, off PANEL width --- */
 @container printpanel (max-width: 560px) {
   .print-cards {

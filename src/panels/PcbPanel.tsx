@@ -13,8 +13,22 @@ import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
 import { useTabCommands } from '../machine/tabCommands'
 import { importGerber, GerberData } from '../core/gerber'
 import { importExcellon, ExcellonData } from '../core/excellon'
-import { isolationRoutes, drillHits, boardCutout, boardOutlinePolygon } from '../core/pcbCam'
-import { makeRect } from '../core/geometry'
+import {
+  isolationRoutes,
+  drillHits,
+  boardCutout,
+  boardOutlinePolygon,
+  vbitDepthForWidth,
+  vbitWidthAtDepth,
+  groupDrillHits,
+  drillGroup as drillGroupTp,
+  mirrorGerber,
+  mirrorExcellon,
+  drcCheck,
+  type DrcIssue,
+  type MirrorAxis,
+} from '../core/pcbCam'
+import { makeRect, BBox, Polyline } from '../core/geometry'
 import { Toolpath, defaultTool } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
 import {
@@ -142,6 +156,18 @@ interface Params {
   feedXY: number
   feedZ: number
   rpm: number
+  // P3 — V-bit isolation: when on, the copper cut Z is computed from the desired
+  // isolation WIDTH using the bit's tip angle (depth-from-width), overriding copperZ.
+  vbit: boolean
+  vbitAngle: number // included tip angle (deg)
+  vbitTip: number // flat-tip diameter (mm)
+  isoWidth: number // desired isolation groove width (mm)
+  // P5 — group drilling by tool diameter (one paused stage per bit).
+  drillGroup: boolean
+  minDrillBit: number // smallest bit you own (mm) — for DRC + grouping note
+  // P8 — double-sided: mirror the BOTTOM copper/drill about an axis for the flip.
+  twoSided: boolean
+  mirrorAxis: 'x' | 'y'
 }
 
 const DEFAULTS: Params = {
@@ -159,6 +185,14 @@ const DEFAULTS: Params = {
   feedXY: 200,
   feedZ: 60,
   rpm: 12000,
+  vbit: false,
+  vbitAngle: 30,
+  vbitTip: 0.1,
+  isoWidth: 0.2,
+  drillGroup: false,
+  minDrillBit: 0.3,
+  twoSided: false,
+  mirrorAxis: 'y',
 }
 
 interface ParseInfo {
@@ -194,6 +228,7 @@ const VALID_STAGES: StageId[] = ['isolation', 'drill', 'cutout']
 function parsePcbParams(v: unknown, base: Params): Params {
   if (!isRecord(v)) return base
   const zmode = v.zmode === 'spindle' || v.zmode === 'pen' ? v.zmode : base.zmode
+  const mirrorAxis = v.mirrorAxis === 'x' || v.mirrorAxis === 'y' ? v.mirrorAxis : base.mirrorAxis
   return {
     zmode,
     toolDia: numOr(v.toolDia, base.toolDia),
@@ -209,6 +244,14 @@ function parsePcbParams(v: unknown, base: Params): Params {
     feedXY: numOr(v.feedXY, base.feedXY),
     feedZ: numOr(v.feedZ, base.feedZ),
     rpm: numOr(v.rpm, base.rpm),
+    vbit: typeof v.vbit === 'boolean' ? v.vbit : base.vbit,
+    vbitAngle: numOr(v.vbitAngle, base.vbitAngle),
+    vbitTip: numOr(v.vbitTip, base.vbitTip),
+    isoWidth: numOr(v.isoWidth, base.isoWidth),
+    drillGroup: typeof v.drillGroup === 'boolean' ? v.drillGroup : base.drillGroup,
+    minDrillBit: numOr(v.minDrillBit, base.minDrillBit),
+    twoSided: typeof v.twoSided === 'boolean' ? v.twoSided : base.twoSided,
+    mirrorAxis,
   }
 }
 
@@ -451,6 +494,14 @@ export function PcbPanel() {
   // other row (or generating elsewhere) cancels a previous arm.
   const [armedRunId, setArmedRunId] = useState<string | null>(null)
 
+  // P8 — which board side the operation cards currently target. 'top' is the
+  // normal (un-mirrored) program; 'bottom' mirrors the geometry about the chosen
+  // axis so the layer machines correctly from the FLIPPED setup. Only meaningful
+  // when twoSided is on (otherwise forced to 'top').
+  const [genSide, setGenSide] = useState<'top' | 'bottom'>('top')
+  const side: 'top' | 'bottom' = params.twoSided ? genSide : 'top'
+  const mirrorOpt = { mirror: side === 'bottom' }
+
   function set<K extends keyof Params>(key: K, value: Params[K]) {
     setParams((p) => ({ ...p, [key]: value }))
   }
@@ -635,11 +686,41 @@ export function PcbPanel() {
   }
 
   // Build a toolpath for one stage from explicit geometry inputs.
+  // P3 — when V-bit mode is on, the copper plunge Z is COMPUTED from the desired
+  // isolation width via the tip-angle relation (depth-from-width); otherwise the
+  // operator's explicit copper cut Z is used. Always a negative cut depth.
+  const effCopperZ = useMemo(() => {
+    if (!params.vbit) return params.copperZ
+    return -Math.abs(vbitDepthForWidth(params.isoWidth, params.vbitAngle, params.vbitTip))
+  }, [params.vbit, params.copperZ, params.isoWidth, params.vbitAngle, params.vbitTip])
+
+  // The effective isolation cutter WIDTH used for DRC: a V-bit's groove width at
+  // the computed depth, else the flat tool diameter.
+  const effToolWidth = useMemo(
+    () =>
+      params.vbit
+        ? vbitWidthAtDepth(Math.abs(effCopperZ), params.vbitAngle, params.vbitTip)
+        : params.toolDia,
+    [params.vbit, effCopperZ, params.vbitAngle, params.vbitTip, params.toolDia],
+  )
+
   function buildToolpath(
     stage: StageId,
-    geom: { copper?: GerberData | null; drillData?: ExcellonData | null; outline?: GerberData | null }
+    geom: { copper?: GerberData | null; drillData?: ExcellonData | null; outline?: GerberData | null },
+    opts: { mirror?: boolean } = {}
   ): { tp: Toolpath } | { error: string } {
     const tool = makeTool()
+    const mirror = !!opts.mirror
+    const axis: MirrorAxis = params.mirrorAxis
+    // P8 — the flip datum: the mid-line of the board (outline preferred, else the
+    // copper being machined) on the mirror axis, so the mirrored bottom registers
+    // against the SAME line the operator flips the stock about.
+    const datumSrc = geom.outline ?? geom.copper
+    let mirrorCoord: number | undefined
+    if (datumSrc) {
+      const b = datumSrc.bounds()
+      if (b.isValid()) mirrorCoord = axis === 'y' ? b.center().x : b.center().y
+    }
     let tp: Toolpath
     if (stage === 'isolation') {
       if (!geom.copper)
@@ -649,13 +730,28 @@ export function PcbPanel() {
             'Assign a Copper Top/Bottom layer (or load a Gerber) for isolation routing.',
           ),
         }
-      tp = isolationRoutes(geom.copper, tool, params.safeZ, params.copperZ, params.passes, params.stepover)
+      const copper = mirror ? mirrorGerber(geom.copper, axis, mirrorCoord) : geom.copper
+      tp = isolationRoutes(copper, tool, params.safeZ, effCopperZ, params.passes, params.stepover)
     } else if (stage === 'drill') {
       if (!geom.drillData)
         return {
           error: t('pcb.error.assignDrill', 'Assign a Drill layer (or load an Excellon file) for drilling.'),
         }
-      tp = drillHits(geom.drillData, params.safeZ, params.drillZ, params.peckDepth)
+      const drillData = mirror ? mirrorExcellon(geom.drillData, axis, mirrorCoord) : geom.drillData
+      if (params.drillGroup) {
+        // P5 — one travel-optimised sub-path per drill bit, concatenated in
+        // ascending Ø order with the bit annotated. (The All-stages run inserts an
+        // M0 pause between full stages; here every group shares ONE bit change at
+        // the start of drilling, so we keep them in one toolpath but ordered.)
+        tp = new Toolpath()
+        tp.name = 'Drill (grouped)'
+        for (const g of groupDrillHits(drillData)) {
+          const gtp = drillGroupTp(g, params.safeZ, params.drillZ, params.peckDepth)
+          for (const m of gtp.moves) tp.append(m)
+        }
+      } else {
+        tp = drillHits(drillData, params.safeZ, params.drillZ, params.peckDepth)
+      }
     } else {
       // Cutout: prefer an assigned Board Outline layer; fall back to copper.
       const source = geom.outline ?? geom.copper
@@ -668,9 +764,10 @@ export function PcbPanel() {
         }
       // Use the real outline polygon (stitched from the edge-cuts traces/region)
       // when we can derive one; otherwise fall back to the bounding rectangle.
-      let outline = boardOutlinePolygon(source)
+      const src = mirror ? mirrorGerber(source, axis, mirrorCoord) : source
+      let outline = boardOutlinePolygon(src)
       if (!outline || outline.points.length < 3) {
-        const b = source.bounds()
+        const b = src.bounds()
         if (!b.isValid())
           return { error: t('pcb.error.emptyBounds', 'Layer bounds are empty; cannot derive cutout outline.') }
         outline = makeRect(b.min, b.width(), b.height())
@@ -683,9 +780,10 @@ export function PcbPanel() {
 
   function buildGcode(
     stage: StageId,
-    geom: { copper?: GerberData | null; drillData?: ExcellonData | null; outline?: GerberData | null }
+    geom: { copper?: GerberData | null; drillData?: ExcellonData | null; outline?: GerberData | null },
+    opts: { mirror?: boolean } = {}
   ): { gcode: string; tp: Toolpath } | { error: string } {
-    const res = buildToolpath(stage, geom)
+    const res = buildToolpath(stage, geom, opts)
     if ('error' in res) return res
     const tool = makeTool()
     const emitter = makeEmitter(tool, res.tp.name)
@@ -744,16 +842,20 @@ export function PcbPanel() {
     return baked.filter((l) => l.length > 0)
   }
 
+  // Program name for a stage, tagged with the (mirrored) side when two-sided.
+  const sideName = (stage: StageId) =>
+    params.twoSided ? `pcb-${stage}-${side}.nc` : `pcb-${stage}.nc`
+
   // Generate a (global) stage and push it to the program store (NOT streamed).
   function sendStage(stage: StageId) {
-    const res = buildGcode(stage, resolved)
+    const res = buildGcode(stage, resolved, mirrorOpt)
     if ('error' in res) {
       fail(res.error)
       setLastGcode(null)
       return
     }
     setArmedRunId(null)
-    pushProgram(res.gcode, `pcb-${stage}.nc`)
+    pushProgram(res.gcode, sideName(stage))
     ok(
       t('pcb.status.sentStage', 'Sent {stage} to program: {moves} moves, cut {mm} mm.', {
         stage: stageLabel(t, stage),
@@ -771,12 +873,12 @@ export function PcbPanel() {
 
   function previewStage(stage: StageId) {
     setArmedRunId(null)
-    const res = buildGcode(stage, resolved)
+    const res = buildGcode(stage, resolved, mirrorOpt)
     if ('error' in res) {
       fail(res.error)
       return
     }
-    pushProgram(res.gcode, `pcb-${stage}.nc`)
+    pushProgram(res.gcode, sideName(stage))
     ok(
       t('pcb.status.preview', 'Preview {verb} for {name}: {moves} moves, cut {mm} mm. Shown in Visualizer.', {
         verb: stageVerb(t, stage),
@@ -797,12 +899,12 @@ export function PcbPanel() {
       fail(t('pcb.status.busy', 'Machine is busy (running/paused) — wait for the current job to finish.'))
       return
     }
-    const res = buildGcode(stage, resolved)
+    const res = buildGcode(stage, resolved, mirrorOpt)
     if ('error' in res) {
       fail(res.error)
       return
     }
-    pushProgram(res.gcode, `pcb-${stage}.nc`)
+    pushProgram(res.gcode, sideName(stage))
     setArmedRunId(STAGE_ARM(stage))
     ok(
       t('pcb.status.armed', 'Armed {verb} for {name} — {moves} moves, {mm} mm. Confirm to run.', {
@@ -820,12 +922,12 @@ export function PcbPanel() {
       fail(t('pcb.status.busy', 'Machine is busy (running/paused) — wait for the current job to finish.'))
       return
     }
-    const res = buildGcode(stage, resolved)
+    const res = buildGcode(stage, resolved, mirrorOpt)
     if ('error' in res) {
       fail(res.error)
       return
     }
-    const lines = pushProgram(res.gcode, `pcb-${stage}.nc`)
+    const lines = pushProgram(res.gcode, sideName(stage))
     grbl.startProgram(levelLines(lines))
     ok(
       t('pcb.status.streaming', 'Streaming {verb} for {name} — {lines} lines.', {
@@ -948,6 +1050,28 @@ export function PcbPanel() {
   const drillTools = resolved.drillData ? resolved.drillData.toolDiameters().length : 0
   const drillHitsCount = resolved.drillData ? resolved.drillData.hits.length : 0
 
+  // P5 — distinct drill bits (per-diameter groups), for the grouping note + DRC.
+  const drillGroups = useMemo(
+    () => (resolved.drillData ? groupDrillHits(resolved.drillData) : []),
+    [resolved],
+  )
+
+  // P12 — DRC-lite: cheap pre-flight checks (copper gap vs cutter width, tiny
+  // holes, slots-as-drills). Recomputed only when the geometry or the effective
+  // cutter width / smallest bit changes. Bounded internally to stay responsive.
+  const drcIssues: DrcIssue[] = useMemo(
+    () =>
+      drcCheck({
+        toolWidth: effToolWidth,
+        copper: resolved.copper,
+        drill: resolved.drillData,
+        minDrillBit: params.minDrillBit,
+      }),
+    [resolved, effToolWidth, params.minDrillBit],
+  )
+  const drcErrors = drcIssues.filter((i) => i.severity === 'error').length
+  const drcWarnings = drcIssues.filter((i) => i.severity === 'warning').length
+
   // Raw probe area (work coords) auto-derived from the board's isolation/outline
   // extents — the auto-level section adds its configurable margin on top.
   const levelBounds: ProbeArea | null = useMemo(() => {
@@ -1008,7 +1132,7 @@ export function PcbPanel() {
     let totalMoves = 0
     const done: StageId[] = []
     for (const stage of readyStages) {
-      const res = buildGcode(stage, resolved)
+      const res = buildGcode(stage, resolved, mirrorOpt)
       if ('error' in res) continue // skip a stage that produced nothing
       // A pause + comment between stages so the operator can change the tool.
       if (parts.length > 0) {
@@ -1563,6 +1687,123 @@ export function PcbPanel() {
           </section>
         )}
 
+        {/* ---- P9 Layer viewer ---- */}
+        {(hasCopper || hasDrill || hasOutline) && (
+          <section className="pcb-section pcb-section-wide">
+            <h3>
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name="eye" size={15} />
+              </span>
+              {t('pcb.lv.title', 'Layer preview')}
+            </h3>
+            <div className="pcb-section-body">
+              <LayerViewer t={t} copper={resolved.copper} outline={resolved.outline} drill={resolved.drillData} />
+              <p className="pcb-hint">
+                {t('pcb.lv.hint', 'What will be machined — toggle layers above. Copper isolates, dots drill, the outline cuts out.')}
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* ---- P12 DRC-lite (pre-flight warnings) ---- */}
+        {drcIssues.length > 0 && (hasCopper || hasDrill) && (
+          <section className="pcb-section pcb-section-wide">
+            <h3>
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name={drcErrors > 0 ? 'warning' : 'info'} size={15} />
+              </span>
+              {t('pcb.drc.title', 'Design checks')}
+              {(drcErrors > 0 || drcWarnings > 0) && (
+                <span className={'pcb-chip' + (drcErrors > 0 ? ' pcb-chip-err' : ' pcb-chip-warn')}>
+                  {drcErrors > 0
+                    ? t('pcb.drc.errCount', '{n} error', { n: drcErrors })
+                    : t('pcb.drc.warnCount', '{n} warning', { n: drcWarnings })}
+                </span>
+              )}
+            </h3>
+            <div className="pcb-section-body">
+              <ul className="pcb-drc-list">
+                {drcIssues.map((issue, i) => (
+                  <li key={i} className={'pcb-drc-item pcb-drc-' + issue.severity}>
+                    <Icon
+                      name={issue.severity === 'error' ? 'warning' : issue.severity === 'warning' ? 'warning' : 'info'}
+                      size={13}
+                    />
+                    <span>{issue.message}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="pcb-hint">
+                {t('pcb.drc.hint', 'Conservative pre-flight checks. Errors will likely ruin the board; review before running.')}
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* ---- P8 Double-sided ---- */}
+        {(hasCopper || hasOutline) && (
+          <section className="pcb-section">
+            <h3>
+              <span className="cam-card-ico" aria-hidden="true">
+                <Icon name="copy" size={15} />
+              </span>
+              {t('pcb.twoSided.title', 'Double-sided')}
+            </h3>
+            <div className="pcb-section-body">
+              <label className="pcb-check">
+                <input
+                  type="checkbox"
+                  checked={params.twoSided}
+                  onChange={(e) => {
+                    set('twoSided', e.target.checked)
+                    if (!e.target.checked) setGenSide('top')
+                  }}
+                />
+                <span>{t('pcb.twoSided.enable', 'Two-sided board (mirror the bottom side)')}</span>
+              </label>
+              {params.twoSided && (
+                <>
+                  <div className="pcb-grid">
+                    <Field label={t('pcb.twoSided.axis', 'Flip / mirror axis')}>
+                      <SegControl<'x' | 'y'>
+                        ariaLabel={t('pcb.twoSided.axis', 'Flip / mirror axis')}
+                        value={params.mirrorAxis}
+                        onChange={(v) => set('mirrorAxis', v)}
+                        options={[
+                          { value: 'y', label: t('pcb.twoSided.axisY', 'Mirror X (flip ↔)') },
+                          { value: 'x', label: t('pcb.twoSided.axisX', 'Mirror Y (flip ↕)') },
+                        ]}
+                      />
+                    </Field>
+                    <Field label={t('pcb.twoSided.side', 'Generate for side')}>
+                      <SegControl<'top' | 'bottom'>
+                        ariaLabel={t('pcb.twoSided.side', 'Generate for side')}
+                        value={genSide}
+                        onChange={setGenSide}
+                        options={[
+                          { value: 'top', label: t('pcb.twoSided.top', 'Top') },
+                          { value: 'bottom', label: t('pcb.twoSided.bottom', 'Bottom (mirrored)') },
+                        ]}
+                      />
+                    </Field>
+                  </div>
+                  <p className="pcb-hint">
+                    {side === 'bottom'
+                      ? t(
+                          'pcb.twoSided.bottomHint',
+                          'Operations now emit MIRRORED geometry. Mill the top first, then physically flip the board about the same axis, re-zero against the registered corner, and run these bottom programs.',
+                        )
+                      : t(
+                          'pcb.twoSided.topHint',
+                          'Top side selected — operations emit the normal (un-mirrored) program. Switch to Bottom after flipping the stock.',
+                        )}
+                  </p>
+                </>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* ---- 3. Toolpath operations (one machining task per layer) ---- */}
         {layers.length > 0 && (
           <section className="pcb-section pcb-section-wide">
@@ -1602,47 +1843,100 @@ export function PcbPanel() {
                     )}
                   </div>
                   {hasCopper && (
-                    <div className="cc-sgrid pcb-op-params">
-                      <SliderField
-                        label={t('pcb.advanced.isolationPasses', 'Isolation passes')}
-                        htmlFor="pcb-iso-passes"
-                        value={params.passes}
-                        onChange={(n) => set('passes', Math.round(Math.min(8, Math.max(1, n))))}
-                        min={1}
-                        max={8}
-                        step={1}
-                      />
-                      <SliderField
-                        label={t('pcb.advanced.passStepover', 'Pass stepover')}
-                        htmlFor="pcb-iso-step"
-                        unit="mm"
-                        value={params.stepover}
-                        onChange={(n) => set('stepover', Math.max(0.05, n))}
-                        min={0.05}
-                        max={1}
-                        step={0.05}
-                      />
-                      <SliderField
-                        label={t('pcb.advanced.copperCutZ', 'Copper cut Z')}
-                        htmlFor="pcb-iso-z"
-                        unit="mm"
-                        value={params.copperZ}
-                        onChange={(n) => set('copperZ', Math.min(0, n))}
-                        min={-0.5}
-                        max={0}
-                        step={0.01}
-                      />
-                      <SliderField
-                        label={t('pcb.advanced.feedXY', 'Feed XY')}
-                        htmlFor="pcb-iso-feed"
-                        unit="mm/min"
-                        value={params.feedXY}
-                        onChange={(n) => set('feedXY', Math.max(1, n))}
-                        min={20}
-                        max={1200}
-                        step={10}
-                      />
-                    </div>
+                    <>
+                      <label className="pcb-check pcb-op-check">
+                        <input
+                          type="checkbox"
+                          checked={params.vbit}
+                          onChange={(e) => set('vbit', e.target.checked)}
+                        />
+                        <span>{t('pcb.vbit.enable', 'V-bit (depth-from-width)')}</span>
+                      </label>
+                      <div className="cc-sgrid pcb-op-params">
+                        <SliderField
+                          label={t('pcb.advanced.isolationPasses', 'Isolation passes')}
+                          htmlFor="pcb-iso-passes"
+                          value={params.passes}
+                          onChange={(n) => set('passes', Math.round(Math.min(8, Math.max(1, n))))}
+                          min={1}
+                          max={8}
+                          step={1}
+                        />
+                        <SliderField
+                          label={t('pcb.advanced.passStepover', 'Pass stepover')}
+                          htmlFor="pcb-iso-step"
+                          unit="mm"
+                          value={params.stepover}
+                          onChange={(n) => set('stepover', Math.max(0.05, n))}
+                          min={0.05}
+                          max={1}
+                          step={0.05}
+                        />
+                        {params.vbit ? (
+                          <>
+                            <SliderField
+                              label={t('pcb.vbit.width', 'Isolation width')}
+                              htmlFor="pcb-iso-w"
+                              unit="mm"
+                              value={params.isoWidth}
+                              onChange={(n) => set('isoWidth', Math.max(0.05, n))}
+                              min={0.05}
+                              max={1}
+                              step={0.01}
+                            />
+                            <SliderField
+                              label={t('pcb.vbit.angle', 'Tip angle')}
+                              htmlFor="pcb-iso-ang"
+                              unit="°"
+                              value={params.vbitAngle}
+                              onChange={(n) => set('vbitAngle', Math.min(120, Math.max(5, n)))}
+                              min={5}
+                              max={120}
+                              step={1}
+                            />
+                            <SliderField
+                              label={t('pcb.vbit.tip', 'Tip flat Ø')}
+                              htmlFor="pcb-iso-tip"
+                              unit="mm"
+                              value={params.vbitTip}
+                              onChange={(n) => set('vbitTip', Math.max(0, n))}
+                              min={0}
+                              max={0.5}
+                              step={0.01}
+                            />
+                          </>
+                        ) : (
+                          <SliderField
+                            label={t('pcb.advanced.copperCutZ', 'Copper cut Z')}
+                            htmlFor="pcb-iso-z"
+                            unit="mm"
+                            value={params.copperZ}
+                            onChange={(n) => set('copperZ', Math.min(0, n))}
+                            min={-0.5}
+                            max={0}
+                            step={0.01}
+                          />
+                        )}
+                        <SliderField
+                          label={t('pcb.advanced.feedXY', 'Feed XY')}
+                          htmlFor="pcb-iso-feed"
+                          unit="mm/min"
+                          value={params.feedXY}
+                          onChange={(n) => set('feedXY', Math.max(1, n))}
+                          min={20}
+                          max={1200}
+                          step={10}
+                        />
+                      </div>
+                      {params.vbit && (
+                        <p className="pcb-hint pcb-vbit-readout">
+                          {t('pcb.vbit.readout', 'Plunge {z} mm → {w} mm groove at depth.', {
+                            z: Math.abs(effCopperZ).toFixed(3),
+                            w: vbitWidthAtDepth(Math.abs(effCopperZ), params.vbitAngle, params.vbitTip).toFixed(3),
+                          })}
+                        </p>
+                      )}
+                    </>
                   )}
                   <OpActions
                     t={t}
@@ -1724,6 +2018,25 @@ export function PcbPanel() {
                         step={5}
                       />
                     </div>
+                  )}
+                  {hasDrill && (
+                    <>
+                      <label className="pcb-check pcb-op-check">
+                        <input
+                          type="checkbox"
+                          checked={params.drillGroup}
+                          onChange={(e) => set('drillGroup', e.target.checked)}
+                        />
+                        <span>{t('pcb.drillGroup.enable', 'Group by drill bit ({n})', { n: drillGroups.length })}</span>
+                      </label>
+                      {params.drillGroup && drillGroups.length > 0 && (
+                        <p className="pcb-hint">
+                          {t('pcb.drillGroup.readout', 'Bits: {list}', {
+                            list: drillGroups.map((g) => `Ø${g.diameter.toFixed(2)} ×${g.hits.length}`).join(', '),
+                          })}
+                        </p>
+                      )}
+                    </>
                   )}
                   <OpActions
                     t={t}
@@ -2085,6 +2398,148 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span>{label}</span>
       {children}
     </label>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// P9 — Gerber/Excellon layer viewer
+// ---------------------------------------------------------------------------
+
+type LayerVis = { copper: boolean; pads: boolean; drill: boolean; outline: boolean }
+
+/**
+ * A compact SVG preview of the loaded copper / drill / outline geometry, with
+ * per-layer visibility toggles and role colours, so the operator can SEE what
+ * will be machined before generating. Pure render off the parsed geometry — no
+ * 3D viewer, no program store; copper traces are stroked at their real width,
+ * pads/regions filled, drill hits dotted at their diameter, the outline drawn as
+ * a closed loop. Y is flipped so +Y is up (matching the bed view).
+ */
+function LayerViewer({
+  t,
+  copper,
+  outline,
+  drill,
+}: {
+  t: TFn
+  copper: GerberData | null
+  outline: GerberData | null
+  drill: ExcellonData | null
+}) {
+  const [vis, setVis] = usePersistentState<LayerVis>('karmyogi.pcb.layerVis', {
+    copper: true,
+    pads: true,
+    drill: true,
+    outline: true,
+  })
+
+  // Combined extents across every loaded layer, for the viewBox.
+  const box = useMemo(() => {
+    const b = new BBox()
+    if (copper) b.expand(copper.bounds())
+    if (outline) b.expand(outline.bounds())
+    if (drill) b.expand(drill.bounds())
+    return b
+  }, [copper, outline, drill])
+
+  if (!box.isValid()) return null
+  const pad = Math.max(1, Math.max(box.width(), box.height()) * 0.04)
+  const minX = box.min.x - pad
+  const minY = box.min.y - pad
+  const w = box.width() + pad * 2
+  const h = box.height() + pad * 2
+  // Flip Y inside the viewBox: translate + negative scale via a group transform.
+  const flip = `translate(0 ${2 * minY + h}) scale(1 -1)`
+  const strokeW = Math.max(w, h) / 900
+
+  const ptsStr = (pl: Polyline) => pl.points.map((p) => `${p.x},${p.y}`).join(' ')
+
+  return (
+    <div className="pcb-lv">
+      <div className="pcb-lv-toggles" role="group" aria-label={t('pcb.lv.aria', 'Layer visibility')}>
+        {([
+          ['copper', t('pcb.lv.copper', 'Copper'), 'var(--pcb-copper)'],
+          ['pads', t('pcb.lv.pads', 'Pads'), 'var(--pcb-pad)'],
+          ['drill', t('pcb.lv.drill', 'Drill'), 'var(--pcb-drill)'],
+          ['outline', t('pcb.lv.outline', 'Outline'), 'var(--pcb-outline)'],
+        ] as [keyof LayerVis, string, string][]).map(([key, label, color]) => (
+          <button
+            key={key}
+            className={'pcb-lv-tog' + (vis[key] ? ' on' : '')}
+            onClick={() => setVis((v) => ({ ...v, [key]: !v[key] }))}
+            aria-pressed={vis[key]}
+          >
+            <span className="pcb-lv-sw" style={{ background: color }} />
+            {label}
+          </button>
+        ))}
+      </div>
+      <svg
+        className="pcb-lv-svg"
+        viewBox={`${minX} ${minY} ${w} ${h}`}
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label={t('pcb.lv.svgAria', 'PCB layer preview')}
+      >
+        <g transform={flip}>
+          {/* Outline */}
+          {vis.outline && outline && (
+            <g className="pcb-lv-outline">
+              {outline.regions.map((r, i) => (
+                <polygon key={'or' + i} points={ptsStr(r)} fill="none" stroke="var(--pcb-outline)" strokeWidth={strokeW * 2} />
+              ))}
+              {outline.traces.map((tr, i) => (
+                <polyline key={'ot' + i} points={ptsStr(tr.centreline)} fill="none" stroke="var(--pcb-outline)" strokeWidth={strokeW * 2} />
+              ))}
+            </g>
+          )}
+          {/* Copper regions + traces */}
+          {vis.copper && copper && (
+            <g className="pcb-lv-copper">
+              {copper.regions.map((r, i) => (
+                <polygon key={'cr' + i} points={ptsStr(r)} fill="var(--pcb-copper)" fillOpacity={0.5} stroke="none" />
+              ))}
+              {copper.traces.map((tr, i) => (
+                <polyline
+                  key={'ct' + i}
+                  points={ptsStr(tr.centreline)}
+                  fill="none"
+                  stroke="var(--pcb-copper)"
+                  strokeOpacity={0.85}
+                  strokeWidth={Math.max(strokeW, tr.width)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ))}
+            </g>
+          )}
+          {/* Pads */}
+          {vis.pads && copper && (
+            <g className="pcb-lv-pads">
+              {copper.pads.map((p, i) => (
+                <polygon key={'pad' + i} points={ptsStr(p)} fill="var(--pcb-pad)" fillOpacity={0.8} stroke="none" />
+              ))}
+            </g>
+          )}
+          {/* Drill hits */}
+          {vis.drill && drill && (
+            <g className="pcb-lv-drill">
+              {drill.hits.map((hit, i) => (
+                <circle
+                  key={'d' + i}
+                  cx={hit.pos.x}
+                  cy={hit.pos.y}
+                  r={Math.max(strokeW * 2, hit.diameter / 2)}
+                  fill="var(--pcb-drill)"
+                  stroke="#0006"
+                  strokeWidth={strokeW}
+                />
+              ))}
+            </g>
+          )}
+        </g>
+      </svg>
+    </div>
   )
 }
 

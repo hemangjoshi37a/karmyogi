@@ -231,6 +231,47 @@
   overflow-x: hidden;
 }
 .pr-code .pr-code-cmt { color: var(--fg-muted); }
+/* The wizard / surfacing previews can get long — cap height + scroll. */
+.pr-code { max-height: 16em; overflow-y: auto; }
+
+/* ---- wizard / heightmap / surfacing param grid: SliderFields pack two-up at
+   wide widths and collapse to one column when the panel narrows. ---- */
+.pr-wiz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  margin-top: var(--sp-2);
+}
+@container probepanel (max-width: 420px) {
+  .pr-wiz-grid { grid-template-columns: 1fr; }
+}
+/* A direction toggle cell sits inline with the sliders, label above control. */
+.pr-wiz-dir {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  justify-content: center;
+}
+.pr-wiz-dir .pr-field-name { font-size: var(--fs-ctl); color: var(--fg-muted); }
+
+/* Ordered step list — compact, with probe/zero steps subtly accented. */
+.pr-wiz-steps {
+  margin: var(--sp-2) 0 0;
+  padding-left: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+}
+.pr-wiz-steps li.probe { color: var(--fg); }
+.pr-wiz-steps li.zero { color: var(--accent); }
+
+/* Grid-info / stats line under a param grid. */
+.pr-hm-grid-line {
+  margin-top: var(--sp-2);
+  font-variant-numeric: tabular-nums;
+}
 
 /* ---- compact field grid (probe params): label-over-input cells that pack
    left and wrap naturally instead of one stretched row per field. ---- */

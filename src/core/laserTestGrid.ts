@@ -1,0 +1,207 @@
+// Laser MATERIAL TEST GRID generator (L4) — UI-independent, pure TypeScript.
+// No React / DOM / three.js imports here (mirrors the src/core/ split).
+//
+// A material test is a grid of small filled squares where one axis sweeps laser
+// POWER and the other sweeps FEED (speed). Burning one tile per (power, feed)
+// combination lets the operator pick the cleanest engrave/cut settings for a new
+// material in a single run.
+//
+// Each tile is engraved as a set of horizontal raster lines (a solid fill) at the
+// tile's commanded power/feed. Reuses the SAME GRBL laser safety scheme as the
+// rest of the laser core:
+//   * GRBL laser mode ($32=1) assumed so S changes take effect with motion.
+//   * The beam is OFF (M5 / S0) at program start, on EVERY travel between tiles,
+//     and at program end. It fires only on the in-tile fill feeds.
+//   * S is clamped into [0, sMax] so a tile can never exceed the GRBL $30 ceiling.
+//   * Air assist (M8/M9) is optional and never gates the beam.
+
+/** Parameters describing a power × feed material-test sweep. */
+export interface TestGridParams {
+  /** Number of POWER steps (columns). >=1. */
+  powerSteps: number;
+  /** Number of FEED steps (rows). >=1. */
+  feedSteps: number;
+
+  /** Power sweep endpoints, as S values (0..sMax). */
+  powerMin: number;
+  powerMax: number;
+  /** Feed sweep endpoints, mm/min. */
+  feedMin: number;
+  feedMax: number;
+
+  /** GRBL $30 ceiling — S is clamped into [0, sMax]. */
+  sMax: number;
+
+  /** Size of each square tile (mm). */
+  tileMm: number;
+  /** Gap between tiles (mm). */
+  gapMm: number;
+  /** Line interval for the fill raster inside each tile (mm). */
+  lineInterval: number;
+
+  /** Bottom-left origin of the whole grid in work coords (mm). */
+  originX: number;
+  originY: number;
+
+  /** Constant (M3) vs dynamic (M4) laser power. */
+  dynamicPower: boolean;
+  /** Air assist M8/M9 around the job. */
+  airAssist: boolean;
+
+  /** Coordinate precision. */
+  decimals: number;
+  programName: string;
+}
+
+export function defaultTestGridParams(overrides: Partial<TestGridParams> = {}): TestGridParams {
+  return {
+    powerSteps: 5,
+    feedSteps: 5,
+    powerMin: 200,
+    powerMax: 1000,
+    feedMin: 1000,
+    feedMax: 6000,
+    sMax: 1000,
+    tileMm: 8,
+    gapMm: 2,
+    lineInterval: 0.15,
+    originX: 0,
+    originY: 0,
+    dynamicPower: true,
+    airAssist: false,
+    decimals: 3,
+    programName: 'hjLabs Laser Material Test',
+    ...overrides,
+  };
+}
+
+/** Formatted number, never "-0.000" — mirrors the emitter's fmt(). */
+function fmt(value: number, decimals: number): string {
+  const d = Number.isFinite(decimals) ? Math.max(0, Math.min(8, Math.floor(decimals))) : 3;
+  const snap = 0.5 * Math.pow(10, -d);
+  if (Math.abs(value) < snap) value = 0;
+  if (value === 0) value = 0;
+  return value.toFixed(d);
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/** Linearly interpolate `n` values across [a, b]; a single step returns [a]. */
+function ramp(a: number, b: number, n: number): number[] {
+  const steps = Math.max(1, Math.floor(n));
+  if (steps === 1) return [a];
+  const out: number[] = [];
+  for (let i = 0; i < steps; i++) out.push(a + ((b - a) * i) / (steps - 1));
+  return out;
+}
+
+/** Summary stats for the UI. */
+export interface TestGridResult {
+  gcode: string;
+  /** Non-comment line count. */
+  lines: number;
+  /** Total grid extent (mm). */
+  widthMm: number;
+  heightMm: number;
+  /** Number of tiles. */
+  tiles: number;
+  /** Power values (S) used, low→high. */
+  powers: number[];
+  /** Feed values (mm/min) used, low→high. */
+  feeds: number[];
+}
+
+/**
+ * Emit a complete, safe material-test-grid program.
+ *
+ * Columns sweep POWER (left→right = low→high S); rows sweep FEED (bottom→top =
+ * low→high mm/min). Each tile is a solid horizontal-raster fill at its commanded
+ * power/feed. Travel between tiles is always beam-OFF (S0, G0). A comment legend
+ * records the axis values so the burned grid can be decoded after the run.
+ */
+export function emitTestGrid(params: Partial<TestGridParams> = {}): TestGridResult {
+  const p = defaultTestGridParams(params);
+  const d = p.decimals;
+  const o: string[] = [];
+  const onCode = p.dynamicPower ? 'M4' : 'M3';
+
+  const sMax = Math.max(1, Math.round(p.sMax));
+  const tile = Math.max(0.5, p.tileMm);
+  const gap = Math.max(0, p.gapMm);
+  const interval = Math.max(0.01, p.lineInterval);
+
+  const powers = ramp(p.powerMin, p.powerMax, p.powerSteps).map((s) =>
+    clamp(Math.round(s), 0, sMax),
+  );
+  const feeds = ramp(p.feedMin, p.feedMax, p.feedSteps).map((f) => Math.max(1, Math.round(f)));
+
+  const cols = powers.length;
+  const rows = feeds.length;
+  const pitch = tile + gap;
+  const widthMm = cols * tile + (cols - 1) * gap;
+  const heightMm = rows * tile + (rows - 1) * gap;
+
+  // ---- Header -------------------------------------------------------------
+  if (p.programName.length > 0) o.push(`(${p.programName})`);
+  o.push('(Generated by karmyogi.hjLabs.in Laser material test grid)');
+  o.push('(Requires GRBL laser mode: $32=1)');
+  o.push(`(Columns = power S, left->right: ${powers.join(', ')})`);
+  o.push(`(Rows = feed mm/min, bottom->top: ${feeds.join(', ')})`);
+  o.push(`(${cols}x${rows} tiles, ${fmt(tile, 2)}mm each, gap ${fmt(gap, 2)}mm)`);
+  o.push('G21');
+  o.push('G90');
+  o.push('G94');
+  o.push('G17');
+  o.push('M5 S0'); // beam OFF at start (safety)
+  if (p.airAssist) o.push('M8');
+  o.push(`${onCode} S0`); // assert on-mode at zero power; S rides on motion
+
+  const nLines = Math.max(1, Math.ceil(tile / interval));
+
+  for (let row = 0; row < rows; row++) {
+    const feed = feeds[row];
+    const y0 = p.originY + row * pitch;
+    for (let col = 0; col < cols; col++) {
+      const s = powers[col];
+      const x0 = p.originX + col * pitch;
+      const x1 = x0 + tile;
+      o.push(`(Tile r${row + 1}c${col + 1}: S${s} F${feed})`);
+      // Beam OFF travel to the tile's bottom-left corner.
+      o.push(`G0 X${fmt(x0, d)} Y${fmt(y0, d)} S0`);
+      // Boustrophedon fill: alternate sweep direction each line.
+      let firstFeed = true;
+      for (let li = 0; li < nLines; li++) {
+        const y = li === nLines - 1 ? y0 + tile : y0 + li * interval;
+        const ltr = (li & 1) === 0;
+        const xStart = ltr ? x0 : x1;
+        const xEnd = ltr ? x1 : x0;
+        // Step up to this scan line with the beam OFF (no vertical burn streak).
+        o.push(`S0 G1 X${fmt(xStart, d)} Y${fmt(y, d)}${firstFeed ? ` F${fmt(feed, d)}` : ''}`);
+        firstFeed = false;
+        // Fire across the tile.
+        o.push(`S${s} G1 X${fmt(xEnd, d)}`);
+      }
+      // Beam OFF after each tile, before the next travel.
+      o.push('S0');
+    }
+  }
+
+  // ---- Footer -------------------------------------------------------------
+  o.push('G0 X0 Y0 S0'); // park
+  o.push('M5 S0'); // laser fully off
+  if (p.airAssist) o.push('M9');
+  o.push('M30');
+
+  const gcode = o.join('\n') + '\n';
+  return {
+    gcode,
+    lines: gcode.split('\n').filter((l) => l.trim() && !l.trim().startsWith('(')).length,
+    widthMm,
+    heightMm,
+    tiles: cols * rows,
+    powers,
+    feeds,
+  };
+}
