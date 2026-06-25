@@ -184,7 +184,11 @@
   box-shadow: 0 0 6px var(--accent);
 }
 
-@media (max-width: 560px) {
+/* Narrow-dialog reflow — keyed to the modal-body width (container query), not the
+   viewport, matching the AI bubble's container-driven model. The threshold is the
+   project's shared small-dialog breakpoint (consolidated from the old 560/640px
+   viewport media queries in this file). */
+@container (max-width: 540px) {
   .gp-map-grid { grid-template-columns: 1fr; }
   .gp-sticks { grid-template-columns: 1fr; }
   .gp-switch { width: 52px; height: 30px; }
@@ -342,7 +346,7 @@
 .gp-map-disclose[open] .gp-map-summary::after { transform: rotate(90deg); }
 .gp-map-disclose[open] .gp-map-summary { margin-bottom: 8px; }
 .gp-map-disclose > .gp-remap:first-of-type { margin-top: 0; }
-@media (max-width: 640px) {
+@container (max-width: 540px) {
   .gp-map-summary { min-height: 44px; }
 }
 
@@ -619,7 +623,7 @@
 }
 .gp-diag-axsel .gp-diag-namesel { min-width: 56px; width: auto; max-width: 88px; }
 
-@media (max-width: 560px) {
+@container (max-width: 540px) {
   .gp-diag-namesel { max-width: none; min-height: 30px; height: 30px; font-size: 12px; }
   .gp-diag-axsel { width: 100%; }
   .gp-diag-axsel .gp-diag-namesel { flex: 1 1 80px; max-width: none; }
@@ -646,6 +650,6 @@
 /* Per-tab rows are a flex container; keep the picker compact there too. */
 .gp-tabedit-row { flex-wrap: wrap; }
 .gp-tabedit-row .gp-remap-picker { flex: 0 1 130px; }
-@media (max-width: 560px) {
+@container (max-width: 540px) {
   .gp-remap-picker { flex-basis: 100%; max-width: none; min-height: 32px; height: 32px; font-size: 12px; }
 }

@@ -516,7 +516,8 @@ export function Shell() {
               onOpenProbe={() => setShowProbe(true)}
             />
             <MobileMore
-              moreLabel={t('topbar.more', 'More')}
+              moreLabel={t('topbar.more', 'More options')}
+              moreWord={t('topbar.menu', 'Menu')}
               zoomLabel={t('topbar.zoom', 'UI zoom')}
               themeLabel={
                 theme === 'dark'
@@ -761,6 +762,7 @@ function MobileConnectSheet({ onOpenSettings, onOpenProbe }: MobileConnectSheetP
 
 interface MobileMoreProps {
   moreLabel: string
+  moreWord: string
   zoomLabel: string
   themeLabel: string
   aboutLabel: string
@@ -782,6 +784,7 @@ interface MobileMoreProps {
  */
 function MobileMore({
   moreLabel,
+  moreWord,
   zoomLabel,
   themeLabel,
   aboutLabel,
@@ -800,12 +803,25 @@ function MobileMore({
   return (
     <div className="topbar-overflow" ref={wrapRef}>
       <IconButton
-        icon={<MoreGlyph />}
+        className="topbar-more-trigger"
+        icon={
+          <>
+            <MoreGlyph />
+            {/* Decorative accent dot cueing that secondary actions live behind
+                the "⋯" (shown only at collapsed/mobile widths via CSS). */}
+            <span className="topbar-more-cue" aria-hidden="true" />
+          </>
+        }
         label={moreLabel}
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
       />
+      {/* "Menu" text label at the widest phone sizes — an extra discoverability
+          cue alongside the dot. Decorative (the button is already labelled). */}
+      <span className="topbar-more-word" aria-hidden="true">
+        {moreWord}
+      </span>
       {open && (
         <div className="topbar-more-pop" role="menu" aria-label={moreLabel}>
           <div className="topbar-more-row">

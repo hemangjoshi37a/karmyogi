@@ -12,6 +12,13 @@
   overflow: auto;
   color: var(--fg);
   background: var(--bg-panel);
+  /* Inline-size container so the settings rows stack based on the PANEL's own
+     width — whether it's a narrow dock panel on a wide desktop or a phone-width
+     modal body. (Embedded in a Modal, the nearest container is instead
+     `.km-modal-body`; the @container rule below resolves against whichever is
+     nearest, so one rule covers both placements.) */
+  container-type: inline-size;
+  container-name: mo-panel;
 }
 
 .mo-section {
@@ -321,8 +328,13 @@
   text-align: left;
 }
 
-/* ---- mobile: stack label over value, full-width controls, ≥36px tap ---- */
-@media (max-width: 540px) {
+/* ---- narrow: stack label over value, full-width controls, ≥36px tap ----
+   Container-query driven (keyed to the panel/modal-body width, not the viewport)
+   so the rows reflow whenever the settings list itself is narrow — a thin dock
+   panel on a big screen reflows just like a phone-width modal. The threshold is
+   the project's shared small-dialog breakpoint (was a viewport `max-width:540px`
+   media query; consolidated alongside the Gamepad modal's old 560/640 ones). */
+@container (max-width: 540px) {
   .mo-rowitem {
     grid-template-columns: 1fr;
     gap: 6px;

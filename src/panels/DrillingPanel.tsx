@@ -198,9 +198,12 @@ export function DrillingPanel() {
 
   const [points, setPoints] = usePersistentState<ScrewPoint[]>('karmyogi.drilling.points', [])
   const [selected, setSelected] = useState(-1)
-  const [showSettings, setShowSettings] = usePersistentState<boolean>(
-    'karmyogi.drilling.showSettings',
-    true,
+  // Defaults disclosure (§6). Tri-state persisted: null = "auto" (follow the
+  // point count — expanded with 0 points, collapsed once ≥1 so the TABLE leads);
+  // a boolean is the operator's explicit choice, which wins and persists.
+  const [defaultsOpen, setDefaultsOpen] = usePersistentState<boolean | null>(
+    'karmyogi.drilling.defaultsOpen',
+    null,
   )
 
   // Persisted drilling params so hole size/depth/feeds survive a reload. The
@@ -402,6 +405,11 @@ export function DrillingPanel() {
     },
   })
 
+  // Explicit user choice (boolean) wins; otherwise "auto" = open only while
+  // there are no points. Toggling stores the negated effective state.
+  const defaultsEffectiveOpen = defaultsOpen ?? points.length === 0
+  const toggleDefaults = () => setDefaultsOpen(!defaultsEffectiveOpen)
+
   return (
     <div className="cc-presets-host">
       <PresetRail
@@ -477,10 +485,10 @@ export function DrillingPanel() {
           />
           <span className="scf-tools-sep" aria-hidden="true" />
           <ToolButton
-            className={showSettings ? 'is-active' : ''}
+            className={defaultsEffectiveOpen ? 'is-active' : ''}
             glyph={<Icon name="settings" />}
-            onClick={() => setShowSettings((v) => !v)}
-            ariaExpanded={showSettings}
+            onClick={toggleDefaults}
+            ariaExpanded={defaultsEffectiveOpen}
             title={t('drill.toolbar.settings', 'Settings')}
             body={t('drill.toolbar.settings.body', 'Hole size, hole type/depth, peck increment, counterbore/countersink, feeds and Safe-Z.')}
           />
@@ -534,8 +542,24 @@ export function DrillingPanel() {
         </p>
       )}
 
+      {/* Defaults disclosure (§6): a persistent WORDED trigger ("Defaults") with
+          the shared rotating caret. Expanded with no points; once ≥1 hole exists
+          it auto-collapses so the table leads (operator can re-open; persists). */}
+      <button
+        type="button"
+        className="scf-defaults-toggle"
+        data-open={defaultsEffectiveOpen}
+        aria-expanded={defaultsEffectiveOpen}
+        onClick={toggleDefaults}
+      >
+        <Icon name="settings" size={14} className="scf-defaults-ico" />
+        <span className="scf-defaults-word">{t('drill.defaults.disclosure', 'Defaults')}</span>
+        <span className="ui-caret" aria-hidden="true">
+          <Icon name="chevron-right" size={14} />
+        </span>
+      </button>
       {/* Collapsible Settings. */}
-      {showSettings && (
+      {defaultsEffectiveOpen && (
         <section className="scf-settings">
           <div className="scf-card">
             <div className="scf-card-head">

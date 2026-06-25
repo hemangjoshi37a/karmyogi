@@ -193,9 +193,12 @@ export function ScrewFittingPanel() {
 
   const [points, setPoints] = usePersistentState<ScrewDrivePoint[]>('karmyogi.screwdrive.points', [])
   const [selected, setSelected] = useState(-1)
-  const [showSettings, setShowSettings] = usePersistentState<boolean>(
-    'karmyogi.screwdrive.showSettings',
-    true,
+  // Defaults disclosure (§6). Tri-state persisted: null = "auto" (follow the
+  // point count — expanded with 0 points, collapsed once ≥1 so the TABLE leads);
+  // a boolean is the operator's explicit choice, which wins and persists.
+  const [defaultsOpen, setDefaultsOpen] = usePersistentState<boolean | null>(
+    'karmyogi.screwdrive.defaultsOpen',
+    null,
   )
 
   // Persisted loader/driver/motion params so they survive a reload. The plain
@@ -440,6 +443,11 @@ export function ScrewFittingPanel() {
     },
   })
 
+  // Explicit user choice (boolean) wins; otherwise "auto" = open only while
+  // there are no points. Toggling stores the negated effective state.
+  const defaultsEffectiveOpen = defaultsOpen ?? points.length === 0
+  const toggleDefaults = () => setDefaultsOpen(!defaultsEffectiveOpen)
+
   return (
     <div className="cc-presets-host">
       <PresetRail
@@ -515,10 +523,10 @@ export function ScrewFittingPanel() {
           />
           <span className="swd-tools-sep" aria-hidden="true" />
           <ToolButton
-            className={showSettings ? 'is-active' : ''}
+            className={defaultsEffectiveOpen ? 'is-active' : ''}
             glyph={<Icon name="settings" />}
-            onClick={() => setShowSettings((v) => !v)}
-            ariaExpanded={showSettings}
+            onClick={toggleDefaults}
+            ariaExpanded={defaultsEffectiveOpen}
             title={t('screw.toolbar.settings', 'Settings')}
             body={t('screw.toolbar.settings.body', 'Loader pickup location, pick Z & dwell, driver RPM, push/approach feeds, seat dwell, default depth and Safe-Z.')}
           />
@@ -572,8 +580,24 @@ export function ScrewFittingPanel() {
         </p>
       )}
 
+      {/* Defaults disclosure (§6): a persistent WORDED trigger ("Defaults") with
+          the shared rotating caret. Expanded with no points; once ≥1 screw exists
+          it auto-collapses so the table leads (operator can re-open; persists). */}
+      <button
+        type="button"
+        className="swd-defaults-toggle"
+        data-open={defaultsEffectiveOpen}
+        aria-expanded={defaultsEffectiveOpen}
+        onClick={toggleDefaults}
+      >
+        <Icon name="settings" size={14} className="swd-defaults-ico" />
+        <span className="swd-defaults-word">{t('screw.defaults.disclosure', 'Defaults')}</span>
+        <span className="ui-caret" aria-hidden="true">
+          <Icon name="chevron-right" size={14} />
+        </span>
+      </button>
       {/* Collapsible Settings. */}
-      {showSettings && (
+      {defaultsEffectiveOpen && (
         <section className="swd-settings">
           <div className="swd-card">
             <div className="swd-card-head">

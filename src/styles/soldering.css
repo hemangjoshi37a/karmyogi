@@ -143,6 +143,40 @@
 /* Settings cards TILE into as many columns as fit (≥ --card-min each), so on a
    wide panel the two cards sit side-by-side and fill the width instead of
    leaving a tall empty gutter. Collapses to one column when narrow. */
+/* Worded "Defaults" disclosure trigger (§6): the word stays visible; the shared
+   .ui-caret rotates open/closed. Full-width header above the defaults section so
+   the points TABLE leads once collapsed. */
+.sp-defaults-toggle {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.sp-defaults-toggle:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.sp-defaults-ico {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.sp-defaults-word {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
 .sp-settings {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));

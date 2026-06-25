@@ -236,8 +236,14 @@ export function Modal({
     opacity: animate ? 1 : 0,
     transition: reduceMotion ? 'none' : 'opacity var(--dur-mid) var(--ease)',
   }
+  // Width resolution lives in CSS: we hand the chosen size-step (in px) to the
+  // stylesheet as a custom property and `.km-modal` resolves the *effective*
+  // max-width as `min(<sizePx>, <viewport minus safe gutters>)`. This caps every
+  // dialog to the viewport with a comfortable margin (and honors safe-area
+  // insets) without scattering per-modal px breakpoints — desktop sizing is
+  // unchanged because the size-step wins until the viewport gets narrow.
   const panelStyle: CSSProperties = {
-    maxWidth,
+    ['--km-modal-w' as string]: `${maxWidth}px`,
     opacity: animate ? 1 : 0,
     transform: animate ? 'scale(1)' : 'scale(0.98)',
     transition: reduceMotion

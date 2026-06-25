@@ -1533,6 +1533,8 @@
   "tab.visualizer": "Visualizer",
   "tab.welding": "Welding",
   "tab.writing": "Writing",
+  "topbar.menu": "Menu",
+  "topbar.more": "More options",
   "transport.empty": "No toolpath to simulate",
   "transport.jumpEnd": "Jump to end",
   "transport.jumpStart": "Jump to start",

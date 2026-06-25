@@ -314,9 +314,12 @@ export function WeldingPanel() {
 
   const [objects, setObjects] = usePersistentState<WeldObject[]>('karmyogi.welding.objects', [])
   const [selected, setSelected] = usePersistentState<string>('karmyogi.welding.selectedId', '')
-  const [showSettings, setShowSettings] = usePersistentState<boolean>(
-    'karmyogi.welding.showSettings',
-    false,
+  // Defaults disclosure (§6). Tri-state persisted: null = "auto" (follow the
+  // object count — expanded with 0 objects, collapsed once ≥1 so the OBJECT list
+  // leads); a boolean is the operator's explicit choice, which wins and persists.
+  const [defaultsOpen, setDefaultsOpen] = usePersistentState<boolean | null>(
+    'karmyogi.welding.defaultsOpen',
+    null,
   )
   const [params, setParams] = usePersistentState<PersistParams>(
     'karmyogi.welding.params',
@@ -554,6 +557,11 @@ export function WeldingPanel() {
     },
   })
 
+  // Explicit user choice (boolean) wins; otherwise "auto" = open only while
+  // there are no objects. Toggling stores the negated effective state.
+  const defaultsEffectiveOpen = defaultsOpen ?? objects.length === 0
+  const toggleDefaults = () => setDefaultsOpen(!defaultsEffectiveOpen)
+
   return (
     <div className="cc-presets-host">
       <PresetRail
@@ -633,10 +641,10 @@ export function WeldingPanel() {
           />
           <span className="wp-tools-sep" aria-hidden="true" />
           <ToolButton
-            className={showSettings ? 'is-active' : ''}
+            className={defaultsEffectiveOpen ? 'is-active' : ''}
             glyph={<Icon name="settings" />}
-            onClick={() => setShowSettings((v) => !v)}
-            ariaExpanded={showSettings}
+            onClick={toggleDefaults}
+            ariaExpanded={defaultsEffectiveOpen}
             title={t('weld.toolbar.settings', 'Settings')}
             body={t('weld.toolbar.settings.body', 'Global arc power, gas pre/post-flow, safe-Z, plunge feed and weave smoothness. Per-object speed/pattern/amplitude live on each card.')}
           />
@@ -701,8 +709,25 @@ export function WeldingPanel() {
         </p>
       )}
 
+      {/* Defaults disclosure (§6): a persistent WORDED trigger ("Defaults") with
+          the shared rotating caret. Expanded with no objects; once ≥1 object
+          exists it auto-collapses so the object list leads (operator can re-open;
+          the choice persists). */}
+      <button
+        type="button"
+        className="wp-defaults-toggle"
+        data-open={defaultsEffectiveOpen}
+        aria-expanded={defaultsEffectiveOpen}
+        onClick={toggleDefaults}
+      >
+        <Icon name="settings" size={14} className="wp-defaults-ico" />
+        <span className="wp-defaults-word">{t('weld.defaults.disclosure', 'Defaults')}</span>
+        <span className="ui-caret" aria-hidden="true">
+          <Icon name="chevron-right" size={14} />
+        </span>
+      </button>
       {/* Collapsible global Settings: arc/gas + motion, dense tiling cards. */}
-      {showSettings && (
+      {defaultsEffectiveOpen && (
         <section className="wp-settings">
           <div className="wp-card">
             <div className="wp-card-head">

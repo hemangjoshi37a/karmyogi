@@ -514,9 +514,13 @@ export function SolderingPanel() {
   // True when the current points came from a DRILL file (the 3D PCB stand-in then
   // renders holes instead of surface pads). Set on import; manual edits keep it.
   const [fromDrill, setFromDrill] = useState(false)
-  const [showSettings, setShowSettings] = usePersistentState<boolean>(
-    'karmyogi.soldering.showSettings',
-    false,
+  // Defaults disclosure (§6): the new-point defaults + feeder/motion block.
+  // Tri-state persisted: null = "auto" (follow the point count — expanded with 0
+  // points so there's something to do, collapsed once ≥1 point so the TABLE
+  // leads). A boolean is the user's explicit choice, which wins and persists.
+  const [defaultsOpen, setDefaultsOpen] = usePersistentState<boolean | null>(
+    'karmyogi.soldering.defaultsOpen',
+    null,
   )
   // Hidden <input type=file> trigger for "Load CSV".
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1136,6 +1140,12 @@ export function SolderingPanel() {
     optimize: () => optimizeOrder(),
   })
 
+  // Effective open: explicit user choice (boolean) wins; otherwise "auto" = open
+  // only while there are no points (nothing else to show). Toggling stores the
+  // negation of the current effective state as an explicit, persisted choice.
+  const defaultsEffectiveOpen = defaultsOpen ?? points.length === 0
+  const toggleDefaults = () => setDefaultsOpen(!defaultsEffectiveOpen)
+
   return (
     <div className="cc-presets-host">
       <PresetRail
@@ -1280,10 +1290,10 @@ export function SolderingPanel() {
           />
           <span className="sp-tools-sep" aria-hidden="true" />
           <ToolButton
-            className={showSettings ? 'is-active' : ''}
+            className={defaultsEffectiveOpen ? 'is-active' : ''}
             glyph={<Icon name="settings" />}
-            onClick={() => setShowSettings((v) => !v)}
-            ariaExpanded={showSettings}
+            onClick={toggleDefaults}
+            ariaExpanded={defaultsEffectiveOpen}
             title={t('solder.toolbar.settings', 'Settings')}
             body={t('solder.toolbar.settings.body', 'New-point defaults plus feeder and motion parameters (Safe-Z, feeder S, plunge feed, dwell).')}
           />
@@ -1478,8 +1488,25 @@ export function SolderingPanel() {
         </p>
       )}
 
+      {/* Defaults disclosure (§6): a persistent WORDED trigger ("Defaults") with
+          the shared rotating caret. Expanded when there are no points (nothing
+          else to do); once ≥1 point exists it auto-collapses so the table leads,
+          but the operator can re-open it any time (the choice persists). */}
+      <button
+        type="button"
+        className="sp-defaults-toggle"
+        data-open={defaultsEffectiveOpen}
+        aria-expanded={defaultsEffectiveOpen}
+        onClick={toggleDefaults}
+      >
+        <Icon name="settings" size={14} className="sp-defaults-ico" />
+        <span className="sp-defaults-word">{t('solder.defaults.disclosure', 'Defaults')}</span>
+        <span className="ui-caret" aria-hidden="true">
+          <Icon name="chevron-right" size={14} />
+        </span>
+      </button>
       {/* Collapsible Settings: new-point defaults + feeder/motion, dense cards. */}
-      {showSettings && (
+      {defaultsEffectiveOpen && (
         <section className="sp-settings">
           <div className="sp-card">
             <div className="sp-card-head">

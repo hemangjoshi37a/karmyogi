@@ -446,7 +446,41 @@
 }
 
 /* ---- Mobile "⋯" menu — secondary actions as labelled rows ---- */
-.topbar-overflow { position: relative; display: inline-flex; }
+.topbar-overflow { position: relative; display: inline-flex; align-items: center; }
+
+/* Discoverability cue for the "⋯" overflow: a small accent dot badged on the
+   trigger so it reads as "holds more items", not a dead glyph. The dot + the
+   "Menu" word only appear in the collapsed/mobile state (the overflow only
+   renders there), and are decorative — the button itself is labelled "More
+   options" with aria-haspopup. Token-driven so it recolors with the theme. */
+.topbar-more-trigger { position: relative; }
+.topbar-more-cue {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  /* a ring carved from the bar bg so the dot reads as a distinct badge */
+  box-shadow: 0 0 0 1.5px var(--bg-elev);
+  pointer-events: none;
+}
+/* "Menu" text label — shown only at the widest phone sizes (there's room), an
+   extra cue beside the dot. Hidden on the narrowest phones to keep the strip
+   tight (the dot still carries the cue there). */
+.topbar-more-word {
+  display: none;
+  margin-left: 1px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+@media (min-width: 421px) {
+  .topbar[data-mobile='true'] .topbar-more-word { display: inline; }
+}
 .topbar-more-pop {
   position: absolute;
   top: calc(100% + 8px);

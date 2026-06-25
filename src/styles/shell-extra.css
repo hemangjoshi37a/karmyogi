@@ -80,20 +80,36 @@
   border-radius: 999px;
 }
 
-/* ---- modal ---- */
+/* ---- modal ----
+   Side gutter the dialog keeps clear of each viewport edge. Folded into the
+   width cap below (and into the overlay padding) so a dialog never reaches the
+   screen edge; widened a touch by the safe-area insets where the viewport meets
+   a notch / rounded corner. One shared knob instead of per-modal breakpoints. */
 .km-modal-overlay {
+  --km-modal-gutter: 16px;
+  --km-modal-safe-l: max(var(--km-modal-gutter), env(safe-area-inset-left, 0px));
+  --km-modal-safe-r: max(var(--km-modal-gutter), env(safe-area-inset-right, 0px));
   position: fixed;
   inset: 0;
   z-index: 1000;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 6vh 16px;
+  padding: max(6vh, env(safe-area-inset-top, 0px)) var(--km-modal-safe-r)
+    max(6vh, env(safe-area-inset-bottom, 0px)) var(--km-modal-safe-l);
   background: color-mix(in srgb, #000 50%, transparent);
   backdrop-filter: blur(2px);
 }
 .km-modal {
+  /* Effective width = the requested size-step (--km-modal-w, default lg=780px),
+     capped to the viewport minus both safe gutters. On phones this collapses to
+     a near-full-width sheet; on desktop the size-step wins, so intended widths
+     are preserved. The overlay padding supplies the matching visible gutter. */
   width: 100%;
+  max-width: min(
+    var(--km-modal-w, 780px),
+    calc(100vw - var(--km-modal-safe-l) - var(--km-modal-safe-r))
+  );
   max-height: 88vh;
   display: flex;
   flex-direction: column;
@@ -136,13 +152,32 @@
   border-color: var(--border);
   color: var(--fg);
 }
-.km-modal-body { overflow: auto; min-height: 0; flex: 1 1 auto; }
+.km-modal-body {
+  overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  /* Inline-size container so dialog CONTENT (Motion rows, Gamepad grids, …) can
+     adapt to the dialog's OWN resolved width via container queries — like the AI
+     bubble does — instead of each modal carrying its own viewport breakpoint.
+     The shared threshold is `--km-modal-narrow` (see motion.css / gamepad.css). */
+  container-type: inline-size;
+  container-name: km-modal-body;
+}
 
 @media (max-width: 768px) {
   .km-conn-btn { min-height: var(--ctl-h-touch); }
   .km-conn-select { min-height: var(--ctl-h-touch); }
   .km-conn .km-conn-icon { min-height: var(--ctl-h-touch); min-width: var(--ctl-h-touch); }
-  .km-modal-overlay { padding: 3vh 6px; }
+  /* Tighten the shared gutter on small screens so the sheet gets near-full-width
+     (the width cap above reads this knob, so the dialog grows in lockstep) and
+     give the scrim a bit more vertical room. */
+  .km-modal-overlay {
+    --km-modal-gutter: 8px;
+    padding-top: max(3vh, env(safe-area-inset-top, 0px));
+    padding-bottom: max(3vh, env(safe-area-inset-bottom, 0px));
+  }
+  /* A phone sheet may use nearly the full height — the body still scrolls. */
+  .km-modal { max-height: 92vh; }
 }
 
 /* Phones (~360px): the connection cluster must wrap to multiple rows and never
