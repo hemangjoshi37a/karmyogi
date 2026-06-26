@@ -320,12 +320,28 @@ export const useMachineProfile = create<MachineProfileState>()(
       detectedModelId: null,
       setDetectedModel: (id) => set({ detectedModelId: modelFor(id) ? id : null }),
 
-      configured: false,
+      // The guided setup wizard (X2) is OPT-IN, never auto-popping: defaulting
+      // `configured` to true means the familiar top-bar Connect dropdown is the
+      // primary flow (exactly as before the wizard existed). Users open the wizard
+      // on demand via "Setup wizard…" in the Machines menu (reopenSetup() flips
+      // this false to show it). Auto-popping a blocking modal on load was hijacking
+      // the normal connect flow — regression fixed.
+      configured: true,
       markConfigured: () => set({ configured: true }),
       reopenSetup: () => set({ configured: false }),
     }),
     {
       name: 'karmyogi.machineProfile',
+      // Bump when the persisted shape/semantics change; `migrate` runs for any
+      // stored state with a lower version.
+      version: 1,
+      // v1: the wizard became opt-in. Grandfather EVERY existing user (and anyone
+      // who already saw the auto-popping wizard and got `configured:false` saved)
+      // to configured=true so the modal never nags them on load.
+      migrate: (persisted: unknown) => {
+        const s = (persisted ?? {}) as Record<string, unknown>
+        return { ...s, configured: true }
+      },
       // Persist the raw selection + baud override + the model/first-launch flag;
       // everything else is derived. `detectedModelId` is a transient runtime hint.
       partialize: (s) => ({

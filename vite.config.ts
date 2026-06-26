@@ -28,14 +28,18 @@ import { zxingWasm } from './vite-zxing-plugin.mjs'
 // (the app tsconfig deliberately omits @types/node so browser globals stay clean).
 declare const process: { env: Record<string, string | undefined> }
 
-// Opt-in HTTPS for the dev server. The camera (`getUserMedia`) and Web Serial
-// only work in a SECURE CONTEXT — `https://` or `localhost`. Plain `http://<lan-ip>`
-// is NOT secure, so the browser hides `navigator.mediaDevices` and the camera
-// can't start. To use the camera / Web Serial from another device over the LAN:
-//   HTTPS=1 npm run dev -- --host 0.0.0.0
-// then open `https://<lan-ip>:5185` and accept the self-signed certificate once.
-// Default (no HTTPS env) keeps plain http://localhost for normal local dev.
-const useHttps = !!process.env.HTTPS
+// HTTPS for the dev server — ON BY DEFAULT. The camera (`getUserMedia`), Web
+// Serial (USB), WebUSB and Web Bluetooth ONLY exist in a SECURE CONTEXT —
+// `https://` or `localhost`/`127.0.0.1`. On a plain `http://<lan-ip>` page (e.g.
+// http://192.168.x.x:5186) the browser HIDES `navigator.serial` /
+// `navigator.bluetooth` entirely, so the USB/Bluetooth buttons disable — there is
+// no app-side workaround for that browser rule. Serving https by default means
+// reaching the dev server from another device on the LAN just works:
+//   npm run dev -- --host 0.0.0.0   → open https://<lan-ip>:5186 (accept the
+//   self-signed cert once) → USB + Bluetooth + camera all available.
+// Opt OUT to plain http with `HTTP=1` (only needed to reach a bare ws:// Wi-Fi
+// board WITHOUT the wss→ws relay; with the relay, keep https and Wi-Fi also works).
+const useHttps = process.env.HTTP !== '1' && process.env.HTTPS !== '0'
 
 // Build identity, computed once when Vite loads this config. Baked into the app
 // via `define` (so the running bundle knows which build it is) AND written to

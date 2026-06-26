@@ -452,14 +452,24 @@ export class BlePort implements PortLike {
   private async discoverCharacteristics(
     server: BluetoothRemoteGATTServer,
   ): Promise<{ rx: BluetoothRemoteGATTCharacteristic; tx: BluetoothRemoteGATTCharacteristic }> {
+    // Diagnostics: BLE GATT failures are notoriously opaque, so we capture WHY
+    // each attempt failed and what the device actually exposed, then fold it into
+    // the thrown error (surfaced in the karmyogi console) instead of swallowing it.
+    const diag: string[] = []
+    const reason = (e: unknown) =>
+      `${(e as { name?: string } | null)?.name ?? 'Error'}: ${e instanceof Error ? e.message : String(e)}`
+
     // 1) Canonical Nordic UART (NUS) exact pair: device→host notify + host→device write.
+    //    This is what FluidNC's BLE exposes. NUS is in optionalServices, so the page
+    //    HAS access even when the device was chosen via a namePrefix filter.
     try {
       const svc = await server.getPrimaryService(NUS_SERVICE)
       const rx = await svc.getCharacteristic(NUS_TX_NOTIFY)
       const tx = await svc.getCharacteristic(NUS_RX_WRITE)
       return { rx, tx }
-    } catch {
-      /* not a NUS device — keep trying */
+    } catch (e) {
+      diag.push(`NUS (${NUS_SERVICE}) → ${reason(e)}`)
+      console.warn('[BLE] Nordic UART discovery failed:', e)
     }
 
     // 2) Microchip RN4870/71 transparent-UART exact pair.
@@ -468,8 +478,8 @@ export class BlePort implements PortLike {
       const rx = await svc.getCharacteristic(RN4870_TX_NOTIFY)
       const tx = await svc.getCharacteristic(RN4870_RX_WRITE)
       return { rx, tx }
-    } catch {
-      /* not an RN4870 — fall through to generic discovery */
+    } catch (e) {
+      diag.push(`RN4870 → ${reason(e)}`)
     }
 
     // 3) Generic discovery: scan each reachable primary service for a notify +
@@ -477,15 +487,22 @@ export class BlePort implements PortLike {
     let services: BluetoothRemoteGATTService[] = []
     try {
       services = await server.getPrimaryServices()
-    } catch {
+    } catch (e) {
+      diag.push(`getPrimaryServices() → ${reason(e)}`)
       services = []
     }
+    const seen: string[] = []
     for (const svc of services) {
+      seen.push((svc as unknown as { uuid?: string }).uuid ?? '?')
       const pair = await pickUartPair(svc)
       if (pair) return pair
     }
+    diag.push(`exposed services: ${seen.length ? seen.join(', ') : '(none reachable)'}`)
+    console.warn('[BLE] No UART characteristics found.', diag)
 
-    throw new Error(BLE_NO_UART_MESSAGE)
+    // Enriched message: the base guidance + the precise per-step failure reasons,
+    // so a misbehaving board/cache (rather than a real "no NUS") is diagnosable.
+    throw new Error(`${BLE_NO_UART_MESSAGE} [diagnostics — ${diag.join(' | ')}]`)
   }
 
   /** Write a chunk, split to ~20-byte frames for the default BLE ATT MTU. */

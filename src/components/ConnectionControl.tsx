@@ -648,6 +648,17 @@ function ConnectMenu({
   const usbOtgSupported = !serialSupported && UsbPort.isSupported()
   const usbSupported = serialSupported || usbOtgSupported
   const pageSecure = typeof location !== 'undefined' && location.protocol === 'https:'
+  // Web Serial / WebUSB / Web Bluetooth ALL require a secure context. Over plain
+  // http://<lan-ip> none of them exist, so USB *and* Bluetooth disable together —
+  // the #1 real-world reason both rows look "broken". Detect it so we can show the
+  // real fix (open over https) instead of the misleading "no USB API in this
+  // browser". localhost is a secure context even on http, so isSecureContext (not
+  // just the https: scheme) is the right test.
+  const insecureCtx = typeof window !== 'undefined' && !window.isSecureContext
+  // USB/BLE are absent specifically *because* the page is insecure (vs the browser
+  // genuinely lacking the API, e.g. Firefox/Safari) → different, actionable advice.
+  const usbBlockedByHttp = insecureCtx && !usbSupported
+  const bleBlockedByHttp = insecureCtx && !bleSupported
 
   useEffect(() => {
     if (!open) return
@@ -765,6 +776,19 @@ function ConnectMenu({
         <div className="km-cx-pop" role="menu">
           <div className="km-cx-head">{t('conn.connect.how', 'Connect to machine')}</div>
 
+          {/* Insecure-context banner — the single most common reason USB AND
+              Bluetooth both look broken. Shown prominently (not just a hover tip)
+              with the exact fix and the alternatives that DO work over http. */}
+          {(usbBlockedByHttp || bleBlockedByHttp) && (
+            <div className="km-cx-note warn" role="note">
+              {t(
+                'conn.secure.required',
+                'USB and Bluetooth need a secure (https) page — this page is http://{host}, so the browser hides those APIs. Open karmyogi over https (the hosted site https://karmyogi.hjlabs.in, or run the dev server with HTTPS=1) to connect by cable or Bluetooth. Wi-Fi and Mock below still work here.',
+                { host: typeof location !== 'undefined' ? location.host : '' },
+              )}
+            </div>
+          )}
+
           {/* USB cable — Web Serial on desktop Chromium; WebUSB (USB-OTG) on
               Android Chromium, where navigator.serial doesn't exist. Same row,
               same glyph, same mental model on both. */}
@@ -774,7 +798,12 @@ function ConnectMenu({
             disabled={connecting || !liveConnect || !usbSupported}
             onClick={connectUsb}
             title={
-              !usbSupported
+              usbBlockedByHttp
+                ? t(
+                    'conn.usb.insecure',
+                    'USB needs a secure (https) page. This page is http:// — open karmyogi over https (or run the dev server with HTTPS=1) to connect by cable.',
+                  )
+                : !usbSupported
                 ? t(
                     'conn.usb.unsupportedAll',
                     'No USB API in this browser — on iPhone/iPad use the Wi-Fi (WebSocket) bridge; on Android use Chrome/Edge.',
@@ -804,10 +833,12 @@ function ConnectMenu({
                         'conn.usb.subOtg',
                         'WebUSB (USB-OTG) — plug the machine into your phone with an OTG cable/adapter.',
                       )
-                    : t(
-                        'conn.usb.subNone',
-                        'Not available in this browser — on iPhone/iPad use the Network bridge; on Android use Chrome/Edge.',
-                      )}
+                    : usbBlockedByHttp
+                      ? t('conn.usb.subInsecure', 'Needs https — open the secure site to use a cable.')
+                      : t(
+                          'conn.usb.subNone',
+                          'Not available in this browser — on iPhone/iPad use the Network bridge; on Android use Chrome/Edge.',
+                        )}
               </span>
             </span>
           </button>
@@ -821,6 +852,11 @@ function ConnectMenu({
             title={
               bleSupported
                 ? t('conn.ble.title', 'Connect over Bluetooth LE (Nordic UART / HM-10 style serial bridge)')
+                : bleBlockedByHttp
+                ? t(
+                    'conn.ble.insecure',
+                    'Bluetooth needs a secure (https) page. This page is http:// — open karmyogi over https to connect over Bluetooth.',
+                  )
                 : t(
                     'conn.ble.unsupported',
                     'Web Bluetooth isn’t available here — use Chrome/Edge over HTTPS (or localhost) with OS Bluetooth on.',
@@ -833,7 +869,9 @@ function ConnectMenu({
               <span className="km-cx-row-sub">
                 {bleSupported
                   ? t('conn.ble.sub', 'BLE serial (Nordic UART / HM-10 / FluidNC). Classic HC-05/06 not supported.')
-                  : t('conn.ble.subUnsupported', 'Not in this browser — on iPhone/iPad use the Wi-Fi bridge below.')}
+                  : bleBlockedByHttp
+                    ? t('conn.ble.subInsecure', 'Needs https — open the secure site to use Bluetooth.')
+                    : t('conn.ble.subUnsupported', 'Not in this browser — on iPhone/iPad use the Wi-Fi bridge below.')}
               </span>
             </span>
           </button>
