@@ -1614,3 +1614,370 @@ export function headHomographyRms(
   const dst: Vec2[] = samples.map((s) => [-s.machine[0], -s.machine[1]]);
   return reprojectionRMS(H, src, dst);
 }
+
+// ---------------------------------------------------------------------------
+// Robust markerless stock detection (lighting/angle hardened)
+// ---------------------------------------------------------------------------
+//
+// The first-pass markerless detector did a single fixed-threshold frame diff
+// and took the largest blob. That is brittle: a different room light, a slight
+// camera nudge, or a shiny stock surface either floods the mask (whole frame
+// "changed") or starves it (nothing crosses the threshold). The pipeline below
+// hardens that into something an operator can trust enough to REVIEW:
+//
+//   1. absolute-difference image (ref empty bed vs current),
+//   2. an AUTOMATIC threshold (Otsu on the diff histogram, floored so sensor
+//      noise alone never trips it) instead of a hand-tuned constant,
+//   3. morphological OPEN then CLOSE to delete speckle and fill pinholes,
+//   4. largest connected blob + rich shape statistics, and
+//   5. a multi-signal CONFIDENCE (area in a plausible band × how dominant the
+//      blob is over scattered noise × how solidly it fills its own box ×
+//      a penalty for hugging the frame border — the signature of a global
+//      lighting shift rather than a real object on the bed).
+//
+// Everything here is pure (no DOM/zustand); the caller maps the result to bed
+// mm and presents it for confirmation — nothing is ever auto-applied.
+
+/**
+ * Per-pixel absolute difference `|cur − ref|` of two same-size grayscale frames,
+ * clamped to 0..255. The basis for the markerless silhouette.
+ *
+ * @throws If `ref` and `cur` dimensions differ.
+ */
+export function absDiffImage(ref: GrayImage, cur: GrayImage): Uint8Array {
+  if (ref.width !== cur.width || ref.height !== cur.height) {
+    throw new Error(
+      `absDiffImage: dimension mismatch (${ref.width}x${ref.height} vs ${cur.width}x${cur.height})`,
+    );
+  }
+  const n = ref.width * ref.height;
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const d = cur.data[i] - ref.data[i];
+    out[i] = d < 0 ? -d : d;
+  }
+  return out;
+}
+
+/**
+ * Otsu's method: the intensity threshold (0..255) that maximizes between-class
+ * variance of an 8-bit single-channel image — i.e. the value that best splits
+ * "background" from "foreground" with no hand-tuning, so the detector adapts to
+ * the lighting instead of relying on a magic constant.
+ *
+ * @param values Single-channel samples (e.g. an abs-diff image).
+ * @param floor  Minimum threshold to return (default 0). For a frame DIFF this
+ *   should be a few grey-levels so pure sensor noise on an unchanged bed cannot
+ *   produce a "foreground" — Otsu on a near-uniform diff returns a tiny value.
+ * @returns The chosen threshold, at least `floor`.
+ */
+export function otsuThreshold(
+  values: Uint8Array | Uint8ClampedArray,
+  floor = 0,
+): number {
+  const hist = new Array<number>(256).fill(0);
+  for (let i = 0; i < values.length; i++) hist[values[i]]++;
+  const total = values.length;
+  if (total === 0) return floor;
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0;
+  let wB = 0;
+  let maxVar = -1;
+  let threshold = 0;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+    sumB += i * hist[i];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > maxVar) {
+      maxVar = between;
+      threshold = i;
+    }
+  }
+  return Math.max(floor, threshold);
+}
+
+/**
+ * 3×3 binary morphology by one pass of erosion or dilation (square structuring
+ * element). Erosion shrinks (a pixel survives only if all neighbours are set) —
+ * deletes isolated speckle. Dilation grows (a pixel is set if any neighbour is
+ * set) — closes pinholes. Out-of-bounds neighbours are treated as 0.
+ *
+ * @param mask 0/1 mask, length `width*height`, row-major.
+ * @param op   `'erode'` or `'dilate'`.
+ * @returns A NEW mask (the input is not mutated).
+ */
+export function morph3x3(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  op: 'erode' | 'dilate',
+): Uint8Array {
+  const out = new Uint8Array(width * height);
+  const erode = op === 'erode';
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      let result = erode ? 1 : 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        let broke = false;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          const v =
+            xx < 0 || xx >= width || yy < 0 || yy >= height
+              ? 0
+              : mask[yy * width + xx];
+          if (erode) {
+            if (v === 0) { result = 0; broke = true; break; }
+          } else if (v === 1) { result = 1; broke = true; break; }
+        }
+        if (broke) break;
+      }
+      out[idx] = result;
+    }
+  }
+  return out;
+}
+
+/** Morphological OPEN (erode→dilate): removes small speckle, keeps blob size. */
+export function morphOpen(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  iterations = 1,
+): Uint8Array {
+  let m = mask;
+  for (let i = 0; i < iterations; i++) m = morph3x3(m, width, height, 'erode');
+  for (let i = 0; i < iterations; i++) m = morph3x3(m, width, height, 'dilate');
+  return m;
+}
+
+/** Morphological CLOSE (dilate→erode): fills small holes, keeps blob size. */
+export function morphClose(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  iterations = 1,
+): Uint8Array {
+  let m = mask;
+  for (let i = 0; i < iterations; i++) m = morph3x3(m, width, height, 'dilate');
+  for (let i = 0; i < iterations; i++) m = morph3x3(m, width, height, 'erode');
+  return m;
+}
+
+/** Pixel-space shape statistics of the largest connected blob in a mask. */
+export interface BlobStats {
+  /** Tight pixel-space bounding box of the largest blob (maxX/maxY exclusive). */
+  bboxPx: Rect;
+  /** Largest blob area, pixels. */
+  area: number;
+  /** Total foreground (set) pixels across the WHOLE mask. */
+  totalForeground: number;
+  /** `area / (bbox width·height)` — how solidly the blob fills its box, 0..1. */
+  fill: number;
+  /** `area / totalForeground` — single coherent object vs scattered noise, 0..1. */
+  dominance: number;
+  /** Fraction of the blob's pixels that sit on the frame border, 0..1. */
+  edgeTouchFrac: number;
+}
+
+/**
+ * Largest connected component (4-connectivity) of a binary mask plus shape
+ * statistics used to score a markerless detection's trustworthiness. Returns
+ * `null` for an empty mask.
+ */
+export function largestBlobStats(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+): BlobStats | null {
+  const n = width * height;
+  const visited = new Uint8Array(n);
+  const stack = new Int32Array(n);
+
+  let totalForeground = 0;
+  for (let i = 0; i < n; i++) totalForeground += mask[i];
+  if (totalForeground === 0) return null;
+
+  let bestSize = 0;
+  let bMinX = 0;
+  let bMinY = 0;
+  let bMaxX = 0;
+  let bMaxY = 0;
+  let bEdge = 0;
+
+  for (let start = 0; start < n; start++) {
+    if (mask[start] !== 1 || visited[start] === 1) continue;
+    let sp = 0;
+    stack[sp++] = start;
+    visited[start] = 1;
+    let size = 0;
+    let edge = 0;
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    while (sp > 0) {
+      const idx = stack[--sp];
+      const px = idx % width;
+      const py = (idx - px) / width;
+      size++;
+      if (px === 0 || py === 0 || px === width - 1 || py === height - 1) edge++;
+      if (px < minX) minX = px;
+      if (py < minY) minY = py;
+      if (px > maxX) maxX = px;
+      if (py > maxY) maxY = py;
+      if (px > 0) {
+        const ni = idx - 1;
+        if (mask[ni] === 1 && visited[ni] === 0) { visited[ni] = 1; stack[sp++] = ni; }
+      }
+      if (px + 1 < width) {
+        const ni = idx + 1;
+        if (mask[ni] === 1 && visited[ni] === 0) { visited[ni] = 1; stack[sp++] = ni; }
+      }
+      if (py > 0) {
+        const ni = idx - width;
+        if (mask[ni] === 1 && visited[ni] === 0) { visited[ni] = 1; stack[sp++] = ni; }
+      }
+      if (py + 1 < height) {
+        const ni = idx + width;
+        if (mask[ni] === 1 && visited[ni] === 0) { visited[ni] = 1; stack[sp++] = ni; }
+      }
+    }
+    if (size > bestSize) {
+      bestSize = size;
+      bMinX = minX;
+      bMinY = minY;
+      bMaxX = maxX;
+      bMaxY = maxY;
+      bEdge = edge;
+    }
+  }
+
+  if (bestSize === 0) return null;
+  const boxArea = Math.max(1, (bMaxX - bMinX + 1) * (bMaxY - bMinY + 1));
+  return {
+    bboxPx: { minX: bMinX, minY: bMinY, maxX: bMaxX + 1, maxY: bMaxY + 1 },
+    area: bestSize,
+    totalForeground,
+    fill: Math.min(1, bestSize / boxArea),
+    dominance: Math.min(1, bestSize / totalForeground),
+    edgeTouchFrac: Math.min(1, bEdge / bestSize),
+  };
+}
+
+/** A reviewable markerless stock detection. Always presented for confirmation. */
+export interface StockDetection {
+  /** Detected workpiece footprint in bed-mm (axis-aligned). */
+  rectMm: Rect;
+  /** Four pixel-space corners of the detected blob's box (for the live overlay):
+   *  `[topLeft, topRight, bottomRight, bottomLeft]`. */
+  polyPx: [Vec2, Vec2, Vec2, Vec2];
+  /** Combined trustworthiness in 0..1 (review before applying — never auto-cut). */
+  confidence: number;
+  /** Largest blob area as a fraction of the whole frame. */
+  areaFrac: number;
+  /** How solidly the blob fills its bounding box, 0..1 (solid stock ≈ high). */
+  fill: number;
+  /** How dominant the blob is over scattered change, 0..1 (one object ≈ high). */
+  dominance: number;
+  /** Fraction of the blob hugging the frame border, 0..1 (high ≈ lighting shift). */
+  edgeTouchFrac: number;
+  /** The automatic diff threshold actually used (0..255). */
+  threshold: number;
+}
+
+/**
+ * End-to-end robust markerless stock detection: empty-bed reference vs current
+ * frame → auto-threshold diff → morphological clean-up → largest blob → bed-mm
+ * rect + a multi-signal confidence. PURE; the caller reviews + confirms.
+ *
+ * @param ref         Empty-bed reference (grayscale).
+ * @param cur         Current frame (grayscale, same size).
+ * @param imgToWorldH Row-major image-px → bed-mm homography (the calibrated H).
+ * @param opts        `noiseFloor` (min diff threshold, default 12),
+ *   `morphIters` (open/close passes, default 1), `minAreaFrac` (reject tiny
+ *   blobs, default 0.002).
+ * @returns A {@link StockDetection}, or `null` if no plausible blob is found.
+ */
+export function detectStockSilhouette(
+  ref: GrayImage,
+  cur: GrayImage,
+  imgToWorldH: Mat3,
+  opts?: { noiseFloor?: number; morphIters?: number; minAreaFrac?: number },
+): StockDetection | null {
+  if (ref.width !== cur.width || ref.height !== cur.height) return null;
+  const w = cur.width;
+  const h = cur.height;
+  const noiseFloor = opts?.noiseFloor ?? 12;
+  const morphIters = Math.max(0, opts?.morphIters ?? 1);
+  const minAreaFrac = opts?.minAreaFrac ?? 0.002;
+
+  const diff = absDiffImage(ref, cur);
+  const thr = otsuThreshold(diff, noiseFloor);
+  let mask: Uint8Array = new Uint8Array(w * h);
+  for (let i = 0; i < mask.length; i++) mask[i] = diff[i] > thr ? 1 : 0;
+  if (morphIters > 0) {
+    mask = morphOpen(mask, w, h, morphIters);
+    mask = morphClose(mask, w, h, morphIters);
+  }
+
+  const stats = largestBlobStats(mask, w, h);
+  if (!stats) return null;
+  const areaFrac = stats.area / (w * h);
+  if (areaFrac < minAreaFrac) return null;
+
+  // Map the four pixel corners of the blob box to bed-mm and take the extents.
+  const b = stats.bboxPx;
+  const cornersPx: [Vec2, Vec2, Vec2, Vec2] = [
+    [b.minX, b.minY],
+    [b.maxX, b.minY],
+    [b.maxX, b.maxY],
+    [b.minX, b.maxY],
+  ];
+  let wMinX = Infinity;
+  let wMinY = Infinity;
+  let wMaxX = -Infinity;
+  let wMaxY = -Infinity;
+  for (const c of cornersPx) {
+    const p = applyHomography(imgToWorldH, c);
+    if (p[0] < wMinX) wMinX = p[0];
+    if (p[1] < wMinY) wMinY = p[1];
+    if (p[0] > wMaxX) wMaxX = p[0];
+    if (p[1] > wMaxY) wMaxY = p[1];
+  }
+
+  // --- Confidence: a product of independent, interpretable signals. ---
+  // (a) area in a plausible band: a workpiece is neither a speck nor the whole
+  //     frame. Peak across ~3%..55%, ramp in below, fall off above.
+  const f = areaFrac;
+  const areaScore =
+    f < 0.03 ? f / 0.03 : f <= 0.55 ? 1 : Math.max(0, 1 - (f - 0.55) / 0.35);
+  // (b) dominance: one coherent object beats scattered lighting noise.
+  const domScore = 0.35 + 0.65 * stats.dominance;
+  // (c) fill: solid stock fills its own bounding box; an irregular smear doesn't.
+  const fillScore = 0.4 + 0.6 * stats.fill;
+  // (d) edge penalty: a blob hugging the border is usually a global light change.
+  const edgePenalty = 1 - 0.6 * stats.edgeTouchFrac;
+  const confidence = Math.max(
+    0,
+    Math.min(1, areaScore * domScore * fillScore * edgePenalty),
+  );
+
+  return {
+    rectMm: { minX: wMinX, minY: wMinY, maxX: wMaxX, maxY: wMaxY },
+    polyPx: cornersPx,
+    confidence,
+    areaFrac,
+    fill: stats.fill,
+    dominance: stats.dominance,
+    edgeTouchFrac: stats.edgeTouchFrac,
+    threshold: thr,
+  };
+}

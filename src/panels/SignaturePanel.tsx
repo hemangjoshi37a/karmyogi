@@ -32,8 +32,10 @@ import {
   modulateStrokes,
   estimatePlotTime,
   formatDuration,
+  fitToBed,
 } from '../core/penOptimize'
 import { useProgram, useMachine, usePersistentState } from '../store'
+import { useBed } from '../store/bed'
 import { grbl } from '../serial/controller'
 import { arrayTransforms } from '../core/arrayDuplicate'
 import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
@@ -545,6 +547,43 @@ export function SignaturePanel() {
     },
     [buildPolys, mode, raster, originX, originY, penUpZ, penDownZ, feed, travelFeed, setProgram, t],
   )
+
+  // W6 — one-click "Fit to bed": uniformly scale the signature to fill the bed
+  // (minus a small margin) and center it on the WORK ORIGIN (= bed centre; see
+  // store/bed.ts). Scaling the size param(s) scales the geometry exactly about the
+  // origin, so penOptimize.fitToBed()'s scale + offset apply cleanly: the size
+  // param takes the scale, the origin takes the (recentred) offset. Reads the bed
+  // size from the shared store; live regen then picks up the new size + origin.
+  const onFitToBed = useCallback(() => {
+    const polys = buildBasePolys()
+    if (polys.length === 0) {
+      setInfo(t('sig.info.fitEmpty', 'Nothing to fit — draw or load a signature first.'))
+      return
+    }
+    const { width, depth } = useBed.getState()
+    const fit = fitToBed(polys, { bedW: width, bedH: depth, margin: 5 })
+    if (!(fit.scale > 0)) return
+    const round2 = (n: number) => Math.round(n * 100) / 100
+    if (mode === 'draw') {
+      setDrawW((p) => round2(p * fit.scale))
+      setDrawH((p) => round2(p * fit.scale))
+    } else {
+      setTargetW((p) => round2(p * fit.scale))
+      if (!lockAspect) setTargetH((p) => round2(p * fit.scale))
+    }
+    // fitToBed centres on (bedW/2, bedH/2); shift to the centred-origin bed model.
+    const nx = round2(fit.dx - width / 2)
+    const ny = round2(fit.dy - depth / 2)
+    setOriginX(nx)
+    setOriginY(ny)
+    setInfo(
+      t('sig.info.fitToBed', 'Fit to bed: scaled {scale}×, centered at origin ({x}, {y}) mm.', {
+        scale: fit.scale.toFixed(2),
+        x: nx,
+        y: ny,
+      }),
+    )
+  }, [buildBasePolys, mode, lockAspect, setDrawW, setDrawH, setTargetW, setTargetH, setOriginX, setOriginY, t])
 
   // Live G-code: regenerate ~300ms after the last change and push to the store
   // so the Visualizer updates without a manual step (skipped while streaming).
@@ -1334,6 +1373,15 @@ export function SignaturePanel() {
         {/* ---- Send action bar (Send to machine / Open in Visualizer) ---- */}
         <section className="sig-card sig-card-wide ui-card">
           <div className="sig-actions">
+            <button
+              type="button"
+              className="sig-btn sig-fit"
+              onClick={onFitToBed}
+              disabled={rawLineCount === 0}
+              title={t('sig.fit.tip', 'Auto-scale the signature to fill the machine bed (minus a small margin) and center it on the work origin.')}
+            >
+              <Icon name="frame" size={14} /> {t('sig.fit', 'Fit to bed')}
+            </button>
             <button
               type="button"
               className="sig-btn primary sig-play"

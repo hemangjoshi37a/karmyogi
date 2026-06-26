@@ -1,0 +1,214 @@
+/* connection.css — styling for the X2 connection setup wizard (ConnectionWizard).
+ *
+ * Owns ONLY the `.km-cw-*` ("connection-wizard") namespace so it never collides
+ * with topbar.css/globals.css (`.km-conn-*`, `.km-farm-*`) or connect.css
+ * (`.km-cx-*`). We REUSE the global `.km-conn-btn` / `.km-conn-select` looks for
+ * controls so the wizard matches the rest of the connection UI; everything else
+ * (steps, cards, info rows) is new `.km-cw-*` structure.
+ */
+
+.km-cw {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4, 14px);
+}
+
+/* Progress dots */
+.km-cw-dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.km-cw-dot {
+  width: 26px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.15s ease;
+}
+.km-cw-dot[data-active='true'] {
+  background: var(--accent, #4c9aff);
+}
+.km-cw-dot[data-done='true'] {
+  background: var(--accent, #4c9aff);
+  opacity: 0.55;
+}
+
+.km-cw-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 12px);
+}
+
+.km-cw-lead {
+  margin: 0;
+  font-size: var(--fs-body, 13px);
+  line-height: 1.5;
+  color: var(--fg);
+}
+.km-cw-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+/* Form field (label + control stacked) */
+.km-cw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.km-cw-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.km-cw-select {
+  width: 100%;
+}
+
+/* Selected-model info panel */
+.km-cw-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-panel, var(--bg-elev));
+}
+.km-cw-info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+.km-cw-info-k {
+  color: var(--fg-muted);
+}
+.km-cw-info-v {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--fg);
+}
+.km-cw-detected {
+  border-color: var(--accent, #4c9aff);
+  gap: 10px;
+  align-items: flex-start;
+}
+
+/* Transport / action cards */
+.km-cw-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-elev);
+}
+.km-cw-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.km-cw-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.km-cw-card-sub {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+.km-cw-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.km-cw-spacer {
+  flex: 1 1 auto;
+}
+
+/* Inputs reuse the connect form sizing */
+.km-cw-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg-panel, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+}
+.km-cw-input--port {
+  flex: 0 0 84px;
+}
+.km-cw-input:focus-visible {
+  outline: 2px solid var(--accent, #4c9aff);
+  outline-offset: 1px;
+}
+
+.km-cw-baud {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.km-cw-baud > span {
+  white-space: nowrap;
+}
+
+.km-cw-state {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status / error rows */
+.km-cw-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius, 8px);
+  font-size: 13px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+.km-cw-status--ok {
+  border-color: var(--ok, #3fb950);
+}
+.km-cw-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok, #3fb950);
+  flex: 0 0 auto;
+}
+.km-cw-err {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger, #f85149);
+}
+
+/* Mobile: stack card rows full-width, larger touch targets */
+@media (max-width: 560px) {
+  .km-cw-card-row {
+    align-items: stretch;
+  }
+  .km-cw-card-row .km-conn-btn {
+    width: 100%;
+  }
+  .km-cw-input,
+  .km-cw-input--port {
+    flex: 1 1 100%;
+  }
+}

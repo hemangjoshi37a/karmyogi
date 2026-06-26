@@ -36,6 +36,14 @@ interface StockState extends StockDims {
   setMaterial: (id: string) => void
   setXYOrigin: (o: XYOrigin) => void
   setZRef: (z: ZRef) => void
+  /**
+   * Transient (NOT persisted): when true the 3D view shows the visual
+   * work-origin picker handles on the translucent stock box (C4). Clicking a
+   * corner/centre sets the XY origin; clicking the top/bottom face sets the Z
+   * reference. Toggled from the CAD/CAM panel.
+   */
+  pickingOrigin: boolean
+  setPickingOrigin: (v: boolean) => void
 }
 
 export const useStock = create<StockState>()(
@@ -59,6 +67,8 @@ export const useStock = create<StockState>()(
       setMaterial: (id) => set({ materialId: id }),
       setXYOrigin: (o) => set({ xyOrigin: o }),
       setZRef: (z) => set({ zRef: z }),
+      pickingOrigin: false,
+      setPickingOrigin: (v) => set({ pickingOrigin: v }),
     }),
     {
       name: KEY,

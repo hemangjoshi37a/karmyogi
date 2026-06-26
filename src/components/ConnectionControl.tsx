@@ -85,6 +85,7 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
   const setControllerKind = useMachineProfile((s) => s.setControllerKind)
   const baudOverride = useMachineProfile((s) => s.baudOverride)
   const setBaudOverride = useMachineProfile((s) => s.setBaudOverride)
+  const reopenSetup = useMachineProfile((s) => s.reopenSetup)
   const streaming = useProgram((s) => s.streaming)
   const connected = connection === 'connected'
   const connecting = connection === 'connecting'
@@ -326,6 +327,7 @@ export function ConnectionControl({ onOpenSettings, onOpenProbe }: ConnectionCon
           const id = addMachine({ kind: 'mock', label: 'Mock' })
           void connectMachine(id)
         }}
+        onOpenWizard={reopenSetup}
       />
 
       <IconButton
@@ -1122,6 +1124,8 @@ interface MachineSwitcherProps {
   onRemove: (id: string) => void
   onAddWs: (url: string, label?: string) => void
   addMock: () => void
+  /** Re-open the guided setup wizard (X2). */
+  onOpenWizard: () => void
 }
 
 /**
@@ -1143,6 +1147,7 @@ function MachineSwitcher({
   onRemove,
   onAddWs,
   addMock,
+  onOpenWizard,
 }: MachineSwitcherProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -1199,7 +1204,25 @@ function MachineSwitcher({
       </button>
       {open && (
         <div className="km-farm-pop">
-          <div className="km-farm-head">{t('conn.machine.farm', 'Machine farm')}</div>
+          <div
+            className="km-farm-head"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+          >
+            <span>{t('conn.machine.farm', 'Machine farm')}</span>
+            <button
+              className="km-conn-btn"
+              onClick={() => {
+                setOpen(false)
+                onOpenWizard()
+              }}
+              title={t(
+                'conn.machine.wizardTitle',
+                'Re-run the guided setup wizard (choose machine, connect, home)',
+              )}
+            >
+              {t('conn.machine.wizard', 'Setup wizard…')}
+            </button>
+          </div>
           {serialScan && (
             <div
               className="km-farm-scan"

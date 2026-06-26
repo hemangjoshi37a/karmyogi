@@ -994,3 +994,24 @@
 .pcb-drc-info {
   color: var(--fg-muted);
 }
+
+/* --- P13 selective (region/paint) isolation + rest machining --- */
+.pcb-lv-paint {
+  margin-left: auto;
+}
+.pcb-lv-painting {
+  cursor: crosshair;
+  touch-action: none; /* let the drag paint instead of panning/scrolling on touch */
+}
+.pcb-lv-region {
+  pointer-events: none;
+}
+.pcb-region-ctl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-1) 0 var(--sp-2);
+}
+.pcb-region-warn {
+  color: var(--warn);
+}

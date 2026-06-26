@@ -3,7 +3,8 @@ import type { IDockviewPanelProps } from 'dockview'
 import { panelComponents, availablePanels } from './panelRegistry'
 import { PanelIcon } from './panelIcons'
 import { useT } from '../i18n'
-import { usePersistentState } from '../store'
+import { usePersistentState, useMachine, useSettings } from '../store'
+import '../styles/mobile.css'
 
 /**
  * Mobile / narrow-viewport layout: the SAME panel components as the desktop
@@ -32,6 +33,112 @@ import { usePersistentState } from '../store'
  * sheet is a `role="dialog" aria-modal` with Esc-to-close, backdrop dismiss and
  * focus restored to the opener on close.
  */
+/**
+ * X5 — persistent machine HUD for portrait/phone use.
+ *
+ * The desktop dock can keep the Controller's DRO visible alongside the active
+ * workbench; on a phone only ONE panel shows at a time, so an operator running a
+ * job from (say) the Program or Visualizer tab would otherwise lose sight of the
+ * live machine state. This compact, always-on strip mirrors the desktop DRO's
+ * read-out — machine state, work X/Y/Z, feed and spindle — using the SAME labels
+ * and unit/decimal contract (mm→3dp, inch→4dp) as the Controller panel, so the
+ * mental model is identical on both form factors.
+ *
+ * It only renders once a connection exists (hidden when disconnected, to give
+ * panels the full height), and can be collapsed to a single state pill via a
+ * persisted toggle. It is a flex row in the column (not an overlay), so it never
+ * obscures panel content.
+ */
+function MachineHud() {
+  const t = useT()
+  const connection = useMachine((s) => s.connection)
+  const state = useMachine((s) => s.state)
+  const wpos = useMachine((s) => s.wpos)
+  const feed = useMachine((s) => s.feed)
+  const spindle = useMachine((s) => s.spindle)
+  const units = useSettings((s) => s.units)
+  const [collapsed, setCollapsed] = usePersistentState('karmyogi.mobile.hud.collapsed', false)
+
+  // Hidden entirely while disconnected — the connection cluster in the top bar
+  // already communicates "not connected", and panels get the full height.
+  if (connection === 'disconnected') return null
+
+  const decimals = units === 'inch' ? 4 : 3
+  const fmt = (n: number) => (Number.isFinite(n) ? n.toFixed(decimals) : (0).toFixed(decimals))
+  const unitLabel = units === 'inch' ? 'in' : 'mm'
+
+  return (
+    <div className="mobile-hud" data-state={state} data-collapsed={collapsed ? 'true' : undefined}>
+      <span className="mobile-hud-state" title={t('controller.state', 'State')}>
+        <span className="mobile-hud-dot" aria-hidden="true" />
+        {state}
+      </span>
+      {!collapsed ? (
+        <>
+          <span className="mobile-hud-dro" aria-label={t('controller.workPos', 'Work position')}>
+            <span className="mobile-hud-ax">
+              <b>X</b>
+              {fmt(wpos.x)}
+            </span>
+            <span className="mobile-hud-ax">
+              <b>Y</b>
+              {fmt(wpos.y)}
+            </span>
+            <span className="mobile-hud-ax">
+              <b>Z</b>
+              {fmt(wpos.z)}
+            </span>
+            <span className="mobile-hud-unit">{unitLabel}</span>
+          </span>
+          <span className="mobile-hud-fs">
+            <span className="mobile-hud-ax" title={t('controller.feed', 'Feed')}>
+              <b>F</b>
+              {Math.round(feed)}
+            </span>
+            <span className="mobile-hud-ax" title={t('controller.spindle', 'Spindle')}>
+              <b>S</b>
+              {Math.round(spindle)}
+            </span>
+          </span>
+        </>
+      ) : null}
+      <button
+        type="button"
+        className="mobile-hud-toggle"
+        aria-expanded={!collapsed}
+        aria-label={
+          collapsed
+            ? t('mobile.hud.expand', 'Show machine read-out')
+            : t('mobile.hud.collapse', 'Hide machine read-out')
+        }
+        title={
+          collapsed
+            ? t('mobile.hud.expand', 'Show machine read-out')
+            : t('mobile.hud.collapse', 'Hide machine read-out')
+        }
+        onClick={() => setCollapsed((v) => !v)}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          style={{ transform: collapsed ? 'rotate(180deg)' : undefined }}
+        >
+          <path
+            d="M6 15l6-6 6 6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 export function MobileShell() {
   const t = useT()
   const [activeId, setActiveId] = useState(availablePanels[0]?.id ?? '')
@@ -295,6 +402,7 @@ export function MobileShell() {
           })}
         </nav>
       </div>
+      <MachineHud />
       <div
         className="mobile-panel"
         id={panelDomId}

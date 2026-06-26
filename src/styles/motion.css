@@ -328,6 +328,97 @@
   text-align: left;
 }
 
+/* ---- guided calibration & tuning (O10) ---- */
+.mo-cal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.mo-cal-toggle svg { flex: none; color: var(--fg-muted); }
+.mo-cal-toggle:hover .mo-group { color: var(--accent); }
+.mo-cal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mo-cal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+.mo-cal-title {
+  margin: 0;
+  font-size: var(--fs-ctl);
+  font-weight: var(--fw-label);
+  color: var(--fg);
+}
+.mo-cal-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-end;
+}
+.mo-cal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.mo-cal-field > span {
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.mo-cal-field .mo-input { width: 110px; max-width: 42vw; }
+.mo-cal-select {
+  min-height: var(--ctl-h);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-ctl);
+}
+.mo-cal-select:focus { outline: none; border-color: var(--accent); }
+.mo-cal-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 2px;
+}
+.mo-cal-beforeafter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.mo-cal-num { color: var(--accent); font-weight: 600; }
+.mo-cal-from { color: var(--fg-muted); text-decoration: line-through; }
+.mo-cal-to { color: var(--fg); font-weight: 600; }
+.mo-cal-arrow { color: var(--fg-muted); }
+.mo-cal-hint { font-size: 11px; color: var(--fg-muted); }
+
+@container (max-width: 540px) {
+  .mo-cal-field { flex: 1 1 130px; }
+  .mo-cal-field .mo-input { width: auto; max-width: none; }
+  .mo-cal-result .mo-btn { flex: 1 1 auto; }
+}
+
 /* ---- narrow: stack label over value, full-width controls, ≥36px tap ----
    Container-query driven (keyed to the panel/modal-body width, not the viewport)
    so the rows reflow whenever the settings list itself is narrow — a thin dock

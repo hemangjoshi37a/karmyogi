@@ -58,6 +58,19 @@ export interface TwoSidedParams {
   flipAxis: FlipAxis;
   /** The corner the operator re-zeros against after the flip. */
   flipCorner: FlipCorner;
+  /**
+   * Drill registration (dowel) holes on side 1 so the flipped stock relocates
+   * onto the same dowels and the back side registers with the front.
+   */
+  registrationHoles: boolean;
+  /** How many registration holes to drill (2..4). */
+  regHoleCount: number;
+  /** Dowel-hole diameter (mm) — used for the operator comment / dowel size. */
+  regHoleDiameterMm: number;
+  /** Drill depth below the front top face (mm). */
+  regHoleDepthMm: number;
+  /** Inset of the outermost holes from the footprint edge (mm). */
+  regHoleInsetMm: number;
 }
 
 export function defaultTwoSidedParams(
@@ -68,6 +81,11 @@ export function defaultTwoSidedParams(
     stockThicknessMm: 12,
     flipAxis: 'x',
     flipCorner: 'front-left',
+    registrationHoles: false,
+    regHoleCount: 2,
+    regHoleDiameterMm: 6,
+    regHoleDepthMm: 6,
+    regHoleInsetMm: 8,
     ...overrides,
   };
 }
@@ -384,6 +402,76 @@ function findSafeRetract(footer: string[]): string {
   return 'G0 Z5';
 }
 
+/** Parse the numeric safe-Z (mm) out of a `G0 Z<value>` retract line. */
+function safeZOf(retract: string): number {
+  const m = /Z\s*([-+]?(?:\d*\.\d+|\d+\.?\d*))/i.exec(retract);
+  const z = m ? parseFloat(m[1]) : NaN;
+  return Number.isFinite(z) && z > 0 ? z : 5;
+}
+
+/**
+ * Build the registration-drill block (C14). Holes are drilled on side 1 only;
+ * the operator drops dowels in them, flips the stock, and relocates it onto the
+ * SAME dowels so the back side registers with the front. The holes sit on the
+ * flip's MIRROR centre line — the only locus invariant under the flip — so each
+ * physical hole maps onto itself after the turn-over (no second drilling needed).
+ *
+ *   • flip about X → mirror is in Y, so the invariant line is y = yCentre; the
+ *     holes spread along X between the insets.
+ *   • flip about Y → mirror is in X, so the invariant line is x = xCentre; the
+ *     holes spread along Y.
+ *
+ * SAFETY: every move lifts to the program's own safe-Z before any XY rapid and
+ * after each hole, drilling is referenced to the front top (work Z0) at a
+ * conservative plunge feed, and `fmt()` guarantees no `-0.000`.
+ */
+function buildRegistrationDrills(
+  bounds: XYBounds,
+  params: TwoSidedParams,
+  safeZ: number,
+): string[] {
+  const count = Math.max(2, Math.min(4, Math.round(params.regHoleCount)));
+  const inset = Math.max(0, params.regHoleInsetMm);
+  const depth = Math.max(0.1, params.regHoleDepthMm);
+  const dia = Math.max(0.1, params.regHoleDiameterMm);
+  const lines: string[] = [];
+  lines.push(
+    `(=== REGISTRATION DRILLING — ${count} × ⌀${fmt(dia)}mm dowel holes on the flip centre line ===)`,
+  );
+
+  // Span the holes along the axis preserved by the flip; lock the other axis to
+  // the mirror centre so the holes are flip-invariant.
+  let pts: { x: number; y: number }[];
+  if (params.flipAxis === 'x') {
+    const yc = (bounds.minY + bounds.maxY) / 2;
+    const x0 = bounds.minX + inset;
+    const x1 = bounds.maxX - inset;
+    pts = spread(x0, x1, count).map((x) => ({ x, y: yc }));
+  } else {
+    const xc = (bounds.minX + bounds.maxX) / 2;
+    const y0 = bounds.minY + inset;
+    const y1 = bounds.maxY - inset;
+    pts = spread(y0, y1, count).map((y) => ({ x: xc, y }));
+  }
+
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    lines.push(`G0 Z${fmt(safeZ)}`);
+    lines.push(`G0 X${fmt(p.x)} Y${fmt(p.y)}`);
+    lines.push(`G1 Z${fmt(-depth)} F120`);
+    lines.push(`G0 Z${fmt(safeZ)}`);
+  }
+  return lines;
+}
+
+/** Evenly spread `n` points across [a, b] (endpoints included for n≥2). */
+function spread(a: number, b: number, n: number): number[] {
+  if (n <= 1) return [(a + b) / 2];
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push(a + ((b - a) * i) / (n - 1));
+  return out;
+}
+
 export interface TwoSidedResult {
   gcode: string;
   warnings: string[];
@@ -447,6 +535,13 @@ export function buildTwoSidedProgram(
   const lines: string[] = [];
   // Shared header (units/plane/spindle + first safe-Z), reused verbatim.
   for (const l of header) lines.push(l);
+  // Registration dowel holes (C14): drilled first, on side 1, so the operator can
+  // seat dowels before any front cutting and relocate the flipped stock onto them.
+  if (params.registrationHoles) {
+    const drills = buildRegistrationDrills(bounds, params, safeZOf(safeRetract));
+    for (const l of drills) lines.push(l);
+    if (params.regHoleCount < 2) warnings.push('Two-sided: at least 2 registration holes are needed to lock both X and Y.');
+  }
   lines.push('(=== SIDE 1 / FRONT ===)');
   for (const l of body) lines.push(l);
   // Side-1 boundary: lift to safe-Z, stop the spindle, and tell the operator how

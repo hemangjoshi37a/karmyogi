@@ -9,6 +9,7 @@ import {
 import { useProgram, useMachine, useSettings } from '../store'
 import { useBed } from '../store/bed'
 import { useHover } from '../store/hover'
+import { useGcodeSelection } from '../viewer/gcodeSelection'
 import { sectionColor } from '../viewer/sectionColors'
 import { applyJobPlacement, isIdentityJob } from '../core/transform'
 import { grbl } from '../serial/controller'
@@ -175,6 +176,9 @@ export function ProgramPanel() {
   const toggleOp = useCallback((id: string) => {
     setOpenOps((m) => ({ ...m, [id]: !m[id] }))
   }, [])
+
+  // V13 — the syntax-highlighted G-code editor card (collapsed by default).
+  const [editorOpen, setEditorOpen] = useState(false)
 
   // Cross-panel hover link: hovering an op row here shimmers its toolpath in the
   // 3D viewer and highlights the matching carving row (and vice-versa). Shared
@@ -1136,6 +1140,173 @@ export function ProgramPanel() {
             onChange={onFileChange}
           />
         </section>
+
+        {/* --- V13 G-code editor ⇄ 3D link: a syntax-highlighted, line-numbered
+                view of the WHOLE combined program. Click a line to highlight that
+                move in the 3D visualizer; clicking a move there selects (and
+                scrolls to) the line here. --- */}
+        <section className="ui-card pp-card pp-gcode-card">
+          <div className="pp-sections-header">
+            <button
+              type="button"
+              className="pp-section-disclosure pp-gcode-disclosure"
+              aria-expanded={editorOpen}
+              onClick={() => setEditorOpen((o) => !o)}
+              title={
+                editorOpen
+                  ? t('prog.editorHide', 'Collapse the G-code editor')
+                  : t('prog.editorShow', 'Show the G-code editor (click a line to highlight it in 3D)')
+              }
+            >
+              <span className="pp-disclosure-caret">{editorOpen ? '▾' : '▸'}</span>
+              <span className="pp-section-title ui-sec-head">{t('prog.editor', 'G-code')}</span>
+            </button>
+            <span className="pp-meta">
+              {lines.length === 1
+                ? t('prog.lineCountOne', '{count} line', { count: lines.length })
+                : t('prog.lineCount', '{count} lines', { count: lines.length })}
+            </span>
+          </div>
+          {editorOpen &&
+            (hasProgram ? (
+              <GcodeEditor lines={lines} t={t} />
+            ) : (
+              <div className="pp-gcode-empty">
+                {t('prog.editorEmpty', 'Load or generate a program to view its G-code here.')}
+              </div>
+            ))}
+        </section>
     </div>
   )
+}
+
+/** Fixed row height (px) for the virtualized G-code editor — keep in sync with
+ *  the `.pp-gcode-line` height in program.css. */
+const GCODE_LINE_H = 18
+
+/**
+ * V13 — syntax-highlighted, line-numbered, VIRTUALIZED G-code view. Only the
+ * lines in the scroll viewport are rendered (a top spacer reserves the full
+ * height), so even a 100k-line program stays smooth. Clicking a line publishes
+ * it to the shared {@link useGcodeSelection} store → the 3D viewer highlights the
+ * matching move(s); a 3D pick writes the same store and scrolls the line here.
+ */
+function GcodeEditor({
+  lines,
+  t,
+}: {
+  lines: string[]
+  t: (key: string, english: string, vars?: Record<string, string | number>) => string
+}) {
+  const selectedLine = useGcodeSelection((s) => s.selectedLine)
+  const setSelectedLine = useGcodeSelection((s) => s.setSelectedLine)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewH, setViewH] = useState(320)
+
+  // Track the viewport height so the window of rendered lines is sized correctly.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setViewH(el.clientHeight || 320))
+    ro.observe(el)
+    setViewH(el.clientHeight || 320)
+    return () => ro.disconnect()
+  }, [])
+
+  // Scroll an externally-selected line (a 3D pick) into view.
+  useEffect(() => {
+    if (selectedLine == null) return
+    const el = scrollRef.current
+    if (!el) return
+    const top = (selectedLine - 1) * GCODE_LINE_H
+    if (top < el.scrollTop || top + GCODE_LINE_H > el.scrollTop + el.clientHeight) {
+      el.scrollTop = Math.max(0, top - el.clientHeight / 2)
+    }
+  }, [selectedLine])
+
+  const total = lines.length
+  const overscan = 8
+  const start = Math.max(0, Math.floor(scrollTop / GCODE_LINE_H) - overscan)
+  const count = Math.ceil(viewH / GCODE_LINE_H) + overscan * 2
+  const end = Math.min(total, start + count)
+  const rows: number[] = []
+  for (let i = start; i < end; i++) rows.push(i)
+
+  return (
+    <div
+      ref={scrollRef}
+      className="pp-gcode"
+      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      role="list"
+      aria-label={t('prog.editorAria', 'G-code lines')}
+    >
+      <div className="pp-gcode-spacer" style={{ height: total * GCODE_LINE_H }}>
+        <div
+          className="pp-gcode-lines"
+          style={{ transform: `translateY(${start * GCODE_LINE_H}px)` }}
+        >
+          {rows.map((i) => {
+            const ln = i + 1
+            const isSel = ln === selectedLine
+            return (
+              <div
+                key={i}
+                role="listitem"
+                className={'pp-gcode-line' + (isSel ? ' is-selected' : '')}
+                style={{ height: GCODE_LINE_H }}
+                onClick={() => setSelectedLine(isSel ? null : ln)}
+                title={t('prog.editorLineHint', 'Click to highlight this move in the 3D view')}
+              >
+                <span className="pp-gcode-num">{ln}</span>
+                <span className="pp-gcode-text">{highlightGcode(lines[i])}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Lightweight G-code syntax highlighter → React spans. Single-pass tokenizer
+ * covering every character (so nothing is dropped): comments, words
+ * (letter+number), whitespace, and any other char. Colour class by the word's
+ * leading letter (G/M command, XYZ axis, IJK/R arc, F/S param).
+ */
+function highlightGcode(line: string): React.ReactNode {
+  if (line === '') return '​' // zero-width space keeps the row height
+  const out: React.ReactNode[] = []
+  const re = /(;[^\n]*)|(\([^)]*\))|([A-Za-z][-+]?[0-9]*\.?[0-9]*)|(\s+)|(.)/g
+  let m: RegExpExecArray | null
+  let k = 0
+  while ((m = re.exec(line)) !== null) {
+    if (m[1] || m[2]) {
+      out.push(
+        <span key={k++} className="pp-gc-comment">
+          {m[0]}
+        </span>,
+      )
+    } else if (m[3]) {
+      const c = m[3][0].toUpperCase()
+      const cls = 'GM'.includes(c)
+        ? 'pp-gc-cmd'
+        : 'XYZABC'.includes(c)
+          ? 'pp-gc-axis'
+          : 'IJKR'.includes(c)
+            ? 'pp-gc-arc'
+            : 'FST'.includes(c)
+              ? 'pp-gc-param'
+              : 'pp-gc-word'
+      out.push(
+        <span key={k++} className={cls}>
+          {m[3]}
+        </span>,
+      )
+    } else {
+      out.push(m[0])
+    }
+  }
+  return out
 }

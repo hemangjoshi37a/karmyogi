@@ -1346,6 +1346,34 @@
 /* labels that host an apply-all sit on one line */
 .cc-field label { display: flex; align-items: center; gap: 5px; }
 
+/* C4 · "Pick origin in 3D view" toggle — full-width, accent-on-when-armed. */
+.cc-pick-origin-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--ctl-h, 32px);
+  padding: 6px 10px;
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2, transparent);
+  color: var(--fg);
+  cursor: pointer;
+}
+.cc-pick-origin-btn:hover { border-color: var(--accent); color: var(--accent); }
+.cc-pick-origin-btn.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+@media (pointer: coarse) {
+  .cc-pick-origin-btn { min-height: var(--ctl-h-touch); }
+}
+
 /* ============================================================================
    Responsive / touch. Compact on the desktop (above), comfortable on touch.
    These key off the PANEL's own width (container query), not the window — the

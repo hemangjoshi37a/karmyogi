@@ -36,6 +36,7 @@ import { useViewportShapes } from '../store/viewportShapes'
 import { shapesToGcode } from '../core/viewportShapeGcode'
 import { useProgram } from '../store/program'
 import { usePlayback } from '../store/playback'
+import { useGcodeSelection } from './gcodeSelection'
 import { useT } from '../i18n'
 import { gcodeToPolylines, type Segment, type Bounds } from './gcodeToPolylines'
 import {
@@ -284,6 +285,31 @@ export interface ViewerProps {
   jogTo?: boolean
   /** Called with the targeted work XY (mm) when {@link jogTo} is on and the bed is right-clicked. */
   onJogTo?: (x: number, y: number) => void
+  /**
+   * V11 — draw the soft-limit travel box ($130/$131/$132) + the distinct machine
+   * (G53) origin marker on the bed. Self-gates on the GRBL settings being synced.
+   * Default true.
+   */
+  showSoftLimits?: boolean
+  /**
+   * L10 — colour the cut toolpath by its S-value (laser power) instead of a flat
+   * colour. Only applies to the static (non-reveal) path. Default false.
+   */
+  colorByPower?: boolean
+  /** Global power range `[min, max]` for the L10 heat-map normalisation. */
+  powerRange?: [number, number] | null
+  /**
+   * V13 — line-tagged segments of the WHOLE combined program (each carries the
+   * `line` it came from). Used purely for the editor⇄3D link (selected-line
+   * highlight + click-to-select), independent of the displayed/simulated
+   * geometry. The selected line itself lives in the shared gcodeSelection store.
+   */
+  lineSegments?: Segment[]
+  /**
+   * Enable the click-a-move→select-its-line picker (V13). Off while another
+   * interactive mode (gizmo/lasso/pick/jog) owns the pointer. Default false.
+   */
+  lineLink?: boolean
 }
 
 const FOV = 45
@@ -342,6 +368,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     heightmap = null,
     jogTo = false,
     onJogTo,
+    showSoftLimits = true,
+    colorByPower = false,
+    powerRange = null,
+    lineSegments,
+    lineLink = false,
   },
   ref,
 ) {
@@ -370,6 +401,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // Soldering: a 3D PCB stand-in (board + pads/holes) + selected-point highlight,
   // shown alongside the streamed toolpath whenever the Soldering panel publishes.
   const solderActive = useSolderViz((s) => s.active)
+
+  // V13 — the selected combined-program line (shared with the Program editor).
+  const selectedLine = useGcodeSelection((s) => s.selectedLine)
+  const setSelectedLine = useGcodeSelection((s) => s.setSelectedLine)
 
   // The global UI zoom (CSS `zoom` on <html>) changes the panel's rendered size
   // without firing a ResizeObserver entry on some Chromium versions. r3f's
@@ -723,7 +758,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         </Environment>
 
         <group visible={showBed}>
-          <Bed width={width} depth={depth} height={height} showLabels={showBed} />
+          <Bed
+            width={width}
+            depth={depth}
+            height={height}
+            showLabels={showBed}
+            showSoftLimits={showSoftLimits}
+          />
         </group>
         <group visible={showShapes}>
           <ViewportShapes onDraggingChanged={onGizmoDragging} />
@@ -790,17 +831,30 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
                         cutColor={op.color}
                         highlight={isHovered}
                         dim={dimmed}
+                        colorByPower={colorByPower}
+                        powerRange={powerRange}
                       />
                     )
                   })
                 ) : (
-                  <Toolpath segments={sp.segments} cutColor={sp.color} />
+                  <Toolpath
+                    segments={sp.segments}
+                    cutColor={sp.color}
+                    colorByPower={colorByPower}
+                    powerRange={powerRange}
+                  />
                 )}
               </group>
             )
           })
         ) : (
-          parsed.segments.length > 0 && <Toolpath segments={parsed.segments} />
+          parsed.segments.length > 0 && (
+            <Toolpath
+              segments={parsed.segments}
+              colorByPower={colorByPower}
+              powerRange={powerRange}
+            />
+          )
         )}
       </group>
       {/* Soldering: the 3D PCB stand-in (board + pads/holes + selected-point
@@ -955,6 +1009,18 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       {/* V9 — probed surface heightmap overlay (colored relief mesh). Hidden for a
           spring program (no XY bed surface there). One draw call, built once. */}
       {!isSpringProgram && heightmap && <HeightmapSurface map={heightmap} />}
+      {/* V13 — highlight the move(s) belonging to the line selected in the editor
+          (or by a previous 3D pick). Event-driven: rebuilt only when the line or
+          program changes, never per frame. */}
+      {!isSpringProgram && lineSegments && selectedLine != null && (
+        <SelectedLineHighlight segments={lineSegments} line={selectedLine} />
+      )}
+      {/* V13 — click a toolpath move to select its source line in the editor. Only
+          mounted when no other interactive mode owns the pointer, so it never
+          steals clicks from the gizmo / lasso / pick / jog tools. */}
+      {!isSpringProgram && lineLink && lineSegments && lineSegments.length > 0 && (
+        <LinePicker segments={lineSegments} onPick={setSelectedLine} />
+      )}
       {/* V8 — right-click-to-jog target plane. Invisible bed-sized catcher that
           reports the world XY of a right-click so the panel can jog there
           (safe-Z first). Only mounted while the mode is on, so it never steals
@@ -1687,6 +1753,87 @@ function SelectedSegments({ segments, indices }: { segments: Segment[]; indices:
   return (
     <lineSegments geometry={geom}>
       <lineBasicMaterial color="#ef4444" depthTest={false} transparent opacity={0.95} />
+    </lineSegments>
+  )
+}
+
+/**
+ * V13 — highlight every move that came from a given source line (the line picked
+ * in the editor or by a 3D click). Drawn as bright, depth-tested-off lines so the
+ * selected move pops over the rest of the path. Rebuilt only when the segments or
+ * the selected line change — no per-frame work.
+ */
+function SelectedLineHighlight({ segments, line }: { segments: Segment[]; line: number }) {
+  const geom = useMemo(() => {
+    const pts: number[] = []
+    for (const s of segments) {
+      if (s.line === line) pts.push(s.from[0], s.from[1], s.from[2], s.to[0], s.to[1], s.to[2])
+    }
+    if (pts.length === 0) return null
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+    return g
+  }, [segments, line])
+  useEffect(() => () => geom?.dispose(), [geom])
+  if (!geom) return null
+  return (
+    <lineSegments geometry={geom} renderOrder={999}>
+      <lineBasicMaterial color="#f43f5e" depthTest={false} transparent opacity={1} linewidth={2} />
+    </lineSegments>
+  )
+}
+
+/**
+ * V13 — invisible click target over the whole program: a click maps to the
+ * nearest move's SOURCE line, which it reports (→ selects that editor line). Same
+ * widened-threshold raycast trick as PickSegments, but it reads the segment's
+ * `line` instead of toggling a delete selection. Renders nothing visible.
+ */
+function LinePicker({
+  segments,
+  onPick,
+}: {
+  segments: Segment[]
+  onPick: (line: number | null) => void
+}) {
+  const geom = useMemo(() => {
+    const pts: number[] = []
+    for (const s of segments) {
+      pts.push(s.from[0], s.from[1], s.from[2], s.to[0], s.to[1], s.to[2])
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+    return g
+  }, [segments])
+  useEffect(() => () => geom.dispose(), [geom])
+
+  const setLineRef = (line: THREE.LineSegments | null) => {
+    if (!line) return
+    const base = THREE.LineSegments.prototype.raycast
+    line.raycast = (raycaster, intersects) => {
+      const params = raycaster.params.Line
+      const prev = params ? params.threshold : 1
+      if (params) params.threshold = 3
+      base.call(line, raycaster, intersects)
+      if (params) params.threshold = prev
+    }
+  }
+
+  return (
+    <lineSegments
+      ref={setLineRef}
+      geometry={geom}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        if (e.index === undefined) return
+        const segIndex = Math.floor(e.index / 2)
+        const seg = segments[segIndex]
+        if (!seg || seg.line === undefined) return
+        e.stopPropagation()
+        onPick(seg.line)
+      }}
+    >
+      <lineBasicMaterial transparent opacity={0} depthWrite={false} />
     </lineSegments>
   )
 }

@@ -241,6 +241,40 @@
   border-radius: var(--radius-sm);
 }
 
+/* ───────────────────────── L15 low-power frame + focus dot ───────────────────────── */
+.lp-frame-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.lp-frame-actions > .lp-fire {
+  flex: 1 1 auto;
+  min-height: var(--ctl-h-touch);
+}
+/* Armed (one click away from firing the beam) — a clear amber "are you sure". */
+.lp-fire.is-armed {
+  background: var(--warn, #f59e0b);
+  border-color: var(--warn, #f59e0b);
+  color: #1a1205;
+  animation: lp-fire-pulse 1s var(--ease) infinite;
+}
+/* Focus dot actively firing — danger red so it never blends in while on. */
+.lp-fire.is-on {
+  background: var(--danger, #e5484d);
+  border-color: var(--danger, #e5484d);
+  color: #fff;
+}
+@keyframes lp-fire-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-fire.is-armed {
+    animation: none;
+  }
+}
+
 /* ───────────────────────── narrow / mobile (container query) ───────────────────────── */
 @container laserpanel (max-width: 480px) {
   .lp-btn {
@@ -248,6 +282,9 @@
   }
   .lp-status-sync {
     margin-left: 0;
+  }
+  .lp-frame-actions > .lp-fire {
+    flex-basis: 100%;
   }
 }
 

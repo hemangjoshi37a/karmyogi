@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { grbl } from '../serial/controller'
+import type { JogParams } from '../serial/controller'
 import { useGrblSettings, useMachine, useMachineProfile, usePersistentState } from '../store'
 import { notesKeyFor, profileFor } from '../machine/controllers'
 import type { Capabilities, ControllerProfile } from '../machine/types'
@@ -672,6 +673,9 @@ function GrblSettingsEditor({
         </div>
       </section>
 
+      {/* Guided calibration & tuning (writes $100–$102 on confirm). */}
+      <CalibrationSection connected={connected} values={values} />
+
       {/* Factory reset */}
       <section className="mo-section">
         <h5 className="mo-group">{t('motion.factory.heading', 'Factory reset')}</h5>
@@ -777,6 +781,460 @@ function GrblSettingsEditor({
         />
       </Modal>
     </div>
+  )
+}
+
+// Axis → steps/mm $-setting number.
+const STEPS_SETTING: Record<'x' | 'y' | 'z', number> = { x: 100, y: 101, z: 102 }
+const CAL_AXES: Array<'x' | 'y' | 'z'> = ['x', 'y', 'z']
+
+/** A non-negative finite number parsed from a text field, or null. */
+function posNum(s: string): number | null {
+  const v = parseFloat(s)
+  return Number.isFinite(v) && v > 0 ? v : null
+}
+
+/** Relative jog of a single axis by `delta` mm at `feed` mm/min (cancellable $J=). */
+function jogAxis(a: 'x' | 'y' | 'z', delta: number, feed: number): Promise<void> {
+  const move: JogParams = { feed }
+  move[a] = delta
+  return grbl.jog(move)
+}
+
+/**
+ * Guided machine calibration & tuning (O10) — lives inside the GRBL `$`-settings
+ * editor and ties directly into it.
+ *
+ * Three guided tools:
+ *  1. **Steps/mm tuning** — command a measured move on one axis (via the
+ *     cancellable `$J=` jog at a safe feed), have the operator measure the actual
+ *     travel, compute the corrected `$100/$101/$102` and (on an explicit confirm
+ *     showing before → after) write it.
+ *  2. **XY squaring** — measure the two diagonals of a scribed square and report
+ *     the out-of-square error (mm + degrees). Stock GRBL has no skew-compensation
+ *     setting, so this is an honest diagnostic + mechanical-adjustment guidance.
+ *  3. **Backlash** — guided there-and-back move to measure lost motion per axis;
+ *     reported as a diagnostic (stock GRBL cannot compensate it).
+ *
+ * SAFETY: every test move uses the cancellable `$J=` jog (never an uncancellable
+ * G1), a conservative default feed, requires the Idle state, and offers a Cancel.
+ * No `$`-setting is ever written without an explicit operator confirm.
+ */
+function CalibrationSection({
+  connected,
+  values,
+}: {
+  connected: boolean
+  values: Record<number, GrblSetting>
+}) {
+  const t = useT()
+  const machineState = useMachine((s) => s.state)
+  const idle = machineState === 'Idle' || machineState === 'Jog' || machineState === 'Unknown'
+  const ready = connected && idle
+
+  const [open, setOpen] = useState(false)
+
+  // ── Steps/mm tuning ──
+  const [axis, setAxis] = useState<'x' | 'y' | 'z'>('x')
+  const [dir, setDir] = useState<1 | -1>(1)
+  const [target, setTarget] = useState('100')
+  const [feed, setFeed] = useState('500')
+  const [measured, setMeasured] = useState('')
+  const [confirmApply, setConfirmApply] = useState(false)
+  const [moving, setMoving] = useState(false)
+
+  const settingNum = STEPS_SETTING[axis]
+  const liveSteps = values[settingNum]?.value ?? settingDefault(settingNum) ?? ''
+  const currentSteps = parseFloat(liveSteps)
+  const targetN = posNum(target)
+  const measuredN = posNum(measured)
+  const corrected =
+    Number.isFinite(currentSteps) && targetN && measuredN
+      ? currentSteps * (targetN / measuredN)
+      : null
+  const correctedStr = corrected != null ? corrected.toFixed(3) : ''
+  const errorPct =
+    targetN && measuredN ? ((measuredN - targetN) / targetN) * 100 : null
+
+  const runMove = async () => {
+    if (!ready || !targetN) return
+    const f = posNum(feed) ?? 500
+    setMoving(true)
+    try {
+      await jogAxis(axis, dir * targetN, f)
+    } catch {
+      /* surfaced via console */
+    }
+    setMoving(false)
+  }
+
+  const applySteps = async () => {
+    setConfirmApply(false)
+    if (corrected == null) return
+    try {
+      await grbl.writeSetting(settingNum, corrected.toFixed(3))
+    } catch {
+      /* surfaced via console */
+    }
+    grbl.readSettings().catch(() => {})
+    setMeasured('')
+  }
+
+  // ── XY squaring ──
+  const [legLen, setLegLen] = useState('100')
+  const [diag1, setDiag1] = useState('')
+  const [diag2, setDiag2] = useState('')
+  const sq = useMemo(() => {
+    const L = posNum(legLen)
+    const p = posNum(diag1)
+    const q = posNum(diag2)
+    if (!L || !p || !q) return null
+    // sides L, included angle θ → p²−q² = 4L²cosθ; ε = θ−90°, cosθ ≈ −sin ε.
+    const cosTheta = (p * p - q * q) / (4 * L * L)
+    const epsRad = -Math.asin(Math.max(-1, Math.min(1, cosTheta)))
+    const epsDeg = (epsRad * 180) / Math.PI
+    const offsetMm = L * Math.sin(epsRad)
+    return { diff: Math.abs(p - q), epsDeg, offsetMm }
+  }, [legLen, diag1, diag2])
+
+  // ── Backlash ──
+  const [blAxis, setBlAxis] = useState<'x' | 'y' | 'z'>('x')
+  const [blLen, setBlLen] = useState('20')
+  const [blFeed, setBlFeed] = useState('500')
+  const [blMeasured, setBlMeasured] = useState('')
+  const blMoving = useRef(false)
+  const [blBusy, setBlBusy] = useState(false)
+  const blValue = posNum(blMeasured)
+
+  const runBacklash = async () => {
+    if (!ready || blMoving.current) return
+    const L = posNum(blLen)
+    if (!L) return
+    const f = posNum(blFeed) ?? 500
+    blMoving.current = true
+    setBlBusy(true)
+    try {
+      // There-and-back: forward L (takes up slack in the + direction), then
+      // return −L. The shortfall from the start mark is the lost motion.
+      await jogAxis(blAxis, L, f)
+      await jogAxis(blAxis, -L, f)
+    } catch {
+      /* surfaced via console */
+    }
+    blMoving.current = false
+    setBlBusy(false)
+  }
+
+  return (
+    <section className="mo-section">
+      <button
+        type="button"
+        className="mo-cal-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        title={t('motion.cal.toggle.title', 'Guided steps/mm, squaring and backlash calibration')}
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
+        <span className="mo-group" style={{ margin: 0 }}>
+          {t('motion.cal.heading', 'Calibration & tuning')}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mo-cal">
+          <div className="mo-note">
+            {t(
+              'motion.cal.intro',
+              'Guided tuning. Test moves use the cancellable $J= jog at a safe feed and need the Idle state — clear the area, keep a hand near the stop, and ensure the axis has clearance (especially Z). No setting is written until you confirm.',
+            )}
+          </div>
+          {!ready && (
+            <div className="mo-note">
+              {connected
+                ? t('motion.cal.notIdle', 'Machine is {state} — calibration moves need the Idle state.', {
+                    state: machineState,
+                  })
+                : t('motion.connectFirst', 'Connect first')}
+            </div>
+          )}
+
+          {/* ── Tool 1: steps/mm ── */}
+          <div className="mo-cal-card">
+            <h6 className="mo-cal-title">{t('motion.cal.steps.title', 'Steps per mm (axis movement)')}</h6>
+            <div className="mo-note">
+              {t(
+                'motion.cal.steps.help',
+                'Command a known move, measure the ACTUAL travel with calipers/rule, then apply the corrected steps/mm. corrected = current × commanded ÷ measured.',
+              )}
+            </div>
+            <div className="mo-cal-grid">
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.axis', 'Axis')}</span>
+                <select
+                  className="mo-cal-select"
+                  value={axis}
+                  onChange={(e) => {
+                    setAxis(e.target.value as 'x' | 'y' | 'z')
+                    setMeasured('')
+                  }}
+                >
+                  {CAL_AXES.map((a) => (
+                    <option key={a} value={a}>
+                      {a.toUpperCase()} (${STEPS_SETTING[a]})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.steps.dir', 'Direction')}</span>
+                <select
+                  className="mo-cal-select"
+                  value={dir}
+                  onChange={(e) => setDir(Number(e.target.value) === -1 ? -1 : 1)}
+                >
+                  <option value={1}>+</option>
+                  <option value={-1}>−</option>
+                </select>
+              </label>
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.steps.commanded', 'Commanded (mm)')}</span>
+                <input
+                  className="mo-input"
+                  type="text"
+                  inputMode="decimal"
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                />
+              </label>
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.feed', 'Feed (mm/min)')}</span>
+                <input
+                  className="mo-input"
+                  type="text"
+                  inputMode="decimal"
+                  value={feed}
+                  onChange={(e) => setFeed(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="mo-row">
+              <button
+                type="button"
+                className="mo-btn primary mo-iconbtn"
+                disabled={!ready || !targetN || moving}
+                onClick={() => void runMove()}
+                title={t('motion.cal.steps.run.title', 'Jog {axis} {sign}{dist} mm at {feed} mm/min (cancellable $J=)', {
+                  axis: axis.toUpperCase(),
+                  sign: dir < 0 ? '−' : '+',
+                  dist: targetN ?? 0,
+                  feed: posNum(feed) ?? 500,
+                })}
+              >
+                <Icon name="play" size={13} />
+                {moving
+                  ? t('motion.cal.moving', 'Moving…')
+                  : t('motion.cal.steps.run', 'Run test move')}
+              </button>
+              <button
+                type="button"
+                className="mo-btn mo-iconbtn"
+                disabled={!connected}
+                onClick={() => void grbl.jogCancel()}
+                title={t('motion.cal.cancel.title', 'Cancel the jog (GRBL 0x85)')}
+              >
+                <Icon name="stop" size={13} />
+                {t('motion.cal.cancel', 'Stop')}
+              </button>
+            </div>
+            <div className="mo-cal-grid">
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.steps.measured', 'Measured (mm)')}</span>
+                <input
+                  className="mo-input"
+                  type="text"
+                  inputMode="decimal"
+                  value={measured}
+                  onChange={(e) => setMeasured(e.target.value)}
+                  placeholder={t('motion.cal.steps.measuredPh', 'actual travel')}
+                />
+              </label>
+            </div>
+            {corrected != null && (
+              <div className="mo-cal-result">
+                <div className="mo-cal-beforeafter">
+                  <span className="mo-cal-num">${settingNum}</span>
+                  <span className="mo-cal-from">
+                    {Number.isFinite(currentSteps) ? currentSteps.toFixed(3) : '—'}
+                  </span>
+                  <span className="mo-cal-arrow" aria-hidden>&rarr;</span>
+                  <span className="mo-cal-to">{correctedStr}</span>
+                  <span className="mo-units">{t('motion.cal.units.stepsmm', 'steps/mm')}</span>
+                </div>
+                {errorPct != null && Math.abs(errorPct) >= 0.05 && (
+                  <span className="mo-cal-hint">
+                    {t('motion.cal.steps.errPct', 'measured is {pct}% off commanded', {
+                      pct: errorPct.toFixed(2),
+                    })}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="mo-btn save mo-iconbtn"
+                  disabled={!ready || corrected == null}
+                  onClick={() => setConfirmApply(true)}
+                  title={t('motion.cal.steps.apply.title', 'Write ${num}={value} to the machine', {
+                    num: settingNum,
+                    value: correctedStr,
+                  })}
+                >
+                  <Icon name="upload" size={13} />
+                  {t('motion.cal.steps.apply', 'Apply ${num}', { num: settingNum })}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ── Tool 2: XY squaring ── */}
+          <div className="mo-cal-card">
+            <h6 className="mo-cal-title">{t('motion.cal.sq.title', 'XY squaring')}</h6>
+            <div className="mo-note">
+              {t(
+                'motion.cal.sq.help',
+                'Scribe/cut a square of the given leg length, then measure both diagonals. Equal diagonals = square. Stock GRBL has NO skew-compensation setting, so correct any error mechanically (frame/gantry).',
+              )}
+            </div>
+            <div className="mo-cal-grid">
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.sq.leg', 'Leg (mm)')}</span>
+                <input className="mo-input" type="text" inputMode="decimal" value={legLen} onChange={(e) => setLegLen(e.target.value)} />
+              </label>
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.sq.diag1', 'Diagonal 1 (mm)')}</span>
+                <input className="mo-input" type="text" inputMode="decimal" value={diag1} onChange={(e) => setDiag1(e.target.value)} />
+              </label>
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.sq.diag2', 'Diagonal 2 (mm)')}</span>
+                <input className="mo-input" type="text" inputMode="decimal" value={diag2} onChange={(e) => setDiag2(e.target.value)} />
+              </label>
+            </div>
+            {sq && (
+              <div className="mo-cal-result">
+                <span className="mo-cal-hint">
+                  {t('motion.cal.sq.diff', 'diagonal difference {diff} mm', { diff: sq.diff.toFixed(3) })}
+                  {' · '}
+                  {t('motion.cal.sq.err', 'out of square {deg}° ({mm} mm over the leg)', {
+                    deg: sq.epsDeg.toFixed(3),
+                    mm: sq.offsetMm.toFixed(3),
+                  })}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Tool 3: backlash ── */}
+          <div className="mo-cal-card">
+            <h6 className="mo-cal-title">{t('motion.cal.bl.title', 'Backlash measurement')}</h6>
+            <div className="mo-note">
+              {t(
+                'motion.cal.bl.help',
+                'Mount an indicator on the axis. Run the test (move forward, then return the same distance) and read the lost motion at the mark — that is the backlash. Stock GRBL cannot compensate it; reduce it mechanically (or use firmware with backlash compensation).',
+              )}
+            </div>
+            <div className="mo-cal-grid">
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.axis', 'Axis')}</span>
+                <select className="mo-cal-select" value={blAxis} onChange={(e) => setBlAxis(e.target.value as 'x' | 'y' | 'z')}>
+                  {CAL_AXES.map((a) => (
+                    <option key={a} value={a}>
+                      {a.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.bl.len', 'Move (mm)')}</span>
+                <input className="mo-input" type="text" inputMode="decimal" value={blLen} onChange={(e) => setBlLen(e.target.value)} />
+              </label>
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.feed', 'Feed (mm/min)')}</span>
+                <input className="mo-input" type="text" inputMode="decimal" value={blFeed} onChange={(e) => setBlFeed(e.target.value)} />
+              </label>
+              <label className="mo-cal-field">
+                <span>{t('motion.cal.bl.measured', 'Lost motion (mm)')}</span>
+                <input className="mo-input" type="text" inputMode="decimal" value={blMeasured} onChange={(e) => setBlMeasured(e.target.value)} />
+              </label>
+            </div>
+            <div className="mo-row">
+              <button
+                type="button"
+                className="mo-btn primary mo-iconbtn"
+                disabled={!ready || !posNum(blLen) || blBusy}
+                onClick={() => void runBacklash()}
+                title={t('motion.cal.bl.run.title', 'Jog {axis} forward then back {dist} mm (cancellable $J=)', {
+                  axis: blAxis.toUpperCase(),
+                  dist: posNum(blLen) ?? 0,
+                })}
+              >
+                <Icon name="play" size={13} />
+                {blBusy ? t('motion.cal.moving', 'Moving…') : t('motion.cal.bl.run', 'Run backlash test')}
+              </button>
+              <button
+                type="button"
+                className="mo-btn mo-iconbtn"
+                disabled={!connected}
+                onClick={() => void grbl.jogCancel()}
+                title={t('motion.cal.cancel.title', 'Cancel the jog (GRBL 0x85)')}
+              >
+                <Icon name="stop" size={13} />
+                {t('motion.cal.cancel', 'Stop')}
+              </button>
+            </div>
+            {blValue != null && (
+              <div className="mo-cal-result">
+                <span className="mo-cal-hint">
+                  {t('motion.cal.bl.result', '{axis} backlash: {mm} mm', {
+                    axis: blAxis.toUpperCase(),
+                    mm: blValue.toFixed(3),
+                  })}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Apply steps/mm confirmation. */}
+      <Modal
+        open={confirmApply}
+        title={t('motion.cal.steps.confirmTitle', 'Apply steps/mm')}
+        onClose={() => setConfirmApply(false)}
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="mo-btn" onClick={() => setConfirmApply(false)}>
+              {t('motion.confirm.cancel', 'Cancel')}
+            </button>
+            <ModalFootSpacer />
+            <button type="button" className="mo-btn save" onClick={() => void applySteps()}>
+              {t('motion.cal.steps.confirmApply', 'Write ${num}', { num: settingNum })}
+            </button>
+          </>
+        }
+      >
+        <p className="mo-confirm-msg">
+          {t(
+            'motion.cal.steps.confirmMsg',
+            'Write ${num} (the {axis}-axis steps/mm) from {from} to {to}? This changes how far the {axis} axis moves per commanded mm. You can re-tune or reset to default afterwards.',
+            {
+              num: settingNum,
+              axis: axis.toUpperCase(),
+              from: Number.isFinite(currentSteps) ? currentSteps.toFixed(3) : '—',
+              to: correctedStr,
+            },
+          )}
+        </p>
+      </Modal>
+    </section>
   )
 }
 

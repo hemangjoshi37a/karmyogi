@@ -466,3 +466,47 @@
     min-height: var(--ctl-h-touch);
   }
 }
+
+/* W4: helper note under the optimize toggles when pen-change layering is active. */
+.wr-opt-note {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-label);
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+
+/* W6: "Fit to bed" action button in the Placement card. Secondary button surface
+   (matches the icon-toolbar / toggle treatment), full-width above the origin
+   sliders, with a leading glyph. */
+.wr-fit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  width: 100%;
+  min-height: var(--ctl-h);
+  margin-bottom: var(--sp-1);
+  padding: 0 var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.wr-fit-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.wr-fit-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.wr-fit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@container writingpanel (max-width: 768px) {
+  .wr-fit-btn {
+    min-height: var(--ctl-h-touch);
+  }
+}

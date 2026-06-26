@@ -45,8 +45,14 @@ export interface RgbaFrame {
 export interface MaterialSuggestion {
   /** The proposed material from the catalogue. */
   material: MaterialPreset
-  /** Confidence in [0,1] — relative, normalized across the returned list. */
+  /**
+   * ABSOLUTE plausibility in [0,1] — the raw category score, so a low number is
+   * an honest "not sure" (not just "lost the relative vote"). The operator
+   * confirms regardless; this is a proposal, never a measurement.
+   */
   confidence: number
+  /** Share of the returned list's total score (0..1) — relative ranking weight. */
+  share: number
   /** Short human reason (English; caller may wrap in t()). */
   reason: string
 }
@@ -180,8 +186,9 @@ function scoreCategories(s: FrameStats): Record<MaterialCategory, number> {
   const tex = Math.min(1, s.textureStd / 60) // 0..1 grain proxy
   const sat = s.saturation
 
+  const dark = bright < 0.4 // low-luma board (copper-on-dark FR-4)
   const metal = clamp01(0.5 * (1 - sat) + 0.3 * bright + 0.2 * (1 - tex) - 0.1)
-  const pcb = clamp01((greenish ? 0.6 : 0) + (warm && !bright ? 0.2 : 0) + 0.2 * (1 - tex))
+  const pcb = clamp01((greenish ? 0.6 : 0) + (warm && dark ? 0.2 : 0) + 0.2 * (1 - tex))
   const wood = clamp01((warm ? 0.45 : 0.05) + 0.35 * tex + 0.2 * Math.min(1, sat * 2))
   const plastic = clamp01(0.35 * bright + 0.25 * sat + 0.2 * (1 - tex) + (greenish || warm ? 0 : 0.1))
   const foam = clamp01(0.5 * bright + 0.4 * (1 - tex) + 0.1 * (1 - sat) - 0.25)
@@ -230,11 +237,13 @@ export function suggestMaterialRuleBased(
   raw.sort((a, b) => b.score - a.score)
   const top = raw.slice(0, topK)
 
-  // Normalize the kept scores into a relative confidence (sums to ~1).
+  // Confidence is the ABSOLUTE per-category plausibility (so "weak" reads as weak).
+  // `share` keeps the relative ranking weight (sums to ~1 across the kept list).
   const sum = top.reduce((acc, c) => acc + c.score, 0) || 1
   const candidates: MaterialSuggestion[] = top.map((c) => ({
     material: c.material,
-    confidence: clamp01(c.score / sum),
+    confidence: clamp01(c.score),
+    share: clamp01(c.score / sum),
     reason: c.reason,
   }))
 

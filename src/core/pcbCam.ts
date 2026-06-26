@@ -305,6 +305,13 @@ export interface IsolationOptions {
   stepdown?: number;
   /** true = climb (CW); false/undefined = conventional (CCW). */
   climb?: boolean;
+  /**
+   * P13 — selective (region/paint) isolation. When set, every isolation loop is
+   * CLIPPED to this axis-aligned window and only the inside pieces are cut, so the
+   * operator can isolate just a fine-pitch part instead of the whole board. The
+   * region is in the same (post-shift/mirror) coordinate frame as `gerber`.
+   */
+  region?: BBox | null;
 }
 
 export function isolationRoutes(
@@ -322,6 +329,7 @@ export function isolationRoutes(
   if (passes < 1) passes = 1;
   const stepdown = opts.stepdown != null && opts.stepdown > 0 ? opts.stepdown : 0;
   const climb = !!opts.climb;
+  const region = opts.region && opts.region.isValid() ? opts.region : null;
 
   const r = toolRadius(tool);
   // Lateral spacing between successive isolation passes, in mm. Caller passes an
@@ -346,7 +354,7 @@ export function isolationRoutes(
           const loop = offsetPolygon(ring, +delta);
           if (loop.points.length < 3) continue;
           loop.closed = true;
-          cutLoopLayered(tp, loop, cutZ, safeZ, stepdown, climb);
+          emitIsolationLoop(tp, loop, cutZ, safeZ, stepdown, climb, region);
         }
       }
       return tp;
@@ -354,7 +362,7 @@ export function isolationRoutes(
     // Union produced nothing usable — fall through to per-feature isolation.
   }
 
-  return perFeatureIsolation(gerber, tp, r, step, safeZ, cutZ, passes, stepdown, climb);
+  return perFeatureIsolation(gerber, tp, r, step, safeZ, cutZ, passes, stepdown, climb, region);
 }
 
 /**
@@ -374,7 +382,8 @@ function perFeatureIsolation(
   cutZ: number,
   passes: number,
   stepdown = 0,
-  climb = false
+  climb = false,
+  region: BBox | null = null
 ): Toolpath {
   // ---- Open traces: offset the centreline to each side. ----
   // Open offset lines have no enclosed area, so climb direction is undefined for
@@ -385,7 +394,7 @@ function perFeatureIsolation(
       const d = t.width / 2.0 + r + pass * step;
       for (const sign of [+1, -1]) {
         const side = offsetOpenPolyline(t.centreline, sign * d);
-        if (side.points.length >= 2) cutLoopLayered(tp, side, cutZ, safeZ, stepdown, false);
+        if (side.points.length >= 2) emitIsolationLoop(tp, side, cutZ, safeZ, stepdown, false, region);
       }
     }
   }
@@ -411,10 +420,139 @@ function perFeatureIsolation(
       const ring = offsetPolygon(feat, +delta);
       if (ring.points.length < 3) continue;
       ring.closed = true;
-      cutLoopLayered(tp, ring, cutZ, safeZ, stepdown, climb);
+      emitIsolationLoop(tp, ring, cutZ, safeZ, stepdown, climb, region);
     }
   }
   return tp;
+}
+
+// ===========================================================================
+// P13 — selective (region/paint) isolation + rest machining
+// ===========================================================================
+
+/** True if point `p` is inside (or on) the axis-aligned box `r` (mm). */
+function inRect(p: Point, r: BBox): boolean {
+  return (
+    p.x >= r.min.x - kEpsilon &&
+    p.x <= r.max.x + kEpsilon &&
+    p.y >= r.min.y - kEpsilon &&
+    p.y <= r.max.y + kEpsilon
+  );
+}
+
+/**
+ * Liang–Barsky clip of segment a→b against the box `r`. Returns the visible
+ * sub-segment endpoints plus its parameter range [t0,t1] within the original
+ * segment (t0>0 ⇒ the segment entered the box after its start; t1<1 ⇒ it left
+ * the box before its end), or null when the segment misses the box entirely.
+ */
+function clipSegment(
+  a: Point,
+  b: Point,
+  r: BBox
+): { p0: Point; p1: Point; t0: number; t1: number } | null {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let t0 = 0;
+  let t1 = 1;
+  const p = [-dx, dx, -dy, dy];
+  const q = [a.x - r.min.x, r.max.x - a.x, a.y - r.min.y, r.max.y - a.y];
+  for (let i = 0; i < 4; i++) {
+    if (Math.abs(p[i]) < kEpsilon) {
+      if (q[i] < 0) return null; // parallel to this edge and outside it
+    } else {
+      const tt = q[i] / p[i];
+      if (p[i] < 0) {
+        if (tt > t1) return null;
+        if (tt > t0) t0 = tt;
+      } else {
+        if (tt < t0) return null;
+        if (tt < t1) t1 = tt;
+      }
+    }
+  }
+  if (t1 < t0) return null;
+  return {
+    p0: { x: a.x + t0 * dx, y: a.y + t0 * dy },
+    p1: { x: a.x + t1 * dx, y: a.y + t1 * dy },
+    t0,
+    t1,
+  };
+}
+
+/**
+ * P13 — clip a closed/open polyline to the axis-aligned rectangle `r`, returning
+ * the pieces that lie INSIDE the rectangle as OPEN polylines. Used by selective
+ * (region/paint) isolation: only the cuts within the painted window are emitted.
+ * Contiguous inside spans become one open polyline (broken wherever the path
+ * leaves and re-enters the box), so the cutter never feeds across the gap.
+ */
+export function clipPolylineToRect(line: Polyline, r: BBox): Polyline[] {
+  const out: Polyline[] = [];
+  const pts = line.points;
+  const n = pts.length;
+  if (!r.isValid() || n === 0) return out;
+  if (n === 1) {
+    if (inRect(pts[0], r)) {
+      const pl = new Polyline();
+      pl.add(pts[0]);
+      out.push(pl);
+    }
+    return out;
+  }
+  const segCount = line.closed ? n : n - 1;
+  let cur: Polyline | null = null;
+  const flush = () => {
+    if (cur && cur.points.length >= 2) out.push(cur);
+    cur = null;
+  };
+  for (let i = 0; i < segCount; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const clip = clipSegment(a, b, r);
+    if (!clip) {
+      flush();
+      continue;
+    }
+    // A new piece starts whenever we have nothing open, or this segment entered
+    // the box mid-way (t0>0 ⇒ a fresh entry point that isn't continuous with cur).
+    if (!cur || clip.t0 > kEpsilon) {
+      flush();
+      cur = new Polyline();
+      cur.add(clip.p0);
+    }
+    cur.add(clip.p1);
+    if (clip.t1 < 1 - kEpsilon) flush(); // left the box before the segment ended
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Emit one isolation loop, optionally CLIPPED to a region (P13). With no region
+ * the closed loop is cut as-is (layered + climb/conventional). With a region the
+ * loop is clipped to the window and each inside piece is cut as an OPEN path
+ * (climb direction is undefined for open offset pieces, so conventional). Every
+ * path goes through {@link cutLoopLayered} so safe-Z retract semantics hold.
+ */
+function emitIsolationLoop(
+  tp: Toolpath,
+  loop: Polyline,
+  cutZ: number,
+  safeZ: number,
+  stepdown: number,
+  climb: boolean,
+  region: BBox | null
+): void {
+  if (!region) {
+    cutLoopLayered(tp, loop, cutZ, safeZ, stepdown, climb);
+    return;
+  }
+  for (const piece of clipPolylineToRect(loop, region)) {
+    if (piece.points.length < 2) continue;
+    piece.closed = false;
+    cutLoopLayered(tp, piece, cutZ, safeZ, stepdown, false);
+  }
 }
 
 /**
@@ -810,6 +948,20 @@ export interface CopperClearOptions {
    * lock the UI. When exceeded the stepover is widened to fit (a coarser clear).
    */
   maxRows?: number;
+  /**
+   * P13 — selective (region/paint) clearing. When set, only the field INSIDE this
+   * axis-aligned window is cleared (same coordinate frame as `gerber`/`outline`).
+   */
+  region?: BBox | null;
+  /**
+   * P13 — rest machining. Radius (mm) of the PRIOR, larger tool that already
+   * cleared the open field. When set (>0 and > this tool's radius), this pass
+   * clears ONLY the band the larger tool's radius kept it out of — points that are
+   * within (priorRadius+clearance) of copper but outside this tool's own keep-out.
+   * That is exactly "what the first/larger tool couldn't reach": the tight pockets
+   * up against the copper that the small bit can now finish.
+   */
+  restToolRadiusMm?: number;
 }
 
 /**
@@ -852,6 +1004,23 @@ export function copperPourClear(
     }
   }
 
+  // P13 rest machining: copper grown by the PRIOR (larger) tool's reach. The rest
+  // band is the area inside this grown copper but outside the small tool's own
+  // keep-out — i.e. the pocket up against copper the larger bit couldn't enter.
+  const restR = opts.restToolRadiusMm;
+  const restActive = restR != null && restR > r + kEpsilon;
+  const restKeepOut: MultiPolygon = [];
+  if (restActive) {
+    const priorClear = Math.max(0, opts.clearanceMm ?? 0) + (restR as number);
+    for (const poly of merged) {
+      for (const ring of poly) {
+        if (ring.length < 4) continue;
+        const grown = offsetPolygon(ringToPolyline(ring), +priorClear);
+        if (grown.points.length >= 3) restKeepOut.push([polylineToRing(grown)]);
+      }
+    }
+  }
+
   // Field bounds: the outline (inset by the tool radius so the cutter stays inside
   // the board edge) or the copper bbox grown a little.
   const field = new BBox();
@@ -861,10 +1030,18 @@ export function copperPourClear(
     field.expand(gerber.bounds());
   }
   if (!field.isValid()) return tp;
-  const minX = field.min.x + r;
-  const maxX = field.max.x - r;
-  const minY = field.min.y + r;
-  const maxY = field.max.y - r;
+  // P13 — clamp the field to the painted region (if any) so only that window is cleared.
+  const region = opts.region && opts.region.isValid() ? opts.region : null;
+  let minX = field.min.x + r;
+  let maxX = field.max.x - r;
+  let minY = field.min.y + r;
+  let maxY = field.max.y - r;
+  if (region) {
+    minX = Math.max(minX, region.min.x);
+    maxX = Math.min(maxX, region.max.x);
+    minY = Math.max(minY, region.min.y);
+    maxY = Math.min(maxY, region.max.y);
+  }
   if (!(maxX - minX > kEpsilon && maxY - minY > kEpsilon)) return tp;
 
   // Stepover + row count guard.
@@ -875,8 +1052,11 @@ export function copperPourClear(
 
   const outlineForTest = outline && outline.points.length >= 3 ? outline : null;
   const inField = (x: number, y: number): boolean => {
+    if (region && (x < region.min.x || x > region.max.x || y < region.min.y || y > region.max.y)) return false;
     if (outlineForTest && !pointInPolygon(outlineForTest, { x, y })) return false;
     if (pointInMultiPolygon(keepOut, x, y)) return false;
+    // Rest machining: only the band the larger tool couldn't reach (inside its keep-out).
+    if (restActive && !pointInMultiPolygon(restKeepOut, x, y)) return false;
     return true;
   };
 

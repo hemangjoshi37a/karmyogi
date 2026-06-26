@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Viewer, type ViewerHandle } from '../viewer/Viewer'
 import { gcodeToPolylines, type Segment } from '../viewer/gcodeToPolylines'
+import { heatColor } from '../viewer/Toolpath'
+import { useGcodeSelection } from '../viewer/gcodeSelection'
 import { reemitSafe, inferEmitOptions } from '../core/toolpathEdit'
 import { useProgram, useMachine, useCameraCalib, usePersistentState, useSettings } from '../store'
 import { useBed } from '../store/bed'
@@ -247,6 +249,26 @@ const IconHeightmap = (
     <path d="M3 16c3 0 4-3 7-3s4 3 7 3" />
     <path d="M3 12c3 0 4-3 7-3s4 3 7 3" />
     <path d="M3 8c3 0 4-3 7-3s4 3 7 3" />
+  </VIcon>
+)
+// V6 lightweight / SVG render mode: a flat 2D-layers / stacked-rectangles glyph.
+const IconSvg = (
+  <VIcon>
+    <rect x="3" y="4" width="18" height="7" rx="1" />
+    <path d="M3 15h18M3 19h12" />
+  </VIcon>
+)
+// L10 power heat-map: a gradient bar with a flame cue.
+const IconPower = (
+  <VIcon>
+    <path d="M12 3c2 3 4 4.5 4 8a4 4 0 0 1-8 0c0-1.5.6-2.6 1.4-3.6C10 9 12 7 12 3z" />
+  </VIcon>
+)
+// V11 soft-limit box: a dashed bounding rectangle with a corner-origin tick.
+const IconSoftLimit = (
+  <VIcon>
+    <path d="M4 6h4M10 6h4M16 6h4M20 8v4M20 14v4M16 18h-4M10 18H6M4 18v-4M4 12V6" />
+    <path d="M4 18l3-3" />
   </VIcon>
 )
 
@@ -571,6 +593,19 @@ export function VisualizerPanel() {
   // V8 — right-click-to-jog mode: a right-click on the bed jogs the head there
   // (safe-Z first). Off by default so right-click stays OrbitControls pan/orbit.
   const [jogToMode, setJogToMode] = useState(false)
+  // V6 — lightweight 2D/SVG render mode: swaps the WebGL viewport for a top-view
+  // SVG render (genuinely lighter for huge files / weak devices). Persisted.
+  const [svgMode, setSvgMode] = usePersistentState('karmyogi.viewer.svgMode', false)
+  // V11 — soft-limit travel box + machine-origin marker (only appears once the
+  // GRBL settings are synced). Persisted; on by default.
+  const [showSoftLimits, setShowSoftLimits] = usePersistentState(
+    'karmyogi.viewer.softLimits',
+    true,
+  )
+  // L10 — colour the toolpath by laser power (S-value). Persisted; on by default
+  // so a laser job shows its heat-map immediately (the toggle only appears when
+  // the loaded program actually modulates power).
+  const [powerHeat, setPowerHeat] = usePersistentState('karmyogi.viewer.powerHeat', true)
   // The probed surface (read-only from the auto-leveling store). Only overlaid
   // when complete so a half-probed grid never misrepresents the relief.
   const heightmap = useHeightmap((s) => s.map)
@@ -658,6 +693,32 @@ export function VisualizerPanel() {
     }
     return lines.join('\n')
   }, [lines, springActive, sections])
+
+  // V13 + L10 — parse the WHOLE combined program ONCE (memoized on the text) to
+  // get line-tagged segments (for the editor⇄3D link) AND the power summary (for
+  // the laser heat-map). The displayed/simulated geometry comes from the timeline
+  // (no line/power info), so this is a separate, cheap, change-only parse.
+  const parsedForLink = useMemo(
+    () => (gcode.trim() !== '' ? gcodeToPolylines(gcode) : null),
+    [gcode],
+  )
+  const lineSegments = parsedForLink?.segments
+  // Laser power heat-map is OFFERED only when the program actually modulates S
+  // (a constant-S spindle job has `varied:false` → no heat-map). Range feeds the
+  // shared normalisation so colours are comparable across sections.
+  const laserPower = parsedForLink?.power?.varied ? parsedForLink.power : null
+  const powerRange = useMemo<[number, number] | null>(
+    () => (laserPower ? [laserPower.min, laserPower.max] : null),
+    [laserPower],
+  )
+  const heatOn = !!laserPower && powerHeat
+
+  // V13 — selected combined-program line (shared with the Program editor). Clear
+  // it whenever the program text changes so a stale index never highlights.
+  const setSelectedLine = useGcodeSelection((s) => s.setSelectedLine)
+  useEffect(() => {
+    setSelectedLine(null)
+  }, [gcode, setSelectedLine])
 
   // Cutter radius for the material-removal sim. Read live from the carve store's
   // GLOBAL tool diameter (the single bit that cuts all jobs, set in the 3D
@@ -828,6 +889,37 @@ export function VisualizerPanel() {
             unique across the always-visible set (front-view ▭ vs add-rect — the
             latter is now labeled in the menu; fit ⤢ vs scale ⤡). */}
         <div className="vz-toolbar">
+          {/* V6 — lightweight 2D/SVG render mode toggle (always available). */}
+          <button
+            className={svgMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+            onClick={() => setSvgMode((s) => !s)}
+            title={t(
+              'vz.svgMode',
+              'Lightweight view — fast 2D top-view render for huge files / weak devices',
+            )}
+            aria-label={t('vz.svgMode', 'Lightweight view')}
+            aria-pressed={svgMode}
+          >
+            {IconSvg}
+          </button>
+          {/* L10 — laser power heat-map toggle (only when the program varies S). */}
+          {laserPower && (
+            <button
+              className={powerHeat ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+              onClick={() => setPowerHeat((s) => !s)}
+              title={t(
+                'vz.powerHeat',
+                'Power heat-map — colour the toolpath by laser power (S-value)',
+              )}
+              aria-label={t('vz.powerHeat', 'Power heat-map')}
+              aria-pressed={powerHeat}
+            >
+              {IconPower}
+            </button>
+          )}
+          <span className="vz-toolbar-sep" aria-hidden="true" />
+          {!svgMode && (
+            <>
           <button
             className="vz-toolbar-btn"
             onClick={() => ref.current?.fit()}
@@ -890,6 +982,8 @@ export function VisualizerPanel() {
             {IconRunOutline}
           </button>
           <span className="vz-toolbar-sep" aria-hidden="true" />
+            </>
+          )}
           <BedSizeControl />
           {/* Overflow menu for the secondary controls. */}
           <OverflowMenu
@@ -913,9 +1007,13 @@ export function VisualizerPanel() {
             setShowSimTool={setShowSimTool}
             showJobBoxes={showJobBoxes}
             setShowJobBoxes={setShowJobBoxes}
+            showSoftLimits={showSoftLimits}
+            setShowSoftLimits={setShowSoftLimits}
             camOverlay={camOverlay}
             toggleCamOverlay={toggleCamOverlay}
           />
+          {!svgMode && (
+            <>
           <span className="vz-toolbar-sep" aria-hidden="true" />
           <button
             className={
@@ -979,6 +1077,8 @@ export function VisualizerPanel() {
           >
             {IconJogTo}
           </button>
+            </>
+          )}
           {/* V10 live DRO/state HUD overlay toggle. */}
           <button
             className={showHud ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
@@ -990,7 +1090,7 @@ export function VisualizerPanel() {
             {IconHud}
           </button>
           {/* V9 heightmap overlay toggle — only meaningful once a surface is probed. */}
-          {heightmapReady && (
+          {!svgMode && heightmapReady && (
             <button
               className={showHeightmap ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
               onClick={() => setShowHeightmap((s) => !s)}
@@ -1002,6 +1102,17 @@ export function VisualizerPanel() {
             </button>
           )}
         </div>
+        {svgMode ? (
+          <SvgViewport
+            segments={lineSegments ?? []}
+            bedW={bedW}
+            bedD={bedD}
+            dark={theme === 'dark'}
+            colorByPower={heatOn}
+            powerRange={powerRange}
+            t={t}
+          />
+        ) : (
         <Viewer
           ref={ref}
           gcode={gcode}
@@ -1047,7 +1158,24 @@ export function VisualizerPanel() {
           heightmap={showHeightmap ? heightmapReady : null}
           jogTo={jogToMode && connected}
           onJogTo={onJogTo}
+          showSoftLimits={showSoftLimits}
+          colorByPower={heatOn}
+          powerRange={powerRange}
+          lineSegments={lineSegments}
+          lineLink={hasProgram && !gizmoOn && !lassoMode && !pickMode && !jogToMode}
         />
+        )}
+        {/* V6 — suggest the lightweight view for very large programs. */}
+        {!svgMode && (lineSegments?.length ?? 0) > SVG_SUGGEST_SEGMENTS && (
+          <SvgSuggestion
+            segs={lineSegments?.length ?? 0}
+            onAccept={() => setSvgMode(true)}
+            t={t}
+          />
+        )}
+        {/* L10 — power scale legend (shown in both render modes when active). */}
+        {heatOn && powerRange && <PowerLegend range={powerRange} t={t} />}
+        {!svgMode && (
         <LegendPanel
           t={t}
           open={legendOpen}
@@ -1063,7 +1191,8 @@ export function VisualizerPanel() {
           setShowBed={setShowBed}
           shifted={gizmoOn && !!placement}
         />
-        {gizmoOn && placement && (
+        )}
+        {!svgMode && gizmoOn && placement && (
           <PlacementReadout
             placement={placement}
             name={selectedSection?.name}
@@ -1079,11 +1208,13 @@ export function VisualizerPanel() {
             runTime={timeline?.duration ?? null}
           />
         )}
-        <ToolConeLegend
-          showActualTool={showActualTool}
-          showSimTool={showSimTool}
-          t={t}
-        />
+        {!svgMode && (
+          <ToolConeLegend
+            showActualTool={showActualTool}
+            showSimTool={showSimTool}
+            t={t}
+          />
+        )}
         {showHud && <ViewportHud t={t} />}
       </div>
       <ToolTimeline timeline={timeline} t={t} />
@@ -1132,6 +1263,8 @@ function OverflowMenu({
   setShowSimTool,
   showJobBoxes,
   setShowJobBoxes,
+  showSoftLimits,
+  setShowSoftLimits,
   camOverlay,
   toggleCamOverlay,
 }: {
@@ -1155,6 +1288,8 @@ function OverflowMenu({
   setShowSimTool: Toggle
   showJobBoxes: boolean
   setShowJobBoxes: Toggle
+  showSoftLimits: boolean
+  setShowSoftLimits: Toggle
   camOverlay: boolean
   toggleCamOverlay: () => void
 }) {
@@ -1287,6 +1422,12 @@ function OverflowMenu({
             t('vz.jobBoxes', 'Show toolpath cubes (colored boxes)'),
             () => setShowJobBoxes((s) => !s),
             showJobBoxes,
+          )}
+          {item(
+            IconSoftLimit,
+            t('vz.softLimits', 'Show soft-limit box + machine origin'),
+            () => setShowSoftLimits((s) => !s),
+            showSoftLimits,
           )}
           {item(
             IconStock,
@@ -2061,6 +2202,228 @@ function DimensionsOverlay({
   )
 }
 
+// V6 — past this many parsed moves we suggest the lightweight 2D view.
+const SVG_SUGGEST_SEGMENTS = 45000
+// L10 — number of discrete colour bands the SVG heat-map buckets power into.
+const POWER_BUCKETS = 10
+
+/** [r,g,b] in 0..1 → a CSS rgb() string. */
+function rgbStr([r, g, b]: [number, number, number]): string {
+  return `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`
+}
+/** Representative colour for power bucket i (matches the 3D heat-map). */
+function bucketColor(i: number): string {
+  return rgbStr(heatColor((i + 0.5) / POWER_BUCKETS))
+}
+/** CSS linear-gradient mirroring {@link heatColor} for the power legend bar. */
+function heatGradientCss(): string {
+  const parts: string[] = []
+  const n = 6
+  for (let i = 0; i <= n; i++) {
+    const t = i / n
+    parts.push(`${rgbStr(heatColor(t))} ${Math.round(t * 100)}%`)
+  }
+  return `linear-gradient(to right, ${parts.join(', ')})`
+}
+
+/**
+ * V6 — lightweight 2D (SVG) top-view of the toolpath. A genuinely lighter render
+ * path than WebGL: the whole program collapses into a handful of `<path>`
+ * elements (one for rapids, one per power bucket or one for cuts, one for the
+ * selected-line highlight), built once per change with `non-scaling-stroke` so
+ * pan/zoom stays crisp. No GPU context, no per-frame work — ideal for huge files
+ * on a Pi / phone. Y is flipped (world +Y up → SVG up) by negating the y coord.
+ */
+function SvgViewport({
+  segments,
+  bedW,
+  bedD,
+  dark,
+  colorByPower,
+  powerRange,
+  t,
+}: {
+  segments: Segment[]
+  bedW: number
+  bedD: number
+  dark: boolean
+  colorByPower: boolean
+  powerRange: [number, number] | null
+  t: TFn
+}) {
+  const selectedLine = useGcodeSelection((s) => s.selectedLine)
+
+  const view = useMemo(() => {
+    let minX = -bedW / 2
+    let maxX = bedW / 2
+    let minY = -bedD / 2
+    let maxY = bedD / 2
+    for (const s of segments) {
+      minX = Math.min(minX, s.from[0], s.to[0])
+      maxX = Math.max(maxX, s.from[0], s.to[0])
+      minY = Math.min(minY, s.from[1], s.to[1])
+      maxY = Math.max(maxY, s.from[1], s.to[1])
+    }
+    const pad = Math.max(maxX - minX, maxY - minY) * 0.04 + 2
+    minX -= pad
+    maxX += pad
+    minY -= pad
+    maxY += pad
+    const w = Math.max(maxX - minX, 1)
+    const h = Math.max(maxY - minY, 1)
+
+    const rapid: string[] = []
+    const cut: string[] = []
+    const buckets: string[][] =
+      colorByPower && powerRange ? Array.from({ length: POWER_BUCKETS }, () => []) : []
+    const sel: string[] = []
+    const [lo, hi] = powerRange ?? [0, 1]
+    const span = hi - lo || 1
+    for (const s of segments) {
+      const d = `M${s.from[0].toFixed(2)} ${(-s.from[1]).toFixed(2)}L${s.to[0].toFixed(2)} ${(-s.to[1]).toFixed(2)}`
+      if (selectedLine != null && s.line === selectedLine) sel.push(d)
+      if (s.kind === 'rapid') {
+        rapid.push(d)
+        continue
+      }
+      if (colorByPower && powerRange) {
+        const bi = Math.max(
+          0,
+          Math.min(POWER_BUCKETS - 1, Math.floor((((s.power ?? lo) - lo) / span) * POWER_BUCKETS)),
+        )
+        buckets[bi].push(d)
+      } else {
+        cut.push(d)
+      }
+    }
+    return {
+      viewBox: `${minX.toFixed(2)} ${(-maxY).toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}`,
+      rapidD: rapid.join(''),
+      cutD: cut.join(''),
+      bucketD: buckets.map((b) => b.join('')),
+      selD: sel.join(''),
+    }
+  }, [segments, bedW, bedD, colorByPower, powerRange, selectedLine])
+
+  const bg = dark ? '#15181c' : '#e7ecf1'
+  const bedStroke = dark ? '#515c6e' : '#aab4c0'
+  const cutColor = dark ? '#38bdf8' : '#0369a1'
+  const rapidColor = dark ? '#6b7280' : '#94a3b8'
+
+  return (
+    <div className="vz-svgwrap" style={{ background: bg }}>
+      <svg
+        className="vz-svg"
+        viewBox={view.viewBox}
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label={t('vz.svgMode.aria', 'Lightweight 2D toolpath view (top)')}
+      >
+        {/* Bed footprint (centred on the work origin). */}
+        <rect
+          x={-bedW / 2}
+          y={-bedD / 2}
+          width={bedW}
+          height={bedD}
+          fill="none"
+          stroke={bedStroke}
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+          opacity={0.7}
+        />
+        {/* G54 work origin cross. */}
+        <line x1={-6} y1={0} x2={6} y2={0} stroke="#ef4444" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        <line x1={0} y1={-6} x2={0} y2={6} stroke="#22c55e" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        {view.rapidD && (
+          <path
+            d={view.rapidD}
+            fill="none"
+            stroke={rapidColor}
+            strokeWidth={0.8}
+            strokeDasharray="3 2"
+            vectorEffect="non-scaling-stroke"
+            opacity={0.7}
+          />
+        )}
+        {colorByPower && powerRange
+          ? view.bucketD.map(
+              (d, i) =>
+                d && (
+                  <path
+                    key={i}
+                    d={d}
+                    fill="none"
+                    stroke={bucketColor(i)}
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ),
+            )
+          : view.cutD && (
+              <path d={view.cutD} fill="none" stroke={cutColor} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            )}
+        {view.selD && (
+          <path d={view.selD} fill="none" stroke="#f43f5e" strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
+        )}
+      </svg>
+      <div className="vz-svg-badge" aria-hidden="true">
+        {t('vz.svgMode.badge', 'Lightweight 2D')}
+      </div>
+    </div>
+  )
+}
+
+/** V6 — dismissible chip suggesting the lightweight view for very large programs. */
+function SvgSuggestion({
+  segs,
+  onAccept,
+  t,
+}: {
+  segs: number
+  onAccept: () => void
+  t: TFn
+}) {
+  const [dismissed, setDismissed] = useState(false)
+  if (dismissed) return null
+  return (
+    <div className="vz-svg-suggest" role="status">
+      <span>
+        {t(
+          'vz.svgSuggest',
+          'Large program ({n} moves) — switch to the lightweight view for smoother performance?',
+          { n: segs },
+        )}
+      </span>
+      <button type="button" className="vz-svg-suggest-go" onClick={onAccept}>
+        {t('vz.svgSuggest.go', 'Use lightweight')}
+      </button>
+      <button
+        type="button"
+        className="vz-svg-suggest-x"
+        onClick={() => setDismissed(true)}
+        aria-label={t('common.dismiss', 'Dismiss')}
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
+/** L10 — compact gradient legend mapping colour → laser power (S-value). */
+function PowerLegend({ range, t }: { range: [number, number]; t: TFn }) {
+  const [lo, hi] = range
+  return (
+    <div className="vz-powerlegend" role="note" aria-label={t('vz.powerLegend.aria', 'Laser power scale')}>
+      <span className="vz-powerlegend-title">{t('vz.powerLegend', 'Power (S)')}</span>
+      <div className="vz-powerlegend-bar" style={{ background: heatGradientCss() }} aria-hidden="true" />
+      <div className="vz-powerlegend-scale">
+        <span>{Math.round(lo)}</span>
+        <span>{Math.round(hi)}</span>
+      </div>
+    </div>
+  )
+}
+
 // Inline (panel-local) styles — globals.css is owned by another agent.
 // Theme-aware via CSS vars. The view toolbar lives top-right (icon buttons);
 // the dimensions overlay lives bottom-left so the two never collide.
@@ -2606,5 +2969,124 @@ const OVERLAY_CSS = `
   .vz-dims-meta, .vz-dims-fit, .vz-dims-unit, .vz-dims-x { font-size: 11px; }
   .vz-place { font-size: 12px; padding: 6px 10px; gap: 12px; }
   .vz-place-unit { font-size: 11px; }
+}
+
+/* V6 — lightweight 2D / SVG render mode. */
+.vz-svgwrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.vz-svg { width: 100%; height: 100%; display: block; }
+.vz-svg-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 84%, transparent);
+  backdrop-filter: blur(4px);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.vz-svg-suggest {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  padding: 7px 8px 7px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-2);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.3;
+}
+.vz-svg-suggest-go {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.vz-svg-suggest-go:hover { filter: brightness(1.08); }
+.vz-svg-suggest-x {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.vz-svg-suggest-x:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
+
+/* L10 — laser power heat-map legend (top-centre, clear of toolbar/layers). */
+.vz-powerlegend {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 84%, transparent);
+  backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-1);
+  color: var(--fg);
+  pointer-events: none;
+  user-select: none;
+}
+.vz-powerlegend-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  text-align: center;
+}
+.vz-powerlegend-bar {
+  width: 132px;
+  height: 9px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+}
+.vz-powerlegend-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .vz-svg-suggest { font-size: 13px; }
+  .vz-powerlegend-bar { width: 110px; height: 11px; }
 }
 `

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useProgram, usePersistentState } from '../store'
+import { useProgram, usePersistentState, useMachine } from '../store'
 import { grbl } from '../serial/controller'
 import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
 import { useTabCommands } from '../machine/tabCommands'
@@ -30,9 +30,14 @@ import {
   contourLayers,
   FillStyle,
   emitLaserProgram,
+  emitLaserFrameProgram,
+  laserDotOnCommand,
+  kLaserOffCommand,
+  kMaxFramePowerPct,
   percentFromPower,
   powerFromPercent,
   type LaserContour,
+  type LaserFrameShape,
   type PlacedContour,
 } from '../core/laser'
 import {
@@ -314,6 +319,276 @@ function LaserTestGridCard(props: { defaults: Partial<TestGridParams> }) {
           </button>
         </>
       )}
+    </section>
+  )
+}
+
+/** Machine states in which it is safe to fire the frame / focus dot. */
+const FRAME_OK_STATES = new Set(['Idle', 'Check'])
+
+/**
+ * Low-power FRAME + FOCUS DOT card (L15). Traces the job outline (bounding box
+ * or convex-hull rubber-band) at a low, operator-set power so the operator sees
+ * exactly where the job lands on the material BEFORE cutting; plus a momentary
+ * focus dot for manual focusing. Both FIRE THE BEAM, so each is gated behind a
+ * connect + idle check AND an explicit arm → confirm step (auto-disarming after
+ * a few seconds). Emission routes through the safe laser emitter
+ * (`emitLaserFrameProgram` / `laserDotOnCommand`): constant M3, low clamped S,
+ * S0 on every travel, M5 S0 at the end. The dot auto-extinguishes if the
+ * machine leaves Idle or disconnects.
+ */
+function LaserFrameCard(props: {
+  placed: PlacedContour[]
+  sMax: number
+  cutFeed: number
+  decimals: number
+}) {
+  const t = useT()
+  const connection = useMachine((s) => s.connection)
+  const machineState = useMachine((s) => s.state)
+  const connected = connection === 'connected'
+  const idle = FRAME_OK_STATES.has(machineState)
+  const canFire = connected && idle
+
+  const [shape, setShape] = usePersistentState<LaserFrameShape>('karmyogi.laser.frame.shape', 'box')
+  const [powerPct, setPowerPct] = usePersistentState<number>('karmyogi.laser.frame.power', 5)
+  const [marginMm, setMarginMm] = usePersistentState<number>('karmyogi.laser.frame.margin', 2)
+  const [loops, setLoops] = usePersistentState<number>('karmyogi.laser.frame.loops', 1)
+  const [frameFeed, setFrameFeed] = usePersistentState<number>('karmyogi.laser.frame.feed', 1500)
+
+  const [armFrame, setArmFrame] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [armDot, setArmDot] = useState(false)
+  const [dotOn, setDotOn] = useState(false)
+
+  const hasJob = props.placed.length > 0
+  const safePct = clamp(powerPct, 0, kMaxFramePowerPct)
+  const frameS = Math.round((safePct / 100) * Math.max(1, props.sMax))
+
+  // Auto-disarm a pending confirm so a stray arm never lingers / fires later.
+  useEffect(() => {
+    if (!armFrame) return
+    const id = window.setTimeout(() => setArmFrame(false), 4000)
+    return () => window.clearTimeout(id)
+  }, [armFrame])
+  useEffect(() => {
+    if (!armDot) return
+    const id = window.setTimeout(() => setArmDot(false), 4000)
+    return () => window.clearTimeout(id)
+  }, [armDot])
+
+  // SAFETY: if the machine leaves Idle or disconnects while the dot is on, kill
+  // it immediately (and command M5 if we can still reach the controller).
+  useEffect(() => {
+    if (dotOn && (!connected || !idle)) {
+      setDotOn(false)
+      if (connected) void grbl.send(kLaserOffCommand)
+    }
+  }, [connected, idle, dotOn])
+
+  async function runFrame() {
+    if (!canFire || !hasJob || running) return
+    const gcode = emitLaserFrameProgram(props.placed, {
+      shape,
+      powerPct: safePct,
+      marginMm,
+      loops,
+      feed: frameFeed,
+      sMax: props.sMax,
+      decimals: props.decimals,
+    })
+    const lines = gcode.split(/\r?\n/).filter((l) => l.trim().length > 0)
+    if (lines.length === 0) return
+    setArmFrame(false)
+    setRunning(true)
+    try {
+      // Stream via the MDI path so the loaded program / cursor is untouched.
+      for (const line of lines) await grbl.send(line)
+    } catch {
+      /* surfaced on the console by grbl.send */
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  async function toggleDot() {
+    if (dotOn) {
+      // OFF is always immediate (safe) regardless of state.
+      setDotOn(false)
+      try {
+        await grbl.send(kLaserOffCommand)
+      } catch {
+        /* console */
+      }
+      return
+    }
+    if (!canFire) return
+    if (!armDot) {
+      setArmDot(true)
+      return
+    }
+    setArmDot(false)
+    setDotOn(true)
+    try {
+      await grbl.send(laserDotOnCommand(safePct, props.sMax))
+    } catch {
+      /* console */
+    }
+  }
+
+  const frameTip = !connected
+    ? t('laser.lframe.run.connect', 'Connect the machine to frame the job.')
+    : !idle
+      ? t('laser.lframe.run.busy', 'Machine is {state} — wait until Idle.', { state: machineState })
+      : !hasJob
+        ? t('laser.lframe.run.nojob', 'Import a drawing first.')
+        : armFrame
+          ? t('laser.lframe.run.armed', 'Click again to fire the low-power frame (≈ S{s}).', { s: frameS })
+          : t('laser.lframe.run.ready', 'Trace the job outline at {pct}% (≈ S{s}) so you can see where it lands.', { pct: safePct, s: frameS })
+
+  const dotTip = dotOn
+    ? t('laser.lframe.dot.on', 'Beam is firing a focus dot — click to stop.')
+    : !canFire
+      ? t('laser.lframe.dot.gate', 'Connect + Idle to fire a focus dot.')
+      : armDot
+        ? t('laser.lframe.dot.armed', 'Click again to fire a constant low-power focus dot (≈ S{s}).', { s: frameS })
+        : t('laser.lframe.dot.ready', 'Fire a stationary low-power dot (M3 constant) to focus the head manually.')
+
+  return (
+    <section className="lp-card ui-card">
+      <div className="lp-card-head">
+        <h4 className="ui-sec-head">
+          <span className="cam-card-ico" aria-hidden="true">
+            <Icon name="frame" size={14} />
+          </span>
+          {t('laser.lframe.title', 'Frame & focus (low power)')}
+        </h4>
+      </div>
+      <p className="lp-hint">
+        {t(
+          'laser.lframe.hint',
+          'Trace the job outline at low power so you can see exactly where it lands on the material before cutting. The beam fires — wear rated eye protection.',
+        )}
+      </p>
+      <div className="lp-segrow">
+        <span
+          className="lp-segrow-label"
+          title={t('laser.lframe.shape.title', 'Box = bounding rectangle; Hull = convex-hull rubber-band (tight outline).')}
+        >
+          {t('laser.lframe.shape', 'Outline')}
+        </span>
+        <SegControl<LaserFrameShape>
+          ariaLabel={t('laser.lframe.shape', 'Frame outline')}
+          value={shape}
+          onChange={setShape}
+          options={[
+            { value: 'box', label: t('laser.lframe.box', 'Box'), icon: 'frame' },
+            { value: 'hull', label: t('laser.lframe.hull', 'Hull'), icon: 'duplicate' },
+          ]}
+        />
+      </div>
+      <div className="lp-sliders">
+        <SliderField
+          icon={<Icon name="laser" size={14} />}
+          label={t('laser.lframe.power', 'Frame power')}
+          unit="%"
+          min={0}
+          max={kMaxFramePowerPct}
+          step={1}
+          integer
+          value={safePct}
+          onChange={(n) => setPowerPct(clamp(Math.round(n), 0, kMaxFramePowerPct))}
+          title={t('laser.lframe.power.title', 'Low marking power as a % of S-max — capped at {max}% so framing marks but never cuts. ≈ S{s}.', { max: kMaxFramePowerPct, s: frameS })}
+        />
+        <SliderField
+          icon={<Icon name="jog" size={14} />}
+          label={t('laser.lframe.margin', 'Margin')}
+          unit="mm"
+          min={0}
+          max={50}
+          step={0.5}
+          value={marginMm}
+          onChange={(n) => setMarginMm(clamp(n, 0, 50))}
+          title={t('laser.lframe.margin.title', 'Grow the outline outward so the trace clears the part.')}
+        />
+        <SliderField
+          icon={<Icon name="copy" size={14} />}
+          label={t('laser.lframe.loops', 'Loops')}
+          min={1}
+          max={10}
+          step={1}
+          integer
+          value={loops}
+          onChange={(n) => setLoops(clamp(Math.floor(n), 1, 10))}
+          title={t('laser.lframe.loops.title', 'How many times to trace the outline.')}
+        />
+        <SliderField
+          icon={<Icon name="jog" size={14} />}
+          label={t('laser.lframe.feed', 'Frame speed')}
+          unit="mm/min"
+          min={1}
+          max={10000}
+          step={10}
+          value={frameFeed}
+          onChange={(n) => setFrameFeed(clamp(n, 1, 10000))}
+          title={t('laser.lframe.feed.title', 'Feed rate for the perimeter trace (G1 F…).')}
+        />
+      </div>
+      <div className="lp-frame-actions">
+        <button
+          type="button"
+          className={`cam-primary lp-fire${armFrame ? ' is-armed' : ''}`}
+          disabled={!canFire || !hasJob || running}
+          onClick={() => {
+            if (!armFrame) {
+              setArmFrame(true)
+              return
+            }
+            void runFrame()
+          }}
+          title={frameTip}
+          aria-label={frameTip}
+        >
+          <Icon name={armFrame ? 'warning' : 'frame'} size={15} />{' '}
+          {running
+            ? t('laser.lframe.framing', 'Framing…')
+            : armFrame
+              ? t('laser.lframe.confirm', 'Confirm — fire frame')
+              : t('laser.lframe.run', 'Frame (low power)')}
+        </button>
+        <button
+          type="button"
+          className={`cam-secondary lp-fire${dotOn ? ' is-on' : ''}${armDot ? ' is-armed' : ''}`}
+          disabled={!canFire && !dotOn}
+          onClick={() => void toggleDot()}
+          title={dotTip}
+          aria-label={dotTip}
+        >
+          <Icon name={dotOn ? 'pause' : armDot ? 'warning' : 'laser'} size={15} />{' '}
+          {dotOn
+            ? t('laser.lframe.dotOff', 'Stop focus dot')
+            : armDot
+              ? t('laser.lframe.dotConfirm', 'Confirm — fire dot')
+              : t('laser.lframe.dot', 'Focus dot')}
+        </button>
+      </div>
+      {connected && !idle && (
+        <p className="lp-hint is-warn">
+          {t('laser.lframe.busy', 'Machine is {state} — wait until Idle to frame or focus.', { state: machineState })}
+        </p>
+      )}
+      {connected && idle && !hasJob && (
+        <p className="lp-hint">{t('laser.lframe.nojob', 'Import a drawing to frame the job outline.')}</p>
+      )}
+      {!connected && (
+        <p className="lp-hint">{t('laser.lframe.connect', 'Connect the machine to frame or focus.')}</p>
+      )}
+      <p className="lp-note">
+        {t(
+          'laser.lframe.note',
+          'Frames in constant-power (M3) mode at low S; the beam is OFF (S0/M5) on every travel and at the end. The focus dot stays on until you stop it — never leave a firing laser unattended.',
+        )}
+      </p>
     </section>
   )
 }
@@ -2125,6 +2400,14 @@ function LaserVectorWorkbench() {
           </label>
         </div>
       </section>
+
+      {/* L15 — low-power frame + focus dot (pre-run placement / manual focus). */}
+      <LaserFrameCard
+        placed={placed}
+        sMax={Math.max(1, params.sMax)}
+        cutFeed={params.cutFeed}
+        decimals={params.decimals}
+      />
 
       {/* L2 — Layers (only when the DXF actually has >1 layer). */}
       {layers.length > 1 && (

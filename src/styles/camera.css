@@ -1442,6 +1442,41 @@
   text-overflow: ellipsis;
 }
 
+/* Engine + feeds-safety notes inside the suggestion card. */
+.cam-ai-src {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.cam-ai-feeds-note,
+.cam-ai-preview-note {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+
+/* Live markerless-detection preview: the proposed box drawn over the feed.
+   Absolutely fills the stage; the SVG viewBox + preserveAspectRatio match the
+   video's object-fit:contain so the polygon lands on the real image. */
+.cam-ai-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+.cam-ai-overlay-box {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 6 4;
+}
+
 /* Touch sizing for the mobile fallback. */
 @supports not (container-type: inline-size) {
   @media (max-width: 480px) {

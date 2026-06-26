@@ -354,6 +354,15 @@
   font-weight: 600;
 }
 
+/* W6: secondary "Fit to bed" action beside the primary Send button. */
+.sig-fit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  min-height: var(--ctl-h-lg);
+}
+
 /* collapsible disclosure header (Advanced / Raw G-code) */
 .sig-disclosure {
   display: flex;

@@ -5,6 +5,8 @@ import { engrave, profileContours, pocket, ProfileSide, type CamParams } from '.
 import {
   applyLeadRamp,
   orientLoop,
+  restMachiningLoops,
+  dragKnifeToolpath,
   type CutDirection,
   type LeadShape,
   type PlungeMode,
@@ -41,7 +43,7 @@ import { PresetSaveBar } from '../components/presets/PresetSaveBar'
 import { FeatureViewer } from '../components/cam/FeatureViewer'
 import { SurfaceViewer } from '../components/cam/SurfaceViewer'
 import { segmentSurfaces, regionOutlineXY, type SurfaceRegion } from '../core/meshSegment'
-import { vCarveContours, type VCarveParams } from '../core/vcarve'
+import { vCarveContours, vCarveInlay, type VCarveParams } from '../core/vcarve'
 import { orderLoopsInsideOut } from '../core/geometry'
 import { defaultTool, type Tool, Toolpath } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
@@ -141,6 +143,9 @@ import {
   ChevronUp,
   ChevronDown,
   Wand2,
+  Scissors,
+  Crosshair,
+  Copy,
 } from 'lucide-react'
 import { SaveLoadButtons } from '../components/SaveLoadButtons'
 import { SegControl } from '../components/ui/SegControl'
@@ -439,6 +444,9 @@ interface VCarveUiParams {
   cleanup: boolean // run a flat-endmill clearance pass for wide areas
   cleanupToolMm: number // flat cleanup tool ⌀
   cleanupStepoverFrac: number // cleanup stepover (×⌀)
+  inlay: boolean // C13 · emit a male + female inlay pair
+  glueGapMm: number // C13 · clearance applied to the male plug so it seats with glue
+  seatingFloorMm: number // C13 · flat seating floor added under the female v-groove
 }
 
 const DEFAULT_VCARVE: VCarveUiParams = {
@@ -448,6 +456,9 @@ const DEFAULT_VCARVE: VCarveUiParams = {
   cleanup: false,
   cleanupToolMm: 3.175,
   cleanupStepoverFrac: 0.45,
+  inlay: false,
+  glueGapMm: 0.2,
+  seatingFloorMm: 0,
 }
 
 /** Narrow unknown into valid VCarveUiParams, falling back per-field to `base`. */
@@ -460,6 +471,9 @@ function parseVcarve(v: unknown, base: VCarveUiParams): VCarveUiParams {
     cleanup: boolOr(v.cleanup, base.cleanup),
     cleanupToolMm: numOr(v.cleanupToolMm, base.cleanupToolMm),
     cleanupStepoverFrac: numOr(v.cleanupStepoverFrac, base.cleanupStepoverFrac),
+    inlay: boolOr(v.inlay, base.inlay),
+    glueGapMm: numOr(v.glueGapMm, base.glueGapMm),
+    seatingFloorMm: numOr(v.seatingFloorMm, base.seatingFloorMm),
   }
 }
 
@@ -484,6 +498,16 @@ interface CutStrategyParams {
   direction: CutDirection
   /** Finishing allowance left on the wall (mm) for a later pass. */
   stockToLeaveMm: number
+  /** C8 · only re-cut what a larger previous tool left in tight corners. */
+  restMachining: boolean
+  /** C8 · the previous (larger) tool ⌀ (mm) — the rest pass clears its leftovers. */
+  priorToolDiameterMm: number
+  /** C15 · cut with a tangential drag knife (blade offset + corner swivel) instead of a mill. */
+  dragKnife: boolean
+  /** C15 · trailing blade offset (mm) — pivot-to-tip distance. */
+  bladeOffsetMm: number
+  /** C15 · corner angle (deg) above which a swivel move is inserted. */
+  swivelThresholdDeg: number
 }
 
 const DEFAULT_STRATEGY: CutStrategyParams = {
@@ -494,6 +518,11 @@ const DEFAULT_STRATEGY: CutStrategyParams = {
   helixRadiusMm: 1.5,
   direction: 'climb',
   stockToLeaveMm: 0,
+  restMachining: false,
+  priorToolDiameterMm: 6,
+  dragKnife: false,
+  bladeOffsetMm: 0.25,
+  swivelThresholdDeg: 20,
 }
 
 function parseStrategy(v: unknown, base: CutStrategyParams): CutStrategyParams {
@@ -510,6 +539,11 @@ function parseStrategy(v: unknown, base: CutStrategyParams): CutStrategyParams {
     helixRadiusMm: numOr(v.helixRadiusMm, base.helixRadiusMm),
     direction: direction as CutDirection,
     stockToLeaveMm: numOr(v.stockToLeaveMm, base.stockToLeaveMm),
+    restMachining: boolOr(v.restMachining, base.restMachining),
+    priorToolDiameterMm: numOr(v.priorToolDiameterMm, base.priorToolDiameterMm),
+    dragKnife: boolOr(v.dragKnife, base.dragKnife),
+    bladeOffsetMm: numOr(v.bladeOffsetMm, base.bladeOffsetMm),
+    swivelThresholdDeg: numOr(v.swivelThresholdDeg, base.swivelThresholdDeg),
   }
 }
 
@@ -956,7 +990,7 @@ export function CadCamPanel() {
       decimals: p.decimals,
       lineNumbers: p.lineNumbers,
     }))
-    setVcarve(() => ({ ...p.vcarve }))
+    setVcarve(() => parseVcarve(p.vcarve, DEFAULT_VCARVE))
   }
   const presets = usePresets<CarvePreset>({
     storageKey: CARVE_PRESETS_KEY,
@@ -1898,6 +1932,8 @@ export function CadCamPanel() {
     toolpaths: Toolpath[]
     operations: ReturnType<typeof composeMultiFileToolpaths>['operations']
     vcarveStats?: { paths: number; segs: number; maxDepth: number; cleanupNeeded: boolean }
+    /** C13 · when V-carve inlay is on, the female + male toolpaths emit as two sections. */
+    inlay?: { female: Toolpath; male: Toolpath }
     warnings?: string[]
   } {
     const polys = file.polylines
@@ -1929,6 +1965,28 @@ export function CadCamPanel() {
         cleanupToolMm: vcarve.cleanupToolMm,
         cleanupStepoverFrac: vcarve.cleanupStepoverFrac,
       }
+      // C13 · INLAY: emit a mating male + female pair (two safe programs) instead
+      // of a single groove. The female is carved as-drawn (+ optional seating
+      // floor); the male is mirrored and shallowed by the glue gap so it seats.
+      if (vcarve.inlay) {
+        const res = vCarveInlay(closed, {
+          ...vp,
+          glueGapMm: vcarve.glueGapMm,
+          flatDepthMm: vcarve.seatingFloorMm,
+        })
+        return {
+          toolpaths: [],
+          operations: [],
+          inlay: { female: res.female.toolpath, male: res.male.toolpath },
+          vcarveStats: {
+            paths: res.female.pathCount + res.male.pathCount,
+            segs: res.female.segmentCount + res.male.segmentCount,
+            maxDepth: Math.max(res.female.maxReachedDepthMm, res.male.maxReachedDepthMm),
+            cleanupNeeded: res.female.cleanupNeeded || res.male.cleanupNeeded,
+          },
+          warnings: res.warnings,
+        }
+      }
       const res = vCarveContours(closed, vp)
       return {
         toolpaths: res.toolpath.isEmpty() ? [] : [res.toolpath],
@@ -1942,7 +2000,28 @@ export function CadCamPanel() {
         warnings: res.warnings,
       }
     }
+    // C8 · rest machining: keep only the loops a larger PREVIOUS tool left material
+    // in (tight concave corners it could not reach). Applies to Profile + Pocket.
+    const restFilter = (loops: Polyline[]): Polyline[] => {
+      if (!strategy.restMachining) return loops
+      const prevR = Math.max(0, strategy.priorToolDiameterMm) / 2
+      const newR = Math.max(0, p2d.diameter) / 2
+      const idxs = new Set(restMachiningLoops(loops, prevR, newR))
+      return loops.filter((_, i) => idxs.has(i))
+    }
     if (op === 'Profile') {
+      // C15 · DRAG KNIFE: a tangential blade, not a mill — compensate the blade
+      // offset + insert corner swivels. No ramp/lead post (the knife is dropped,
+      // swivelled, dragged); orientation/stock-to-leave don't apply.
+      if (strategy.dragKnife && p2d.zMode === ZMode.Spindle) {
+        const tp = dragKnifeToolpath(restFilter(closed), {
+          bladeOffsetMm: Math.max(0, strategy.bladeOffsetMm),
+          swivelThresholdDeg: strategy.swivelThresholdDeg,
+          cutZ: p2d.surfaceZ - p2d.cutDepth,
+          safeZ: p2d.safeZ,
+        })
+        return { toolpaths: tp.isEmpty() ? [] : [tp], operations: [] }
+      }
       // Cut nested closed loops INNERMOST-FIRST: an inner cutout must be cut
       // before the outer loop that contains it, or freeing the outer loop lets
       // the still-uncut inner piece wander. profileContours builds the
@@ -1951,16 +2030,18 @@ export function CadCamPanel() {
       // C12 · re-orient each loop to the requested climb/conventional direction
       // (inside profiles flip the winding↔direction relation vs outside).
       const isInside = side === ProfileSide.Inside
+      const profClosed = restFilter(closed)
       const oriented =
-        side === ProfileSide.On ? closed : closed.map((c) => orientLoop(c, strategy.direction, isInside))
+        side === ProfileSide.On ? profClosed : profClosed.map((c) => orientLoop(c, strategy.direction, isInside))
       const tp = applyStrategyPost(profileContours(oriented, side, p))
       return { toolpaths: tp.isEmpty() ? [] : [tp], operations: [] }
     }
     // Pocket: clear each closed region, innermost-first for the same reason.
     // C12 · pocket walls run as an inside cut → orient for the chosen direction.
+    const pocketClosed = restFilter(closed)
     const out: Toolpath[] = []
-    for (const idx of orderLoopsInsideOut(closed)) {
-      const oriented = orientLoop(closed[idx], strategy.direction, true)
+    for (const idx of orderLoopsInsideOut(pocketClosed)) {
+      const oriented = orientLoop(pocketClosed[idx], strategy.direction, true)
       const tp = applyStrategyPost(pocket(oriented, p))
       if (!tp.isEmpty()) out.push(tp)
     }
@@ -2013,11 +2094,51 @@ export function CadCamPanel() {
     let lastVStats: typeof vcarveStats = null
     const vWarnings: string[] = []
 
+    // Push a single named section through the emitter, disambiguating duplicate
+    // names. Returns the count of non-empty lines added.
+    const pushSection = (
+      name: string,
+      tps: Toolpath[],
+      programOps?: { id: string; label: string; gcode: string; color?: string }[],
+    ): number => {
+      let uniqueName = name
+      let n = 2
+      while (pushedNames.has(uniqueName)) uniqueName = `${name} (${n++})`
+      const emitOpts = {
+        programName: uniqueName,
+        safeZ: p2d.safeZ,
+        feedXY: p2d.feedXY,
+        feedZ: p2d.feedZ,
+        zMode: vCarveZMode,
+        useSpindle: vCarveZMode === ZMode.Spindle,
+        spindleRPM: p2d.spindleRPM,
+        penUpZ: p2d.penUpZ,
+        penDownZ: p2d.penDownZ,
+        decimals: p2d.decimals,
+        lineNumbers: p2d.lineNumbers,
+      }
+      const gout = new GcodeEmitter(emitOpts).emitProgram(tps)
+      const c = gout.split('\n').filter((l) => l.length > 0).length
+      combined.push(gout)
+      setProgram(uniqueName, gout, programOps ? { operations: programOps } : undefined)
+      pushedNames.add(uniqueName)
+      return c
+    }
+
     for (const file of fileGeos) {
-      const { toolpaths, operations, vcarveStats: vs, warnings: ws } =
+      const { toolpaths, operations, vcarveStats: vs, warnings: ws, inlay } =
         build2DToolpathsForFile(file, camParams)
       if (vs) lastVStats = vs
       if (ws && ws.length) for (const w of ws) vWarnings.push(w)
+      // C13 · inlay emits TWO sections (female + male) per file; each is a full,
+      // independently-safe program (own header/footer + safe-Z) from the emitter.
+      if (inlay) {
+        if (!inlay.female.isEmpty())
+          totalCount += pushSection(`${file.name} — ${t('cc.vcarve.female', 'Inlay female (pocket)')}`, [inlay.female])
+        if (!inlay.male.isEmpty())
+          totalCount += pushSection(`${file.name} — ${t('cc.vcarve.male', 'Inlay male (plug)')}`, [inlay.male])
+        continue
+      }
       if (toolpaths.length === 0) continue
       const progName = `${file.name} — ${opLabel}`
       // Disambiguate duplicate file names (e.g. a file and its "(copy)" sharing
@@ -2125,6 +2246,8 @@ export function CadCamPanel() {
   }, [carveProgress, importing, t])
   // On unmount, clear the indicator so a closed panel can't leave it stuck on.
   useEffect(() => () => setGenerating(false), [setGenerating])
+  // C4 · don't leave the 3D origin-picker handles armed once the panel closes.
+  useEffect(() => () => useStock.getState().setPickingOrigin(false), [])
 
   // The active carve worker (null when idle), held in a ref so a replace/cancel
   // can terminate it without re-rendering. `carveJobIdRef` is a monotonic id so a
@@ -2461,7 +2584,7 @@ export function CadCamPanel() {
         : '0'
       // Two-sided post-process inputs change the emitted program too.
       const ts = twoSided.enabled
-        ? `1|${twoSided.stockThicknessMm}|${twoSided.flipAxis}|${twoSided.flipCorner}`
+        ? `1|${twoSided.stockThicknessMm}|${twoSided.flipAxis}|${twoSided.flipCorner}|${twoSided.registrationHoles ? 1 : 0}|${twoSided.regHoleCount}|${twoSided.regHoleDiameterMm}|${twoSided.regHoleDepthMm}|${twoSided.regHoleInsetMm}`
         : '0'
       // NOTE: per-SURFACE ops are intentionally NOT in this key — they regenerate
       // in their OWN lightweight effect (generateSurfaceOps), so editing a surface
@@ -2470,17 +2593,20 @@ export function CadCamPanel() {
     }
     if (mode === '2d') {
       const v = op === 'VCarve' ? `|${JSON.stringify(vcarve)}` : ''
+      // Cut strategy (C7/C12 leads+ramp+direction, C8 rest machining, C15 drag
+      // knife) rewrites the Profile/Pocket toolpath, so it must re-emit live.
+      const st = op === 'Profile' || op === 'Pocket' ? `|${JSON.stringify(strategy)}` : ''
       // The per-feature op map is part of the signature so stacking/removing a
       // feature pass live-regenerates the program just like a slider drag. The
       // added-order list is folded in too so REORDERING ops re-emits the section
       // metadata in the new order (the Program tab + Visualizer follow it).
       const f = `|${JSON.stringify(featureOpMap)}|${featureOpOrder.join(',')}`
-      return `2d|${op}|${side}|${JSON.stringify(p2d)}${v}${f}`
+      return `2d|${op}|${side}|${JSON.stringify(p2d)}${v}${st}${f}`
     }
     return mode
     // polylines/drawing/epsPolys identity is folded in via the separate dep below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, carveRev, cutout, twoSided, op, side, p2d, vcarve, featureOpMap, featureOpOrder])
+  }, [mode, carveRev, cutout, twoSided, op, side, p2d, vcarve, strategy, featureOpMap, featureOpOrder])
 
   // ---- clobber guard: only own the Visualizer when this panel is VISIBLE --
   // Several CAM panels write the shared program store via live-generate effects;
@@ -4039,6 +4165,50 @@ export function CadCamPanel() {
                       </div>
                     )}
 
+                    {/* C13 · V-carve inlay — emit a mating male + female pair. */}
+                    <label className="cc-vc-cleanup-toggle" title={t('cc.vcarve.inlayTip', 'Carve a two-part inlay: a female pocket in the base board and a mirrored male plug to drop in. Both use this V-bit so the walls mate perfectly. Two safe programs are emitted.')}>
+                      <input
+                        type="checkbox"
+                        checked={vcarve.inlay}
+                        onChange={(e) => setVcarve((v) => ({ ...v, inlay: e.target.checked }))}
+                      />
+                      <Copy size={14} strokeWidth={1.8} aria-hidden />
+                      <span>{t('cc.vcarve.inlay', 'Inlay (male + female pair)')}</span>
+                    </label>
+                    {vcarve.inlay && (
+                      <>
+                        <div className="cc-sgrid">
+                          <SliderField
+                            icon={<ChevronsLeftRightEllipsis size={14} strokeWidth={1.8} />}
+                            label={t('cc.vcarve.glueGap', 'Glue gap')}
+                            htmlFor="cc-vc-glue"
+                            unit="mm"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={vcarve.glueGapMm}
+                            onChange={(n) => setVcarve((v) => ({ ...v, glueGapMm: Math.max(0, n) }))}
+                            title={t('cc.vcarve.glueGapTip', 'Clearance left on the male plug so it seats with room for glue and the top seam closes tight. 0.1–0.3mm is typical.')}
+                          />
+                          <SliderField
+                            icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
+                            label={t('cc.vcarve.seatFloor', 'Seating floor')}
+                            htmlFor="cc-vc-seat"
+                            unit="mm"
+                            min={0}
+                            max={10}
+                            step={0.1}
+                            value={vcarve.seatingFloorMm}
+                            onChange={(n) => setVcarve((v) => ({ ...v, seatingFloorMm: Math.max(0, n) }))}
+                            title={t('cc.vcarve.seatFloorTip', 'Flat floor cut under the female V-groove so the plug has somewhere to bottom out. 0 = a pure V-valley mate.')}
+                          />
+                        </div>
+                        <span className="cc-hint">
+                          {t('cc.vcarve.inlayHint', 'Emits two sections: an "Inlay female (pocket)" cut into the base, and a mirrored "Inlay male (plug)" cut from the contrasting board — flip the plug over to fit.')}
+                        </span>
+                      </>
+                    )}
+
                     {/* Status: path / segment count + reached depth + cleanup hint. */}
                     {vcarveStats && closedCount > 0 && (
                       <div className="cc-vc-status" role="status">
@@ -4181,9 +4351,131 @@ export function CadCamPanel() {
                       onChange={(n) => setStrategy((s) => ({ ...s, stockToLeaveMm: Math.max(0, n) }))}
                       title={t('cc.strat.stlTip', 'Finishing allowance kept on the wall (mm) for a later clean-up pass. 0 cuts to size.')}
                     />
+
+                    {/* C8 · Rest machining — only re-cut what a larger previous tool left. */}
+                    <label className="cc-vc-cleanup-toggle" title={t('cc.strat.restTip', 'Skip everything a larger previous tool already cleared; only re-cut the tight corners it could not reach. Run this with a smaller bit after a roughing pass.')}>
+                      <input
+                        type="checkbox"
+                        checked={strategy.restMachining}
+                        onChange={(e) => setStrategy((s) => ({ ...s, restMachining: e.target.checked }))}
+                      />
+                      <Crosshair size={14} strokeWidth={1.8} aria-hidden />
+                      <span>{t('cc.strat.rest', 'Rest machining (clear leftover only)')}</span>
+                    </label>
+                    {strategy.restMachining && (
+                      <SliderField
+                        icon={<Drill size={14} strokeWidth={1.8} />}
+                        label={t('cc.strat.priorTool', 'Previous tool ⌀')}
+                        htmlFor="cc-strat-prior"
+                        unit="mm"
+                        min={0.2}
+                        max={25}
+                        step={0.1}
+                        value={strategy.priorToolDiameterMm}
+                        onChange={(n) => setStrategy((s) => ({ ...s, priorToolDiameterMm: Math.max(0, n) }))}
+                        title={t('cc.strat.priorToolTip', 'Diameter of the larger bit used in the previous pass. This pass re-cuts only the corners that bit was too wide to reach.')}
+                      />
+                    )}
+
+                    {/* C15 · Drag knife — tangential blade for vinyl/foam (Profile only). */}
+                    {op === 'Profile' && (
+                      <>
+                        <label className="cc-vc-cleanup-toggle" title={t('cc.strat.dragTip', 'Cut with a tangential drag knife instead of a mill: the blade trails its pivot, so the path is offset and a swivel is inserted at each sharp corner. For vinyl, gasket and card stock.')}>
+                          <input
+                            type="checkbox"
+                            checked={strategy.dragKnife}
+                            onChange={(e) => setStrategy((s) => ({ ...s, dragKnife: e.target.checked }))}
+                          />
+                          <Scissors size={14} strokeWidth={1.8} aria-hidden />
+                          <span>{t('cc.strat.drag', 'Drag knife (tangential blade)')}</span>
+                        </label>
+                        {strategy.dragKnife && (
+                          <div className="cc-sgrid">
+                            <SliderField
+                              icon={<Spline size={14} strokeWidth={1.8} />}
+                              label={t('cc.strat.bladeOffset', 'Blade offset')}
+                              htmlFor="cc-strat-blade"
+                              unit="mm"
+                              min={0}
+                              max={2}
+                              step={0.05}
+                              value={strategy.bladeOffsetMm}
+                              onChange={(n) => setStrategy((s) => ({ ...s, bladeOffsetMm: Math.max(0, n) }))}
+                              title={t('cc.strat.bladeOffsetTip', 'Distance the cutting tip trails behind the blade pivot (from the knife spec). The path is led by this so the cut lands on the line.')}
+                            />
+                            <SliderField
+                              icon={<RotateCw size={14} strokeWidth={1.8} />}
+                              label={t('cc.strat.swivel', 'Swivel angle')}
+                              htmlFor="cc-strat-swivel"
+                              unit="°"
+                              min={5}
+                              max={90}
+                              step={1}
+                              value={strategy.swivelThresholdDeg}
+                              onChange={(n) => setStrategy((s) => ({ ...s, swivelThresholdDeg: n }))}
+                              title={t('cc.strat.swivelTip', 'Corners that turn more than this get a swivel move so the blade re-aligns before continuing. Lower = swivel at gentler corners.')}
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 </section>
               )}
+
+              {/* C4 · Work origin — where work X0/Y0 sits on the stock + which face
+                  is Z0. "Pick in 3D view" lights up clickable handles on the
+                  translucent stock box (StockBlock) so the origin can be set
+                  visually; the SegControls set it directly. Drives the stock store. */}
+              <section className="cc-section">
+                <h3>
+                  <Crosshair className="cam-card-ico" size={15} strokeWidth={1.9} aria-hidden />
+                  {t('cc.origin.title', 'Work origin')}
+                  <Tip
+                    id="work-origin"
+                    title={t('cc.origin.title', 'Work origin')}
+                    body={t('cc.origin.tip', 'Sets where the machine’s work zero (X0 Y0 Z0) sits on the stock block. Turn on “Pick in 3D view” then click a corner/centre for the XY origin or the top/bottom face for the Z reference, right on the stock box.')}
+                  />
+                </h3>
+                <div className="cc-section-body">
+                  <button
+                    type="button"
+                    className={'cc-pick-origin-btn' + (stock.pickingOrigin ? ' active' : '')}
+                    aria-pressed={stock.pickingOrigin}
+                    onClick={() => stock.setPickingOrigin(!stock.pickingOrigin)}
+                    title={t('cc.origin.pickTip', 'Show clickable handles on the stock box in the 3D view, then click to set the origin.')}
+                  >
+                    <Crosshair size={14} strokeWidth={1.9} aria-hidden />
+                    {stock.pickingOrigin
+                      ? t('cc.origin.picking', 'Picking… click the stock box')
+                      : t('cc.origin.pick', 'Pick origin in 3D view')}
+                  </button>
+                  <div className="cc-rowlabel" title={t('cc.origin.xyTip', 'Where X0/Y0 sits in the stock footprint.')}>
+                    <Grid2x2 size={13} strokeWidth={1.9} aria-hidden /> {t('cc.origin.xy', 'XY origin')}
+                  </div>
+                  <SegControl<'center' | 'frontLeft'>
+                    ariaLabel={t('cc.origin.xy', 'XY origin')}
+                    value={stock.xyOrigin}
+                    onChange={(v) => stock.setXYOrigin(v)}
+                    options={[
+                      { value: 'center', label: t('cc.origin.center', 'Centre'), title: t('cc.origin.centerTip', 'X0 Y0 at the middle of the stock.') },
+                      { value: 'frontLeft', label: t('cc.origin.frontLeft', 'Front-left'), title: t('cc.origin.frontLeftTip', 'X0 Y0 at the front-left corner (min X, min Y).') },
+                    ]}
+                  />
+                  <div className="cc-rowlabel" title={t('cc.origin.zTip', 'Which face of the stock is Z0.')}>
+                    <ArrowUpToLine size={13} strokeWidth={1.9} aria-hidden /> {t('cc.origin.z', 'Z reference')}
+                  </div>
+                  <SegControl<'top' | 'bottom'>
+                    ariaLabel={t('cc.origin.z', 'Z reference')}
+                    value={stock.zRef}
+                    onChange={(v) => stock.setZRef(v)}
+                    options={[
+                      { value: 'top', label: t('cc.origin.top', 'Top'), title: t('cc.origin.topZTip', 'Z0 at the top surface; material is below (Z negative).') },
+                      { value: 'bottom', label: t('cc.origin.bottom', 'Bottom'), title: t('cc.origin.bottomZTip', 'Z0 at the bottom surface; material is above (Z positive).') },
+                    ]}
+                  />
+                </div>
+              </section>
 
               {/* Position & size — offset + uniform scale (or type a target W/H to
                   auto-fit), mirroring the placement controls 3D jobs already have. */}
@@ -5636,6 +5928,81 @@ function TwoSidedCard({
                   },
                 )}
               </span>
+
+              {/* C14 · Registration (dowel) holes drilled on side 1, on the flip
+                  centre line, so the flipped stock relocates onto the same dowels. */}
+              <label className="cc-check cc-ts-enable">
+                <input
+                  type="checkbox"
+                  checked={twoSided.registrationHoles}
+                  onChange={(e) => patch({ registrationHoles: e.target.checked })}
+                />
+                {t('cc.ts.reg', 'Drill registration (dowel) holes')}
+                <Tip
+                  id="twoSidedReg"
+                  title={t('cc.ts.reg', 'Drill registration (dowel) holes')}
+                  body={t(
+                    'cc.ts.regTip',
+                    'Drills holes on the flip centre line before the front cut. Drop dowel pins in, flip the stock, and relocate it onto the same pins so the back lines up exactly with the front. Place them clear of the part.',
+                  )}
+                />
+              </label>
+              {twoSided.registrationHoles && (
+                <>
+                  <div className="cc-sgrid">
+                    <SliderField
+                      icon={<Hash size={14} strokeWidth={1.8} />}
+                      label={t('cc.ts.regCount', 'Holes')}
+                      htmlFor="cc-ts-regcount"
+                      min={2}
+                      max={4}
+                      step={1}
+                      value={twoSided.regHoleCount}
+                      onChange={(n) => patch({ regHoleCount: Math.round(n) })}
+                      title={t('cc.ts.regCountTip', 'How many dowel holes to drill along the flip centre line (2 locks both X and Y).')}
+                    />
+                    <SliderField
+                      icon={<Drill size={14} strokeWidth={1.8} />}
+                      label={t('cc.ts.regDia', 'Dowel ⌀')}
+                      htmlFor="cc-ts-regdia"
+                      unit="mm"
+                      min={1}
+                      max={12}
+                      step={0.5}
+                      value={twoSided.regHoleDiameterMm}
+                      onChange={(n) => patch({ regHoleDiameterMm: Math.max(0.1, n) })}
+                      title={t('cc.ts.regDiaTip', 'Dowel-pin diameter — note it matches your drill bit; used in the operator comment.')}
+                    />
+                    <SliderField
+                      icon={<ArrowDownToLine size={14} strokeWidth={1.8} />}
+                      label={t('cc.ts.regDepth', 'Hole depth')}
+                      htmlFor="cc-ts-regdepth"
+                      unit="mm"
+                      min={1}
+                      max={30}
+                      step={0.5}
+                      value={twoSided.regHoleDepthMm}
+                      onChange={(n) => patch({ regHoleDepthMm: Math.max(0.1, n) })}
+                      title={t('cc.ts.regDepthTip', 'How deep each dowel hole is drilled below the front top face.')}
+                    />
+                    <SliderField
+                      icon={<Ruler size={14} strokeWidth={1.8} />}
+                      label={t('cc.ts.regInset', 'Edge inset')}
+                      htmlFor="cc-ts-reginset"
+                      unit="mm"
+                      min={0}
+                      max={50}
+                      step={1}
+                      value={twoSided.regHoleInsetMm}
+                      onChange={(n) => patch({ regHoleInsetMm: Math.max(0, n) })}
+                      title={t('cc.ts.regInsetTip', 'How far the outermost holes sit in from the stock edge along the flip line.')}
+                    />
+                  </div>
+                  <span className="cc-hint">
+                    {t('cc.ts.regHint', 'Holes are drilled first, on the flip centre line, so they map onto themselves after the turn-over — keep them out of the cut area.')}
+                  </span>
+                </>
+              )}
             </>
           )}
         </div>

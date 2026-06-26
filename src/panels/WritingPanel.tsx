@@ -16,6 +16,7 @@ import {
   optimizePenPaths,
   estimatePlotTime,
   formatDuration,
+  fitToBed,
   type OptimizeOptions,
 } from '../core/penOptimize'
 import {
@@ -31,6 +32,7 @@ import {
   type LoadedFont,
 } from '../core/fontLibrary'
 import { useProgram, usePersistentState } from '../store'
+import { useBed } from '../store/bed'
 import { useProgramOwner } from '../store/programOwner'
 import { grbl } from '../serial/controller'
 import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
@@ -231,6 +233,7 @@ interface WritingDoc {
   optOcclude?: boolean
   optReloop?: boolean
   passes?: number
+  penChangePause?: boolean
   travelFeed?: number
   penChangeSec?: number
 }
@@ -246,6 +249,60 @@ const WRITING_SECTION = 'Writing'
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/** W6: margin kept clear on every side when auto-fitting to the bed (mm). */
+const FIT_MARGIN_MM = 5
+
+/** Round to 2 decimals (keeps the persisted size/offset tidy, no float noise). */
+const round2 = (n: number): number => Math.round(n * 100) / 100
+
+/**
+ * W4 — per-layer pen change: repeat the single-pass pen program `passes` times
+ * with an `M0` (program pause) between copies so the operator can swap the
+ * pen / ink colour for each layer (the AxiDraw / saxi per-layer pen-change
+ * workflow). The safe header (units + safe-Z lift) and footer (final lift +
+ * M30) emitted by {@link GcodeEmitter} are split off and the drawing body is
+ * re-stitched N times; the pen is lifted (the header's safe-Z line) BEFORE every
+ * pause so the machine never halts with the pen down. If the safe header/footer
+ * can't be located the input is returned unchanged — we never emit unsafe code.
+ */
+function withPenChangePauses(gcode: string, passes: number, t: TFunc): string {
+  const n = Math.max(1, Math.floor(passes))
+  if (n <= 1) return gcode
+  const lines = gcode.replace(/\n+$/, '').split('\n')
+  const m30 = lines.length - 1
+  if (lines[m30] !== 'M30') return gcode
+  // Header ends at the FIRST safe-Z lift; the footer lift is the LAST one.
+  const hEnd = lines.findIndex((l) => /^G0 Z/.test(l))
+  let liftIdx = -1
+  for (let i = m30 - 1; i > hEnd; i--) {
+    if (/^G0 Z/.test(lines[i])) {
+      liftIdx = i
+      break
+    }
+  }
+  if (hEnd < 0 || liftIdx <= hEnd) return gcode
+  const header = lines.slice(0, hEnd + 1)
+  const body = lines.slice(hEnd + 1, liftIdx)
+  const footer = lines.slice(liftIdx) // final safe-Z lift + M30
+  const liftLine = header[header.length - 1] // 'G0 Z<penUp>' — pen UP before pausing
+  const out: string[] = [...header, ...body]
+  for (let k = 2; k <= n; k++) {
+    out.push(liftLine)
+    out.push(
+      '(' +
+        t('writing.penChangePause.gcode', 'pen change — load pen/ink {k} of {n}, then resume', {
+          k,
+          n,
+        }) +
+        ')',
+    )
+    out.push('M0')
+    out.push(...body)
+  }
+  out.push(...footer)
+  return out.join('\n') + '\n'
+}
 
 /**
  * Build pen-mode G-code from laid-out polylines. Each polyline becomes a rapid
@@ -419,6 +476,9 @@ export function WritingPanel() {
   const [optOcclude, setOptOcclude] = usePersistentState('karmyogi.writing.opt.occlude', false)
   const [optReloop, setOptReloop] = usePersistentState('karmyogi.writing.opt.reloop', false)
   const [passes, setPasses] = usePersistentState('karmyogi.writing.opt.passes', 1)
+  // W4: when on (and passes > 1), pause (M0) between passes for a pen/colour swap
+  // instead of repeating each stroke in place for a bolder line.
+  const [penChangePause, setPenChangePause] = usePersistentState('karmyogi.writing.opt.penChange', false)
   const [travelFeed, setTravelFeed] = usePersistentState('karmyogi.writing.travelFeed', 3000)
   const [penChangeSec, setPenChangeSec] = usePersistentState('karmyogi.writing.penChangeSec', 0.3)
   const [showOpt, setShowOpt] = usePersistentState('karmyogi.writing.opt.show', false)
@@ -696,6 +756,10 @@ export function WritingPanel() {
       charHeight * (lineSpacing > 0 ? lineSpacing : 1.5),
     )
 
+    // W4: with a pen-change pause we DON'T multipass in place (that bolds a line
+    // with the same pen); instead we emit ONE pass and repeat it with an M0 swap
+    // between copies, so each pass can use a different pen/colour.
+    const usePenChange = penChangePause && passes > 1
     const optimizeOpts: OptimizeOptions = {
       simplifyTol: optSimplifyTol,
       dedupeTol: optDedupe ? 0.01 : 0,
@@ -704,15 +768,22 @@ export function WritingPanel() {
       reloop: optReloop,
       sort: optSort,
       startAt: { x: originX, y: originY },
-      passes,
+      passes: usePenChange ? 1 : passes,
     }
-    const { gcode, paths: optPaths, seconds } = strokesToGcode(
+    const emitted = strokesToGcode(
       styled,
       { x: originX, y: originY },
       { penUpZ, penDownZ, feedXY: feed, travelFeed, penChangeSec },
       optimizeOpts,
     )
-    setPlotSeconds(seconds)
+    const optPaths = emitted.paths
+    let gcode = emitted.gcode
+    let plotSecondsOut = emitted.seconds
+    if (usePenChange) {
+      gcode = withPenChangePauses(gcode, passes, t)
+      plotSecondsOut = emitted.seconds * passes // each pass redraws everything once
+    }
+    setPlotSeconds(plotSecondsOut)
     setProgram(WRITING_SECTION, gcode)
 
     const modeLabel =
@@ -724,7 +795,9 @@ export function WritingPanel() {
       '{mode}: {strokes} path(s), {lines} line(s) → Visualizer.',
       { mode: modeLabel, strokes: optPaths.length, lines: lineCount },
     )
-    msg += ' ' + t('writing.info.plotTime', '~{time} plot.', { time: formatDuration(seconds) })
+    msg += ' ' + t('writing.info.plotTime', '~{time} plot.', { time: formatDuration(plotSecondsOut) })
+    if (usePenChange)
+      msg += ' ' + t('writing.info.penChange', '{n} pen-change pause(s) (M0) between passes.', { n: passes - 1 })
     if (centerlineFromOutline)
       msg += ' ' + t('writing.info.centerline', '(centerline derived from the font outline)')
     if (effectiveMode !== genMode)
@@ -751,7 +824,59 @@ export function WritingPanel() {
     carveTool, carveDepth, carveStepdown, carveStepover, carveFeed, carvePlunge,
     carveRpm, carveSafeZ, carveStrokeWidth, carveMargin,
     optMerge, optSort, optSimplifyTol, optDedupe, optOcclude, optReloop, passes,
-    travelFeed, penChangeSec,
+    penChangePause, travelFeed, penChangeSec,
+  ])
+
+  // W6 — one-click "Fit to bed": lay the text out at the current params, uniformly
+  // scale it (charHeight + letterSpacing together, so the geometry scales about
+  // its corner exactly) to fill the bed minus a margin, and shift the origin so
+  // the artwork is centered on the WORK ORIGIN (= bed centre; see store/bed.ts).
+  // Reads the bed size from the shared store; live regen then picks up the new
+  // size + origin automatically. The pure maths live in penOptimize.fitToBed().
+  const onFitToBed = useCallback(() => {
+    if (text.trim().length === 0) {
+      setInfo(t('writing.info.enterText', 'Enter some text first.'))
+      return
+    }
+    const layoutOpts: LayoutOptions = {
+      charHeightMm: charHeight,
+      lineSpacingFactor: lineSpacing,
+      letterSpacingMm: letterSpacing,
+      align,
+    }
+    const raw = layoutFont.layout(text, layoutOpts)
+    if (raw.length === 0) {
+      setInfo(t('writing.info.nothingToDraw', 'Nothing to draw (no renderable glyphs).'))
+      return
+    }
+    const styled = applyTextStyle(
+      raw,
+      { bold, italic, underline, charHeightMm: charHeight },
+      charHeight * (lineSpacing > 0 ? lineSpacing : 1.5),
+    )
+    const { width, depth } = useBed.getState()
+    const fit = fitToBed(styled, { bedW: width, bedH: depth, margin: FIT_MARGIN_MM })
+    if (!(fit.scale > 0) || fit.polys.length === 0) {
+      setInfo(t('writing.info.fitFailed', 'Could not fit to bed — check the bed size and text.'))
+      return
+    }
+    setCharHeight(round2(charHeight * fit.scale))
+    setLetterSpacing(round2(letterSpacing * fit.scale))
+    // fitToBed centres on (bedW/2, bedH/2); shift to the centred-origin bed model.
+    const nx = round2(fit.dx - width / 2)
+    const ny = round2(fit.dy - depth / 2)
+    setOriginX(nx)
+    setOriginY(ny)
+    setInfo(
+      t('writing.info.fitToBed', 'Fit to bed: scaled {scale}×, centered at origin ({x}, {y}) mm.', {
+        scale: fit.scale.toFixed(2),
+        x: nx,
+        y: ny,
+      }),
+    )
+  }, [
+    t, text, charHeight, lineSpacing, letterSpacing, align, bold, italic, underline,
+    layoutFont, setCharHeight, setLetterSpacing, setOriginX, setOriginY,
   ])
 
   // Live G-code: always regenerate ~300ms after the last change and push to the
@@ -886,7 +1011,7 @@ export function WritingPanel() {
     text, charHeight, lineSpacing, letterSpacing, originX, originY, align,
     penUpZ, penDownZ, feed, bold, italic, underline, fontId, genMode,
     optMerge, optSort, optSimplifyTol, optDedupe, optOcclude, optReloop,
-    passes, travelFeed, penChangeSec,
+    passes, penChangePause, travelFeed, penChangeSec,
   }
 
   // Apply a loaded document. `data` is untrusted: validate every field and keep
@@ -919,6 +1044,7 @@ export function WritingPanel() {
       if (typeof data.optOcclude === 'boolean') setOptOcclude(data.optOcclude)
       if (typeof data.optReloop === 'boolean') setOptReloop(data.optReloop)
       if (isNum(data.passes)) setPasses(Math.max(1, Math.round(data.passes)))
+      if (typeof data.penChangePause === 'boolean') setPenChangePause(data.penChangePause)
       if (isNum(data.travelFeed)) setTravelFeed(data.travelFeed)
       if (isNum(data.penChangeSec)) setPenChangeSec(data.penChangeSec)
       if (
@@ -941,7 +1067,7 @@ export function WritingPanel() {
     [t, setText, setCharHeight, setLineSpacing, setLetterSpacing, setOriginX, setOriginY,
       setAlign, setPenUpZ, setPenDownZ, setFeed, setBold, setItalic, setUnderline,
       setGenMode, setFontId, setOptMerge, setOptSort, setOptSimplifyTol, setOptDedupe,
-      setOptOcclude, setOptReloop, setPasses, setTravelFeed, setPenChangeSec],
+      setOptOcclude, setOptReloop, setPasses, setPenChangePause, setTravelFeed, setPenChangeSec],
   )
 
   // ---- color-coded setting PRESETS (text / font / layout) -------------------
@@ -1500,7 +1626,22 @@ export function WritingPanel() {
                 onClick={() => setOptReloop(!optReloop)}
                 title={t('writing.opt.reloop.tip', 'Reloop: randomize the start point (seam) of closed shapes so the start/stop blob moves around.')}
               >{t('writing.opt.reloop', 'Reloop')}</button>
+              {/* W4: per-layer pen change — turns "Passes" into colour layers with
+                  an M0 pause between them (only meaningful when Passes > 1). */}
+              <button
+                type="button"
+                className={'wr-tgl wr-opt-tgl' + (penChangePause ? ' is-active' : '')}
+                aria-pressed={penChangePause}
+                disabled={passes <= 1}
+                onClick={() => setPenChangePause(!penChangePause)}
+                title={t('writing.opt.penChange.tip', 'Pen change: pause (M0) between each pass so you can swap the pen/ink colour — each pass becomes a colour layer. Set Passes > 1 to use.')}
+              >{t('writing.opt.penChange', 'Pen change')}</button>
             </div>
+            {penChangePause && passes > 1 && (
+              <p className="wr-opt-note">
+                {t('writing.opt.penChange.note', 'Passes = colour layers: the machine pauses (M0) {n} time(s) for a pen swap.', { n: passes - 1 })}
+              </p>
+            )}
             <div className="wr-sliders">
               {/* W2: simplify tolerance */}
               <WrSlider
@@ -1567,6 +1708,15 @@ export function WritingPanel() {
             {t('writing.placement.title', 'Placement')}
           </h3>
           <div className="wr-card-body wr-sliders">
+            <button
+              type="button"
+              className="wr-fit-btn"
+              onClick={onFitToBed}
+              disabled={text.trim().length === 0}
+              title={t('writing.fit.tip', 'Auto-scale the text to fill the machine bed (minus a small margin) and center it on the work origin.')}
+            >
+              <Icon name="frame" size={14} /> {t('writing.fit', 'Fit to bed')}
+            </button>
             <WrSlider
               icon={<span className="wr-glyph">X</span>}
               label={t('writing.originX', 'Origin X')}

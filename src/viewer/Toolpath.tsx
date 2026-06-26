@@ -41,6 +41,77 @@ interface ToolpathProps {
    * `highlight` is true. Only meaningful in the static (non-reveal) path.
    */
   dim?: boolean
+  /**
+   * L10 — colour CUT lines by their S-value (laser power) using a heat gradient
+   * instead of a single cut colour. Only applies in the static (non-reveal)
+   * path; the simulation reveal keeps its traveled/upcoming split. Default false.
+   */
+  colorByPower?: boolean
+  /**
+   * Power range `[min, max]` used to normalise the heat-map colours so every
+   * section/op shares the SAME scale (a value at `max` is the hottest). Ignored
+   * unless `colorByPower` is set.
+   */
+  powerRange?: [number, number] | null
+}
+
+/**
+ * Map a normalised value t∈[0,1] to a perceptual heat colour (cool blue → cyan →
+ * green → amber → hot red). Pure + allocation-free per call beyond the returned
+ * tuple; used once per segment when building the vertex-colour buffer (never per
+ * frame). Matches the legend gradient in the panel.
+ */
+export function heatColor(t: number): [number, number, number] {
+  const x = Math.max(0, Math.min(1, t))
+  // 5 stops in 0..1 RGB. Linear interpolation between the bracketing stops.
+  const stops: [number, [number, number, number]][] = [
+    [0.0, [0.15, 0.3, 0.85]], // blue (low power)
+    [0.25, [0.1, 0.75, 0.85]], // cyan
+    [0.5, [0.2, 0.8, 0.3]], // green
+    [0.75, [0.97, 0.75, 0.15]], // amber
+    [1.0, [0.92, 0.16, 0.18]], // red (high power)
+  ]
+  for (let i = 1; i < stops.length; i++) {
+    if (x <= stops[i][0]) {
+      const [a0, ca] = stops[i - 1]
+      const [b0, cb] = stops[i]
+      const f = (x - a0) / (b0 - a0 || 1)
+      return [
+        ca[0] + (cb[0] - ca[0]) * f,
+        ca[1] + (cb[1] - ca[1]) * f,
+        ca[2] + (cb[2] - ca[2]) * f,
+      ]
+    }
+  }
+  return stops[stops.length - 1][1]
+}
+
+/**
+ * Build a single vertex-coloured LineSegments geometry for the CUT moves, each
+ * coloured by its power (S-value) via {@link heatColor}. Built once per
+ * segments/range change (useMemo) — no per-frame allocation. Returns null when
+ * there are no cut moves.
+ */
+function buildPowerGeometry(
+  segments: Segment[],
+  range: [number, number],
+): THREE.BufferGeometry | null {
+  const [lo, hi] = range
+  const span = hi - lo || 1
+  const pos: number[] = []
+  const col: number[] = []
+  for (const s of segments) {
+    if (s.kind !== 'cut') continue
+    const t = ((s.power ?? lo) - lo) / span
+    const [r, g, b] = heatColor(t)
+    pos.push(s.from[0], s.from[1], s.from[2], s.to[0], s.to[1], s.to[2])
+    col.push(r, g, b, r, g, b)
+  }
+  if (pos.length === 0) return null
+  const geom = new THREE.BufferGeometry()
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  geom.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+  return geom
 }
 
 /** Mix a hex colour toward neutral grey by `amount` (0..1) — the "spent" look. */
@@ -85,6 +156,8 @@ export function Toolpath({
   hideProcessed = false,
   highlight = false,
   dim = false,
+  colorByPower = false,
+  powerRange = null,
 }: ToolpathProps) {
   const theme = useSettings((s) => s.theme)
 
@@ -118,15 +191,23 @@ export function Toolpath({
   })
 
   const revealing = revealIndex !== undefined && revealIndex >= 0
+  // L10: heat-map mode replaces the flat cut colour with a per-segment vertex
+  // colour buffer. Only when not revealing and a range was supplied.
+  const heatmap = colorByPower && !revealing && !!powerRange
 
   // --- Static path geometries (used when not revealing). -------------------
   const cutGeom = useMemo(
-    () => (revealing ? null : buildGeometry(segments, 'cut')),
-    [revealing, segments],
+    () => (revealing || heatmap ? null : buildGeometry(segments, 'cut')),
+    [revealing, heatmap, segments],
   )
   const rapidGeom = useMemo(
     () => (revealing ? null : buildGeometry(segments, 'rapid')),
     [revealing, segments],
+  )
+  // Vertex-coloured cut geometry for the power heat-map (built once per change).
+  const powerGeom = useMemo(
+    () => (heatmap && powerRange ? buildPowerGeometry(segments, powerRange) : null),
+    [heatmap, powerRange, segments],
   )
 
   // Dispose old geometries when they change / on unmount. MUST be useEffect:
@@ -136,8 +217,9 @@ export function Toolpath({
     return () => {
       cutGeom?.dispose()
       rapidGeom?.dispose()
+      powerGeom?.dispose()
     }
-  }, [cutGeom, rapidGeom])
+  }, [cutGeom, rapidGeom, powerGeom])
 
   // SIMULATION reveal: delegate to a buffer-stable renderer that builds the line
   // geometry ONCE and only advances a GPU draw-range cursor per frame — so the
@@ -168,6 +250,12 @@ export function Toolpath({
 
   return (
     <group>
+      {/* L10 heat-map: cut lines coloured by power via per-vertex colours. */}
+      {powerGeom && (
+        <lineSegments geometry={powerGeom}>
+          <lineBasicMaterial vertexColors />
+        </lineSegments>
+      )}
       {cutGeom && (
         <lineSegments geometry={cutGeom}>
           <lineBasicMaterial

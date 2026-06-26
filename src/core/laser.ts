@@ -22,7 +22,8 @@
 
 import { BBox, Point, Polyline, distance, kDefaultArcTolerance } from './geometry';
 import { Drawing } from './entity';
-import { insetRings } from './offset';
+import { insetRings, offsetPolygon } from './offset';
+import { convexHull } from './framing';
 
 /** Which laser source the job targets. Shares one code path; gates a few opts. */
 export enum LaserMode {
@@ -678,4 +679,148 @@ export function emitLaserProgram(placed: PlacedContour[], params: Partial<LaserP
   o.push('M30');
 
   return o.join('\n') + '\n';
+}
+
+// ---- L15: low-power framing + focus dot ------------------------------------
+//
+// The operator "frames" a job by tracing its outline at a LOW, clearly-bounded
+// power so they can see exactly where the cut lands on the stock before
+// committing. Because framing FIRES THE BEAM while the head moves, the safety
+// rules are stricter than a cut:
+//   * Power is CONSTANT (M3) — never M4 — so the trace power is exactly the
+//     operator-set S, independent of feed/accel.
+//   * Power is clamped to a low ceiling (`kMaxFramePowerPct`) so framing MARKS
+//     but cannot CUT, even if the operator drags the slider up.
+//   * Emission routes through `emitLaserProgram`, inheriting every guarantee:
+//     `M5 S0` header, `S0`/`G0` on all travel, `S0 M5` after the outline, and a
+//     `M5 S0` footer — the beam is never left on.
+
+/** Frame outline shape: the axis-aligned bounding box, or the convex hull. */
+export type LaserFrameShape = 'box' | 'hull';
+
+/** Hard ceiling on framing / focus-dot power (%) — framing must MARK, never CUT. */
+export const kMaxFramePowerPct = 30;
+
+/** Single GRBL command that extinguishes the beam (focus-dot OFF / safe). */
+export const kLaserOffCommand = 'M5 S0';
+
+/** Options for {@link emitLaserFrameProgram}. */
+export interface LaserFrameOptions {
+  /** 'box' = bounding rectangle; 'hull' = convex-hull rubber-band. */
+  shape: LaserFrameShape;
+  /** Operator-set LOW power as a % of sMax. Clamped to [0, kMaxFramePowerPct]. */
+  powerPct: number;
+  /** Outward margin (mm) so the outline clears the part. Default 0. */
+  marginMm?: number;
+  /** Repeat the outline N times. Default 1. */
+  loops?: number;
+  /** Perimeter feed (mm/min). Default 1500. */
+  feed?: number;
+  /** S value at 100% (GRBL $30). Default 1000. */
+  sMax?: number;
+  decimals?: number;
+  programName?: string;
+}
+
+/** Flatten every vertex of the placed contours into one point cloud. */
+export function framePoints(placed: PlacedContour[]): Point[] {
+  const out: Point[] = [];
+  for (const c of placed) for (const p of c.points) out.push(p);
+  return out;
+}
+
+/**
+ * Build the frame OUTLINE contour (a closed loop) for a set of placed contours.
+ * 'box' yields the axis-aligned bounding rectangle; 'hull' yields the convex
+ * hull (rubber-band). A positive `marginMm` grows the outline outward so the
+ * low-power trace clears the part. A degenerate (collinear) hull falls back to
+ * the box. Returns null when there is nothing to frame.
+ */
+export function buildFrameContour(
+  placed: PlacedContour[],
+  shape: LaserFrameShape,
+  marginMm = 0,
+): PlacedContour | null {
+  const pts = framePoints(placed);
+  if (pts.length < 2) return null;
+  const m = Math.max(0, marginMm);
+
+  if (shape === 'hull') {
+    const hull = convexHull(pts);
+    if (hull.length >= 3) {
+      let ring = hull;
+      if (m > 0) {
+        const pl = new Polyline();
+        pl.points = hull.slice();
+        pl.closed = true;
+        const off = offsetPolygon(pl, m);
+        if (off.points.length >= 3) ring = off.points.slice();
+      }
+      return { points: ring, closed: true };
+    }
+    // Fall through to the box for a degenerate (collinear) hull.
+  }
+
+  // Box: axis-aligned bounding rectangle (optionally grown by the margin).
+  const b = new BBox();
+  for (const p of pts) b.expand(p);
+  if (!b.valid) return null;
+  const x0 = b.min.x - m;
+  const y0 = b.min.y - m;
+  const x1 = b.max.x + m;
+  const y1 = b.max.y + m;
+  if (!(x1 > x0) || !(y1 > y0)) return null;
+  return {
+    points: [
+      { x: x0, y: y0 },
+      { x: x1, y: y0 },
+      { x: x1, y: y1 },
+      { x: x0, y: y1 },
+    ],
+    closed: true,
+  };
+}
+
+/**
+ * Emit a SAFE low-power FRAME program (L15): trace the job's outline (box or
+ * convex hull) at a low, operator-set CONSTANT power so the operator can see
+ * exactly where the job lands on the stock BEFORE cutting. See the section
+ * comment above for the beam-safety contract. Returns a safe no-op program
+ * (header + `M5 S0` footer) when there is nothing to frame.
+ */
+export function emitLaserFrameProgram(placed: PlacedContour[], opts: LaserFrameOptions): string {
+  const sMax = opts.sMax && opts.sMax > 0 ? opts.sMax : 1000;
+  const pct = Math.max(0, Math.min(kMaxFramePowerPct, opts.powerPct));
+  const sFrame = Math.round((pct / 100) * sMax);
+  const frame = buildFrameContour(placed, opts.shape, Math.max(0, opts.marginMm ?? 0));
+  const contours = frame ? [frame] : [];
+  return emitLaserProgram(contours, {
+    mode: LaserMode.CO2,
+    cutFeed: opts.feed && opts.feed > 0 ? opts.feed : 1500,
+    power: sFrame,
+    sMax,
+    passes: Math.max(1, Math.floor(opts.loops ?? 1)),
+    powerMode: LaserPowerMode.Constant, // M3 constant — NEVER M4 for framing
+    useFocusZ: false, // no Z move for a frame
+    pierce: false, // no pierce dwell
+    airAssist: false,
+    rotary: false,
+    decimals: opts.decimals ?? 3,
+    programName:
+      opts.programName ?? `karmyogi Laser FRAME (low power ${fmt(pct, 1)}%) — ${opts.shape}`,
+  });
+}
+
+/**
+ * Single GRBL command for a stationary low-power FOCUS DOT: constant-power M3 at
+ * a low, operator-set S so a diode/CO2 head shows a faint dot for manual
+ * focusing. M3 (constant) is REQUIRED — in GRBL laser mode M4 (dynamic) only
+ * fires during motion, so a stationary dot needs constant power. Power is
+ * clamped to the same low framing ceiling. Pair with {@link kLaserOffCommand}.
+ */
+export function laserDotOnCommand(powerPct: number, sMax = 1000): string {
+  const max = sMax > 0 ? sMax : 1000;
+  const pct = Math.max(0, Math.min(kMaxFramePowerPct, powerPct));
+  const s = Math.round((pct / 100) * max);
+  return `M3 S${s}`;
 }

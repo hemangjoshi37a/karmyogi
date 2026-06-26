@@ -28,7 +28,7 @@ import { grbl, type ActivePortInfo } from '../serial/controller'
 import { MockPort, WsPort } from '../serial'
 import type { PortLike } from '../serial/grblConnection'
 import { useMachine } from './machine'
-import { useMachineProfile } from './machineProfile'
+import { useMachineProfile, MACHINE_MODELS } from './machineProfile'
 import type { ControllerKind } from '../machine/types'
 
 export type TransportKind = 'serial' | 'mock' | 'websocket'
@@ -156,6 +156,25 @@ function firmwareToControllerKind(fw?: DetectedFirmware): ControllerKind | null 
     default:
       return null
   }
+}
+
+/**
+ * X3 auto-detect: map a probed firmware classification to a representative
+ * machine-model id from the library. A firmware string can't uniquely identify a
+ * physical model (many machines share GRBL), so we point at the matching generic
+ * catalogue entry — a SUGGESTION the connection wizard surfaces; never applied
+ * automatically (it would silently change the bed size). Returns null when no
+ * generic entry fits (the user picks a concrete model themselves).
+ */
+function firmwareToModelId(fw?: DetectedFirmware): string | null {
+  const kind = firmwareToControllerKind(fw)
+  if (!kind) return null
+  // Prefer a generic catalogue entry for this firmware (no forced bed); fall back
+  // to the first concrete model that ships with this firmware.
+  const generic = MACHINE_MODELS.find((m) => m.generic && m.controllerKind === kind)
+  if (generic) return generic.id
+  const concrete = MACHINE_MODELS.find((m) => m.controllerKind === kind)
+  return concrete?.id ?? null
 }
 
 /**
@@ -293,6 +312,11 @@ export const useMachines = create<MachinesState>()(
         if (kind && kind !== useMachineProfile.getState().controllerKind) {
           useMachineProfile.getState().setControllerKind(kind)
         }
+        // X3 auto-detect: record a non-destructive model SUGGESTION from the
+        // detected firmware (the wizard surfaces it; we never silently change the
+        // bed size on connect).
+        const suggested = firmwareToModelId(entry.firmware)
+        if (suggested) useMachineProfile.getState().setDetectedModel(suggested)
         try {
           let port = buildPort(entry)
           // Detected serial machine: open its ALREADY-GRANTED port directly by

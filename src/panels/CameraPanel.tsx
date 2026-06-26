@@ -40,7 +40,7 @@ import {
   reprojectionRMS,
   applyHomography,
   silhouetteMask,
-  largestBlobBBoxMm,
+  detectStockSilhouette,
   invertMat3,
   assumedIntrinsics,
   poseFromPlaneHomography,
@@ -51,7 +51,8 @@ import {
   type Vec2,
 } from '../core/cameraCalib'
 import {
-  suggestMaterialRuleBased,
+  suggestMaterial,
+  webgpuAvailable,
   type MaterialSuggestion,
 } from '../core/materialSuggest'
 import { useExperimentalAI } from '../experimental'
@@ -603,13 +604,25 @@ export function CameraPanel() {
   // --- experimental AI (gated): markerless auto-detect + material suggester ---
   const aiEnabled = useExperimentalAI()
   // A markerless-detected job rect held for REVIEW before the operator applies it.
+  // Carries the pixel-space corners so the live overlay can preview the box, and
+  // the shape sub-scores that explain the confidence.
   const [pendingDetect, setPendingDetect] = useState<{
     rect: { minX: number; minY: number; maxX: number; maxY: number }
+    polyPx: [Vec2, Vec2, Vec2, Vec2]
+    frameW: number
+    frameH: number
     confidence: number
     areaFrac: number
+    fill: number
+    dominance: number
+    edgeTouchFrac: number
   } | null>(null)
-  // Ranked material proposals from the rule-based suggester (operator confirms).
+  // True while the (async, ML-or-rule) material suggester is running.
+  const [matBusy, setMatBusy] = useState(false)
+  // Ranked material proposals from the suggester (operator confirms — never auto-cut).
   const [matSuggest, setMatSuggest] = useState<MaterialSuggestion[] | null>(null)
+  // Which engine produced the suggestions ('ml' = on-device WebGPU model, else rule).
+  const [matSource, setMatSource] = useState<'rule' | 'ml'>('rule')
 
   // ---- advanced live-camera image controls (per slot) ----
   // Discovered, adjustable settings on each slot's active track (re-read on every
@@ -2515,23 +2528,25 @@ export function CameraPanel() {
       setCalibMsg(t('cam.bt.hull.sizeMismatch', 'Reference and live frame sizes differ — re-capture the reference.'))
       return
     }
-    const mask = silhouetteMask(ref, cur, 28)
-    // Confidence ≈ how decisively the bed changed: changed-pixel fraction mapped
-    // into a sane band (too little = noise, too much = lighting/whole-frame shift).
-    let changed = 0
-    for (let i = 0; i < mask.length; i++) changed += mask[i]
-    const areaFrac = changed / mask.length
-    const rect = largestBlobBBoxMm(mask, cur.width, cur.height, cam.H as Mat3)
-    if (!rect || areaFrac < 0.002) {
+    // Robust pipeline (pure core): auto-threshold diff → morphological clean-up →
+    // largest blob → bed-mm rect + a multi-signal confidence. Hardened against
+    // lighting/angle vs the old single fixed-threshold diff.
+    const det = detectStockSilhouette(ref, cur, cam.H as Mat3)
+    if (!det) {
       setCalibMsg(t('cam.ai.detect.none', 'No clear workpiece found — check lighting and that the bed reference was empty.'))
       return
     }
-    // Map the raw area fraction to a 0..1 confidence: peaks around a plausible
-    // stock footprint (~2%..60% of frame), falls off for tiny specks / whole-frame.
-    const f = areaFrac
-    const confidence =
-      f < 0.02 ? f / 0.02 * 0.6 : f <= 0.6 ? 1 - (f - 0.02) * 0.3 : Math.max(0, 0.4 - (f - 0.6))
-    setPendingDetect({ rect, confidence: Math.max(0, Math.min(1, confidence)), areaFrac })
+    setPendingDetect({
+      rect: det.rectMm,
+      polyPx: det.polyPx,
+      frameW: cur.width,
+      frameH: cur.height,
+      confidence: det.confidence,
+      areaFrac: det.areaFrac,
+      fill: det.fill,
+      dominance: det.dominance,
+      edgeTouchFrac: det.edgeTouchFrac,
+    })
   }, [calib, t])
 
   const applyPendingDetect = useCallback(() => {
@@ -2547,11 +2562,27 @@ export function CameraPanel() {
     setPendingDetect(null)
   }, [pendingDetect, calib, t])
 
+  // A short, honest reason string for a markerless detection's confidence.
+  const detectReason = useCallback(
+    (d: NonNullable<typeof pendingDetect>): string => {
+      if (d.edgeTouchFrac > 0.5)
+        return t('cam.ai.detect.why.edge', 'Detected region hugs the frame edge — could be a lighting change. Re-check the empty-bed reference.')
+      if (d.dominance < 0.5)
+        return t('cam.ai.detect.why.scatter', 'Change is scattered, not one clean object — confirm the size carefully.')
+      if (d.areaFrac > 0.55)
+        return t('cam.ai.detect.why.big', 'The change covers most of the frame — verify this is the stock, not a relight.')
+      if (d.fill < 0.45)
+        return t('cam.ai.detect.why.irregular', 'Irregular shape detected — the box is an estimate; verify it.')
+      return t('cam.ai.detect.why.clean', 'Clean, solid object change — looks like a workpiece on the bed.')
+    },
+    [t],
+  )
+
   // ---- material + feeds suggester (experimental AI, operator-confirmed) ----
-  // Rule-based classifier over a live Cam 1 frame. PROPOSES materials only — the
-  // operator picks one; nothing auto-applies cutting parameters. (WebGPU ML path
-  // is scaffolded in materialSuggest.ts and falls back here until wired.)
-  const suggestMaterials = useCallback(() => {
+  // PROPOSES materials only — the operator picks one; nothing auto-applies cutting
+  // parameters. Tries the lazy/optional on-device WebGPU model first, then ALWAYS
+  // falls back to the pure rule-based classifier (model asset not bundled yet).
+  const suggestMaterials = useCallback(async () => {
     setMatSuggest(null)
     const frame = captureFrame(videoRefs.current[JOB_SLOT])
     if (!frame) {
@@ -2563,12 +2594,21 @@ export function CameraPanel() {
       setCalibMsg(t('cam.ai.mat.noCtx', 'Could not read the camera frame.'))
       return
     }
+    // The frame stays on-device: we read pixels locally and never upload them.
     const img = ctx.getImageData(0, 0, frame.width, frame.height)
-    const res = suggestMaterialRuleBased(
-      { data: img.data, width: frame.width, height: frame.height },
-      { topK: 3 },
-    )
-    setMatSuggest(res.candidates)
+    setMatBusy(true)
+    try {
+      const res = await suggestMaterial(
+        { data: img.data, width: frame.width, height: frame.height },
+        { topK: 3 },
+      )
+      setMatSuggest(res.candidates)
+      setMatSource(res.source)
+    } catch {
+      setCalibMsg(t('cam.ai.mat.noCtx', 'Could not read the camera frame.'))
+    } finally {
+      setMatBusy(false)
+    }
   }, [t])
 
   const applyManualJob = useCallback(() => {
@@ -2806,6 +2846,23 @@ export function CameraPanel() {
               <span className="cam-rec-dot" aria-hidden="true" />
               {t('cam.feed.rec', 'REC')} {fmtElapsed(recElapsed)}
             </span>
+          )}
+          {/* Markerless-detection PREVIEW: draw the proposed box over the live
+              feed so the operator sees what would be applied before confirming.
+              viewBox + meet match the video's object-fit:contain so the polygon
+              lands on the real image. Slot 0 only (the calibrated, textured view). */}
+          {isLive && s === 0 && aiEnabled && pendingDetect && pendingDetect.frameW > 0 && (
+            <svg
+              className="cam-ai-overlay"
+              viewBox={`0 0 ${pendingDetect.frameW} ${pendingDetect.frameH}`}
+              preserveAspectRatio="xMidYMid meet"
+              aria-hidden="true"
+            >
+              <polygon
+                className="cam-ai-overlay-box"
+                points={pendingDetect.polyPx.map((p) => `${p[0]},${p[1]}`).join(' ')}
+              />
+            </svg>
           )}
         </div>
         {/* Empty-bed reference capture (used by the visual hull). */}
@@ -4379,11 +4436,25 @@ export function CameraPanel() {
                       {t('cam.ai.conf', '{p}% confidence', { p: Math.round(pendingDetect.confidence * 100) })}
                     </span>
                   </div>
+                  <p className="cam-hint">{detectReason(pendingDetect)}</p>
+                  <p className="cam-hint cam-ai-preview-note">
+                    {t('cam.ai.detect.previewNote', 'The blue box on the live feed above shows what will be applied — verify it frames your stock.')}
+                  </p>
                   <p className="cam-hint">
                     {t('cam.ai.detect.reviewHint', 'AI proposes — you confirm. Check the size matches your stock before applying.')}
                   </p>
                   <div className="cam-row">
-                    <button type="button" className="cam-btn cam-grow cam-primary" onClick={applyPendingDetect}>
+                    <button
+                      type="button"
+                      className="cam-btn cam-grow cam-primary"
+                      disabled={!calib.cameras[0].H}
+                      onClick={applyPendingDetect}
+                      title={
+                        !calib.cameras[0].H
+                          ? t('cam.bt.job.needCam1Calib', 'Calibrate Cam 1 first (its homography maps stock pixels to mm).')
+                          : t('cam.ai.detect.apply', 'Apply this job')
+                      }
+                    >
                       <Icon name="frame" size={14} />
                       {t('cam.ai.detect.apply', 'Apply this job')}
                     </button>
@@ -4398,8 +4469,10 @@ export function CameraPanel() {
                 <button
                   type="button"
                   className="cam-btn cam-grow"
-                  disabled={!live(0)}
-                  onClick={suggestMaterials}
+                  disabled={!live(0) || matBusy}
+                  onClick={() => {
+                    suggestMaterials().catch(() => {})
+                  }}
                   title={
                     !live(0)
                       ? t('cam.bt.job.needCam1Live', 'Start Camera 1 first.')
@@ -4407,7 +4480,9 @@ export function CameraPanel() {
                   }
                 >
                   <Icon name="probe" size={14} />
-                  {t('cam.ai.mat.btn', 'Suggest material')}
+                  {matBusy
+                    ? t('cam.ai.mat.busy', 'Analyzing…')
+                    : t('cam.ai.mat.btn', 'Suggest material')}
                   <span className="cam-ai-badge">{t('cam.ai.badge', 'AI')}</span>
                 </button>
               </div>
@@ -4415,6 +4490,12 @@ export function CameraPanel() {
                 <div className="cam-ai-review" role="group" aria-label={t('cam.ai.mat.reviewAria', 'Suggested materials — pick one to use')}>
                   <p className="cam-hint">
                     {t('cam.ai.mat.hint', 'AI suggestions only — pick the material that matches your stock. Feeds/speeds are conservative defaults you can still tune.')}
+                    {' '}
+                    <span className="cam-ai-src">
+                      {matSource === 'ml'
+                        ? t('cam.ai.mat.srcMl', 'On-device model')
+                        : t('cam.ai.mat.srcRule', 'On-device colour analysis')}
+                    </span>
                   </p>
                   <ul className="cam-ai-matlist">
                     {matSuggest.map((s) => (
@@ -4425,7 +4506,8 @@ export function CameraPanel() {
                           <span className="cam-ai-mat-reason">{s.reason}</span>
                         </span>
                         <span
-                          className={`cam-ai-conf ${s.confidence >= 0.5 ? 'is-high' : s.confidence >= 0.25 ? 'is-mid' : 'is-low'}`}
+                          className={`cam-ai-conf ${s.confidence >= 0.6 ? 'is-high' : s.confidence >= 0.3 ? 'is-mid' : 'is-low'}`}
+                          title={t('cam.ai.mat.confTip', 'How plausible this material is from the image. A proposal — you confirm before cutting.')}
                         >
                           {Math.round(s.confidence * 100)}%
                         </span>
@@ -4444,6 +4526,11 @@ export function CameraPanel() {
                       </li>
                     ))}
                   </ul>
+                  <p className="cam-hint cam-ai-feeds-note">
+                    {webgpuAvailable()
+                      ? t('cam.ai.mat.feedsNote', 'Feeds/speeds stay a suggestion — nothing is cut until you press Go.')
+                      : t('cam.ai.mat.feedsNoteNoGpu', 'Colour-based suggestion (no WebGPU here). Feeds/speeds stay a suggestion — nothing is cut until you press Go.')}
+                  </p>
                 </div>
               )}
             </div>

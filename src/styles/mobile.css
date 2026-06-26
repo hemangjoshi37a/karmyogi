@@ -1,0 +1,142 @@
+/* ============================================================
+   MOBILE shell — X5 portrait/single-pane polish.
+
+   Owned by the MobileShell workstream (imported from MobileShell.tsx, not the
+   app shell). Scope EVERY rule under `.mobile-shell` / `.mobile-hud` so this
+   file never clobbers desktop or panel CSS — the mobile shell is the only
+   consumer. The base tab-strip / sheet styles live in globals.css +
+   shell-extra.css; this file adds the always-on machine HUD and a few
+   portrait-only reflow safeties.
+   ============================================================ */
+
+/* ── Machine read-out HUD (mirrors the desktop DRO, compact + always-on) ───── */
+.mobile-hud {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Horizontal scroll only if X/Y/Z + F/S can't fit (very narrow phones); the
+     state pill + toggle stay pinned via the flex layout below. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding: 5px 8px;
+  padding-left: max(8px, env(safe-area-inset-left, 0px));
+  padding-right: max(8px, env(safe-area-inset-right, 0px));
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(11.5px, 3.4vw, 13px);
+  line-height: var(--lh-tight, 1.2);
+  white-space: nowrap;
+  /* A hairline accent edge that recolours with the machine state (see below). */
+  box-shadow: inset 3px 0 0 var(--mobile-hud-accent, transparent);
+}
+.mobile-hud::-webkit-scrollbar { height: 0; }
+
+.mobile-hud-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: clamp(10.5px, 3.2vw, 12px);
+}
+.mobile-hud-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mobile-hud-accent, var(--fg-muted));
+  flex: 0 0 auto;
+}
+
+/* State → accent mapping, mirroring controller.css `.mc-badge[data-state=…]` so
+   "Run is teal, Alarm is red" reads identically on phone and desktop. */
+.mobile-hud[data-state='Idle'] { --mobile-hud-accent: var(--ok); }
+.mobile-hud[data-state='Run'],
+.mobile-hud[data-state='Jog'],
+.mobile-hud[data-state='Home'] { --mobile-hud-accent: var(--accent); }
+.mobile-hud[data-state='Hold'],
+.mobile-hud[data-state='Door'] { --mobile-hud-accent: var(--warn); }
+.mobile-hud[data-state='Alarm'] { --mobile-hud-accent: var(--danger); }
+
+.mobile-hud-dro,
+.mobile-hud-fs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+}
+.mobile-hud-fs {
+  /* Push feed/spindle to the right, before the toggle. */
+  margin-left: auto;
+  color: var(--fg-muted);
+}
+.mobile-hud-ax {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+.mobile-hud-ax b {
+  color: var(--fg-muted);
+  font-weight: 700;
+  font-size: 0.85em;
+}
+.mobile-hud-unit {
+  color: var(--fg-muted);
+  font-size: 0.8em;
+  align-self: center;
+}
+
+.mobile-hud-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  /* Comfortable ≥36px tap target via padding without bloating the thin HUD. */
+  min-height: 32px;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.mobile-hud-toggle:hover { color: var(--fg); }
+.mobile-hud-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.mobile-hud-toggle svg { transition: transform var(--dur-fast, 0.12s) var(--ease, ease); }
+
+/* When collapsed, the HUD is just the state pill + toggle — keep it from
+   stealing the whole row width. */
+.mobile-hud[data-collapsed='true'] .mobile-hud-toggle { margin-left: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-hud-toggle svg { transition: none; }
+}
+
+/* ── Portrait-only reflow safeties ─────────────────────────────────────────
+   Generic guards scoped to the mobile panel area so any panel that wasn't
+   tuned for very narrow portrait can't force horizontal page scroll. Panel
+   internals stay owned by their own CSS; these only constrain the container. */
+@media (orientation: portrait) {
+  .mobile-shell .mobile-panel {
+    /* Never let panel content push the viewport wider than the screen. */
+    max-width: 100vw;
+  }
+}
+
+/* Very small phones (≤360px): tighten the HUD so X/Y/Z + F/S fit without
+   scrolling on the common case. */
+@media (max-width: 360px) {
+  .mobile-hud { gap: 7px; padding-left: 6px; padding-right: 6px; }
+  .mobile-hud-dro,
+  .mobile-hud-fs { gap: 6px; }
+}

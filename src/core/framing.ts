@@ -14,7 +14,7 @@
 //     faint power, bracketed by `M5 S0`) — for the Laser tab.
 // All output is modal, `G21 G90`, and never emits "-0.000".
 
-import { BBox, Polyline } from './geometry';
+import { BBox, Point, Polyline } from './geometry';
 
 /** Formatted number, never "-0.000" — mirrors the emitter / soldering fmt(). */
 function fmt(value: number, decimals: number): string {
@@ -113,6 +113,57 @@ export function frameBoundsOfGcode(lines: string[]): BBox | null {
   }
 
   return any && bbox.isValid() ? bbox : null;
+}
+
+// ===========================================================================
+// Convex hull — the "rubber-band" frame outline (L15)
+// ===========================================================================
+
+/**
+ * Convex hull of a point set via Andrew's monotone chain. Returns the hull
+ * vertices in counter-clockwise order WITHOUT a duplicated closing vertex
+ * (callers close the loop themselves). Fewer than three unique points yields the
+ * de-duplicated input unchanged (degenerate — nothing to wrap).
+ *
+ * Used by the laser low-power frame to trace the TIGHT rubber-band outline of a
+ * job (instead of its axis-aligned bounding box) so the operator sees exactly
+ * where the cut lands on the stock. Pure geometry — no laser/G-code concerns.
+ */
+export function convexHull(points: Point[]): Point[] {
+  // Keep finite points, copy, and sort by x then y.
+  const pts = points
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => ({ x: p.x, y: p.y }))
+    .sort((a, b) => a.x - b.x || a.y - b.y);
+  // Drop exact duplicates (adjacent after the sort).
+  const uniq: Point[] = [];
+  for (const p of pts) {
+    const last = uniq[uniq.length - 1];
+    if (!last || last.x !== p.x || last.y !== p.y) uniq.push(p);
+  }
+  const n = uniq.length;
+  if (n < 3) return uniq;
+
+  // > 0 → counter-clockwise turn. We pop on <= 0 to keep a strictly CCW hull.
+  const cross = (o: Point, a: Point, b: Point): number =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+  const lower: Point[] = [];
+  for (let i = 0; i < n; i++) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], uniq[i]) <= 0)
+      lower.pop();
+    lower.push(uniq[i]);
+  }
+  const upper: Point[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], uniq[i]) <= 0)
+      upper.pop();
+    upper.push(uniq[i]);
+  }
+  // Concatenate, dropping each chain's last point (shared with the other's first).
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
 }
 
 // ===========================================================================

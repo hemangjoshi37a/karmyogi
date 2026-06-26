@@ -26,6 +26,17 @@ export interface Segment {
   to: [number, number, number]
   /** rapid = G0 (travel), cut = G1/G2/G3 (working move). */
   kind: MoveKind
+  /**
+   * 1-based source line this segment originated from (V13 editor⇄3D link). An
+   * arc flattens to many segments that all share the source line. Optional so
+   * timeline-built segments (which omit it) stay assignable to `Segment`.
+   */
+  line?: number
+  /**
+   * Active spindle/laser S-value while this move executed (L10 power heat-map).
+   * Only meaningful on `cut` moves; rapids leave it undefined (laser off / travel).
+   */
+  power?: number
 }
 
 export interface ParseOptions {
@@ -42,6 +53,22 @@ export interface ParseResult {
   segments: Segment[]
   /** Axis-aligned bounds of all visited points, or null if no moves. */
   bounds: Bounds | null
+  /**
+   * L10 — S-value (power) summary across CUT moves. `varied` is true when the
+   * power was modulated (max > min), the signal that this is a power-controlled
+   * (laser) job worth heat-mapping; a constant-S spindle job has `varied:false`.
+   * null when there were no cut moves at all.
+   */
+  power: PowerSummary | null
+}
+
+export interface PowerSummary {
+  /** Lowest S seen on a cut move. */
+  min: number
+  /** Highest S seen on a cut move. */
+  max: number
+  /** True when S was modulated across cuts (max > min and max > 0). */
+  varied: boolean
 }
 
 export interface Bounds {
@@ -74,6 +101,21 @@ export function gcodeToPolylines(text: string, opts: ParseOptions = {}): ParseRe
   let motion = 0 // 0,1,2,3
   let absolute = true // G90
   let absoluteArc = false // G90.1 ; default incremental IJK (G91.1)
+  let sVal = 0 // modal S (spindle/laser power) — persists across lines
+
+  // L10 power summary, accumulated over CUT moves only.
+  let pMin = Infinity
+  let pMax = -Infinity
+  let pAny = false
+  const notePower = (s: number) => {
+    if (s < pMin) pMin = s
+    if (s > pMax) pMax = s
+    pAny = true
+  }
+
+  // 1-based source-line counter for the editor⇄3D link (incremented for EVERY
+  // raw line, including blanks/comments, so it matches the editor's line numbers).
+  let lineNo = 0
 
   let min: [number, number, number] = [Infinity, Infinity, Infinity]
   let max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
@@ -91,6 +133,7 @@ export function gcodeToPolylines(text: string, opts: ParseOptions = {}): ParseRe
   expand(pos) // include the start point in bounds
 
   for (const rawLine of text.split(/\r?\n/)) {
+    lineNo++
     const line = stripComments(rawLine).trim()
     if (line === '') continue
 
@@ -142,8 +185,12 @@ export function gcodeToPolylines(text: string, opts: ParseOptions = {}): ParseRe
         case 'R':
           axis.r = value
           break
+        case 'S':
+          // Modal spindle/laser power — tracked for the L10 heat-map.
+          if (Number.isFinite(value)) sVal = value
+          break
         default:
-          break // M-words, F, S, T, line numbers, etc. ignored for geometry
+          break // M-words, F, T, line numbers, etc. ignored for geometry
       }
     }
 
@@ -184,9 +231,16 @@ export function gcodeToPolylines(text: string, opts: ParseOptions = {}): ParseRe
         minArcSegments,
       )
       for (const s of arcSegs) {
-        segments.push({ from: [s.from.x, s.from.y, s.from.z], to: [s.to.x, s.to.y, s.to.z], kind: 'cut' })
+        segments.push({
+          from: [s.from.x, s.from.y, s.from.z],
+          to: [s.to.x, s.to.y, s.to.z],
+          kind: 'cut',
+          line: lineNo,
+          power: sVal,
+        })
         expand(s.to)
       }
+      notePower(sVal)
       pos.x = target.x
       pos.y = target.y
       pos.z = target.z
@@ -198,7 +252,10 @@ export function gcodeToPolylines(text: string, opts: ParseOptions = {}): ParseRe
           from: [pos.x, pos.y, pos.z],
           to: [target.x, target.y, target.z],
           kind,
+          line: lineNo,
+          power: kind === 'cut' ? sVal : undefined,
         })
+        if (kind === 'cut') notePower(sVal)
         expand(target)
       }
       pos.x = target.x
@@ -208,7 +265,10 @@ export function gcodeToPolylines(text: string, opts: ParseOptions = {}): ParseRe
   }
 
   const bounds: Bounds | null = any ? { min, max } : null
-  return { segments, bounds }
+  const power: PowerSummary | null = pAny
+    ? { min: pMin, max: pMax, varied: pMax > pMin + 1e-9 && pMax > 0 }
+    : null
+  return { segments, bounds, power }
 }
 
 /** Strip `;` line comments and `( ... )` inline comments. */

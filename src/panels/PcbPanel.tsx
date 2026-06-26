@@ -36,7 +36,7 @@ import {
   type OriginMode,
 } from '../core/pcbCam'
 import { makeRect, BBox, Polyline } from '../core/geometry'
-import { Toolpath, defaultTool } from '../core/toolpath'
+import { Toolpath, defaultTool, toolRadius } from '../core/toolpath'
 import { GcodeEmitter, ZMode } from '../core/gcodeEmitter'
 import {
   unzipGerberPackage,
@@ -95,6 +95,49 @@ const GERBER_ACCEPT = '.gbr,.ger,.gtl,.gbl,.art,.gko,.gm1,.txt'
 const EXCELLON_ACCEPT = '.drl,.xln,.txt,.nc,.exc'
 
 type StageId = 'isolation' | 'drill' | 'cutout'
+
+/** P13 — an axis-aligned paint region (mm, raw resolved-geometry frame). */
+interface Region {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+/**
+ * Map a painted {@link Region} (raw geometry frame) through the same origin-shift
+ * (+dx,+dy) and optional mirror the copper gets, returning a BBox in the
+ * transformed frame so the region stays registered with the toolpath geometry.
+ */
+function transformRegion(
+  r: Region,
+  delta: { x: number; y: number },
+  mirror: boolean,
+  axis: MirrorAxis,
+  mirrorCoord?: number,
+): BBox {
+  let minx = r.minX + delta.x
+  let maxx = r.maxX + delta.x
+  let miny = r.minY + delta.y
+  let maxy = r.maxY + delta.y
+  if (mirror && mirrorCoord != null && Number.isFinite(mirrorCoord)) {
+    if (axis === 'y') {
+      const a = 2 * mirrorCoord - maxx
+      const b = 2 * mirrorCoord - minx
+      minx = a
+      maxx = b
+    } else {
+      const a = 2 * mirrorCoord - maxy
+      const b = 2 * mirrorCoord - miny
+      miny = a
+      maxy = b
+    }
+  }
+  const bb = new BBox()
+  bb.expand({ x: minx, y: miny })
+  bb.expand({ x: maxx, y: maxy })
+  return bb
+}
 
 /** Names of paste/stencil layers — noted on the cutout card as "for Soldering". */
 const PASTE_NAME = /\.(gtp|gbp|crc|crs|spt|spb)$|paste|stencil|\bcream\b/i
@@ -191,6 +234,10 @@ interface Params {
   millOversize: number // mm: mill a hole only if Ø exceeds bit by this margin
   // P10 — board origin handling (corner/center/keep-positive).
   origin: 'asis' | 'keepPositive' | 'corner' | 'center'
+  // P13 — selective (region/paint) isolation + rest machining.
+  isoRegion: boolean // limit isolation/clear to the painted rectangle
+  restMachine: boolean // run a 2nd smaller-tool pass into what the bigger tool missed
+  restPriorDia: number // Ø of the prior (larger) isolation tool (mm)
 }
 
 const DEFAULTS: Params = {
@@ -226,6 +273,9 @@ const DEFAULTS: Params = {
   millHoles: false,
   millOversize: 0.1,
   origin: 'asis',
+  isoRegion: false,
+  restMachine: false,
+  restPriorDia: 0.8,
 }
 
 interface ParseInfo {
@@ -300,6 +350,9 @@ function parsePcbParams(v: unknown, base: Params): Params {
     millHoles: typeof v.millHoles === 'boolean' ? v.millHoles : base.millHoles,
     millOversize: numOr(v.millOversize, base.millOversize),
     origin,
+    isoRegion: typeof v.isoRegion === 'boolean' ? v.isoRegion : base.isoRegion,
+    restMachine: typeof v.restMachine === 'boolean' ? v.restMachine : base.restMachine,
+    restPriorDia: numOr(v.restPriorDia, base.restPriorDia),
   }
 }
 
@@ -550,6 +603,13 @@ export function PcbPanel() {
   const side: 'top' | 'bottom' = params.twoSided ? genSide : 'top'
   const mirrorOpt = { mirror: side === 'bottom' }
 
+  // P13 — selective (region/paint) isolation. The painted window is stored in the
+  // RAW resolved geometry frame (mm, pre origin-shift/mirror); buildToolpath maps
+  // it through the same origin/mirror transform as the copper so it stays
+  // registered. `regionMode` arms the drag-to-paint interaction over the viewer.
+  const [region, setRegion] = useState<Region | null>(null)
+  const [regionMode, setRegionMode] = useState(false)
+
   function set<K extends keyof Params>(key: K, value: Params[K]) {
     setParams((p) => ({ ...p, [key]: value }))
   }
@@ -574,6 +634,8 @@ export function PcbPanel() {
     setStatus('')
     setStatusError(false)
     setArmedRunId(null)
+    setRegion(null) // P13 — a new board invalidates the painted region
+    setRegionMode(false)
     setParsingZip(true)
     try {
       const buf = new Uint8Array(await file.arrayBuffer())
@@ -634,6 +696,8 @@ export function PcbPanel() {
     setStatusError(false)
     setArmedRunId(null)
     setLastGcode(null)
+    setRegion(null) // P13 — clear the painted region with the package
+    setRegionMode(false)
     // Drop our (single canonical) section from the program store too, so the
     // Visualizer/Program tab don't keep showing a now-orphaned PCB program.
     removeSection(PCB_SECTION)
@@ -802,10 +866,17 @@ export function PcbPanel() {
         }
       let copper = shiftG(geom.copper)
       copper = mirror ? mirrorGerber(copper, axis, mirrorCoord) : copper
-      // P11 — multi-depth + climb/conventional; P2 — overlap/mm stepover.
+      // P13 — map the painted region through the SAME origin-shift + mirror so it
+      // registers with the (transformed) copper; null when no region / disabled.
+      const regionXf =
+        params.isoRegion && region
+          ? transformRegion(region, originDelta, mirror, axis, mirrorCoord)
+          : null
+      // P11 — multi-depth + climb/conventional; P2 — overlap/mm stepover; P13 region.
       tp = isolationRoutes(copper, tool, params.safeZ, effCopperZ, params.passes, effStepover, true, {
         stepdown: params.isoStepdown,
         climb: params.climb,
+        region: regionXf,
       })
       // P4 — optionally clear the non-copper field (copper pour) after isolating.
       if (params.copperClear) {
@@ -818,8 +889,27 @@ export function PcbPanel() {
           clearanceMm: params.copperClearClearance,
           stepoverMm: params.copperClearStepover,
           stepdown: params.isoStepdown,
+          region: regionXf,
         })
         for (const m of clearTp.moves) tp.append(m)
+      }
+      // P13 — rest machining: a 2nd, smaller-tool pass that clears ONLY the tight
+      // band up against copper the larger (prior) tool couldn't reach. Honors the
+      // painted region too. Uses the current (small) tool + copper cut Z.
+      if (params.restMachine && params.restPriorDia / 2 > toolRadius(tool) + 1e-6) {
+        let restOutline: Polyline | null = null
+        if (geom.outline) {
+          const ol = mirror ? mirrorGerber(shiftG(geom.outline), axis, mirrorCoord) : shiftG(geom.outline)
+          restOutline = boardOutlinePolygon(ol)
+        }
+        const restTp = copperPourClear(copper, tool, params.safeZ, effCopperZ, restOutline, {
+          clearanceMm: params.copperClearClearance,
+          stepoverMm: params.copperClearStepover > 0 ? params.copperClearStepover : effStepover,
+          stepdown: params.isoStepdown,
+          restToolRadiusMm: params.restPriorDia / 2,
+          region: regionXf,
+        })
+        for (const m of restTp.moves) tp.append(m)
       }
     } else if (stage === 'drill') {
       if (!geom.drillData)
@@ -1816,9 +1906,20 @@ export function PcbPanel() {
               {t('pcb.lv.title', 'Layer preview')}
             </h3>
             <div className="pcb-section-body">
-              <LayerViewer t={t} copper={resolved.copper} outline={resolved.outline} drill={resolved.drillData} />
+              <LayerViewer
+                t={t}
+                copper={resolved.copper}
+                outline={resolved.outline}
+                drill={resolved.drillData}
+                region={region}
+                regionMode={regionMode}
+                onRegionMode={setRegionMode}
+                onRegion={setRegion}
+              />
               <p className="pcb-hint">
-                {t('pcb.lv.hint', 'What will be machined — toggle layers above. Copper isolates, dots drill, the outline cuts out.')}
+                {regionMode
+                  ? t('pcb.lv.regionHint', 'Drag a box over the board to isolate/clear ONLY that window. Enable “Use selected region” in Isolation routing to apply it.')
+                  : t('pcb.lv.hint', 'What will be machined — toggle layers above. Copper isolates, dots drill, the outline cuts out.')}
               </p>
             </div>
           </section>
@@ -2146,6 +2247,89 @@ export function PcbPanel() {
                       {params.copperClear && (
                         <p className="pcb-hint">
                           {t('pcb.p4.hint', 'Removes the open ground-plane field so only isolated copper remains. Slow — uses the same bit and copper Z.')}
+                        </p>
+                      )}
+                      {/* P13 — selective (region/paint) isolation */}
+                      <label className="pcb-check pcb-op-check">
+                        <input
+                          type="checkbox"
+                          checked={params.isoRegion}
+                          onChange={(e) => set('isoRegion', e.target.checked)}
+                        />
+                        <span>{t('pcb.p13.region', 'Isolate only a selected region')}</span>
+                      </label>
+                      {params.isoRegion && (
+                        <div className="pcb-region-ctl">
+                          <button
+                            type="button"
+                            className={'pcb-load-btn' + (regionMode ? ' primary' : '')}
+                            onClick={() => setRegionMode((m) => !m)}
+                          >
+                            <Icon name="frame" size={13} className="pcb-btn-icon" />
+                            {regionMode
+                              ? t('pcb.p13.painting', 'Painting… drag on the preview')
+                              : region
+                              ? t('pcb.p13.repaint', 'Re-select region')
+                              : t('pcb.p13.paint', 'Select region on preview')}
+                          </button>
+                          {region && (
+                            <button
+                              type="button"
+                              className="pcb-load-btn"
+                              onClick={() => {
+                                setRegion(null)
+                                setRegionMode(false)
+                              }}
+                            >
+                              <Icon name="trash" size={13} className="pcb-btn-icon" />
+                              {t('pcb.p13.clearRegion', 'Clear region')}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {params.isoRegion && (
+                        <p className="pcb-hint">
+                          {region
+                            ? t('pcb.p13.regionReadout', 'Region {w} × {h} mm — only copper inside this window is isolated/cleared.', {
+                                w: (region.maxX - region.minX).toFixed(1),
+                                h: (region.maxY - region.minY).toFixed(1),
+                              })
+                            : t('pcb.p13.regionNone', 'No region yet — Select a window on the Layer preview above (drag a box). Until then the whole board is isolated.')}
+                        </p>
+                      )}
+                      {/* P13 — rest machining (2nd smaller tool clears what the bigger missed) */}
+                      <label className="pcb-check pcb-op-check">
+                        <input
+                          type="checkbox"
+                          checked={params.restMachine}
+                          onChange={(e) => set('restMachine', e.target.checked)}
+                        />
+                        <span>{t('pcb.p13.rest', 'Rest machining (2nd smaller tool)')}</span>
+                      </label>
+                      {params.restMachine && (
+                        <div className="cc-sgrid pcb-op-params">
+                          <SliderField
+                            label={t('pcb.p13.priorDia', 'Prior (larger) tool Ø')}
+                            htmlFor="pcb-rest-dia"
+                            unit="mm"
+                            value={params.restPriorDia}
+                            onChange={(n) => set('restPriorDia', Math.max(0.1, n))}
+                            min={0.1}
+                            max={3}
+                            step={0.05}
+                          />
+                        </div>
+                      )}
+                      {params.restMachine && (
+                        <p className={'pcb-hint' + (params.restPriorDia / 2 > params.toolDia / 2 ? '' : ' pcb-region-warn')}>
+                          {params.restPriorDia / 2 > params.toolDia / 2
+                            ? t('pcb.p13.restReadout', 'This {small} mm bit clears the tight band the {big} mm tool couldn’t reach (run the big-tool isolation first, then fit this bit).', {
+                                small: params.toolDia.toFixed(2),
+                                big: params.restPriorDia.toFixed(2),
+                              })
+                            : t('pcb.p13.restBadDia', 'The prior tool must be LARGER than this tool ({small} mm) for rest machining to add anything.', {
+                                small: params.toolDia.toFixed(2),
+                              })}
                         </p>
                       )}
                     </>
@@ -2679,11 +2863,19 @@ function LayerViewer({
   copper,
   outline,
   drill,
+  region,
+  regionMode,
+  onRegionMode,
+  onRegion,
 }: {
   t: TFn
   copper: GerberData | null
   outline: GerberData | null
   drill: ExcellonData | null
+  region?: Region | null
+  regionMode?: boolean
+  onRegionMode?: (b: boolean) => void
+  onRegion?: (r: Region | null) => void
 }) {
   const [vis, setVis] = usePersistentState<LayerVis>('karmyogi.pcb.layerVis', {
     copper: true,
@@ -2691,6 +2883,22 @@ function LayerViewer({
     drill: true,
     outline: true,
   })
+
+  // P13 — region paint. The flipped <g> maps screen px → mm (its CTM already
+  // folds in the viewBox + Y-flip), so we convert pointer coords through its
+  // inverse screen CTM. The in-progress drag is kept locally; the committed
+  // region is owned by the panel (props). Pointer events cover mouse + touch.
+  const gRef = useRef<SVGGElement>(null)
+  const dragRef = useRef<{ x0: number; y0: number } | null>(null)
+  const [draft, setDraft] = useState<Region | null>(null)
+
+  const toMM = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const g = gRef.current
+    const ctm = g?.getScreenCTM()
+    if (!g || !ctm) return null
+    const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse())
+    return { x: p.x, y: p.y }
+  }
 
   // Combined extents across every loaded layer, for the viewBox.
   const box = useMemo(() => {
@@ -2732,15 +2940,79 @@ function LayerViewer({
             {label}
           </button>
         ))}
+        {onRegionMode && (
+          <button
+            type="button"
+            className={'pcb-lv-tog pcb-lv-paint' + (regionMode ? ' on' : '')}
+            onClick={() => onRegionMode(!regionMode)}
+            aria-pressed={!!regionMode}
+            title={t('pcb.lv.regionTitle', 'Drag a rectangle to isolate/clear only that window (P13)')}
+          >
+            <Icon name="frame" size={12} />
+            {region
+              ? t('pcb.lv.regionSet', 'Region set')
+              : regionMode
+              ? t('pcb.lv.regionDrag', 'Drag a box…')
+              : t('pcb.lv.regionPaint', 'Paint region')}
+          </button>
+        )}
       </div>
       <svg
-        className="pcb-lv-svg"
+        className={'pcb-lv-svg' + (regionMode ? ' pcb-lv-painting' : '')}
         viewBox={`${minX} ${minY} ${w} ${h}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label={t('pcb.lv.svgAria', 'PCB layer preview')}
+        onPointerDown={
+          regionMode
+            ? (e) => {
+                const p = toMM(e.clientX, e.clientY)
+                if (!p) return
+                e.currentTarget.setPointerCapture(e.pointerId)
+                dragRef.current = { x0: p.x, y0: p.y }
+                setDraft({ minX: p.x, minY: p.y, maxX: p.x, maxY: p.y })
+              }
+            : undefined
+        }
+        onPointerMove={
+          regionMode
+            ? (e) => {
+                const d = dragRef.current
+                if (!d) return
+                const p = toMM(e.clientX, e.clientY)
+                if (!p) return
+                setDraft({
+                  minX: Math.min(d.x0, p.x),
+                  minY: Math.min(d.y0, p.y),
+                  maxX: Math.max(d.x0, p.x),
+                  maxY: Math.max(d.y0, p.y),
+                })
+              }
+            : undefined
+        }
+        onPointerUp={
+          regionMode
+            ? (e) => {
+                const d = dragRef.current
+                dragRef.current = null
+                const p = toMM(e.clientX, e.clientY)
+                setDraft(null)
+                if (!d || !p) return
+                const r: Region = {
+                  minX: Math.min(d.x0, p.x),
+                  minY: Math.min(d.y0, p.y),
+                  maxX: Math.max(d.x0, p.x),
+                  maxY: Math.max(d.y0, p.y),
+                }
+                // Ignore a tiny accidental tap; require a usable window.
+                if (r.maxX - r.minX < strokeW * 8 || r.maxY - r.minY < strokeW * 8) return
+                onRegion?.(r)
+                onRegionMode?.(false)
+              }
+            : undefined
+        }
       >
-        <g transform={flip}>
+        <g transform={flip} ref={gRef}>
           {/* Outline */}
           {vis.outline && outline && (
             <g className="pcb-lv-outline">
@@ -2796,6 +3068,26 @@ function LayerViewer({
               ))}
             </g>
           )}
+          {/* P13 — committed region + in-progress drag rectangle */}
+          {(() => {
+            const r = draft ?? region
+            if (!r) return null
+            return (
+              <rect
+                className={'pcb-lv-region' + (draft ? ' drafting' : '')}
+                x={r.minX}
+                y={r.minY}
+                width={Math.max(0, r.maxX - r.minX)}
+                height={Math.max(0, r.maxY - r.minY)}
+                fill="var(--accent)"
+                fillOpacity={0.12}
+                stroke="var(--accent)"
+                strokeWidth={strokeW * 2}
+                strokeDasharray={draft ? `${strokeW * 6} ${strokeW * 4}` : undefined}
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })()}
         </g>
       </svg>
     </div>
