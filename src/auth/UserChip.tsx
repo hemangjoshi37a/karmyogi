@@ -1,6 +1,7 @@
 import { useT } from '../i18n'
 import { useAuth } from './authStore'
 import { firebaseConfigured } from './firebase'
+import { useNotifications } from '../store/notifications'
 import '../styles/auth.css'
 
 /**
@@ -14,16 +15,36 @@ export function UserChip() {
   const user = useAuth((s) => s.user)
   const signOut = useAuth((s) => s.signOut)
   const signIn = useAuth((s) => s.signInWithGoogle)
+  const notify = useNotifications((s) => s.notify)
+  // Sign-in click. When Firebase is configured, run the Google flow; when it's
+  // NOT configured (status 'disabled'), the store's signIn is a no-op, so explain
+  // how to enable it instead of leaving a dead button.
+  const onLogin = () => {
+    if (firebaseConfigured()) {
+      void signIn()
+    } else {
+      notify(
+        'info',
+        t(
+          'auth.notConfigured',
+          "Sign-in isn't set up yet. Add your Firebase keys to .env.local (copy .env.example) and restart the dev server.",
+        ),
+      )
+    }
+  }
 
-  // Signed out (grace window OR optional mode): show a small circular login
-  // icon button in the profile slot — sign-in is one tap away, no banner needed.
-  if (status === 'signedOut' && firebaseConfigured()) {
+  // Show the login button whenever the user is NOT signed in — including when
+  // Firebase auth is UNCONFIGURED ('disabled'), so the affordance is always
+  // visible in the app bar. (Previously 'disabled' hid it entirely.) When
+  // unconfigured, clicking explains how to turn sign-in on; otherwise it runs the
+  // Google flow.
+  if (status === 'signedOut' || status === 'disabled') {
     return (
       <span className="km-userchip">
         <button
           type="button"
           className="km-userchip-avatarbtn km-userchip-login"
-          onClick={() => void signIn()}
+          onClick={onLogin}
           title={t('auth.google', 'Sign in with Google')}
           aria-label={t('auth.google', 'Sign in with Google')}
         >

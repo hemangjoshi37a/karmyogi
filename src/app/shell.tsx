@@ -142,6 +142,7 @@ const LEFT_TABS = [
   { id: 'welding', title: 'Welding' },
   { id: 'camera', title: 'Camera' },
   { id: 'springcoiling', title: 'Spring Coiling' },
+  { id: 'tattoo', title: 'Tattoo / Henna' },
 ]
 
 // Per-tab hover tooltips shown on the dock TAB name. The 2D/3D Carving tab
@@ -206,7 +207,7 @@ const DEFAULT_LAYOUT: SerializedDockview = {
         {
           type: 'leaf',
           data: {
-            views: ['cadcam', 'writing', 'soldering', 'screwfitting', 'drilling', 'pcb', 'glue', 'pnp', 'signature', 'print', 'laser', 'welding', 'camera', 'springcoiling'],
+            views: ['cadcam', 'writing', 'soldering', 'screwfitting', 'drilling', 'pcb', 'glue', 'pnp', 'signature', 'print', 'laser', 'welding', 'camera', 'springcoiling', 'tattoo'],
             activeView: 'cadcam',
             id: '1',
           },
@@ -473,13 +474,30 @@ export function Shell() {
       existing.api.setActive()
       return
     }
+    // Left-group panels (the CAM tools: 2D/3D Carving, Soldering, … Tattoo/Henna)
+    // must open INTO the left tab group, not the active (center) group. Anchor on
+    // the first currently-open left-group tab so the new tab joins that stack.
+    const isLeft = LEFT_TABS.some((tt) => tt.id === panel.id)
+    const anchorId = isLeft
+      ? LEFT_TABS.map((tt) => tt.id).find((id) => api.getPanel(id))
+      : undefined
+    const anchor = anchorId ? api.getPanel(anchorId) : undefined
     api.addPanel({
       id: panel.id,
       component: panel.component,
       title: t('tab.' + panel.id, panel.title),
       params: panel.params,
+      ...(anchor ? { position: { referencePanel: anchor.id, direction: 'within' as const } } : {}),
     })
   }, [t])
+
+  // Close (remove) a panel from the dock — used by the launcher list's ✕ button so
+  // panels can be closed from there, not only via their tab's ✕.
+  const onClosePanel = useCallback((id: string) => {
+    const api = apiRef.current
+    const panel = api?.getPanel(id)
+    if (api && panel) api.removePanel(panel)
+  }, [])
 
   return (
     <div className="app-shell">
@@ -512,6 +530,7 @@ export function Shell() {
           <span className="topbar-actions topbar-actions--mobile">
             <StorageGuard />
             <NotificationBell />
+            <UserChip />
             <MobileConnectSheet
               onOpenSettings={() => setShowMotion(true)}
               onOpenProbe={() => setShowProbe(true)}
@@ -549,7 +568,11 @@ export function Shell() {
                 [status + account]. */}
             <span className="topbar-actions">
               <span className="topbar-group">
-                <PanelLauncher onOpenPanel={onOpenPanel} isPanelOpen={isPanelOpen} />
+                <PanelLauncher
+                  onOpenPanel={onOpenPanel}
+                  isPanelOpen={isPanelOpen}
+                  onClosePanel={onClosePanel}
+                />
                 <IconButton icon={<ResetGlyph />} label="Reset dock layout to default" onClick={onReset} />
                 <span className="zoom-group" title="UI zoom">
                   <IconButton icon={<MinusGlyph />} label="Zoom out" onClick={zoomOut} />

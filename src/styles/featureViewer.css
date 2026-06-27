@@ -408,3 +408,134 @@
   color: var(--fg-muted);
   font-size: var(--fs-label);
 }
+
+/* ── 3D viewport overlay chrome (src/viewer/Viewer.tsx) ─────────────────────
+   Transient HTML controls layered ON TOP of the WebGL canvas: the lasso draw
+   surface, the confirm/action bar shared by the lasso + pick delete tools, and
+   the WebGL-context-lost recovery panel. Styled as translucent, blurred "glass"
+   chrome so they read cleanly over the 3D scene without fighting it; buttons are
+   touch-friendly (≥36px) and the action bar reflows to a full-width strip on
+   narrow / phone widths. (The main viewport TOOLBAR — view presets + display
+   toggles + gizmo tools — lives in VisualizerPanel.tsx, not here.) */
+
+/* Freeform lasso capture surface (full-canvas, captures the polygon in px). */
+.vzo-lasso-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  cursor: crosshair;
+  touch-action: none;
+}
+.vzo-lasso-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Floating confirm/action bar, pinned bottom-centre (clear of the timeline). */
+.vzo-actionbar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  max-width: min(92%, 460px);
+  padding: 9px 13px;
+  border-radius: var(--radius, 8px);
+  background: color-mix(in srgb, var(--bg-elev, #1b1f24) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border, #3a4048);
+  box-shadow: var(--shadow-2, 0 6px 22px rgba(0, 0, 0, 0.4));
+  color: var(--fg, #cfd6dd);
+  font: 12px/1.35 system-ui, sans-serif;
+}
+.vzo-actionbar-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+}
+.vzo-actionbar-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* Shared overlay button — consistent shape, ≥36px touch target. */
+.vzo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border, #3a4048);
+  background: transparent;
+  color: var(--fg, #cfd6dd);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+  transition: border-color var(--dur-fast, 0.12s) var(--ease, ease),
+    background var(--dur-fast, 0.12s) var(--ease, ease);
+}
+.vzo-btn:hover {
+  border-color: var(--accent, #0e7c66);
+  background: color-mix(in srgb, var(--accent, #0e7c66) 10%, transparent);
+}
+.vzo-btn--danger {
+  border-color: transparent;
+  background: var(--danger, #e5484d);
+  color: #fff;
+}
+.vzo-btn--danger:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--danger, #e5484d) 86%, #000);
+}
+.vzo-btn--accent {
+  border-color: transparent;
+  background: var(--accent, #0e7c66);
+  color: #fff;
+}
+.vzo-btn--accent:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent, #0e7c66) 88%, #000);
+}
+
+/* WebGL-context-lost recovery panel (covers the whole canvas). */
+.vzo-gllost {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--fg, #cfd6dd);
+  font: 13px/1.5 system-ui, sans-serif;
+}
+.vzo-gllost-icon {
+  font-size: 26px;
+}
+.vzo-gllost-msg {
+  max-width: 340px;
+}
+
+/* On phones the centred bar can't fit text + two buttons — stretch it across. */
+@media (max-width: 560px) {
+  .vzo-actionbar {
+    left: 8px;
+    right: 8px;
+    transform: none;
+    max-width: none;
+  }
+}

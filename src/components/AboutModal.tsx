@@ -21,9 +21,6 @@ interface AboutModalProps {
   issuesUrl: string
 }
 
-/** Live hosted instance of the app. */
-const LIVE_URL = 'https://karmyogi.hjlabs.in'
-
 /** GitHub mark (inherits the surrounding text color via currentColor). */
 function GitHubGlyph() {
   return (
@@ -40,16 +37,6 @@ function BugGlyph() {
       <path d="M8 2l1.5 2.5M16 2l-1.5 2.5" />
       <rect x="8" y="6" width="8" height="12" rx="4" />
       <path d="M12 6v12M3 9h3M3 14h3M3 19l3-2M18 9h3M18 14h3M18 19l-3-2M5 5l3 2.5M19 5l-3 2.5" />
-    </svg>
-  )
-}
-
-/** "Open in new window" glyph for the live-app button. */
-function ExternalGlyph() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-      <path d="M15 3h6v6M10 14L21 3" />
     </svg>
   )
 }
@@ -162,13 +149,10 @@ export function AboutModal({ open, onClose, repoUrl, issuesUrl }: AboutModalProp
           <div className="km-about2-actions">
             <a
               className="km-about2-btn km-about2-btn-primary"
-              href={LIVE_URL}
+              href={repoUrl}
               target="_blank"
               rel="noopener noreferrer"
             >
-              <ExternalGlyph /> {t('about.live', 'Open live app')}
-            </a>
-            <a className="km-about2-btn" href={repoUrl} target="_blank" rel="noopener noreferrer">
               <GitHubGlyph /> {t('about.source.short', 'View source')}
             </a>
             <a className="km-about2-btn" href={issuesUrl} target="_blank" rel="noopener noreferrer">

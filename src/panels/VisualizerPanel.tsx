@@ -24,6 +24,7 @@ import {
 
 import { sectionColor } from '../viewer/sectionColors'
 import { useViewportShapes, type ShapeKind } from '../store/viewportShapes'
+import { useSolderViz } from '../store/solderViz'
 import { useHover } from '../store/hover'
 import { useSpringViz } from '../store/springViz'
 import { getActiveTab, subscribeActiveTab } from '../track/activity'
@@ -199,6 +200,15 @@ const IconCarve = (
     <path d="M7 16l3-9 2 5 2-3 3 7" />
   </VIcon>
 )
+// PCB board: a rectangular board with two copper pads and a connecting trace.
+const IconPcb = (
+  <VIcon>
+    <rect x="3" y="4" width="18" height="16" rx="1.5" />
+    <circle cx="8" cy="9" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="16" cy="15" r="1.4" fill="currentColor" stroke="none" />
+    <path d="M8 9h4v6h4" />
+  </VIcon>
+)
 const IconCone = (
   <VIcon fill>
     <path d="M12 18L7 7h10z" />
@@ -365,6 +375,12 @@ export function VisualizerPanel() {
   }, [])
 
   const [showStock, setShowStock] = useState(true)
+  // PCB board (FR-4 + copper) visibility for the soldering scene. Lives in the
+  // solderViz store (the channel SolderScene reads), so the toggle here reaches
+  // the scene without threading a prop through the Viewer. Default ON; the pads
+  // never hide — only the board slab does.
+  const showPcb = useSolderViz((s) => s.showPcb)
+  const setShowPcb = useSolderViz((s) => s.setShowPcb)
   // Independent show/hide for the two spindle cones (actual machine vs simulation).
   const [showActualTool, setShowActualTool] = useState(true)
   const [showSimTool, setShowSimTool] = useState(true)
@@ -614,14 +630,11 @@ export function VisualizerPanel() {
     [heightmap],
   )
 
-  // --- Layers / legend overlay (upper-left) ---------------------------------
-  // Collapsed by default so it never clutters the viewport. Each toggle drives
-  // the corresponding three.js object's visibility via the props below, and all
-  // state is persisted (same usePersistentState pattern used across the app).
-  const [legendOpen, setLegendOpen] = usePersistentState(
-    'karmyogi.viewer.legendOpen',
-    false,
-  )
+  // --- Layers tree (lives inside the ⋯ overflow menu → Display section) ------
+  // Each toggle drives the corresponding three.js object's visibility via the
+  // props below, and all state is persisted (same usePersistentState pattern
+  // used across the app). The UI now renders inside OverflowMenu's "Layers"
+  // group rather than as a standalone on-canvas overlay.
   const [showAllToolpaths, setShowAllToolpaths] = usePersistentState(
     'karmyogi.viewer.layers.toolpaths',
     true,
@@ -882,225 +895,263 @@ export function VisualizerPanel() {
     <div className="vz-root">
       <style>{OVERLAY_CSS}</style>
       <div className="vz-stage">
-        {/* Toolbar: PRIMARY buttons stay always-visible and the row wraps
-            (flex-wrap + capped max-width) so it can never overlap the scene on a
-            phone; SECONDARY actions (add-shape + display toggles + camera) live
-            in an overflow "⋯" menu so ~18 controls never collide. Each glyph is
-            unique across the always-visible set (front-view ▭ vs add-rect — the
-            latter is now labeled in the menu; fit ⤢ vs scale ⤡). */}
+        {/* Toolbar (top-right): controls are organised into translucent "glass"
+            CLUSTERS — Render · View · Edit · Display — instead of one long run.
+            Generous gap separates clusters; buttons sit ghost inside a capsule
+            and only fill on hover/open/latched-on, so they don't fight the 3D
+            scene. The whole row wraps (flex-wrap) and clusters reflow as units
+            on narrow/mobile widths; secondary display options stay in the ⋯
+            menu so the visible set never collides with the orientation cube. */}
         <div className="vz-toolbar">
-          {/* V6 — lightweight 2D/SVG render mode toggle (always available). */}
-          <button
-            className={svgMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
-            onClick={() => setSvgMode((s) => !s)}
-            title={t(
-              'vz.svgMode',
-              'Lightweight view — fast 2D top-view render for huge files / weak devices',
-            )}
-            aria-label={t('vz.svgMode', 'Lightweight view')}
-            aria-pressed={svgMode}
+          {/* ── Render-mode cluster: 2D/SVG fast view + laser power heat-map. */}
+          <div
+            className="vz-tbgroup"
+            role="group"
+            aria-label={t('vz.group.render', 'Render mode')}
           >
-            {IconSvg}
-          </button>
-          {/* L10 — laser power heat-map toggle (only when the program varies S). */}
-          {laserPower && (
+            {/* V6 — lightweight 2D/SVG render mode toggle (always available). */}
             <button
-              className={powerHeat ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
-              onClick={() => setPowerHeat((s) => !s)}
+              className={svgMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+              onClick={() => setSvgMode((s) => !s)}
               title={t(
-                'vz.powerHeat',
-                'Power heat-map — colour the toolpath by laser power (S-value)',
+                'vz.svgMode',
+                'Lightweight view — fast 2D top-view render for huge files / weak devices',
               )}
-              aria-label={t('vz.powerHeat', 'Power heat-map')}
-              aria-pressed={powerHeat}
+              aria-label={t('vz.svgMode', 'Lightweight view')}
+              aria-pressed={svgMode}
             >
-              {IconPower}
+              {IconSvg}
             </button>
-          )}
-          <span className="vz-toolbar-sep" aria-hidden="true" />
+            {/* L10 — laser power heat-map toggle (only when the program varies S). */}
+            {laserPower && (
+              <button
+                className={powerHeat ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+                onClick={() => setPowerHeat((s) => !s)}
+                title={t(
+                  'vz.powerHeat',
+                  'Power heat-map — colour the toolpath by laser power (S-value)',
+                )}
+                aria-label={t('vz.powerHeat', 'Power heat-map')}
+                aria-pressed={powerHeat}
+              >
+                {IconPower}
+              </button>
+            )}
+          </div>
+
+          {/* ── Camera-view cluster: fit + Top/Front/Right/Iso presets. These
+              snap the camera (smooth, reduced-motion-gated) and drive the same
+              OrbitControls/camera as the orientation cube below this corner. */}
           {!svgMode && (
-            <>
-          <button
-            className="vz-toolbar-btn"
-            onClick={() => ref.current?.fit()}
-            title={t('vz.fit', 'Fit to toolpath')}
-            aria-label={t('vz.fit', 'Fit to toolpath')}
-          >
-            {IconFit}
-          </button>
-          <span className="vz-toolbar-sep" aria-hidden="true" />
-          {/* V5 preset camera views — a compact cluster that snaps the camera to
-              Top / Front / Right / Iso (smooth, reduced-motion-gated). They drive
-              the same OrbitControls/camera as the orientation cube. */}
-          <button
-            className="vz-toolbar-btn"
-            onClick={() => ref.current?.setView('top')}
-            title={t('vz.top', 'Top view')}
-            aria-label={t('vz.top', 'Top view')}
-          >
-            {IconViewTop}
-          </button>
-          <button
-            className="vz-toolbar-btn"
-            onClick={() => ref.current?.setView('front')}
-            title={t('vz.front', 'Front view')}
-            aria-label={t('vz.front', 'Front view')}
-          >
-            {IconViewFront}
-          </button>
-          <button
-            className="vz-toolbar-btn"
-            onClick={() => ref.current?.setView('right')}
-            title={t('vz.right', 'Right view')}
-            aria-label={t('vz.right', 'Right view')}
-          >
-            {IconViewRight}
-          </button>
-          <button
-            className="vz-toolbar-btn"
-            onClick={() => ref.current?.setView('iso')}
-            title={t('vz.iso', 'Isometric view')}
-            aria-label={t('vz.iso', 'Isometric view')}
-          >
-            {IconIso}
-          </button>
-          <span className="vz-toolbar-sep" aria-hidden="true" />
-          {/* O6 run-outline: latch the program-footprint preview on the bed. */}
-          <button
-            className={
-              showRunOutline ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
-            }
-            onClick={() => setShowRunOutline((s) => !s)}
-            disabled={!hasProgram}
-            title={t(
-              'vz.runOutline',
-              'Run outline — show the program footprint on the bed before running',
-            )}
-            aria-label={t('vz.runOutline', 'Run outline')}
-            aria-pressed={showRunOutline}
-          >
-            {IconRunOutline}
-          </button>
-          <span className="vz-toolbar-sep" aria-hidden="true" />
-            </>
+            <div
+              className="vz-tbgroup"
+              role="group"
+              aria-label={t('vz.group.view', 'Camera views')}
+            >
+              <button
+                className="vz-toolbar-btn"
+                onClick={() => ref.current?.fit()}
+                title={t('vz.fit', 'Fit to toolpath')}
+                aria-label={t('vz.fit', 'Fit to toolpath')}
+              >
+                {IconFit}
+              </button>
+              <button
+                className="vz-toolbar-btn"
+                onClick={() => ref.current?.setView('top')}
+                title={t('vz.top', 'Top view')}
+                aria-label={t('vz.top', 'Top view')}
+              >
+                {IconViewTop}
+              </button>
+              <button
+                className="vz-toolbar-btn"
+                onClick={() => ref.current?.setView('front')}
+                title={t('vz.front', 'Front view')}
+                aria-label={t('vz.front', 'Front view')}
+              >
+                {IconViewFront}
+              </button>
+              <button
+                className="vz-toolbar-btn"
+                onClick={() => ref.current?.setView('right')}
+                title={t('vz.right', 'Right view')}
+                aria-label={t('vz.right', 'Right view')}
+              >
+                {IconViewRight}
+              </button>
+              <button
+                className="vz-toolbar-btn"
+                onClick={() => ref.current?.setView('iso')}
+                title={t('vz.iso', 'Isometric view')}
+                aria-label={t('vz.iso', 'Isometric view')}
+              >
+                {IconIso}
+              </button>
+            </div>
           )}
-          <BedSizeControl />
-          {/* Overflow menu for the secondary controls. */}
-          <OverflowMenu
-            t={t}
-            onAddShape={onAddShape}
-            showDimensions={showDimensions}
-            setShowDimensions={setShowDimensions}
-            showStock={showStock}
-            setShowStock={setShowStock}
-            carveSim={carveSim}
-            setCarveSim={setCarveSim}
-            autoStock={autoStock}
-            setAutoStock={setAutoStock}
-            autoStockThickness={autoStockThickness}
-            setAutoStockThickness={setAutoStockThickness}
-            hideProcessed={hideProcessed}
-            setHideProcessed={setHideProcessed}
-            showActualTool={showActualTool}
-            setShowActualTool={setShowActualTool}
-            showSimTool={showSimTool}
-            setShowSimTool={setShowSimTool}
-            showJobBoxes={showJobBoxes}
-            setShowJobBoxes={setShowJobBoxes}
-            showSoftLimits={showSoftLimits}
-            setShowSoftLimits={setShowSoftLimits}
-            camOverlay={camOverlay}
-            toggleCamOverlay={toggleCamOverlay}
-          />
+
+          {/* ── Edit / selection-tools cluster: place · reset · lasso · pick ·
+              jog-to. Grouped so the destructive/interaction tools read as one
+              distinct palette separate from the (non-mutating) view buttons. */}
           {!svgMode && (
-            <>
-          <span className="vz-toolbar-sep" aria-hidden="true" />
-          <button
-            className={
-              gizmoOn ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
-            }
-            onClick={toggleGizmo}
-            disabled={!hasProgram}
-            title={t('vz.place', 'Place job — move / rotate / scale on all 3 axes (or click a toolpath)')}
-            aria-label={t('vz.place', 'Place job')}
-            aria-pressed={gizmoOn}
-          >
-            {IconPlace}
-          </button>
-          {gizmoOn && selectedSectionId && (
-            <button
-              className="vz-toolbar-btn"
-              onClick={() =>
-                useProgram.getState().resetSectionPlacement(selectedSectionId)
-              }
-              title={t('vz.resetPlacement', 'Reset placement')}
-              aria-label={t('vz.resetPlacement', 'Reset placement')}
+            <div
+              className="vz-tbgroup"
+              role="group"
+              aria-label={t('vz.group.tools', 'Edit tools')}
             >
-              {IconReset}
-            </button>
+              <button
+                className={
+                  gizmoOn ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
+                }
+                onClick={toggleGizmo}
+                disabled={!hasProgram}
+                title={t('vz.place', 'Place job — move / rotate / scale on all 3 axes (or click a toolpath)')}
+                aria-label={t('vz.place', 'Place job')}
+                aria-pressed={gizmoOn}
+              >
+                {IconPlace}
+              </button>
+              {gizmoOn && selectedSectionId && (
+                <button
+                  className="vz-toolbar-btn"
+                  onClick={() =>
+                    useProgram.getState().resetSectionPlacement(selectedSectionId)
+                  }
+                  title={t('vz.resetPlacement', 'Reset placement')}
+                  aria-label={t('vz.resetPlacement', 'Reset placement')}
+                >
+                  {IconReset}
+                </button>
+              )}
+              <button
+                className={lassoMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+                onClick={toggleLasso}
+                disabled={!hasProgram}
+                title={t('vz.lasso', 'Lasso-delete: drag a region over the toolpath to remove moves (safe-Z kept)')}
+                aria-label={t('vz.lasso', 'Lasso delete')}
+                aria-pressed={lassoMode}
+              >
+                {IconLasso}
+              </button>
+              <button
+                className={pickMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+                onClick={togglePick}
+                disabled={!hasProgram}
+                title={t(
+                  'vz.pick',
+                  'Pick-delete: click a toolpath line to select it (Shift/Ctrl-click for more), then Delete (safe-Z kept)',
+                )}
+                aria-label={t('vz.pick', 'Pick delete')}
+                aria-pressed={pickMode}
+              >
+                {IconPick}
+              </button>
+              {/* V8 right-click-to-jog: arm jog-to-point mode (needs a connection). */}
+              <button
+                className={jogToMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+                onClick={toggleJogTo}
+                disabled={!connected}
+                title={t(
+                  'vz.jogTo',
+                  'Jog to point — right-click anywhere on the bed to move the head there (retracts to safe-Z first)',
+                )}
+                aria-label={t('vz.jogTo', 'Jog to point')}
+                aria-pressed={jogToMode}
+              >
+                {IconJogTo}
+              </button>
+            </div>
           )}
-          <button
-            className={lassoMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
-            onClick={toggleLasso}
-            disabled={!hasProgram}
-            title={t('vz.lasso', 'Lasso-delete: drag a region over the toolpath to remove moves (safe-Z kept)')}
-            aria-label={t('vz.lasso', 'Lasso delete')}
-            aria-pressed={lassoMode}
+
+          {/* ── Scene / display cluster: run-outline · bed-size · ⋯ more (add
+              shapes + display options) · live HUD · surface heightmap. The ⋯
+              menu absorbs the secondary toggles so this cluster stays compact. */}
+          <div
+            className="vz-tbgroup"
+            role="group"
+            aria-label={t('vz.group.display', 'Scene & display')}
           >
-            {IconLasso}
-          </button>
-          <button
-            className={pickMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
-            onClick={togglePick}
-            disabled={!hasProgram}
-            title={t(
-              'vz.pick',
-              'Pick-delete: click a toolpath line to select it (Shift/Ctrl-click for more), then Delete (safe-Z kept)',
+            {/* O6 run-outline: latch the program-footprint preview on the bed. */}
+            {!svgMode && (
+              <button
+                className={
+                  showRunOutline ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'
+                }
+                onClick={() => setShowRunOutline((s) => !s)}
+                disabled={!hasProgram}
+                title={t(
+                  'vz.runOutline',
+                  'Run outline — show the program footprint on the bed before running',
+                )}
+                aria-label={t('vz.runOutline', 'Run outline')}
+                aria-pressed={showRunOutline}
+              >
+                {IconRunOutline}
+              </button>
             )}
-            aria-label={t('vz.pick', 'Pick delete')}
-            aria-pressed={pickMode}
-          >
-            {IconPick}
-          </button>
-          <span className="vz-toolbar-sep" aria-hidden="true" />
-          {/* V8 right-click-to-jog: arm jog-to-point mode (needs a connection). */}
-          <button
-            className={jogToMode ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
-            onClick={toggleJogTo}
-            disabled={!connected}
-            title={t(
-              'vz.jogTo',
-              'Jog to point — right-click anywhere on the bed to move the head there (retracts to safe-Z first)',
-            )}
-            aria-label={t('vz.jogTo', 'Jog to point')}
-            aria-pressed={jogToMode}
-          >
-            {IconJogTo}
-          </button>
-            </>
-          )}
-          {/* V10 live DRO/state HUD overlay toggle. */}
-          <button
-            className={showHud ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
-            onClick={() => setShowHud((s) => !s)}
-            title={t('vz.hud', 'Live readout — show machine state, position, feed & spindle in the viewport')}
-            aria-label={t('vz.hud', 'Live readout overlay')}
-            aria-pressed={showHud}
-          >
-            {IconHud}
-          </button>
-          {/* V9 heightmap overlay toggle — only meaningful once a surface is probed. */}
-          {!svgMode && heightmapReady && (
+            <BedSizeControl />
+            {/* Overflow menu for the secondary controls. */}
+            <OverflowMenu
+              t={t}
+              onAddShape={onAddShape}
+              showAllToolpaths={showAllToolpaths}
+              setShowAllToolpaths={setShowAllToolpaths}
+              layerSections={legendSections}
+              hiddenSections={hiddenSections}
+              onToggleSection={toggleSection}
+              showModel={showModel}
+              setShowModel={setShowModel}
+              showBed={showBed}
+              setShowBed={setShowBed}
+              showDimensions={showDimensions}
+              setShowDimensions={setShowDimensions}
+              showStock={showStock}
+              setShowStock={setShowStock}
+              showPcb={showPcb}
+              setShowPcb={setShowPcb}
+              carveSim={carveSim}
+              setCarveSim={setCarveSim}
+              autoStock={autoStock}
+              setAutoStock={setAutoStock}
+              autoStockThickness={autoStockThickness}
+              setAutoStockThickness={setAutoStockThickness}
+              hideProcessed={hideProcessed}
+              setHideProcessed={setHideProcessed}
+              showActualTool={showActualTool}
+              setShowActualTool={setShowActualTool}
+              showSimTool={showSimTool}
+              setShowSimTool={setShowSimTool}
+              showJobBoxes={showJobBoxes}
+              setShowJobBoxes={setShowJobBoxes}
+              showSoftLimits={showSoftLimits}
+              setShowSoftLimits={setShowSoftLimits}
+              camOverlay={camOverlay}
+              toggleCamOverlay={toggleCamOverlay}
+            />
+            {/* V10 live DRO/state HUD overlay toggle. */}
             <button
-              className={showHeightmap ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
-              onClick={() => setShowHeightmap((s) => !s)}
-              title={t('vz.heightmap', 'Surface map — overlay the probed auto-leveling relief (low blue → high red)')}
-              aria-label={t('vz.heightmap', 'Surface map overlay')}
-              aria-pressed={showHeightmap}
+              className={showHud ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+              onClick={() => setShowHud((s) => !s)}
+              title={t('vz.hud', 'Live readout — show machine state, position, feed & spindle in the viewport')}
+              aria-label={t('vz.hud', 'Live readout overlay')}
+              aria-pressed={showHud}
             >
-              {IconHeightmap}
+              {IconHud}
             </button>
-          )}
+            {/* V9 heightmap overlay toggle — only meaningful once a surface is probed. */}
+            {!svgMode && heightmapReady && (
+              <button
+                className={showHeightmap ? 'vz-toolbar-btn vz-toolbar-btn--on' : 'vz-toolbar-btn'}
+                onClick={() => setShowHeightmap((s) => !s)}
+                title={t('vz.heightmap', 'Surface map — overlay the probed auto-leveling relief (low blue → high red)')}
+                aria-label={t('vz.heightmap', 'Surface map overlay')}
+                aria-pressed={showHeightmap}
+              >
+                {IconHeightmap}
+              </button>
+            )}
+          </div>
         </div>
         {svgMode ? (
           <SvgViewport
@@ -1175,23 +1226,6 @@ export function VisualizerPanel() {
         )}
         {/* L10 — power scale legend (shown in both render modes when active). */}
         {heatOn && powerRange && <PowerLegend range={powerRange} t={t} />}
-        {!svgMode && (
-        <LegendPanel
-          t={t}
-          open={legendOpen}
-          setOpen={setLegendOpen}
-          showAllToolpaths={showAllToolpaths}
-          setShowAllToolpaths={setShowAllToolpaths}
-          sections={legendSections}
-          hiddenSections={hiddenSections}
-          onToggleSection={toggleSection}
-          showModel={showModel}
-          setShowModel={setShowModel}
-          showBed={showBed}
-          setShowBed={setShowBed}
-          shifted={gizmoOn && !!placement}
-        />
-        )}
         {!svgMode && gizmoOn && placement && (
           <PlacementReadout
             placement={placement}
@@ -1245,10 +1279,21 @@ const SIM_TOOL_COLOR = '#22d3ee'
 function OverflowMenu({
   t,
   onAddShape,
+  showAllToolpaths,
+  setShowAllToolpaths,
+  layerSections,
+  hiddenSections,
+  onToggleSection,
+  showModel,
+  setShowModel,
+  showBed,
+  setShowBed,
   showDimensions,
   setShowDimensions,
   showStock,
   setShowStock,
+  showPcb,
+  setShowPcb,
   carveSim,
   setCarveSim,
   autoStock,
@@ -1270,10 +1315,21 @@ function OverflowMenu({
 }: {
   t: TFn
   onAddShape: (kind: ShapeKind) => void
+  showAllToolpaths: boolean
+  setShowAllToolpaths: Toggle
+  layerSections: LegendSection[]
+  hiddenSections: Record<string, boolean>
+  onToggleSection: (id: string) => void
+  showModel: boolean
+  setShowModel: Toggle
+  showBed: boolean
+  setShowBed: Toggle
   showDimensions: boolean
   setShowDimensions: Toggle
   showStock: boolean
   setShowStock: Toggle
+  showPcb: boolean
+  setShowPcb: Toggle
   carveSim: boolean
   setCarveSim: Toggle
   autoStock: boolean
@@ -1370,6 +1426,40 @@ function OverflowMenu({
     </button>
   )
 
+  // One eye/eye-off layer row (master "All toolpaths", per-section, model, bed).
+  // Reuses the layers-tree row styling so the look is identical to the old
+  // on-canvas overlay — just hosted inside this menu now.
+  const layerRow = (
+    visible: boolean,
+    label: React.ReactNode,
+    onToggle: () => void,
+    opts?: { indent?: boolean; swatch?: string; key?: string },
+  ) => (
+    <button
+      key={opts?.key}
+      type="button"
+      className={
+        'vz-layer-row' +
+        (opts?.indent ? ' vz-layer-row--child' : '') +
+        (visible ? '' : ' vz-layer-row--off')
+      }
+      onClick={onToggle}
+      aria-pressed={visible}
+    >
+      <span className="vz-layer-eye" aria-hidden="true">
+        <Icon name={visible ? 'eye' : 'eye-off'} size={15} />
+      </span>
+      {opts?.swatch !== undefined && (
+        <span
+          className="vz-layer-swatch"
+          style={{ background: opts.swatch }}
+          aria-hidden="true"
+        />
+      )}
+      <span className="vz-layer-label">{label}</span>
+    </button>
+  )
+
   return (
     <div className="vz-bed-wrap" ref={wrapRef}>
       <button
@@ -1436,10 +1526,54 @@ function OverflowMenu({
             showStock,
           )}
           {item(
+            IconPcb,
+            t('vz.display.pcb', 'PCB board — show the soldering FR-4/copper board (pads always shown)'),
+            () => setShowPcb((s) => !s),
+            showPcb,
+          )}
+          {item(
             IconCarve,
             t('vz.carveSim', 'Material removal simulation'),
             () => setCarveSim((s) => !s),
             carveSim,
+          )}
+          {/* Layers tree (relocated from the old on-canvas overlay): show/hide
+              the toolpaths (master + per-section, with colour swatches), the
+              model/drawing, and the machine bed. The per-section list scrolls
+              when long so the rest of the menu stays reachable. */}
+          <div className="vz-menu-group">
+            {t('vz.layers.label', 'Layers')}
+          </div>
+          <div className="vz-layer-group">
+            {t('vz.layers.toolpaths', 'Toolpaths')}
+          </div>
+          {layerRow(
+            showAllToolpaths,
+            t('vz.layers.allToolpaths', 'All toolpaths'),
+            () => setShowAllToolpaths((v) => !v),
+          )}
+          {layerSections.length === 0 ? (
+            <div className="vz-layer-empty">
+              {t('vz.layers.none', 'No toolpaths loaded')}
+            </div>
+          ) : (
+            <div className="vz-menu-layers">
+              {layerSections.map((s) =>
+                layerRow(
+                  showAllToolpaths && hiddenSections[s.id] !== true,
+                  s.name,
+                  () => onToggleSection(s.id),
+                  { indent: true, swatch: s.color, key: s.id },
+                ),
+              )}
+            </div>
+          )}
+          <div className="vz-layer-group">{t('vz.layers.scene', 'Scene')}</div>
+          {layerRow(showModel, t('vz.layers.model', 'Model / drawing'), () =>
+            setShowModel((v) => !v),
+          )}
+          {layerRow(showBed, t('vz.layers.bed', 'Machine bed'), () =>
+            setShowBed((v) => !v),
           )}
           <div className="vz-menu-group">
             {t('sim.menu.stock', 'Stock simulation')}
@@ -1514,137 +1648,6 @@ interface LegendSection {
   id: string
   name: string
   color: string
-}
-
-/**
- * Collapsible LAYERS / legend overlay (upper-left). Collapsed by default it is
- * just a small layers button, so it never clutters the viewport; expanding
- * reveals a tree of eye/eye-off show-hide toggles for the toolpaths (an "All"
- * master plus one row per program section, each with its colour swatch), the
- * model / drawing preview, and the machine bed. Each toggle drives the matching
- * three.js object's `.visible` through props passed to the Viewer.
- *
- * Sits opposite the toolbar (top-LEFT vs the toolbar's top-RIGHT) so it never
- * overlaps the lasso/pick tools or the ⋯ menu; when the placement readout is
- * showing (also top-left) it shifts down (`shifted`) so the two never collide.
- */
-function LegendPanel({
-  t,
-  open,
-  setOpen,
-  showAllToolpaths,
-  setShowAllToolpaths,
-  sections,
-  hiddenSections,
-  onToggleSection,
-  showModel,
-  setShowModel,
-  showBed,
-  setShowBed,
-  shifted,
-}: {
-  t: TFn
-  open: boolean
-  setOpen: (updater: (v: boolean) => boolean) => void
-  showAllToolpaths: boolean
-  setShowAllToolpaths: Toggle
-  sections: LegendSection[]
-  hiddenSections: Record<string, boolean>
-  onToggleSection: (id: string) => void
-  showModel: boolean
-  setShowModel: Toggle
-  showBed: boolean
-  setShowBed: Toggle
-  shifted: boolean
-}) {
-  const eyeRow = (
-    visible: boolean,
-    label: React.ReactNode,
-    onToggle: () => void,
-    opts?: { indent?: boolean; swatch?: string; key?: string },
-  ) => (
-    <button
-      key={opts?.key}
-      type="button"
-      className={
-        'vz-layer-row' +
-        (opts?.indent ? ' vz-layer-row--child' : '') +
-        (visible ? '' : ' vz-layer-row--off')
-      }
-      onClick={onToggle}
-      aria-pressed={visible}
-    >
-      <span className="vz-layer-eye" aria-hidden="true">
-        <Icon name={visible ? 'eye' : 'eye-off'} size={15} />
-      </span>
-      {opts?.swatch !== undefined && (
-        <span
-          className="vz-layer-swatch"
-          style={{ background: opts.swatch }}
-          aria-hidden="true"
-        />
-      )}
-      <span className="vz-layer-label">{label}</span>
-    </button>
-  )
-
-  return (
-    <div
-      className={'vz-layers' + (shifted ? ' vz-layers--shifted' : '')}
-      role="group"
-      aria-label={t('vz.layers.aria', 'Layers')}
-    >
-      <button
-        type="button"
-        className="vz-toolbar-btn vz-layers-btn"
-        onClick={() => setOpen((o) => !o)}
-        title={t('vz.layers.title', 'Layers — show / hide toolpaths, model, bed')}
-        aria-label={t('vz.layers.title', 'Layers')}
-        aria-expanded={open}
-      >
-        <span className="vz-layers-glyph" aria-hidden="true">
-          {open ? (
-            <VIcon size={14}>
-              <path d="M6 9l6 6 6-6" />
-            </VIcon>
-          ) : (
-            <VIcon size={14}>
-              <path d="M12 5v14M5 12h14" />
-            </VIcon>
-          )}
-        </span>
-        <span className="vz-layers-btn-label">{t('vz.layers.label', 'Layers')}</span>
-      </button>
-      {open && (
-        <div className="vz-layers-tree">
-          <div className="vz-layer-group">{t('vz.layers.toolpaths', 'Toolpaths')}</div>
-          {eyeRow(
-            showAllToolpaths,
-            t('vz.layers.allToolpaths', 'All toolpaths'),
-            () => setShowAllToolpaths((v) => !v),
-          )}
-          {sections.length === 0 && (
-            <div className="vz-layer-empty">{t('vz.layers.none', 'No toolpaths loaded')}</div>
-          )}
-          {sections.map((s) =>
-            eyeRow(
-              showAllToolpaths && hiddenSections[s.id] !== true,
-              s.name,
-              () => onToggleSection(s.id),
-              { indent: true, swatch: s.color, key: s.id },
-            ),
-          )}
-          <div className="vz-layer-group">{t('vz.layers.scene', 'Scene')}</div>
-          {eyeRow(showModel, t('vz.layers.model', 'Model / drawing'), () =>
-            setShowModel((v) => !v),
-          )}
-          {eyeRow(showBed, t('vz.layers.bed', 'Machine bed'), () =>
-            setShowBed((v) => !v),
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 /**
@@ -2252,6 +2255,21 @@ function SvgViewport({
   t: TFn
 }) {
   const selectedLine = useGcodeSelection((s) => s.selectedLine)
+  // Live tool position (work coords) — drawn as a crosshair that tracks jogs and
+  // streaming. wpos is replaced with a fresh object on each status report, so this
+  // selector re-renders the (cheap) marker live without recomputing the path memo.
+  const wpos = useMachine((s) => s.wpos)
+  const connected = useMachine((s) => s.connection === 'connected')
+  // Soldering points of interest — mirror the 3D SolderScene's pads + highlights.
+  const solderActive = useSolderViz((s) => s.active)
+  const solderPts = useSolderViz((s) => s.points)
+  const solSelected = useSolderViz((s) => s.selected)
+  const solHovered = useSolderViz((s) => s.hovered)
+  const solActive = useSolderViz((s) => s.activeIndex)
+  const solFromDrill = useSolderViz((s) => s.fromDrill)
+  // Hover previews a point; otherwise the pinned click-selection shows (as in 3D).
+  const solHighlight = solHovered >= 0 ? solHovered : solSelected
+  const hasSolder = solderActive && solderPts.length > 0
 
   const view = useMemo(() => {
     let minX = -bedW / 2
@@ -2264,6 +2282,13 @@ function SvgViewport({
       minY = Math.min(minY, s.from[1], s.to[1])
       maxY = Math.max(maxY, s.from[1], s.to[1])
     }
+    // Keep solder pads in frame (a points-only soldering job has no segments).
+    for (const p of solderPts) {
+      minX = Math.min(minX, p.x)
+      maxX = Math.max(maxX, p.x)
+      minY = Math.min(minY, p.y)
+      maxY = Math.max(maxY, p.y)
+    }
     const pad = Math.max(maxX - minX, maxY - minY) * 0.04 + 2
     minX -= pad
     maxX += pad
@@ -2271,6 +2296,8 @@ function SvgViewport({
     maxY += pad
     const w = Math.max(maxX - minX, 1)
     const h = Math.max(maxY - minY, 1)
+    // Marker radius in mm, scaled to the view so pads/crosshair read at any zoom.
+    const markerR = Math.max(Math.min(w, h) * 0.012, 0.6)
 
     const rapid: string[] = []
     const cut: string[] = []
@@ -2302,13 +2329,20 @@ function SvgViewport({
       cutD: cut.join(''),
       bucketD: buckets.map((b) => b.join('')),
       selD: sel.join(''),
+      markerR,
     }
-  }, [segments, bedW, bedD, colorByPower, powerRange, selectedLine])
+  }, [segments, solderPts, bedW, bedD, colorByPower, powerRange, selectedLine])
 
   const bg = dark ? '#15181c' : '#e7ecf1'
   const bedStroke = dark ? '#515c6e' : '#aab4c0'
   const cutColor = dark ? '#38bdf8' : '#0369a1'
   const rapidColor = dark ? '#6b7280' : '#94a3b8'
+  // POI / live-marker palette (mirrors the 3D scene: copper pad, cyan highlight,
+  // amber active/live so the 2D view reads the same as the 3D one).
+  const padColor = dark ? '#ffd98a' : '#c8951a'
+  const hiColor = dark ? '#34e3f5' : '#0891b2'
+  const liveColor = dark ? '#ffb454' : '#ea7a17'
+  const r = view.markerR
 
   return (
     <div className="vz-svgwrap" style={{ background: bg }}>
@@ -2364,6 +2398,73 @@ function SvgViewport({
             )}
         {view.selD && (
           <path d={view.selD} fill="none" stroke="#f43f5e" strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
+        )}
+        {/* Soldering points of interest: a marker per pad, echoing the 3D scene's
+            hover/pin highlight (cyan) and the streaming active point (amber). Drill
+            points read as hollow rings; surface pads as filled discs. */}
+        {hasSolder &&
+          solderPts.map((p, i) => {
+            const isHi = i === solHighlight
+            const isAct = i === solActive
+            const c = isHi ? hiColor : isAct ? liveColor : padColor
+            const rr = isHi || isAct ? r * 1.5 : r
+            return solFromDrill ? (
+              <circle
+                key={i}
+                cx={p.x}
+                cy={-p.y}
+                r={rr}
+                fill="none"
+                stroke={c}
+                strokeWidth={isHi || isAct ? 1.8 : 1.2}
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : (
+              <circle
+                key={i}
+                cx={p.x}
+                cy={-p.y}
+                r={rr}
+                fill={c}
+                fillOpacity={isHi || isAct ? 0.95 : 0.7}
+                stroke={c}
+                strokeWidth={isHi || isAct ? 1.4 : 0.6}
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })}
+        {/* Live tool marker: a crosshair + dot at the machine's current work
+            position, tracking jogs and streaming. Only while connected. */}
+        {connected && Number.isFinite(wpos.x) && Number.isFinite(wpos.y) && (
+          <g>
+            <line
+              x1={wpos.x - r * 2.4}
+              y1={-wpos.y}
+              x2={wpos.x + r * 2.4}
+              y2={-wpos.y}
+              stroke={liveColor}
+              strokeWidth={1.6}
+              vectorEffect="non-scaling-stroke"
+            />
+            <line
+              x1={wpos.x}
+              y1={-wpos.y - r * 2.4}
+              x2={wpos.x}
+              y2={-wpos.y + r * 2.4}
+              stroke={liveColor}
+              strokeWidth={1.6}
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle
+              cx={wpos.x}
+              cy={-wpos.y}
+              r={r * 0.9}
+              fill="none"
+              stroke={liveColor}
+              strokeWidth={1.6}
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
         )}
       </svg>
       <div className="vz-svg-badge" aria-hidden="true">
@@ -2449,12 +2550,61 @@ const OVERLAY_CSS = `
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  align-items: center;
-  gap: 3px;
+  align-items: flex-start;
+  /* Generous gap BETWEEN clusters; spacing WITHIN a cluster is tighter (set on
+     .vz-tbgroup) so each capsule reads as one cohesive group. */
+  gap: 8px;
   /* Cap the width so the row WRAPS instead of overlapping the scene; leave a
      left gutter so it never collides with the placement readout (top-left). */
   max-width: calc(100% - 16px);
   pointer-events: auto;
+}
+/* A cluster of related controls — a translucent "glass" capsule that groups
+   buttons (render · view · edit · display) so the overlay reads as a few tidy
+   clusters instead of one long crowded run. Buttons inside go "ghost" (below)
+   so the capsule itself carries the surface; only hover/open/latched-on fills. */
+.vz-tbgroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: calc(var(--radius) + 4px);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 68%, transparent);
+  backdrop-filter: blur(9px) saturate(1.12);
+  box-shadow: var(--shadow-1);
+}
+.vz-tbgroup .vz-toolbar-btn {
+  background: transparent;
+  border-color: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+.vz-tbgroup .vz-toolbar-btn:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  border-color: transparent;
+  color: var(--fg);
+}
+.vz-tbgroup .vz-toolbar-btn[aria-expanded='true'] {
+  /* Open popover trigger (Bed / More): subtle accent tint, no border so it
+     stays flush inside the capsule. */
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+}
+.vz-tbgroup .vz-toolbar-btn--on,
+.vz-tbgroup .vz-toolbar-btn--on:hover {
+  /* Latched mode (place / lasso / pick / jog / run-outline / heat-map): a solid
+     accent fill stands out unmistakably against the translucent capsule. */
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.vz-tbgroup .vz-toolbar-btn:disabled,
+.vz-tbgroup .vz-toolbar-btn:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-muted);
 }
 /* Icon button (§2.8): --icon-btn square, neutral resting border, accent only on
    hover/active/focus. The translucent glass fill stays (these float over the 3D
@@ -2706,51 +2856,17 @@ const OVERLAY_CSS = `
 .vz-menu-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .vz-menu-input:focus { outline: none; border-color: var(--accent); }
 .vz-menu-unit { flex: 0 0 auto; color: var(--fg-muted); font-size: 10px; }
-.vz-layers-glyph { display: inline-flex; align-items: center; justify-content: center; }
 .vz-legend-cone svg { display: block; }
 .vz-menu-label { flex: 1 1 auto; min-width: 0; }
-/* --- layers / legend overlay (top-left, collapsible) --- */
-.vz-layers {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 4;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
-  /* Cap so the tree wraps/scrolls instead of covering the scene on a phone. */
-  max-width: min(70%, 230px);
-  pointer-events: auto;
-}
-/* When the placement readout occupies the top-left, drop below it. */
-.vz-layers--shifted { top: 44px; }
-.vz-layers-btn {
-  width: auto;
-  min-width: 28px;
-  gap: 5px;
-  padding: 0 9px;
-}
-.vz-layers-glyph { font-size: 13px; line-height: 1; }
-.vz-layers-btn-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-}
-.vz-layers-tree {
+/* --- layers tree (hosted inside the ⋯ overflow menu → Display section) --- */
+/* The per-section list scrolls on its own so a program with many sections never
+   makes the menu unwieldy; the model/bed rows + other menu controls stay put. */
+.vz-menu-layers {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  width: max-content;
-  max-width: 100%;
-  max-height: min(60vh, 360px);
+  max-height: min(34vh, 200px);
   overflow-y: auto;
-  padding: 5px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
-  backdrop-filter: blur(6px);
-  box-shadow: var(--shadow-2);
 }
 .vz-layer-group {
   padding: 5px 6px 2px;
@@ -2950,10 +3066,9 @@ const OVERLAY_CSS = `
   .vz-hud-axisval { font-size: 15px; }
   .vz-tooltl-pin { height: 18px; width: 4px; }
   .vz-tooltl-mark { min-width: 16px; }
-  .vz-toolbar { gap: 6px; }
+  .vz-toolbar { gap: 8px; }
+  .vz-tbgroup { gap: 3px; padding: 4px; }
   .vz-toolbar-btn { width: 36px; height: 36px; font-size: 18px; }
-  .vz-layers-btn { width: auto; }
-  .vz-layers--shifted { top: 52px; }
   .vz-layer-row { min-height: 40px; font-size: 13px; }
   .vz-layer-group { font-size: 11px; }
   .vz-layer-empty { font-size: 12px; }

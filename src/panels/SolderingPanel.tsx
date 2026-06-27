@@ -500,6 +500,7 @@ export function SolderingPanel() {
   const notify = useNotifications((s) => s.notify)
   const setSolderViz = useSolderViz((s) => s.set)
   const selectSolderViz = useSolderViz((s) => s.select)
+  const setHoveredViz = useSolderViz((s) => s.setHovered)
   const clearSolderViz = useSolderViz((s) => s.clear)
   const setDetectedViz = useSolderViz((s) => s.setDetected)
   // Camera calibration + live video for vision pad-detection and the iron-touch
@@ -677,6 +678,36 @@ export function SolderingPanel() {
   // + 3D regenerate exactly as they do for a single-row change.
   function applyToAll(patch: Partial<SolderPoint>) {
     setPoints((p) => p.map((pt) => ({ ...pt, ...patch })))
+  }
+
+  // "Apply to all points" — New-point defaults section. Copies EVERY new-point
+  // default field (the per-point SolderPoint fields the defaults block edits) onto
+  // every existing point in one action, so after tuning the defaults the operator
+  // can bulk-update the points already in the table. X/Y stay per-point (they are
+  // per-point coordinates), and individual points remain editable afterward.
+  function applyDefaultsToAll() {
+    if (points.length === 0) return
+    applyToAll({
+      freeZ: defaults.freeZ,
+      touchZ: defaults.touchZ,
+      feedSeconds: Math.max(0, defaults.feedSeconds),
+      type: defaults.type,
+      approach: defaults.approach,
+      preheatSeconds: Math.max(0, defaults.preheatSeconds ?? 0),
+      antiOozeMm: Math.max(0, defaults.antiOozeMm ?? 0),
+    })
+    notify('success', t('solder.applyAll.defaults.done', 'Applied the new-point defaults to all {n} point(s).', { n: points.length }))
+  }
+
+  // "Apply to all points" — Feeder & motion section. Safe-Z, feeder S, plunge
+  // feed, prime, anti-ooze feed and decimals are GLOBAL program params that already
+  // apply to every point, so the only per-point-overridable field this section owns
+  // is the settle dwell (SolderPoint.settleSeconds overrides the global one). Pin
+  // the current settle value onto every existing point; points stay editable.
+  function applyFeederToAll() {
+    if (points.length === 0) return
+    applyToAll({ settleSeconds: Math.max(0, params.settleSeconds) })
+    notify('success', t('solder.applyAll.feeder.done', 'Applied the settle dwell to all {n} point(s).', { n: points.length }))
   }
 
   // Download the current point list as a CSV the operator can re-load later.
@@ -1641,6 +1672,33 @@ export function SolderingPanel() {
                 </select>
               </div>
             </div>
+            {/* Apply the new-point defaults above to every EXISTING point in one
+                action (X/Y stay per-point). Bulk-updates the table after the
+                operator tunes the defaults; points remain individually editable. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '0 var(--sp-3) var(--sp-2)' }}>
+              <button
+                type="button"
+                className="sp-optimize-btn"
+                style={{ marginLeft: 0 }}
+                onClick={applyDefaultsToAll}
+                disabled={points.length === 0}
+                title={t('solder.applyAll.defaults.title', 'Overwrite Free-Z, Touch-Z, feed, preheat, anti-ooze, feed type and approach on all {n} existing point(s) with the defaults above (X/Y kept).', { n: points.length })}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 3v9" />
+                  <path d="m8 9 4 4 4-4" />
+                  <path d="M5 18h14" />
+                  <path d="M5 21h14" />
+                </svg>
+                <span>{t('solder.applyAll.points', 'Apply to all points')}</span>
+                {points.length > 0 && <span className="sp-optimize-travel">{points.length}</span>}
+              </button>
+              <InfoTip
+                topic="solderDefaults"
+                title={t('solder.applyAll.defaults.tipTitle', 'Apply defaults to all points')}
+                body={t('solder.applyAll.defaults.body', 'Copies the Free-Z, Touch-Z, feed, preheat, anti-ooze, feed type and approach above onto every point already in the table. Each point keeps its own X/Y, and you can still edit individual points afterward.')}
+              />
+            </div>
           </div>
 
           <div className="sp-card">
@@ -1743,6 +1801,33 @@ export function SolderingPanel() {
                   title: t('solder.field.decimals', 'Decimals'),
                   body: t('solder.field.decimals.body', 'Number of decimal places in the emitted coordinates (0–6).'),
                 }}
+              />
+            </div>
+            {/* Apply the feeder/motion settle dwell to every EXISTING point. The
+                other params here are global (Safe-Z, feeder S, plunge feed, prime,
+                anti-ooze feed, decimals) and already apply to all points. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '0 var(--sp-3) var(--sp-2)' }}>
+              <button
+                type="button"
+                className="sp-optimize-btn"
+                style={{ marginLeft: 0 }}
+                onClick={applyFeederToAll}
+                disabled={points.length === 0}
+                title={t('solder.applyAll.feeder.title', 'Pin the current settle dwell onto all {n} existing point(s) as a per-point value. Safe-Z, feeder S, plunge feed, prime, anti-ooze feed and decimals are global and already apply to every point.', { n: points.length })}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 3v9" />
+                  <path d="m8 9 4 4 4-4" />
+                  <path d="M5 18h14" />
+                  <path d="M5 21h14" />
+                </svg>
+                <span>{t('solder.applyAll.points', 'Apply to all points')}</span>
+                {points.length > 0 && <span className="sp-optimize-travel">{points.length}</span>}
+              </button>
+              <InfoTip
+                topic="solderFeeder"
+                title={t('solder.applyAll.feeder.tipTitle', 'Apply settle to all points')}
+                body={t('solder.applyAll.feeder.body', 'Writes the current Settle dwell onto every point in the table as a per-point override. The other feeder and motion values (Safe-Z, feeder S, plunge feed, prime, anti-ooze feed, decimals) are global program settings that already apply to every point, so they need no per-point copy. You can still edit individual points afterward.')}
               />
             </div>
           </div>
@@ -1856,6 +1941,8 @@ export function SolderingPanel() {
                   key={i}
                   className={i === selected ? 'sp-row-selected' : undefined}
                   onClick={() => setSelected(i)}
+                  onMouseEnter={() => setHoveredViz(i)}
+                  onMouseLeave={() => setHoveredViz(-1)}
                 >
                   <td className="sp-idx">{i + 1}</td>
                   <td data-label={t('solder.table.x', 'X')}>

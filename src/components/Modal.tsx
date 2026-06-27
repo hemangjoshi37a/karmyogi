@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { useT } from '../i18n'
 import { Icon } from './Icons'
 
@@ -270,7 +271,12 @@ export function Modal({
     zIndex: 1,
   }
 
-  return (
+  // Portal to <body> so the fixed-position overlay covers the WHOLE app. Without
+  // this, a Modal rendered INSIDE a dockview panel is clipped to that panel: a
+  // dockview ancestor sets transform/contain, which turns `position: fixed` into a
+  // panel-relative containing block. Portaling escapes that so any modal (e.g. the
+  // gamepad modal opened from the Controller panel) overlays the entire viewport.
+  return createPortal(
     <div
       className="km-modal-overlay km-modal-scrim"
       onClick={onClose}
@@ -330,6 +336,7 @@ export function Modal({
           </footer>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

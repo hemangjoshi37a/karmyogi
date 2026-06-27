@@ -351,6 +351,40 @@
 }
 .pp-section-lines { flex: 0 0 auto; }
 .pp-section-row .pp-icon-btn { margin-left: auto; }
+
+/* --- per-section / per-op "G" toggle ---
+   Reveals that item's own RAW G-code inline (replaces the old global G-code
+   dump). A bold monospace "G" glyph; accent-tinted when its block is open. */
+.pp-gcode-toggle .pp-gcode-glyph {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-weight: 800;
+  font-size: 13px;
+  line-height: 1;
+}
+.pp-gcode-toggle:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.pp-gcode-toggle.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+/* While this section is the one streaming but its G-code is still collapsed, the
+   "G" button pulses — a cue that revealing it shows the live line-by-line list
+   (the row itself already carries the shimmer + "line / total" indicator). */
+.pp-gcode-toggle--live {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+  animation: pp-gtoggle-pulse 1.6s ease-in-out infinite;
+}
+@keyframes pp-gtoggle-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  60% { box-shadow: 0 0 0 4px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-gcode-toggle--live { animation: none; }
+}
 .pp-section-body {
   margin: 0;
   padding: 5px 7px;
@@ -489,6 +523,16 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .pp-section.is-streaming .pp-section-row::after { animation: none; }
+}
+/* #9 — the Soldering section LINKED to the point currently hovered/pinned in the
+   Soldering panel's table. A steady accent edge + tint (no shimmer) so it reads as
+   "this point's G-code lives here", distinct from the streaming sheen above. */
+.pp-section--linked {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+}
+.pp-section--linked .pp-section-row {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 /* Live "line X / Y" readout in the streaming section's header row. */
 .pp-section-live {
@@ -703,6 +747,29 @@
   font-weight: 700;
   color: var(--warn);
   margin-bottom: 5px;
+}
+/* Dismiss (✕) for the check results — pushed to the right edge of the header (or
+   the OK row, which is also a flex row), so the operator can clear the panel. */
+.pp-check-dismiss {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pp-check-dismiss:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
 }
 .pp-check-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .pp-check-item {
@@ -943,69 +1010,4 @@
     min-width: 44px;
     min-height: 44px;
   }
-}
-
-/* --- V13 G-code editor ⇄ 3D link (syntax-highlighted, virtualized) --- */
-.pp-gcode-card .pp-sections-header { cursor: default; }
-.pp-gcode-disclosure {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  color: var(--fg);
-}
-.pp-gcode-empty {
-  padding: 10px 4px 4px;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-.pp-gcode {
-  margin-top: 6px;
-  max-height: 360px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 4px);
-  background: var(--bg-card, var(--bg-elev));
-  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 18px;
-}
-.pp-gcode-spacer { position: relative; width: 100%; }
-.pp-gcode-lines { position: absolute; top: 0; left: 0; right: 0; }
-.pp-gcode-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  white-space: pre;
-  cursor: pointer;
-  border-left: 2px solid transparent;
-}
-.pp-gcode-line:hover { background: color-mix(in srgb, var(--accent, var(--fg)) 10%, transparent); }
-.pp-gcode-line.is-selected {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  border-left-color: var(--accent);
-}
-.pp-gcode-num {
-  flex: 0 0 auto;
-  min-width: 3.5ch;
-  text-align: right;
-  color: var(--fg-muted);
-  opacity: 0.7;
-  user-select: none;
-  font-variant-numeric: tabular-nums;
-}
-.pp-gcode-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* token colours */
-.pp-gc-cmd { color: var(--accent); font-weight: 700; }
-.pp-gc-axis { color: #e06c75; }
-.pp-gc-arc { color: #c678dd; }
-.pp-gc-param { color: #d19a66; }
-.pp-gc-word { color: var(--fg); }
-.pp-gc-comment { color: var(--fg-muted); font-style: italic; }
-@media (pointer: coarse), (max-width: 768px) {
-  .pp-gcode { max-height: 280px; font-size: 13px; }
 }

@@ -659,6 +659,16 @@ function ConnectMenu({
   // genuinely lacking the API, e.g. Firefox/Safari) → different, actionable advice.
   const usbBlockedByHttp = insecureCtx && !usbSupported
   const bleBlockedByHttp = insecureCtx && !bleSupported
+  // Chrome on LINUX desktop ships Web Bluetooth OFF by default (behind
+  // chrome://flags/#enable-experimental-web-platform-features), so even on a
+  // secure page navigator.bluetooth is undefined → the BLE row stays disabled.
+  // Detect that case to show the actionable "enable the flag" hint instead of the
+  // generic "not supported" tooltip. (Android, though Linux-based, has BLE → excluded.)
+  const isLinuxDesktop =
+    typeof navigator !== 'undefined' &&
+    /Linux/i.test(navigator.userAgent) &&
+    !/Android/i.test(navigator.userAgent)
+  const bleNeedsLinuxFlag = !bleSupported && !bleBlockedByHttp && isLinuxDesktop
 
   useEffect(() => {
     if (!open) return
@@ -758,6 +768,35 @@ function ConnectMenu({
     grbl.connectBluetooth({ acceptAllDevices: true }).catch(() => {})
   }
 
+  // Linux Chrome hides Web Bluetooth behind a flag. Browsers BLOCK a web page from
+  // navigating to (or window.open-ing) a chrome:// URL, so the best we can do is
+  // COPY the flag link to the clipboard for the user to paste into a new tab, then
+  // Enable "Experimental Web Platform features" and Relaunch Chrome.
+  const BLE_FLAG_URL = 'chrome://flags/#enable-experimental-web-platform-features'
+  const [flagCopied, setFlagCopied] = useState(false)
+  const enableBleFlag = () => {
+    // Best-effort: ATTEMPT to open the flag page in a new tab (some browsers/
+    // policies allow it). Chrome normally BLOCKS web content from navigating to a
+    // chrome:// URL, so we ALWAYS also copy the link as the reliable fallback — the
+    // user can then paste it into the address bar.
+    try {
+      window.open(BLE_FLAG_URL, '_blank', 'noopener,noreferrer')
+    } catch {
+      /* navigation to chrome:// blocked — the clipboard copy below covers it */
+    }
+    const done = () => {
+      setFlagCopied(true)
+      window.setTimeout(() => setFlagCopied(false), 6000)
+    }
+    try {
+      const p = navigator.clipboard?.writeText(BLE_FLAG_URL)
+      if (p && typeof p.then === 'function') p.then(done, done)
+      else done()
+    } catch {
+      done()
+    }
+  }
+
   return (
     <span className="km-cx" ref={ref}>
       <button
@@ -847,8 +886,8 @@ function ConnectMenu({
           <button
             className="km-cx-row"
             role="menuitem"
-            disabled={connecting || !bleSupported}
-            onClick={connectBle}
+            disabled={connecting || (!bleSupported && !bleNeedsLinuxFlag)}
+            onClick={bleNeedsLinuxFlag ? enableBleFlag : connectBle}
             title={
               bleSupported
                 ? t('conn.ble.title', 'Connect over Bluetooth LE (Nordic UART / HM-10 style serial bridge)')
@@ -856,6 +895,11 @@ function ConnectMenu({
                 ? t(
                     'conn.ble.insecure',
                     'Bluetooth needs a secure (https) page. This page is http:// — open karmyogi over https to connect over Bluetooth.',
+                  )
+                : bleNeedsLinuxFlag
+                ? t(
+                    'conn.ble.linuxFlag',
+                    'Web Bluetooth is OFF by default in Chrome on Linux. Tap to COPY the flag link (chrome://flags/#enable-experimental-web-platform-features) — paste it in a new tab, set it to Enabled, Relaunch Chrome, then reload this page. (Linux BLE can be flaky; the phone or Wi-Fi bridge is more reliable.)',
                   )
                 : t(
                     'conn.ble.unsupported',
@@ -871,7 +915,11 @@ function ConnectMenu({
                   ? t('conn.ble.sub', 'BLE serial (Nordic UART / HM-10 / FluidNC). Classic HC-05/06 not supported.')
                   : bleBlockedByHttp
                     ? t('conn.ble.subInsecure', 'Needs https — open the secure site to use Bluetooth.')
-                    : t('conn.ble.subUnsupported', 'Not in this browser — on iPhone/iPad use the Wi-Fi bridge below.')}
+                    : bleNeedsLinuxFlag
+                      ? flagCopied
+                        ? t('conn.ble.subFlagCopied', '✓ Link copied — paste in a new tab, set Enabled, Relaunch Chrome, reload.')
+                        : t('conn.ble.subLinuxFlag', 'Tap to copy the chrome://flags link → enable Bluetooth on Linux.')
+                      : t('conn.ble.subUnsupported', 'Not in this browser — on iPhone/iPad use the Wi-Fi bridge below.')}
               </span>
             </span>
           </button>

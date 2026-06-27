@@ -9,16 +9,22 @@
 // human-readable label/units table for the common GRBL v1.1 settings so the
 // Motion panel can render them.
 //
-// FluidNC (named style): FluidNC replaced the numbered table with a YAML config
-// + NAMED settings. Its `$$` dump lists `$path/name=value` lines instead, e.g.:
-//   $axes/x/steps_per_mm=80.000
-//   $Firmware/Build=...
-// A write is `$<name>=<value>` and a single read is `$<name>`. This module ALSO
-// parses those named lines and captures them into `useNamedSettings` (a small
-// persisted snapshot store, mirroring src/store/grblSettings.ts for the numeric
-// map) — the capture rides on `parseSettingLine`, which the controller already
-// calls on every received line, so no controller change is needed. The numeric
-// GRBL path is byte-for-byte unchanged.
+// FluidNC: for sender compatibility FluidNC KEEPS GRBL's NUMBERED `$$` dump, but
+// only for the SUBSET of settings that carry a `grblName` (firmware:
+// ProcessSettings.cpp `report_normal_settings` → `show_settings(out, GRBL)`). So a
+// FluidNC `$$` looks like a (small) classic GRBL dump:
+//   $10=1
+//   $20=0            ← read-only proxy (derived from the YAML config)
+//   $100=80.000      ← writable (writes the live config field, persists config.yaml)
+//   $110=1000.000
+// FluidNC's deeper, NAMED settings (`$axes/x/steps_per_mm=80.000`, `$Firmware/Build=…`)
+// come from `$S` / `$<name>` — NOT `$$`. This module parses BOTH styles: numeric
+// lines feed `useGrblSettings`; named lines are captured into `useNamedSettings`
+// (a small persisted snapshot store mirroring src/store/grblSettings.ts). The
+// capture rides on `parseSettingLine`, which the controller already calls on every
+// received line, so no controller change is needed. The numeric GRBL path is
+// byte-for-byte unchanged. See FLUIDNC_NUMBERS / fluidncSettingSupport below for
+// exactly which numbered settings FluidNC exposes and which are writable.
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -106,6 +112,67 @@ export const GRBL_SETTING_META: Record<number, GrblSettingMeta> = {
   133: { label: 'A max travel', labelKey: 'set.133.label', units: 'mm' },
   134: { label: 'B max travel', labelKey: 'set.134.label', units: 'mm' },
   135: { label: 'C max travel', labelKey: 'set.135.label', units: 'mm' },
+}
+
+// --- FluidNC numbered `$`-settings support -----------------------------------
+//
+// FluidNC keeps GRBL's NUMBERED settings for sender compatibility, but ONLY the
+// subset its firmware registers with a `grblName`. From the FluidNC source
+// (SettingsDefinitions.cpp `make_settings()` + `make_proxies()`,
+// Settings.cpp `FloatProxySetting`/`IntProxySetting`):
+//
+//   WRITABLE via `$N=value` — a write updates the live MachineConfig field and
+//   persists config.yaml (FloatProxySetting), or is a real NVS IntSetting:
+//     $10            status report mask
+//     $100..$10x     steps/mm        (one per axis)
+//     $110..$11x     max rate        (one per axis)
+//     $120..$12x     acceleration    (one per axis)
+//     $130..$13x     max travel      (one per axis)
+//
+//   READ-ONLY — these IntProxySettings appear in `$$` but their setStringValue
+//   returns Error::ReadOnlySetting; they are DERIVED from the YAML config and can
+//   only be changed by editing the YAML (e.g. `$axes/x/soft_limits=true`):
+//     $20 soft limits  $21 hard limits  $22 homing enable  $23 homing dir mask
+//     $30 max spindle speed            $32 laser mode
+//
+// Every OTHER classic GRBL number ($0,$1,$2..$6,$11,$12,$13,$24..$27,$31) is NOT a
+// numbered setting on FluidNC: it never appears in `$$` and `$N=` is rejected
+// (those live in the YAML config, or — like $13 — are commands). The Motion panel
+// uses this so it shows ONLY what FluidNC actually exposes (instead of fabricated
+// GRBL defaults that silently "fail to sync") and marks the read-only rows.
+
+/** FluidNC numbered settings that appear in `$$` but reject `$N=` (YAML-managed). */
+export const FLUIDNC_READONLY_NUMBERS: ReadonlySet<number> = new Set<number>([
+  20, 21, 22, 23, 30, 32,
+])
+
+/**
+ * All numbered settings FluidNC exposes via the GRBL-compatible `$$` dump (covering
+ * up to six axes for the steps/rate/accel/travel proxies). A live FluidNC reports
+ * only the axes it actually has; the Motion panel unions this with whatever `$$`
+ * returned, so extra/fewer axes are handled gracefully.
+ */
+export const FLUIDNC_NUMBERS: ReadonlySet<number> = new Set<number>([
+  10, 20, 21, 22, 23, 30, 32,
+  100, 101, 102, 103, 104, 105,
+  110, 111, 112, 113, 114, 115,
+  120, 121, 122, 123, 124, 125,
+  130, 131, 132, 133, 134, 135,
+])
+
+/** Whether/how FluidNC supports a given GRBL setting number. */
+export type FluidncSupport = 'writable' | 'readonly' | 'unsupported'
+
+/**
+ * Classify a GRBL setting number for FluidNC:
+ *  - `writable`    — exposed in `$$` and `$N=value` is accepted + persisted.
+ *  - `readonly`    — exposed in `$$` but `$N=` is rejected (configure via YAML).
+ *  - `unsupported` — FluidNC never exposes this number at all.
+ */
+export function fluidncSettingSupport(number: number): FluidncSupport {
+  if (FLUIDNC_READONLY_NUMBERS.has(number)) return 'readonly'
+  if (FLUIDNC_NUMBERS.has(number)) return 'writable'
+  return 'unsupported'
 }
 
 const SETTING_RE = /^\$(\d+)\s*=\s*(.+?)\s*$/

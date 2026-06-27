@@ -9,7 +9,6 @@ import {
 import { useProgram, useMachine, useSettings } from '../store'
 import { useBed } from '../store/bed'
 import { useHover } from '../store/hover'
-import { useGcodeSelection } from '../viewer/gcodeSelection'
 import { sectionColor } from '../viewer/sectionColors'
 import { applyJobPlacement, isIdentityJob } from '../core/transform'
 import { grbl } from '../serial/controller'
@@ -26,6 +25,7 @@ import {
 import { useTabCommands } from '../machine/tabCommands'
 import { buildFrameProgram, frameBoundsOfGcode } from '../core/framing'
 import { explainGrblMessage } from '../core/explainers'
+import { useSolderViz } from '../store/solderViz'
 import { useT } from '../i18n'
 import '../styles/program.css'
 
@@ -133,6 +133,11 @@ export function ProgramPanel() {
   const t = useT()
   const lines = useProgram((s) => s.lines)
   const sections = useProgram((s) => s.sections)
+  // #9: the effective soldering highlight — a row HOVER in the Soldering panel
+  // wins over the pinned (clicked) point. When set, light up the matching
+  // "soldering" section row below so the user sees WHERE that point's G-code lives
+  // (the 3D viz highlights the same pad at the same time).
+  const solderHi = useSolderViz((s) => (s.hovered >= 0 ? s.hovered : s.selected))
   const cursor = useProgram((s) => s.cursor)
   const streaming = useProgram((s) => s.streaming)
   const generating = useProgram((s) => s.generating)
@@ -163,22 +168,29 @@ export function ProgramPanel() {
   // run starts from the top unless the user picks a new line.
   const [startLine, setStartLine] = useState('1')
 
-  // Which section cards are expanded (collapsed by default), keyed by id.
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
-  const toggleSection = useCallback((id: string) => {
-    setOpenSections((m) => ({ ...m, [id]: !m[id] }))
+  // Per-section RAW G-code reveal — the "G" button, keyed by section id,
+  // collapsed by default. This REPLACES the old global G-code dump: each section
+  // reveals just ITS OWN G-code inline (part-wise for carving, point-wise for
+  // soldering, etc.). While that section is the one streaming, the reveal renders
+  // as a line-by-line shimmer list instead of a flat block.
+  const [openGcode, setOpenGcode] = useState<Record<string, boolean>>({})
+  const toggleGcode = useCallback((id: string) => {
+    setOpenGcode((m) => ({ ...m, [id]: !m[id] }))
   }, [])
 
-  // Which per-operation blocks are expanded (within an expanded section),
-  // keyed by the operation id. Collapsed by default — clicking an op header
-  // reveals just that op's own G-code (far more readable than one flat blob).
+  // Carving sections also carry a per-operation breakdown; this tracks which
+  // sections have that OPS LIST expanded (the disclosure caret), keyed by id.
+  const [openOpsList, setOpenOpsList] = useState<Record<string, boolean>>({})
+  const toggleOpsList = useCallback((id: string) => {
+    setOpenOpsList((m) => ({ ...m, [id]: !m[id] }))
+  }, [])
+
+  // Which per-operation G-code blocks are revealed (within an expanded carving
+  // section's ops list), keyed by the operation id — the per-op "G" button.
   const [openOps, setOpenOps] = useState<Record<string, boolean>>({})
   const toggleOp = useCallback((id: string) => {
     setOpenOps((m) => ({ ...m, [id]: !m[id] }))
   }, [])
-
-  // V13 — the syntax-highlighted G-code editor card (collapsed by default).
-  const [editorOpen, setEditorOpen] = useState(false)
 
   // Cross-panel hover link: hovering an op row here shimmers its toolpath in the
   // 3D viewer and highlights the matching carving row (and vice-versa). Shared
@@ -229,24 +241,13 @@ export function ProgramPanel() {
     return null
   }, [streaming, cursor, sections, sectionRanges])
 
-  // Auto-expand the section currently being streamed so its active line is
-  // visible; remember whether WE opened it so we don't fight the user's toggles.
-  const autoOpenedRef = useRef<string | null>(null)
-  useEffect(() => {
-    const id = streamPos?.id ?? null
-    if (id === autoOpenedRef.current) return
-    setOpenSections((m) => {
-      const next = { ...m }
-      // Re-collapse a previously auto-opened section if it's no longer active.
-      const prev = autoOpenedRef.current
-      if (prev && prev !== id) delete next[prev]
-      if (id) next[id] = true
-      return next
-    })
-    autoOpenedRef.current = id
-  }, [streamPos?.id])
+  // NOTE: we deliberately DON'T auto-expand the streaming section anymore. By
+  // default sections stay collapsed and the streamed one shows a shimmer
+  // indicator on its row (+ a live "line / total" badge); the full line-by-line
+  // shimmer list is only rendered when the user reveals that section's G-code via
+  // the "G" button — see the `openGcode` / `active` branch in the render below.
 
-  // Scroll the active line into view within the streaming section's body.
+  // Scroll the active line into view within the streaming section's revealed body.
   const activeLineRef = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     activeLineRef.current?.scrollIntoView({ block: 'nearest' })
@@ -708,6 +709,15 @@ export function ProgramPanel() {
                     'Looks good — no unsupported codes, missing feed or out-of-bounds moves found.',
                   )}
                 </span>
+                <button
+                  type="button"
+                  className="pp-check-dismiss"
+                  onClick={() => setCheckFindings(null)}
+                  title={t('prog.checkDismiss', 'Dismiss check results')}
+                  aria-label={t('prog.checkDismiss', 'Dismiss check results')}
+                >
+                  ✕
+                </button>
               </div>
             ) : (
               <div className="pp-check-result" role="alert">
@@ -719,6 +729,15 @@ export function ProgramPanel() {
                       warns: checkWarns,
                     })}
                   </span>
+                  <button
+                    type="button"
+                    className="pp-check-dismiss"
+                    onClick={() => setCheckFindings(null)}
+                    title={t('prog.checkDismiss', 'Dismiss check results')}
+                    aria-label={t('prog.checkDismiss', 'Dismiss check results')}
+                  >
+                    ✕
+                  </button>
                 </div>
                 <ul className="pp-check-list">
                   {checkFindings.map((f, i) => (
@@ -863,23 +882,34 @@ export function ProgramPanel() {
           {sections.length > 0 ? (
           <ul className="pp-section-list">
             {sections.map((sec, i) => {
-              const open = !!openSections[sec.id]
               const count = sec.rawLines.length
               const color = sectionColor(i, theme === 'dark', sec.color)
               // A carving section carries an ordered per-operation breakdown
               // (each op = its own label + G-code + preset colour). When present
-              // we render the section as an EXPANDABLE list of ops (each expands
-              // to ITS OWN G-code) and the toolpath is coloured by its presets —
-              // so the manual per-section colour picker is redundant and hidden.
+              // the disclosure caret expands the section into that OPS LIST (each
+              // op has its own "G" button revealing ITS G-code) and the toolpath
+              // is coloured by its presets — so the manual colour picker is hidden.
               const ops = sec.operations
               const hasOps = !!ops && ops.length > 0
               // Is THIS section the one currently being streamed? If so, expose
               // the live "line X / Y" position and a subtle shimmer highlight.
               const active = streamPos && streamPos.id === sec.id ? streamPos : null
+              // The per-section "G" button reveals this section's RAW G-code.
+              const gcodeOpen = !!openGcode[sec.id]
+              // The disclosure caret expands the ops list (carving) or, for a
+              // plain section that has no ops, simply reveals its raw G-code (so
+              // the caret and the "G" button drive the same reveal there).
+              const caretOpen = hasOps ? !!openOpsList[sec.id] : gcodeOpen
+              const onToggleCaret = () =>
+                hasOps ? toggleOpsList(sec.id) : toggleGcode(sec.id)
               return (
                 <li
                   key={sec.id}
-                  className={'pp-section' + (active ? ' is-streaming' : '')}
+                  className={
+                    'pp-section' +
+                    (active ? ' is-streaming' : '') +
+                    (solderHi >= 0 && sec.name === 'soldering' ? ' pp-section--linked' : '')
+                  }
                 >
                   <div className="pp-section-row">
                     {hasOps ? (
@@ -914,16 +944,20 @@ export function ProgramPanel() {
                     <button
                       type="button"
                       className="pp-section-disclosure"
-                      aria-expanded={open}
-                      onClick={() => toggleSection(sec.id)}
+                      aria-expanded={caretOpen}
+                      onClick={onToggleCaret}
                       title={
-                        open
-                          ? t('prog.sectionHide', 'Collapse section')
-                          : t('prog.sectionShow', 'Expand section')
+                        hasOps
+                          ? caretOpen
+                            ? t('prog.opsHide', 'Collapse operations')
+                            : t('prog.opsShow', 'Expand operations')
+                          : caretOpen
+                            ? t('prog.sectionHide', 'Collapse section')
+                            : t('prog.sectionShow', 'Expand section')
                       }
                     >
                       <span className="pp-disclosure-caret">
-                        {open ? '▾' : '▸'}
+                        {caretOpen ? '▾' : '▸'}
                       </span>
                       <span className="pp-section-name" title={sec.name}>
                         {sec.name}
@@ -964,6 +998,30 @@ export function ProgramPanel() {
                       showOptions={false}
                       label={t('prog.frame', 'Frame this section')}
                     />
+                    {/* Per-section "G" — toggles this section's raw G-code inline
+                        (replaces the old global G-code dump). Pulses while this
+                        section is the one streaming but its G-code is collapsed,
+                        hinting that revealing it shows the live line progress. */}
+                    <button
+                      type="button"
+                      className={
+                        'pp-icon-btn pp-gcode-toggle' +
+                        (gcodeOpen ? ' is-on' : '') +
+                        (active && !gcodeOpen ? ' pp-gcode-toggle--live' : '')
+                      }
+                      aria-pressed={gcodeOpen}
+                      onClick={() => toggleGcode(sec.id)}
+                      title={
+                        gcodeOpen
+                          ? t('prog.sectionGcodeHide', 'Hide this section’s G-code')
+                          : t('prog.sectionGcodeShow', 'Show this section’s G-code')
+                      }
+                      aria-label={t('prog.sectionGcodeAria', 'Toggle G-code for {name}', {
+                        name: sec.name,
+                      })}
+                    >
+                      <span className="pp-gcode-glyph" aria-hidden="true">G</span>
+                    </button>
                     <button
                       type="button"
                       className="pp-icon-btn pp-section-io"
@@ -996,12 +1054,112 @@ export function ProgramPanel() {
                       <Icon name="trash" size={14} />
                     </button>
                   </div>
-                  {open &&
+                  {/* Carving ops list (the disclosure caret) — a readable per-op
+                      breakdown; each op reveals ITS OWN G-code via its "G" button. */}
+                  {hasOps && caretOpen && (
+                    <ul className="pp-op-list">
+                      {ops!.map((op) => {
+                        const opOpen = !!openOps[op.id]
+                        const opLines = op.gcode === '' ? 0 : op.gcode.split(/\r?\n/).length
+                        return (
+                          <li
+                            key={op.id}
+                            className={
+                              'pp-op' +
+                              (opOpen ? ' is-open' : '') +
+                              (hoveredOpId === op.id ? ' pp-op--hover' : '')
+                            }
+                            onMouseEnter={() => setHoveredOp(op.id)}
+                            onMouseLeave={() => setHoveredOp(null)}
+                            onTouchStart={() => setHoveredOp(op.id)}
+                          >
+                            <div className="pp-op-row">
+                              <button
+                                type="button"
+                                className="pp-op-disclosure"
+                                aria-expanded={opOpen}
+                                onClick={() => toggleOp(op.id)}
+                                title={
+                                  opOpen
+                                    ? t('prog.opHide', 'Collapse operation')
+                                    : t('prog.opShow', 'Expand operation G-code')
+                                }
+                              >
+                                <span className="pp-disclosure-caret">
+                                  {opOpen ? '▾' : '▸'}
+                                </span>
+                                <span
+                                  className="pp-op-swatch"
+                                  style={{ background: op.color || color }}
+                                  aria-hidden="true"
+                                />
+                                <span className="pp-op-label" title={op.label}>
+                                  {op.label}
+                                </span>
+                                <span className="pp-meta pp-op-lines">
+                                  {opLines === 1
+                                    ? t('prog.lineCountOne', '{count} line', {
+                                        count: opLines,
+                                      })
+                                    : t('prog.lineCount', '{count} lines', {
+                                        count: opLines,
+                                      })}
+                                </span>
+                              </button>
+                              {/* Per-op "G" — reveals just THIS operation's G-code. */}
+                              <button
+                                type="button"
+                                className={
+                                  'pp-icon-btn pp-gcode-toggle' +
+                                  (opOpen ? ' is-on' : '')
+                                }
+                                aria-pressed={opOpen}
+                                onClick={() => toggleOp(op.id)}
+                                title={
+                                  opOpen
+                                    ? t('prog.opGcodeHide', 'Hide this operation’s G-code')
+                                    : t('prog.opGcodeShow', 'Show this operation’s G-code')
+                                }
+                                aria-label={t('prog.opGcodeAria', 'Toggle G-code for {name}', {
+                                  name: op.label,
+                                })}
+                              >
+                                <span className="pp-gcode-glyph" aria-hidden="true">G</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="pp-icon-btn pp-section-io"
+                                onClick={() => copyGcodeText(op.gcode)}
+                                title={t('prog.opCopy', 'Copy this operation’s G-code')}
+                                aria-label={t('prog.opCopyAria', 'Copy G-code for {name}', { name: op.label })}
+                              >
+                                <Icon name="copy" size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                className="pp-icon-btn pp-section-io"
+                                onClick={() => downloadGcodeText(op.label, op.gcode)}
+                                title={t('prog.opDownload', 'Download this operation’s G-code (.nc)')}
+                                aria-label={t('prog.opDownloadAria', 'Download G-code for {name}', { name: op.label })}
+                              >
+                                <Icon name="download" size={13} />
+                              </button>
+                            </div>
+                            {opOpen && (
+                              <pre className="pp-op-body">{op.gcode}</pre>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                  {/* Per-section raw G-code reveal (the "G" button). While this
+                      section is streaming, it renders line-by-line so the active
+                      line shimmers + scrolls into view; otherwise a flat block.
+                      (Line numbers track the raw body; for identity placement
+                      baked === raw so the active index lines up exactly.) */}
+                  {gcodeOpen &&
                     (active ? (
-                      // While this section is streaming, render line-by-line so
-                      // the active line can be highlighted + scrolled into view.
-                      // (Line numbers track the raw body; for identity placement
-                      // baked === raw so the active index lines up exactly.)
                       <pre className="pp-section-body pp-section-body--live">
                         {sec.rawLines.map((ln, li) => {
                           const isActive = li === active.line - 1
@@ -1020,86 +1178,6 @@ export function ProgramPanel() {
                           )
                         })}
                       </pre>
-                    ) : hasOps ? (
-                      // Carving section: an expandable list of its operations.
-                      // Each op header shows its preset colour + label + line
-                      // count; clicking it reveals THAT op's own G-code (plus
-                      // per-op copy / download). Far more readable than one blob.
-                      <ul className="pp-op-list">
-                        {ops!.map((op) => {
-                          const opOpen = !!openOps[op.id]
-                          const opLines = op.gcode === '' ? 0 : op.gcode.split(/\r?\n/).length
-                          return (
-                            <li
-                              key={op.id}
-                              className={
-                                'pp-op' +
-                                (opOpen ? ' is-open' : '') +
-                                (hoveredOpId === op.id ? ' pp-op--hover' : '')
-                              }
-                              onMouseEnter={() => setHoveredOp(op.id)}
-                              onMouseLeave={() => setHoveredOp(null)}
-                              onTouchStart={() => setHoveredOp(op.id)}
-                            >
-                              <div className="pp-op-row">
-                                <button
-                                  type="button"
-                                  className="pp-op-disclosure"
-                                  aria-expanded={opOpen}
-                                  onClick={() => toggleOp(op.id)}
-                                  title={
-                                    opOpen
-                                      ? t('prog.opHide', 'Collapse operation')
-                                      : t('prog.opShow', 'Expand operation G-code')
-                                  }
-                                >
-                                  <span className="pp-disclosure-caret">
-                                    {opOpen ? '▾' : '▸'}
-                                  </span>
-                                  <span
-                                    className="pp-op-swatch"
-                                    style={{ background: op.color || color }}
-                                    aria-hidden="true"
-                                  />
-                                  <span className="pp-op-label" title={op.label}>
-                                    {op.label}
-                                  </span>
-                                  <span className="pp-meta pp-op-lines">
-                                    {opLines === 1
-                                      ? t('prog.lineCountOne', '{count} line', {
-                                          count: opLines,
-                                        })
-                                      : t('prog.lineCount', '{count} lines', {
-                                          count: opLines,
-                                        })}
-                                  </span>
-                                </button>
-                                <button
-                                  type="button"
-                                  className="pp-icon-btn pp-section-io"
-                                  onClick={() => copyGcodeText(op.gcode)}
-                                  title={t('prog.opCopy', 'Copy this operation’s G-code')}
-                                  aria-label={t('prog.opCopyAria', 'Copy G-code for {name}', { name: op.label })}
-                                >
-                                  <Icon name="copy" size={13} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="pp-icon-btn pp-section-io"
-                                  onClick={() => downloadGcodeText(op.label, op.gcode)}
-                                  title={t('prog.opDownload', 'Download this operation’s G-code (.nc)')}
-                                  aria-label={t('prog.opDownloadAria', 'Download G-code for {name}', { name: op.label })}
-                                >
-                                  <Icon name="download" size={13} />
-                                </button>
-                              </div>
-                              {opOpen && (
-                                <pre className="pp-op-body">{op.gcode}</pre>
-                              )}
-                            </li>
-                          )
-                        })}
-                      </ul>
                     ) : (
                       <pre className="pp-section-body">
                         {sec.rawLines.join('\n')}
@@ -1140,173 +1218,6 @@ export function ProgramPanel() {
             onChange={onFileChange}
           />
         </section>
-
-        {/* --- V13 G-code editor ⇄ 3D link: a syntax-highlighted, line-numbered
-                view of the WHOLE combined program. Click a line to highlight that
-                move in the 3D visualizer; clicking a move there selects (and
-                scrolls to) the line here. --- */}
-        <section className="ui-card pp-card pp-gcode-card">
-          <div className="pp-sections-header">
-            <button
-              type="button"
-              className="pp-section-disclosure pp-gcode-disclosure"
-              aria-expanded={editorOpen}
-              onClick={() => setEditorOpen((o) => !o)}
-              title={
-                editorOpen
-                  ? t('prog.editorHide', 'Collapse the G-code editor')
-                  : t('prog.editorShow', 'Show the G-code editor (click a line to highlight it in 3D)')
-              }
-            >
-              <span className="pp-disclosure-caret">{editorOpen ? '▾' : '▸'}</span>
-              <span className="pp-section-title ui-sec-head">{t('prog.editor', 'G-code')}</span>
-            </button>
-            <span className="pp-meta">
-              {lines.length === 1
-                ? t('prog.lineCountOne', '{count} line', { count: lines.length })
-                : t('prog.lineCount', '{count} lines', { count: lines.length })}
-            </span>
-          </div>
-          {editorOpen &&
-            (hasProgram ? (
-              <GcodeEditor lines={lines} t={t} />
-            ) : (
-              <div className="pp-gcode-empty">
-                {t('prog.editorEmpty', 'Load or generate a program to view its G-code here.')}
-              </div>
-            ))}
-        </section>
     </div>
   )
-}
-
-/** Fixed row height (px) for the virtualized G-code editor — keep in sync with
- *  the `.pp-gcode-line` height in program.css. */
-const GCODE_LINE_H = 18
-
-/**
- * V13 — syntax-highlighted, line-numbered, VIRTUALIZED G-code view. Only the
- * lines in the scroll viewport are rendered (a top spacer reserves the full
- * height), so even a 100k-line program stays smooth. Clicking a line publishes
- * it to the shared {@link useGcodeSelection} store → the 3D viewer highlights the
- * matching move(s); a 3D pick writes the same store and scrolls the line here.
- */
-function GcodeEditor({
-  lines,
-  t,
-}: {
-  lines: string[]
-  t: (key: string, english: string, vars?: Record<string, string | number>) => string
-}) {
-  const selectedLine = useGcodeSelection((s) => s.selectedLine)
-  const setSelectedLine = useGcodeSelection((s) => s.setSelectedLine)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [scrollTop, setScrollTop] = useState(0)
-  const [viewH, setViewH] = useState(320)
-
-  // Track the viewport height so the window of rendered lines is sized correctly.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setViewH(el.clientHeight || 320))
-    ro.observe(el)
-    setViewH(el.clientHeight || 320)
-    return () => ro.disconnect()
-  }, [])
-
-  // Scroll an externally-selected line (a 3D pick) into view.
-  useEffect(() => {
-    if (selectedLine == null) return
-    const el = scrollRef.current
-    if (!el) return
-    const top = (selectedLine - 1) * GCODE_LINE_H
-    if (top < el.scrollTop || top + GCODE_LINE_H > el.scrollTop + el.clientHeight) {
-      el.scrollTop = Math.max(0, top - el.clientHeight / 2)
-    }
-  }, [selectedLine])
-
-  const total = lines.length
-  const overscan = 8
-  const start = Math.max(0, Math.floor(scrollTop / GCODE_LINE_H) - overscan)
-  const count = Math.ceil(viewH / GCODE_LINE_H) + overscan * 2
-  const end = Math.min(total, start + count)
-  const rows: number[] = []
-  for (let i = start; i < end; i++) rows.push(i)
-
-  return (
-    <div
-      ref={scrollRef}
-      className="pp-gcode"
-      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-      role="list"
-      aria-label={t('prog.editorAria', 'G-code lines')}
-    >
-      <div className="pp-gcode-spacer" style={{ height: total * GCODE_LINE_H }}>
-        <div
-          className="pp-gcode-lines"
-          style={{ transform: `translateY(${start * GCODE_LINE_H}px)` }}
-        >
-          {rows.map((i) => {
-            const ln = i + 1
-            const isSel = ln === selectedLine
-            return (
-              <div
-                key={i}
-                role="listitem"
-                className={'pp-gcode-line' + (isSel ? ' is-selected' : '')}
-                style={{ height: GCODE_LINE_H }}
-                onClick={() => setSelectedLine(isSel ? null : ln)}
-                title={t('prog.editorLineHint', 'Click to highlight this move in the 3D view')}
-              >
-                <span className="pp-gcode-num">{ln}</span>
-                <span className="pp-gcode-text">{highlightGcode(lines[i])}</span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/**
- * Lightweight G-code syntax highlighter → React spans. Single-pass tokenizer
- * covering every character (so nothing is dropped): comments, words
- * (letter+number), whitespace, and any other char. Colour class by the word's
- * leading letter (G/M command, XYZ axis, IJK/R arc, F/S param).
- */
-function highlightGcode(line: string): React.ReactNode {
-  if (line === '') return '​' // zero-width space keeps the row height
-  const out: React.ReactNode[] = []
-  const re = /(;[^\n]*)|(\([^)]*\))|([A-Za-z][-+]?[0-9]*\.?[0-9]*)|(\s+)|(.)/g
-  let m: RegExpExecArray | null
-  let k = 0
-  while ((m = re.exec(line)) !== null) {
-    if (m[1] || m[2]) {
-      out.push(
-        <span key={k++} className="pp-gc-comment">
-          {m[0]}
-        </span>,
-      )
-    } else if (m[3]) {
-      const c = m[3][0].toUpperCase()
-      const cls = 'GM'.includes(c)
-        ? 'pp-gc-cmd'
-        : 'XYZABC'.includes(c)
-          ? 'pp-gc-axis'
-          : 'IJKR'.includes(c)
-            ? 'pp-gc-arc'
-            : 'FST'.includes(c)
-              ? 'pp-gc-param'
-              : 'pp-gc-word'
-      out.push(
-        <span key={k++} className={cls}>
-          {m[3]}
-        </span>,
-      )
-    } else {
-      out.push(m[0])
-    }
-  }
-  return out
 }

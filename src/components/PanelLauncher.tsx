@@ -13,6 +13,8 @@ interface PanelLauncherProps {
   onOpenPanel: (panel: PanelSpec) => void
   /** Predicate: is this panel id currently present in the dock? */
   isPanelOpen: (id: string) => boolean
+  /** Close (remove) an open panel from the dock — wired to the dockview API. */
+  onClosePanel: (id: string) => void
 }
 
 /**
@@ -20,7 +22,7 @@ interface PanelLauncherProps {
  * reopens a closed dock (or focuses it if it's already open) via the shell's
  * dockview API handlers — this is how a user brings back a panel they closed.
  */
-export function PanelLauncher({ onOpenPanel, isPanelOpen }: PanelLauncherProps) {
+export function PanelLauncher({ onOpenPanel, isPanelOpen, onClosePanel }: PanelLauncherProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -74,24 +76,38 @@ export function PanelLauncher({ onOpenPanel, isPanelOpen }: PanelLauncherProps) 
               const isOpen = isPanelOpen(p.id)
               const title = t('tab.' + p.id, p.title)
               return (
-                <button
-                  key={p.id}
-                  role="menuitem"
-                  className="launcher-item"
-                  onClick={() => {
-                    onOpenPanel(p)
-                    setOpen(false)
-                  }}
-                  title={
-                    isOpen
-                      ? t('launch.focus', 'Focus {title}', { title })
-                      : t('launch.open', 'Open {title}', { title })
-                  }
-                >
-                  <PanelIcon id={p.id} size={15} className="launcher-item-ico" />
-                  <span className="launcher-item-title">{title}</span>
-                  <span className={isOpen ? 'launcher-dot open' : 'launcher-dot'} aria-hidden="true" />
-                </button>
+                <div key={p.id} className="launcher-item-wrap">
+                  <button
+                    role="menuitem"
+                    className="launcher-item"
+                    onClick={() => {
+                      onOpenPanel(p)
+                      setOpen(false)
+                    }}
+                    title={
+                      isOpen
+                        ? t('launch.focus', 'Focus {title}', { title })
+                        : t('launch.open', 'Open {title}', { title })
+                    }
+                  >
+                    <PanelIcon id={p.id} size={15} className="launcher-item-ico" />
+                    <span className="launcher-item-title">{title}</span>
+                    <span className={isOpen ? 'launcher-dot open' : 'launcher-dot'} aria-hidden="true" />
+                  </button>
+                  {/* Close (✕) only when the panel is open — closes it straight from
+                      the list; the menu stays open so several can be closed. */}
+                  {isOpen && (
+                    <button
+                      type="button"
+                      className="launcher-item-close"
+                      onClick={() => onClosePanel(p.id)}
+                      title={t('launch.close', 'Close {title}', { title })}
+                      aria-label={t('launch.close', 'Close {title}', { title })}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               )
             })}
             {/* The AI assistant is a floating bubble, not a dock panel — picking it

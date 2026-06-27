@@ -298,6 +298,12 @@ export default defineConfig({
     },
   },
   server: {
+    // Bind to ALL interfaces (0.0.0.0) so the dev server is reachable from other
+    // devices on the LAN (a phone/tablet for Bluetooth / USB / camera testing)
+    // WITHOUT needing `-- --host`. Combined with the HTTPS-by-default above, that
+    // gives a SECURE CONTEXT at https://<lan-ip>:5185 so Web Bluetooth / Web Serial
+    // stay available on the phone. Set HOST=localhost to bind to localhost only.
+    host: process.env.HOST ?? true,
     port: 5185,
     strictPort: true,
     proxy: {

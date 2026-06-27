@@ -180,6 +180,25 @@ export class GrblConnection {
     )
     this.port = port
 
+    // ESP32-based controllers (FluidNC, GRBL-ESP32, grblHAL-ESP32) AUTO-RESET when
+    // the serial DTR/RTS control lines toggle — that's the esptool/Arduino
+    // auto-reset circuit (DTR→EN, RTS→IO0). Chrome's Web Serial asserts BOTH lines
+    // on open, which can reboot the controller a second or two after connecting and
+    // drop the link ("connects, then disconnects after ~2-3 s"). Deassert both
+    // right after open so the board runs normally and the connection stays up.
+    // Guarded: only real Web Serial ports expose setSignals (Mock / WebUSB / BLE /
+    // WebSocket don't), and any failure here is non-fatal.
+    const sp = port as unknown as {
+      setSignals?: (s: { dataTerminalReady?: boolean; requestToSend?: boolean }) => Promise<void>
+    }
+    if (typeof sp.setSignals === 'function') {
+      try {
+        await sp.setSignals({ dataTerminalReady: false, requestToSend: false })
+      } catch {
+        /* setSignals unsupported or rejected — non-fatal; continue. */
+      }
+    }
+
     if (!port.writable) throw new Error('Port is not writable')
     this.writer = port.writable.getWriter()
 
@@ -187,6 +206,12 @@ export class GrblConnection {
   }
 
   private async readLoop(): Promise<void> {
+    // Count CONSECUTIVE read errors that left the USB device still enumerated, so a
+    // transient blip is tolerated but a truly wedged stream eventually gives up.
+    // Reset to 0 the moment bytes flow again. ~12 × 300ms ≈ 3.6s of tolerance —
+    // comfortably covers an ESP32 controller's one-time auto-reset reboot (~1.5-2s).
+    let transientErrors = 0
+    const MAX_TRANSIENT_ERRORS = 12
     while (this.port && this.port.readable && !this.closing) {
       const reader = this.port.readable.getReader()
       this.reader = reader
@@ -194,16 +219,35 @@ export class GrblConnection {
         for (;;) {
           const { value, done } = await reader.read()
           if (done) break
-          if (value && value.length) this.ingest(value)
+          if (value && value.length) {
+            transientErrors = 0
+            this.ingest(value)
+          }
         }
-      } catch (err) {
-        if (!this.closing) {
-          this.options.onDisconnect?.(err)
-          return
-        }
-      } finally {
         reader.releaseLock()
         this.reader = null
+      } catch (err) {
+        reader.releaseLock()
+        this.reader = null
+        if (this.closing) return
+        // A read error while the device is STILL enumerated is usually TRANSIENT,
+        // not a real unplug. The big one: an ESP32 controller (FluidNC / GRBL-ESP32
+        // / grblHAL-ESP32) AUTO-RESETS when the port opens (DTR/RTS → EN), so it
+        // reboots ~1.5-2s after connect; the CP210x bridge stays enumerated
+        // (`port.readable` becomes a fresh stream, NOT null) but the stream blips
+        // during the reboot. Tearing the connection down here is exactly the
+        // "connects, then disconnects after 2-3s" bug. So while the port handle is
+        // still alive, release the reader, pause briefly and re-read from the new
+        // stream — the board finishes booting and streams its `Grbl [FluidNC…]`
+        // banner. Only give up once the handle is genuinely gone (unplug →
+        // `port.readable` null) or after repeated failures.
+        if (this.port?.readable && transientErrors < MAX_TRANSIENT_ERRORS) {
+          transientErrors++
+          await new Promise((resolve) => setTimeout(resolve, 300))
+          continue
+        }
+        this.options.onDisconnect?.(err)
+        return
       }
       if (this.closing) break
     }

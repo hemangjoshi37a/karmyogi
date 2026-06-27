@@ -18,6 +18,7 @@ import {
   Camera,
   IterationCw,
   Sparkles,
+  Syringe,
   PanelsTopLeft,
   type LucideIcon,
 } from 'lucide-react'
@@ -49,6 +50,7 @@ const PANEL_ICONS: Record<string, LucideIcon> = {
   welding: Flame,
   camera: Camera,
   springcoiling: IterationCw,
+  tattoo: Syringe,
   aigcode: Sparkles,
 }
 

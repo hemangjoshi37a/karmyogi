@@ -24,7 +24,7 @@ import {
   parseStatusForDialect,
   type ResolvedDialect,
 } from './dialect'
-import { parseSettingLine, writeSettingCommand } from './settings'
+import { parseSettingLine, writeSettingCommand, FLUIDNC_READONLY_NUMBERS } from './settings'
 import { useMachine } from '../store/machine'
 import { useProgram } from '../store/program'
 import { useConsole } from '../store/console'
@@ -89,7 +89,11 @@ export interface JogParams {
   feed: number
 }
 
-const STATUS_POLL_MS = 200 // ~5 Hz
+const STATUS_POLL_MS = 200 // ~5 Hz (USB / Wi-Fi)
+// Bluetooth LE is low-bandwidth + high-latency; polling status at 5 Hz floods the
+// single GATT writer and starves interactive jog. ~2.5 Hz keeps the DRO live while
+// leaving the link free for jog/realtime bytes.
+const BLE_STATUS_POLL_MS = 400
 // `$G` parser state changes rarely (only on a G54–G59 / modal change), and it is
 // a buffered LINE command (not a realtime byte), so polling it fast would
 // needlessly fill the RX buffer and compete with a running job. Poll it slowly
@@ -210,6 +214,11 @@ class GrblController {
   private streamer: Streamer | null = null
   private statusTimer: ReturnType<typeof setInterval> | null = null
   private parserStateTimer: ReturnType<typeof setInterval> | null = null
+  /** True while the self-pacing status-poll loop is active. */
+  private statusPolling = false
+  /** True on a slow link (Bluetooth LE) — status is polled less often so the single
+   * GATT writer stays free for interactive jog / realtime commands. */
+  private slowLink = false
   // Set when an automatic `$G` poll's `[GC:…]` report arrives, so the matching
   // `ok` that immediately follows is consumed SILENTLY (not echoed to the console
   // and not counted by the jog gate) — otherwise the slow poll spams the console.
@@ -261,6 +270,14 @@ class GrblController {
    * deviations (Marlin/Smoothie/Masso). Set at connect time from the profile.
    */
   private dialect: ResolvedDialect = GRBL_DIALECT
+  /**
+   * True when the active profile is FluidNC. FluidNC's wire protocol is pure GRBL
+   * (so `dialect` alone can't tell it apart), but its `$`-settings model differs:
+   * a subset of numbered settings are READ-ONLY proxies derived from the YAML
+   * config ($20/$21/$22/$23/$30/$32) that reject `$N=` writes. This flag lets
+   * `writeSetting` refuse those writes instead of emitting a command FluidNC errors.
+   */
+  private isFluidnc = false
   /** What the active connection is (for the farm store's appbar label). */
   private active: ActivePortInfo = { connected: false }
   private readonly activeListeners = new Set<(info: ActivePortInfo) => void>()
@@ -337,6 +354,9 @@ class GrblController {
     // Resolve the firmware's protocol deviations once per connection. Mock always
     // speaks GRBL (the MockPort is a GRBL emulator), so pin it to the GRBL dialect.
     this.dialect = isMock ? GRBL_DIALECT : resolveDialect(profile.dialect, profile.kind)
+    // FluidNC keeps a GRBL-compatible wire protocol but a different settings model
+    // (some numbered settings are read-only YAML proxies) — track it for writeSetting.
+    this.isFluidnc = profile.kind === 'fluidnc'
     // Baud the port is actually opened at: the user's override (if set) wins over
     // the profile default. The mock/WebSocket transports ignore baud, so this only
     // matters for real USB (Web Serial) — but it's harmless to pass through.
@@ -375,6 +395,10 @@ class GrblController {
       }
       await conn.open(chosen as PortLike)
       this.conn = conn
+      // BLE is a low-bandwidth, high-latency link: poll status LESS often so the
+      // single GATT writer stays free for interactive jog/realtime commands (a 5 Hz
+      // poll over BLE starves jog of the link). USB/Wi-Fi keep the fast rate.
+      this.slowLink = chosen instanceof BlePort
       // Coalesce cursor updates to ONE per animation frame. A char-counting
       // burst acks many lines in a single synchronous read tick; pushing a store
       // update per `ok` floods React with dozens of synchronous external-store
@@ -803,6 +827,7 @@ class GrblController {
     await this.conn?.close()
     this.conn = null
     this.dialect = GRBL_DIALECT
+    this.isFluidnc = false
     this.setActive({ connected: false, machineId: this.active.machineId })
     useMachine.getState().setConnection('disconnected')
     useMachine.getState().resetMachine()
@@ -1058,6 +1083,15 @@ class GrblController {
 
   /** Write a single setting (`$N=val`) and re-read to confirm. */
   async writeSetting(num: number, value: number | string): Promise<void> {
+    // FluidNC exposes some numbered settings ($20/$21/$22/$23/$30/$32) as READ-ONLY
+    // proxies derived from the YAML config — `$N=value` is rejected with
+    // Error::ReadOnlySetting. Refuse the write here (defense-in-depth: the Motion
+    // panel already disables those inputs) so we never emit a command FluidNC errors.
+    if (this.isFluidnc && FLUIDNC_READONLY_NUMBERS.has(num)) {
+      throw new Error(
+        `$${num} is firmware-managed on FluidNC (set it in the YAML config, e.g. via $Config/Dump) — it can't be written with $${num}=`,
+      )
+    }
     await this.send(writeSettingCommand(num, value))
   }
 
@@ -1187,13 +1221,32 @@ class GrblController {
 
   private startStatusPolling(): void {
     this.stopStatusPolling()
-    this.statusTimer = setInterval(() => {
-      // For a line-command status (Marlin `M114`) skip the poll while streaming —
-      // it would compete for the RX buffer and its `ok` would desync the
-      // char-counting window. GRBL's `?` realtime byte is free, so it always polls.
-      if (this.dialect.statusIsLineCommand && this.streamer?.isRunning) return
-      void this.requestStatus()
-    }, STATUS_POLL_MS)
+    this.statusPolling = true
+    // Slower cadence on BLE so interactive jog/realtime keep the single GATT writer.
+    const pollMs = this.slowLink ? BLE_STATUS_POLL_MS : STATUS_POLL_MS
+    // SELF-PACING status poll: AWAIT each poll, THEN schedule the next one
+    // STATUS_POLL_MS later. On a fast transport (USB) this still polls at ~5 Hz;
+    // on a SLOW one (Bluetooth LE) each `?` write takes longer to drain through
+    // the single serial writer, so the next poll is naturally delayed and the
+    // realtime `?` bytes NEVER pile up. Previously the fixed 5 Hz fire-and-forget
+    // interval out-ran BLE's drain rate, growing a multi-second writer backlog
+    // that delayed JOG and realtime commands by tens of seconds.
+    const pollOnce = async (): Promise<void> => {
+      if (!this.statusPolling || !this.conn) return
+      // Marlin `M114` is a buffered LINE command — skip it while streaming (it
+      // would compete for the RX buffer and its `ok` would desync the stream).
+      // GRBL's `?` realtime byte is free, so it always polls.
+      if (!(this.dialect.statusIsLineCommand && this.streamer?.isRunning)) {
+        try {
+          await this.requestStatus()
+        } catch {
+          /* transient write failure — keep the loop alive */
+        }
+      }
+      if (!this.statusPolling) return
+      this.statusTimer = setTimeout(() => void pollOnce(), pollMs)
+    }
+    this.statusTimer = setTimeout(() => void pollOnce(), STATUS_POLL_MS)
     // Prime the active-WCS badge immediately, then poll `$G` slowly. The poll
     // only fires when a program is NOT streaming, so it never competes with a
     // job for the RX buffer (the WCS won't change mid-cut anyway).
@@ -1205,8 +1258,9 @@ class GrblController {
   }
 
   private stopStatusPolling(): void {
+    this.statusPolling = false
     if (this.statusTimer !== null) {
-      clearInterval(this.statusTimer)
+      clearTimeout(this.statusTimer)
       this.statusTimer = null
     }
     if (this.parserStateTimer !== null) {

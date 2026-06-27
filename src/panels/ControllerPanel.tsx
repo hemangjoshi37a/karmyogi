@@ -1144,6 +1144,23 @@ export function ControllerPanel() {
   const machineState = useMachine((s) => s.state)
   const machineError = useMachine((s) => s.error)
   const buffer = useMachine((s) => s.buffer)
+  // Surface machine errors / alarms in the notification BELL (app bar) instead of
+  // an inline alert under the DRO. Push once per distinct error transition; the
+  // decoded title + fix are translated so the bell entry matches the app language.
+  const notifyBell = useNotifications((s) => s.notify)
+  const lastErrRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (machineError && machineError !== lastErrRef.current) {
+      const ex = explainGrblMessage(machineError)
+      const text = ex
+        ? `${t(`grbl.${ex.kind}.${ex.code}.title`, ex.title)} — ${t('ctrl.error.fix', 'Fix: {fix}', {
+            fix: t(`grbl.${ex.kind}.${ex.code}.fix`, ex.fix),
+          })}`
+        : machineError
+      notifyBell('error', text)
+    }
+    lastErrRef.current = machineError
+  }, [machineError, notifyBell, t])
   // O9 — live input-pin states (limit/probe/door) reported in GRBL `Pn:` status.
   const pins = useMachine((s) => s.pins)
   // Machine-reported active WCS (from a `$G` parser-state poll). Authoritative
@@ -1881,40 +1898,10 @@ export function ControllerPanel() {
             by reconnecting / a new action that clears it. O8: any GRBL
             ALARM:/error: code is decoded into a plain-language cause + fix, with
             an inline Unlock for alarm states. */}
-        {machineError && (() => {
-          const ex = explainGrblMessage(machineError)
-          return (
-            <div className="mc-error" role="alert">
-              <span className="mc-error-raw">{machineError}</span>
-              {ex && (
-                <span className="mc-error-explain">
-                  <strong className="mc-error-explain-title">
-                    {t(`grbl.${ex.kind}.${ex.code}.title`, ex.title)}
-                  </strong>
-                  <span className="mc-error-explain-cause">
-                    {t(`grbl.${ex.kind}.${ex.code}.cause`, ex.cause)}
-                  </span>
-                  <span className="mc-error-explain-fix">
-                    {t('ctrl.error.fix', 'Fix: {fix}', {
-                      fix: t(`grbl.${ex.kind}.${ex.code}.fix`, ex.fix),
-                    })}
-                  </span>
-                  {ex.kind === 'alarm' && connected && (
-                    <button
-                      type="button"
-                      className="mc-error-unlock"
-                      onClick={() => void grbl.unlock()}
-                      title={t('ctrl.error.unlock.title', 'Clear the alarm lock ($X)')}
-                    >
-                      <UnlockIcon />
-                      {t('ctrl.error.unlock', 'Unlock ($X)')}
-                    </button>
-                  )}
-                </span>
-              )}
-            </div>
-          )
-        })()}
+        {/* Machine errors / alarms now surface in the NOTIFICATION BELL (app bar)
+            via the machineError → notify effect above — no inline alert under the
+            DRO. Alarm recovery (Home / Unlock $X / Reset) lives in the recovery
+            section below. */}
       </section>
 
       {/* O12 — Motion lockout. A clear armed/locked guard so jogging/running

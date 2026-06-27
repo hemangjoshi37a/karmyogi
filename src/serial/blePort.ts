@@ -381,12 +381,19 @@ export class BlePort implements PortLike {
     this.device = device
     if (!device.gatt) throw new Error('Selected Bluetooth device has no GATT server.')
 
-    device.addEventListener('gattserverdisconnected', this.onGattDisconnected)
-
-    const server = await device.gatt.connect()
-    const { rx, tx } = await this.discoverCharacteristics(server)
+    // Connect + discover with RETRIES. On Android Chrome the first gatt.connect()
+    // very often resolves against a link that immediately drops (the ESP32/NimBLE
+    // peer terminates the initial connection, or Chrome's GATT cache is stale), so
+    // getPrimaryService() then throws "GATT Server is disconnected. Cannot retrieve
+    // services". Retrying the whole connect→discover cycle with a clean disconnect
+    // + backoff between tries is the standard, reliable workaround. The disconnect
+    // watcher is attached only AFTER we are stably connected, so these retry
+    // disconnects don't fire it.
+    const { rx, tx } = await this.connectAndDiscover(device)
     this.rxChar = rx
     this.txChar = tx
+
+    device.addEventListener('gattserverdisconnected', this.onGattDisconnected)
 
     // Wire the readable BEFORE starting notifications so no early bytes are lost.
     this.readable = new ReadableStream<Uint8Array>({
@@ -441,6 +448,48 @@ export class BlePort implements PortLike {
   }
 
   // --- internals -------------------------------------------------------------
+
+  /** Resolve after `ms` milliseconds (used to let a fresh BLE link settle). */
+  private static delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  /**
+   * GATT-connect and discover the UART characteristics, RETRYING the whole cycle.
+   * Android Chrome frequently reports the first `gatt.connect()` as resolved while
+   * the link is still settling — or the ESP32/NimBLE peer terminates the initial
+   * connection — so service discovery throws "GATT Server is disconnected". A
+   * clean disconnect + backoff + reconnect almost always succeeds within a few
+   * tries; a genuine "connected but no NUS" surfaces as the final thrown error.
+   */
+  private async connectAndDiscover(
+    device: BluetoothDevice,
+  ): Promise<{ rx: BluetoothRemoteGATTCharacteristic; tx: BluetoothRemoteGATTCharacteristic }> {
+    const ATTEMPTS = 5
+    let lastErr: unknown = null
+    for (let i = 0; i < ATTEMPTS; i++) {
+      try {
+        const server = device.gatt
+        if (!server) throw new Error('Selected Bluetooth device has no GATT server.')
+        if (!server.connected) await server.connect()
+        // Let the freshly-established link settle before discovery — querying
+        // services too eagerly is exactly what races the "disconnected" error.
+        await BlePort.delay(i === 0 ? 250 : 450)
+        if (!server.connected) throw new Error('GATT link dropped right after connect.')
+        return await this.discoverCharacteristics(server)
+      } catch (e) {
+        lastErr = e
+        // Drop any half-open link so the next attempt gets a clean reconnect.
+        try {
+          device.gatt?.disconnect()
+        } catch {
+          /* already gone */
+        }
+        if (i < ATTEMPTS - 1) await BlePort.delay(300 * (i + 1))
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+  }
 
   /**
    * Locate the RX (notify) and TX (write) characteristics. Prefer the NUS pair
@@ -505,15 +554,35 @@ export class BlePort implements PortLike {
     throw new Error(`${BLE_NO_UART_MESSAGE} [diagnostics — ${diag.join(' | ')}]`)
   }
 
-  /** Write a chunk, split to ~20-byte frames for the default BLE ATT MTU. */
+  /** Largest payload (bytes) we attempt per BLE frame. Starts OPTIMISTIC — the
+   * firmware requests ATT MTU 247 (→ 244 usable) — and auto-shrinks to the safe 20
+   * if the peer negotiated a smaller MTU (the write then rejects). Web Bluetooth
+   * never exposes the negotiated MTU, so we discover it by trying. A big MTU means
+   * ~12× fewer GATT writes per line → dramatically faster G-code streaming. */
+  private writeChunkSize = 244
+
+  /** Write a chunk, split into frames sized to the negotiated ATT MTU (adaptive). */
   private async writeChunked(chunk: Uint8Array): Promise<void> {
     const tx = this.txChar
     if (!tx) return
-    const MTU = 20
-    for (let off = 0; off < chunk.length; off += MTU) {
-      const slice = chunk.subarray(off, Math.min(off + MTU, chunk.length))
-      // Send a copy: the source may be a view over a pooled/reused buffer.
-      await this.writeOne(tx, slice.slice())
+    let off = 0
+    while (off < chunk.length) {
+      const size = Math.min(this.writeChunkSize, chunk.length - off)
+      const slice = chunk.subarray(off, off + size)
+      try {
+        // Send a copy: the source may be a view over a pooled/reused buffer.
+        await this.writeOne(tx, slice.slice())
+        off += size
+      } catch (err) {
+        // A frame larger than (negotiated MTU − 3) rejects — drop to the safe
+        // 20-byte size and retry this slice (no data lost). One-time: every later
+        // write then uses the conservative size.
+        if (this.writeChunkSize > 20) {
+          this.writeChunkSize = 20
+          continue
+        }
+        throw err
+      }
     }
   }
 

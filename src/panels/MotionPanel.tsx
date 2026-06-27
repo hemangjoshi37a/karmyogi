@@ -13,7 +13,10 @@ import {
   useNamedSettings,
   writeNamedSettingCommand,
   readNamedSettingCommand,
+  fluidncSettingSupport,
+  FLUIDNC_NUMBERS,
 } from '../serial/settings'
+import type { FluidncSupport } from '../serial/settings'
 import {
   GRBL_GROUPS,
   GRBL_SETTING_RICH,
@@ -98,6 +101,17 @@ function GrblSettingsEditor({
   const lastReadAt = useGrblSettings((s) => s.lastReadAt)
 
   const connected = connection === 'connected'
+  // FluidNC keeps a GRBL-compatible numbered `$$` dump, but only for the SUBSET of
+  // settings it registers with a grblName — and several of those are READ-ONLY
+  // proxies derived from the YAML config. When the active profile is FluidNC we
+  // (a) show only the numbers FluidNC actually exposes (not the full GRBL catalog,
+  // which would render fabricated defaults that look like a broken sync), and
+  // (b) mark the read-only rows + skip writes FluidNC would reject. Everything else
+  // (classic GRBL / grblHAL) is unchanged.
+  const isFluidnc = profile.kind === 'fluidnc'
+  /** FluidNC support class for a setting number ('writable' for non-FluidNC). */
+  const supportFor = (num: number): FluidncSupport =>
+    isFluidnc ? fluidncSettingSupport(num) : 'writable'
 
   // Pending edits, keyed by setting number; absent => showing the live value.
   // Persisted so unsaved edits survive a page refresh.
@@ -125,6 +139,13 @@ function GrblSettingsEditor({
   const onSync = () => {
     grbl.readSettings().catch(() => {
       /* surfaced via console/store */
+    })
+  }
+
+  /** Send a raw line (used by the FluidNC YAML-config buttons). */
+  const sendLine = (line: string) => {
+    grbl.send(line).catch(() => {
+      /* surfaced via console */
     })
   }
 
@@ -218,13 +239,21 @@ function GrblSettingsEditor({
     setEdit(num, def)
   }
 
-  /** Serialize the current live values (or defaults) as `$N=val` lines for export. */
+  /**
+   * Serialize the current live values (or defaults) as `$N=val` lines for export.
+   * On FluidNC the catalog base is the FluidNC-exposed subset, and READ-ONLY
+   * numbers are dropped — re-importing a `$20=…` line would just be rejected.
+   */
   const exportText = useMemo(() => {
-    const numbers = Object.keys(GRBL_SETTING_META)
-      .map(Number)
-      .concat(Object.values(values).map((s) => s.number))
+    const base = isFluidnc
+      ? Array.from(FLUIDNC_NUMBERS)
+      : Object.keys(GRBL_SETTING_META).map(Number)
+    const numbers = base.concat(Object.values(values).map((s) => s.number))
     const uniq = Array.from(new Set(numbers)).sort((a, b) => a - b)
     return uniq
+      // GRBL/grblHAL: export everything. FluidNC: only the settings it accepts via
+      // `$N=` (drops read-only YAML proxies and any non-FluidNC number).
+      .filter((n) => (isFluidnc ? supportFor(n) === 'writable' : true))
       .map((n) => {
         const live = values[n]
         const val = live ? live.value : settingDefault(n)
@@ -233,7 +262,8 @@ function GrblSettingsEditor({
       })
       .filter((l): l is string => l !== null)
       .join('\n')
-  }, [values])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values, isFluidnc])
 
   const onCopy = () => {
     const text = exportText
@@ -258,6 +288,9 @@ function GrblSettingsEditor({
     setEdits((e) => {
       const next = { ...e }
       for (const [num, s] of parsed) {
+        // On FluidNC skip numbers it can't accept via `$N=` (read-only proxies or
+        // settings it doesn't expose) — staging them would only fail on Save.
+        if (isFluidnc && supportFor(num) !== 'writable') continue
         // Only stage when the imported value differs numerically from the live one.
         const live = values[num]
         if (!live || parseFloat(live.value) !== parseFloat(s.value)) {
@@ -294,7 +327,12 @@ function GrblSettingsEditor({
         // controller ends up correctly configured regardless of firmware defaults.
         if (kind === '$' || kind === '*') {
           for (const [num, val] of Object.entries(MACHINE_DEFAULT_PROFILE)) {
-            await grbl.writeSetting(Number(num), val)
+            const n = Number(num)
+            // On FluidNC only re-write the settings it accepts via `$N=` (steps/mm,
+            // max rate, accel, max travel, status mask). The read-only proxies and
+            // GRBL-only numbers would just error; their values come from the YAML config.
+            if (isFluidnc && supportFor(n) !== 'writable') continue
+            await grbl.writeSetting(n, val)
           }
         }
       } catch {
@@ -310,9 +348,19 @@ function GrblSettingsEditor({
   // never blank, even before a $$ sync or while disconnected. Any extra settings
   // a controller reports (e.g. grblHAL's extended set) are included too.
   const sections = useMemo(() => {
+    // Catalog base: the FULL GRBL catalog for GRBL/grblHAL, but only the
+    // FluidNC-exposed subset for FluidNC (so we don't render fabricated defaults
+    // for settings FluidNC never reports). Live `$$` values are always unioned in,
+    // so any extra number a controller actually reports still shows up.
+    const liveNums = Object.values(values).map((s) => s.number)
     const numbers = new Set<number>([
-      ...Object.keys(GRBL_SETTING_META).map(Number),
-      ...Object.values(values).map((s) => s.number),
+      ...(isFluidnc ? FLUIDNC_NUMBERS : Object.keys(GRBL_SETTING_META).map(Number)),
+      // On FluidNC drop any live value that isn't a FluidNC setting — this also
+      // sheds rows left over in the persisted store from a previously-connected
+      // classic-GRBL machine, which would otherwise show as fake/stale on FluidNC.
+      ...(isFluidnc
+        ? liveNums.filter((n) => fluidncSettingSupport(n) !== 'unsupported')
+        : liveNums),
     ])
     const rowFor = (n: number): GrblSetting => {
       const live = values[n]
@@ -331,14 +379,21 @@ function GrblSettingsEditor({
       info: g,
       rows: (byGroup.get(g.id) ?? []).sort((a, b) => a.number - b.number),
     })).filter((sec) => sec.rows.length > 0)
-  }, [values])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values, isFluidnc])
 
   const total = Object.keys(values).length
   const corruptCount = useMemo(
     () =>
-      Object.values(values).filter((s) => validateSetting(s.number, s.numeric).bad)
-        .length,
-    [values],
+      Object.values(values).filter(
+        (s) =>
+          // On FluidNC ignore values that aren't FluidNC settings (e.g. stale rows
+          // from a previously-connected GRBL machine) — they aren't shown, so
+          // flagging them would be a phantom alert with no visible row to fix.
+          (!isFluidnc || fluidncSettingSupport(s.number) !== 'unsupported') &&
+          validateSetting(s.number, s.numeric).bad,
+      ).length,
+    [values, isFluidnc],
   )
 
   // Apply the search box + "only flagged/changed" toggle to the grouped table.
@@ -463,12 +518,25 @@ function GrblSettingsEditor({
             )}
           </span>
         </div>
-        {!connected && (
+        {isFluidnc && (
           <div className="mo-note">
             {t(
-              'motion.note.connectDefaults',
-              'Showing default GRBL settings below. Connect to a GRBL device and press Sync to read and edit the live values from your machine.',
+              'motion.fluidnc.model',
+              'FluidNC keeps a GRBL-compatible numbered $$ dump, but only for the settings it exposes for sender compatibility: steps/mm, max rate, acceleration, max travel and the status mask are writable here, while the rows marked “YAML · read-only” (soft/hard limits, homing, spindle, laser mode) are derived from the YAML config and can only be changed there. The full machine configuration lives in the YAML file — $Config/Dump prints it to the Console.',
             )}
+          </div>
+        )}
+        {!connected && (
+          <div className="mo-note">
+            {isFluidnc
+              ? t(
+                  'motion.fluidnc.note.offline',
+                  'Showing the GRBL-compatible settings FluidNC exposes. Connect to your FluidNC board and press Sync to read and edit the live values.',
+                )
+              : t(
+                  'motion.note.connectDefaults',
+                  'Showing default GRBL settings below. Connect to a GRBL device and press Sync to read and edit the live values from your machine.',
+                )}
           </div>
         )}
         {corruptCount > 0 && (
@@ -551,6 +619,10 @@ function GrblSettingsEditor({
               // Reset is disabled when the field already equals the default — but
               // compared NUMERICALLY (parseFloat), so "200" == "200.000".
               const atDefault = def !== undefined && parseFloat(fieldVal) === parseFloat(def)
+              // FluidNC: this numbered setting appears in `$$` but is a read-only
+              // proxy of the YAML config — show its live value but don't let it be
+              // edited (a `$N=` write would be rejected). Configure it in the YAML.
+              const readOnly = supportFor(s.number) === 'readonly'
               return (
                 <div
                   className="mo-rowitem"
@@ -563,6 +635,18 @@ function GrblSettingsEditor({
                     <span className="mo-name">
                       {known ? label : <em>{t('motion.unknown', 'unknown')}</em>}
                     </span>
+                    {readOnly && (
+                      <span
+                        className="mo-badge"
+                        data-sev="warn"
+                        title={t(
+                          'motion.fluidnc.readonly.hint',
+                          'Firmware-managed on FluidNC — derived from the YAML config and not writable with $N=. Change it in config.yaml ($Config/Dump prints the running config to the Console).',
+                        )}
+                      >
+                        {t('motion.fluidnc.readonly.badge', 'YAML · read-only')}
+                      </span>
+                    )}
                     {rich?.description && (
                       (() => {
                         const desc = t(rich.descKey, rich.description)
@@ -587,7 +671,8 @@ function GrblSettingsEditor({
                       type="text"
                       inputMode="decimal"
                       value={fieldVal}
-                      disabled={!connected}
+                      disabled={!connected || readOnly}
+                      readOnly={readOnly}
                       onChange={(e) => setEdit(s.number, e.target.value)}
                       aria-label={t('motion.aria.value', '{label} (${num}) value', {
                         label,
@@ -618,7 +703,7 @@ function GrblSettingsEditor({
                         <Icon name="upload" size={13} />
                       </button>
                     )}
-                    {def !== undefined && (
+                    {def !== undefined && !readOnly && (
                       <button
                         type="button"
                         className="mo-btn mo-reset mo-iconbtn"
@@ -673,6 +758,52 @@ function GrblSettingsEditor({
         </div>
       </section>
 
+      {/* FluidNC: the YAML config is the real source of truth for everything the
+          numbered $$ subset can't reach (read-only proxies, pins, motors). Offer the
+          same $Config/Dump / startup-log buttons the named editor has. */}
+      {isFluidnc && (
+        <section className="mo-section">
+          <h5 className="mo-group">{t('motion.named.yaml.heading', 'YAML config')}</h5>
+          <div className="mo-note">
+            {t(
+              'motion.fluidnc.yaml.note',
+              'Settings marked “YAML · read-only” above (soft/hard limits, homing, spindle, laser mode) and the deeper machine structure (axes, motors, pins) are defined in the YAML config file, not the numbered settings. $Config/Dump prints the running config to the Console; $SS shows the startup log; type $Bye in the Console to restart the controller.',
+            )}
+          </div>
+          <div className="mo-row">
+            <button
+              type="button"
+              className="mo-btn primary"
+              disabled={!connected}
+              onClick={() => sendLine('$Config/Dump')}
+              title={
+                connected
+                  ? t(
+                      'motion.named.dump.title',
+                      'Send $Config/Dump — the YAML config streams into the Console',
+                    )
+                  : t('motion.connectFirst', 'Connect first')
+              }
+            >
+              {t('motion.named.dump.label', 'Dump YAML ($Config/Dump)')}
+            </button>
+            <button
+              type="button"
+              className="mo-btn"
+              disabled={!connected}
+              onClick={() => sendLine('$SS')}
+              title={t('motion.named.ss.title', 'Send $SS — show the startup log in the Console')}
+            >
+              {t('motion.named.ss.label', 'Startup log ($SS)')}
+            </button>
+            <span className="mo-grow" />
+            {!connected && (
+              <span className="mo-status">{t('motion.connectFirst', 'Connect first')}</span>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Guided calibration & tuning (writes $100–$102 on confirm). */}
       <CalibrationSection connected={connected} values={values} />
 
@@ -680,10 +811,15 @@ function GrblSettingsEditor({
       <section className="mo-section">
         <h5 className="mo-group">{t('motion.factory.heading', 'Factory reset')}</h5>
         <div className="mo-note">
-          {t(
-            'motion.factory.note',
-            'Use these to recover from corrupted EEPROM. Each asks for confirmation, then re-reads settings.',
-          )}
+          {isFluidnc
+            ? t(
+                'motion.fluidnc.factory.note',
+                'On FluidNC $RST restores the NVS settings and then re-writes the writable defaults (steps/mm, max rate, accel, max travel). The YAML-managed settings (soft/hard limits, homing, spindle, laser) are unaffected — edit the YAML config for those. Each action asks for confirmation, then re-reads settings.',
+              )
+            : t(
+                'motion.factory.note',
+                'Use these to recover from corrupted EEPROM. Each asks for confirmation, then re-reads settings.',
+              )}
         </div>
         <div className="mo-row">
           <button

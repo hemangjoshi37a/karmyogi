@@ -36,6 +36,7 @@ import { useViewportShapes } from '../store/viewportShapes'
 import { shapesToGcode } from '../core/viewportShapeGcode'
 import { useProgram } from '../store/program'
 import { usePlayback } from '../store/playback'
+import { useMachine } from '../store/machine'
 import { useGcodeSelection } from './gcodeSelection'
 import { useT } from '../i18n'
 import { gcodeToPolylines, type Segment, type Bounds } from './gcodeToPolylines'
@@ -57,6 +58,20 @@ import {
 export type PresetView = ViewName | 'right'
 import { useSettings } from '../store'
 import { useBed } from '../store/bed'
+// Overlay-chrome styles for the HTML controls layered over the WebGL canvas
+// (lasso surface, confirm/action bar, GL-lost panel — the `.vzo-*` classes).
+import '../styles/featureViewer.css'
+
+// Low-power device heuristic (Raspberry Pi, cheap tablets / low-end laptops): few
+// CPU cores or little reported RAM. On these we trim 3D cost — cap the
+// device-pixel-ratio to 1 (the biggest per-frame fragment saving on HiDPI) and
+// shrink the static reflection env map — WITHOUT changing any functionality.
+// Combined with the adaptive frameloop (idle → demand) this keeps the viewport
+// usable on a Pi's browser. Computed once at module load.
+const LOW_POWER =
+  typeof navigator !== 'undefined' &&
+  ((navigator.hardwareConcurrency ?? 8) <= 4 ||
+    ((navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 8) <= 4)
 
 // --- Orientation CUBE (the clickable view gizmo) ---
 // drei renders only ONE GizmoHelper at a time, so this helper holds JUST the cube;
@@ -388,6 +403,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // job); the SpindleTool gates the actual motion on reduced-motion.
   const isPlaying = usePlayback((s) => s.isPlaying)
   const spinning = spinningProp ?? isPlaying
+  // Live machine → keep the render loop running so the live tool tracks position
+  // smoothly. Combined with the other animation signals below, this drives the
+  // adaptive <Canvas frameloop> (see the Canvas) — idle+disconnected drops to
+  // on-demand rendering and stops the ~30 fps of wasted idle GPU/CPU.
+  const machineLive = useMachine((s) => s.connection === 'connected')
 
   // Spring-coiling preview channel: when the Spring panel owns the program (its
   // 3D-coil-preview output mode), it publishes the spring dimensions here. We then
@@ -676,6 +696,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     >
       <Canvas
         key={glEpoch}
+        // ADAPTIVE FRAMELOOP — the biggest idle-CPU win. Render continuously only
+        // while something actually animates: a live machine (tool tracks position),
+        // a playing simulation, the placement gizmo (dragged at 60fps), or a GL
+        // context rebuild. Otherwise drop to "demand" — r3f renders only when
+        // needed: drei's OrbitControls auto-invalidates on orbit/damping, and r3f
+        // auto-invalidates on any scene-graph change (loading a toolpath/stock,
+        // theme, resize). This takes the idle viewport from ~30 fps of wasted
+        // renders down to ~0. (Cosmetic-only tradeoff when idle+disconnected: the
+        // preview pulse pauses and fit/iso snaps instead of easing.)
+        frameloop={machineLive || isPlaying || gizmo || glLost ? 'always' : 'demand'}
         style={{ height: '100%', width: '100%', background: bg }}
         // Measure with offsetWidth/Height (layout px), NOT getBoundingClientRect.
         // The app's global UI zoom uses CSS `zoom` on <html>; getBoundingClientRect
@@ -693,11 +723,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           antialias: false,
           failIfMajorPerformanceCaveat: false,
           powerPreference: 'default',
-          // DEV: lets us snapshot the 3D canvas (toBlob) and POST it to the bridge
-          // so an agent can SEE the rendered overlay/twin, not just the camera feed.
-          preserveDrawingBuffer: import.meta.env.DEV,
+          // Only when the dev viewport-capture bridge is EXPLICITLY enabled
+          // (VITE_VIEWER_CAPTURE=1). preserveDrawingBuffer forces the GL context to
+          // keep the back buffer (a real perf cost), so it stays OFF by default even
+          // in dev — it was making `npm run dev` needlessly heavy.
+          preserveDrawingBuffer:
+            import.meta.env.DEV && import.meta.env.VITE_VIEWER_CAPTURE === '1',
         }}
-        dpr={[1, 1.5]}
+        dpr={LOW_POWER ? [1, 1] : [1, 1.5]}
         // WebGL CONTEXT-LOSS handling: a driver can drop the context (GPU OOM,
         // power-switch, tab backgrounding). preventDefault() asks the browser to
         // restore it; on restore we re-render. On drivers where Chrome applies
@@ -746,12 +779,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
             reads premium (not flat-grey) in both themes. */}
         <ambientLight intensity={theme === 'dark' ? 0.9 : 1.05} />
         <directionalLight position={[120, -120, 320]} intensity={0.9} />
-        <directionalLight position={[-140, 120, 180]} intensity={0.5} />
-        <directionalLight position={[0, 40, 260]} intensity={0.5} />
+        {/* Fill + rim lights each add per-fragment shading cost; on a low-power GPU
+            (Raspberry Pi) keep only the ambient + key light — the Environment still
+            supplies image-based reflections so metals don't read flat. */}
+        {!LOW_POWER && <directionalLight position={[-140, 120, 180]} intensity={0.5} />}
+        {!LOW_POWER && <directionalLight position={[0, 40, 260]} intensity={0.5} />}
         {/* Self-contained studio Environment (no remote HDR fetch — offline-safe):
             a few Lightformer panels generate image-based reflections so the
             metallic spindle reads premium instead of flat. */}
-        <Environment resolution={64} environmentIntensity={theme === 'dark' ? 0.7 : 0.9}>
+        <Environment resolution={LOW_POWER ? 24 : 64} environmentIntensity={theme === 'dark' ? 0.7 : 0.9}>
           <Lightformer intensity={2.2} position={[0, 0, 60]} scale={[140, 140, 1]} color="#ffffff" />
           <Lightformer intensity={1.4} position={[80, 40, 40]} scale={[50, 90, 1]} color="#e6edf5" />
           <Lightformer intensity={1} position={[-80, -40, 30]} scale={[50, 70, 1]} color="#c2ccd8" />
@@ -1051,7 +1087,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           Shown only while in lasso mode with no pending selection. */}
       {lasso && !lassoSel && (
         <div
-          style={{ position: 'absolute', inset: 0, cursor: 'crosshair', zIndex: 6, touchAction: 'none' }}
+          className="vzo-lasso-surface"
           onPointerDown={(e) => {
             lassoDrawing.current = true
             const r = e.currentTarget.getBoundingClientRect()
@@ -1076,7 +1112,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           }}
         >
           {lassoPoly.length > 1 && (
-            <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+            <svg className="vzo-lasso-svg">
               <polygon
                 points={lassoPoly.map((p) => `${p[0]},${p[1]}`).join(' ')}
                 fill="rgba(94,234,212,0.15)"
@@ -1089,146 +1125,70 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       )}
       {/* Confirm bar once a lasso selection exists. */}
       {lasso && lassoSel && (
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            bottom: 14,
-            transform: 'translateX(-50%)',
-            zIndex: 7,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '8px 12px',
-            borderRadius: 8,
-            background: 'var(--bg-elev, #1b1f24)',
-            border: '1px solid var(--border, #3a4048)',
-            boxShadow: '0 6px 22px rgba(0,0,0,0.4)',
-            font: '12px/1.3 system-ui, sans-serif',
-            color: 'var(--fg, #cfd6dd)',
-          }}
-        >
-          <span>
+        <div className="vzo-actionbar">
+          <span className="vzo-actionbar-msg">
             {t('vz.lassoSelected', 'Delete {n} selected move(s)? Safe-Z is kept around the gap.', {
               n: String(lassoSel.idx.size),
             })}
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              onLassoDelete?.(lassoSel.kept)
-              setLassoSel(null)
-            }}
-            style={{
-              padding: '5px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: 'var(--danger, #e5484d)',
-              color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            {t('vz.lassoDelete', 'Delete')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setLassoSel(null)
-              onLassoExit?.()
-            }}
-            style={{
-              padding: '5px 12px',
-              borderRadius: 6,
-              border: '1px solid var(--border, #3a4048)',
-              background: 'transparent',
-              color: 'var(--fg, #cfd6dd)',
-              cursor: 'pointer',
-            }}
-          >
-            {t('common.cancel', 'Cancel')}
-          </button>
+          <div className="vzo-actionbar-actions">
+            <button
+              type="button"
+              className="vzo-btn vzo-btn--danger"
+              onClick={() => {
+                onLassoDelete?.(lassoSel.kept)
+                setLassoSel(null)
+              }}
+            >
+              {t('vz.lassoDelete', 'Delete')}
+            </button>
+            <button
+              type="button"
+              className="vzo-btn"
+              onClick={() => {
+                setLassoSel(null)
+                onLassoExit?.()
+              }}
+            >
+              {t('common.cancel', 'Cancel')}
+            </button>
+          </div>
         </div>
       )}
       {/* Confirm bar once an individual pick selection exists (mirrors the lasso). */}
       {pick && pickSel.size > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            bottom: 14,
-            transform: 'translateX(-50%)',
-            zIndex: 7,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '8px 12px',
-            borderRadius: 8,
-            background: 'var(--bg-elev, #1b1f24)',
-            border: '1px solid var(--border, #3a4048)',
-            boxShadow: '0 6px 22px rgba(0,0,0,0.4)',
-            font: '12px/1.3 system-ui, sans-serif',
-            color: 'var(--fg, #cfd6dd)',
-          }}
-        >
-          <span>
+        <div className="vzo-actionbar">
+          <span className="vzo-actionbar-msg">
             {t('vz.pickSelected', 'Delete {n} selected move(s)? Safe-Z is kept around the gap.', {
               n: String(pickSel.size),
             })}
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              const kept = parsed.segments.filter((_, i) => !pickSel.has(i))
-              onPickDelete?.(kept)
-              setPickSel(new Set())
-            }}
-            style={{
-              padding: '5px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: 'var(--danger, #e5484d)',
-              color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            {t('vz.lassoDelete', 'Delete')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPickSel(new Set())}
-            style={{
-              padding: '5px 12px',
-              borderRadius: 6,
-              border: '1px solid var(--border, #3a4048)',
-              background: 'transparent',
-              color: 'var(--fg, #cfd6dd)',
-              cursor: 'pointer',
-            }}
-          >
-            {t('vz.pickClear', 'Clear')}
-          </button>
+          <div className="vzo-actionbar-actions">
+            <button
+              type="button"
+              className="vzo-btn vzo-btn--danger"
+              onClick={() => {
+                const kept = parsed.segments.filter((_, i) => !pickSel.has(i))
+                onPickDelete?.(kept)
+                setPickSel(new Set())
+              }}
+            >
+              {t('vz.lassoDelete', 'Delete')}
+            </button>
+            <button
+              type="button"
+              className="vzo-btn"
+              onClick={() => setPickSel(new Set())}
+            >
+              {t('vz.pickClear', 'Clear')}
+            </button>
+          </div>
         </div>
       )}
       {glLost && (
-        <div
-          role="alert"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 12,
-            padding: 24,
-            textAlign: 'center',
-            background: bg,
-            color: 'var(--fg, #cfd6dd)',
-            font: '13px/1.5 system-ui, sans-serif',
-          }}
-        >
-          <div style={{ fontSize: 26 }} aria-hidden="true">⚠</div>
-          <div style={{ maxWidth: 340 }}>
+        <div role="alert" className="vzo-gllost" style={{ background: bg }}>
+          <div className="vzo-gllost-icon" aria-hidden="true">⚠</div>
+          <div className="vzo-gllost-msg">
             {t(
               'vz.glLostAuto',
               'The 3D view lost the GPU (WebGL) context — usually a graphics-driver hiccup. Reloading automatically… the rest of the app is unaffected.',
@@ -1236,17 +1196,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           </div>
           <button
             type="button"
+            className="vzo-btn vzo-btn--accent"
             onClick={() => {
               setGlLost(false)
               setGlEpoch((n) => n + 1)
-            }}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 6,
-              border: '1px solid var(--border, #3a4048)',
-              background: 'var(--accent, #0e7c66)',
-              color: '#fff',
-              cursor: 'pointer',
             }}
           >
             {t('vz.glReload', 'Reload 3D view')}
@@ -1338,7 +1291,7 @@ function ViewerBridge() {
   // FOREGROUND path: capture inside the render loop (drawing buffer is fresh),
   // throttled to ~1.5s. Also records that rAF is alive.
   useFrame((state) => {
-    if (!import.meta.env.DEV) return
+    if (!(import.meta.env.DEV && import.meta.env.VITE_VIEWER_CAPTURE === '1')) return
     const now = Date.now()
     lastFrameAt.current = now
     if (now - lastCapAt.current < 1500) return
@@ -1351,7 +1304,7 @@ function ViewerBridge() {
   // refresh the drawing buffer, then capture. This keeps the twin observable to an
   // agent on the server regardless of whether the tab is focused/visible.
   useEffect(() => {
-    if (!import.meta.env.DEV) return
+    if (!(import.meta.env.DEV && import.meta.env.VITE_VIEWER_CAPTURE === '1')) return
     const id = setInterval(() => {
       const now = Date.now()
       // Telemetry so the server-side agent can see WHY a hidden-tab capture

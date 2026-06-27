@@ -1,0 +1,406 @@
+/* TATTOO panel (experimental concept). Slim, sectioned, token-driven — matches
+   the other CAM tabs. The safety banner is intentionally loud. */
+
+.tt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 10px);
+  padding: var(--sp-3, 10px);
+  overflow: auto;
+  height: 100%;
+}
+
+/* ── Experimental / safety banner ── */
+.tt-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3, 10px);
+  padding: var(--sp-3, 10px);
+  border-radius: var(--radius, 6px);
+  border: 1px solid color-mix(in srgb, var(--danger, #e0567a) 60%, var(--border));
+  background: color-mix(in srgb, var(--danger, #e0567a) 12%, var(--bg-card));
+}
+.tt-banner--ack {
+  border-color: color-mix(in srgb, var(--warn, #d6a420) 50%, var(--border));
+  background: color-mix(in srgb, var(--warn, #d6a420) 9%, var(--bg-card));
+}
+.tt-banner-icon {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--danger, #e0567a);
+  flex: none;
+}
+.tt-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  min-width: 0;
+}
+.tt-banner-text strong {
+  font-size: 12.5px;
+}
+.tt-ack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+  cursor: pointer;
+  align-self: center;
+}
+.tt-ack input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+/* ── Dismissable banner close (✕) + collapsed reminder chip ── */
+.tt-banner-close {
+  flex: none;
+  align-self: flex-start;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tt-banner-close:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+}
+.tt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warn, #d6a420) 55%, var(--border));
+  background: color-mix(in srgb, var(--warn, #d6a420) 12%, var(--bg-card));
+  color: var(--fg);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tt-chip span {
+  color: var(--warn, #d6a420);
+}
+
+/* ── Always-visible safety acknowledgment row ── */
+.tt-ackrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tt-ackrow input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+/* ── Segmented controls (skin shape / wrap axis) ── */
+.tt-seg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tt-seg--sm {
+  gap: 4px;
+}
+.tt-seg-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-right: 2px;
+}
+.tt-seg-btn {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tt-seg--sm .tt-seg-btn {
+  flex: 0 0 auto;
+  min-width: 38px;
+}
+.tt-seg-btn.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
+  color: var(--fg);
+}
+
+/* ── Tool-mode segmented control (Tattoo · needle / Henna · extruder) ── */
+.tt-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tt-mode-btn {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--fg-muted);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tt-mode-btn.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
+  color: var(--fg);
+}
+
+/* ── Cards ── */
+.tt-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2, 7px);
+  padding: var(--sp-3, 10px);
+  border-radius: var(--radius, 6px);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.tt-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tt-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.tt-card-actions {
+  display: flex;
+  gap: 4px;
+}
+/* Camera header: title + camera-picker grouped on the left, actions on the right. */
+.tt-camhead-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tt-camselect {
+  max-width: 160px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--bg-elev, var(--bg-card));
+  color: var(--fg);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+/* ── Camera frame ── */
+.tt-camframe {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--border);
+}
+.tt-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.tt-camempty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.tt-camoverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px dashed color-mix(in srgb, var(--accent) 70%, transparent);
+  margin: 14px;
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-end;
+}
+.tt-camoverlay-note {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--accent) 85%, #fff);
+  background: color-mix(in srgb, #000 55%, transparent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin: 6px;
+}
+
+/* ── Number rows ── */
+.tt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.tt-row-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg);
+}
+.tt-row-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tt-row-input input {
+  width: 78px;
+  padding: 4px 6px;
+  text-align: right;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--bg-elev, var(--bg-card));
+  color: var(--fg);
+  font: inherit;
+}
+.tt-row--warn .tt-row-input input {
+  border-color: var(--warn, #d6a420);
+}
+.tt-row-unit {
+  font-size: 11px;
+  color: var(--fg-muted);
+  min-width: 40px;
+}
+.tt-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ── Loaded-file row + notes (design upload) ── */
+.tt-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  font-size: 12px;
+}
+.tt-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--fg);
+}
+.tt-file-meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.tt-note {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+.tt-note--warn {
+  color: var(--warn, #d6a420);
+}
+
+/* ── Checkbox row (scale-to-fit) ── */
+.tt-checkrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tt-checkrow input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  flex: none;
+}
+.tt-checkrow-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ── Toggle switch (live skin tracking on/off) ── */
+.tt-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tt-switch input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+/* ── Generate ── */
+.tt-generate {
+  gap: 8px;
+}
+.tt-summary {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.tt-gen-btn {
+  padding: 9px 12px;
+  border-radius: var(--radius, 6px);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg, #04201a);
+  font-weight: 700;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.tt-gen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+.tt-gen-hint {
+  font-size: 11px;
+  color: var(--warn, #d6a420);
+}

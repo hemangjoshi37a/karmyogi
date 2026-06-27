@@ -30,10 +30,18 @@ export interface SolderSceneProps {
 export function SolderScene({ dark }: SolderSceneProps) {
   const points = useSolderViz((s) => s.points)
   const selected = useSolderViz((s) => s.selected)
+  const hovered = useSolderViz((s) => s.hovered)
+  // Effective highlight: a row HOVER previews its point; otherwise the pinned
+  // (clicked) `selected` shows. So hovering the soldering table lights up the
+  // matching pad in 3D, and clicking pins it even after the cursor leaves.
+  const highlight = hovered >= 0 ? hovered : selected
   const activeIndex = useSolderViz((s) => s.activeIndex)
   const setActiveIndex = useSolderViz((s) => s.setActiveIndex)
   const fromDrill = useSolderViz((s) => s.fromDrill)
   const detected = useSolderViz((s) => s.detected)
+  // Display toggle (from the Visualizer's ⋯ menu): when OFF, the FR-4/copper board
+  // slab is hidden but the PADS/points (and highlights) below still render.
+  const showPcb = useSolderViz((s) => s.showPcb)
 
   const reduceMotion = useMemo(() => prefersReducedMotion(), [])
   // The soldering section's placement (the gizmo edits it). We apply the SAME
@@ -205,7 +213,7 @@ export function SolderScene({ dark }: SolderSceneProps) {
 
   if (!board || points.length === 0) return detMarkers
 
-  const sel = selected >= 0 && selected < points.length ? points[selected] : null
+  const sel = highlight >= 0 && highlight < points.length ? points[highlight] : null
   // The point the machine is currently executing — shimmered (animated pulse),
   // visually distinct from the static cyan click-selected highlight above.
   const act = activeIndex >= 0 && activeIndex < points.length ? points[activeIndex] : null
@@ -216,25 +224,30 @@ export function SolderScene({ dark }: SolderSceneProps) {
     <group ref={transformRef}>
       {/* ---- Board: an FR-4 substrate (slightly larger → a thin tan edge rim)
           with a green soldermask layer on top whose face sits at Z=0 (the work
-          surface). The two tones + rim give the slab real PCB depth. ---- */}
-      <mesh position={[board.cx, board.cy, -0.05 - board.thick / 2]}>
-        <boxGeometry args={[board.w + 1.4, board.h + 1.4, board.thick]} />
-        <meshStandardMaterial color={fr4Color} metalness={0.1} roughness={0.9} />
-      </mesh>
-      <mesh position={[board.cx, board.cy, -board.thick * 0.25]}>
-        <boxGeometry args={[board.w, board.h, board.thick * 0.5]} />
-        <meshStandardMaterial
-          color={boardColor}
-          emissive={boardEmissive}
-          emissiveIntensity={0.4}
-          metalness={0.15}
-          roughness={0.55}
-        />
-      </mesh>
+          surface). The two tones + rim give the slab real PCB depth. Gated by the
+          `showPcb` display toggle — when off, only the board hides; pads stay. ---- */}
+      {showPcb && (
+        <>
+          <mesh position={[board.cx, board.cy, -0.05 - board.thick / 2]}>
+            <boxGeometry args={[board.w + 1.4, board.h + 1.4, board.thick]} />
+            <meshStandardMaterial color={fr4Color} metalness={0.1} roughness={0.9} />
+          </mesh>
+          <mesh position={[board.cx, board.cy, -board.thick * 0.25]}>
+            <boxGeometry args={[board.w, board.h, board.thick * 0.5]} />
+            <meshStandardMaterial
+              color={boardColor}
+              emissive={boardEmissive}
+              emissiveIntensity={0.4}
+              metalness={0.15}
+              roughness={0.55}
+            />
+          </mesh>
+        </>
+      )}
 
       {/* ---- Pads (surface discs) or drilled holes at every point. ---- */}
       {points.map((p, i) => {
-        const isSel = i === selected
+        const isSel = i === highlight
         if (fromDrill) {
           // A dark plated bore through the board + a shiny copper annular ring.
           return (

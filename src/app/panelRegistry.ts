@@ -103,6 +103,9 @@ const lazyPanels: Record<string, LazyExoticComponent<ComponentType<IDockviewPane
       default: pick(m, 'SpringCoilingPanel'),
     })),
   ),
+  tattoo: lazy(() =>
+    import('../panels/TattooPanel').then((m) => ({ default: pick(m, 'TattooPanel') })),
+  ),
 }
 
 /** Pick a named export from a module, asserting it exists (dev safety). */
@@ -149,6 +152,7 @@ const PANEL_SCOPE: Record<string, string> = {
   welding: 'Welding',
   camera: 'Camera',
   springcoiling: 'Spring Coiling',
+  tattoo: 'Tattoo / Henna',
 }
 
 /**
@@ -204,6 +208,7 @@ export const availablePanels: PanelSpec[] = [
   { id: 'welding', component: 'welding', title: 'Welding' },
   { id: 'camera', component: 'camera', title: 'Camera' },
   { id: 'springcoiling', component: 'springcoiling', title: 'Spring Coiling' },
+  { id: 'tattoo', component: 'tattoo', title: 'Tattoo / Henna' },
 ]
 
 /**
@@ -229,6 +234,7 @@ export const TAB_TITLES: ReadonlyArray<{ id: string; en: string }> = [
   { id: 'welding', en: 'Welding' },
   { id: 'camera', en: 'Camera' },
   { id: 'springcoiling', en: 'Spring Coiling' },
+  { id: 'tattoo', en: 'Tattoo / Henna' },
 ]
 
 type Translate = (key: string, en: string) => string
@@ -262,6 +268,7 @@ export function TAB_TITLE_KEYS(t: Translate): string[] {
     t('tab.welding', 'Welding'),
     t('tab.camera', 'Camera'),
     t('tab.springcoiling', 'Spring Coiling'),
+    t('tab.tattoo', 'Tattoo / Henna'),
   ]
 }
 

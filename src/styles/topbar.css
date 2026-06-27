@@ -192,6 +192,28 @@
   flex: 0 0 auto;
 }
 .launcher-dot.open { background: var(--ok); border-color: var(--ok); }
+/* Row wrapper so an OPEN panel gets a close (✕) button beside its open/focus row,
+   letting the user close panels straight from the launcher list. */
+.launcher-item-wrap { display: flex; align-items: stretch; gap: 2px; }
+.launcher-item-wrap .launcher-item { flex: 1 1 auto; }
+.launcher-item-close {
+  flex: 0 0 auto;
+  width: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.launcher-item-close:hover {
+  background: color-mix(in srgb, var(--danger, #e0567a) 18%, transparent);
+  color: var(--danger, #e0567a);
+}
 
 /* ---- Server-bridge icon toggle (active state) ---- */
 .km-conn-icon[data-active='true'] {
