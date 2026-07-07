@@ -107,6 +107,7 @@ function SignInScreen({ graceExpired }: { graceExpired?: boolean }) {
   const t = useT()
   const signIn = useAuth((s) => s.signInWithGoogle)
   const signInWithCredential = useAuth((s) => s.signInWithGoogleCredential)
+  const prewarmSignIn = useAuth((s) => s.prewarmSignIn)
   const error = useAuth((s) => s.error)
   const features = useFeatures()
   // Policy acceptance is REQUIRED to sign in: the box is checked by default, and
@@ -115,6 +116,26 @@ function SignInScreen({ graceExpired }: { graceExpired?: boolean }) {
   // sign-in (see recordPolicyConsent in track/activity.ts) as legal evidence.
   const [accepted, setAccepted] = useState(true)
   const [openPolicy, setOpenPolicy] = useState<Policy | null>(null)
+  // While the Google popup/redirect is in flight: disables the button (so a second
+  // click can't cancel the first popup → auth/cancelled-popup-request) and shows a
+  // "Signing in…" label so the click always gives visible feedback.
+  const [pending, setPending] = useState(false)
+
+  // Warm the popup sign-in deps as soon as the screen shows, so the click opens the
+  // Google popup within the user gesture (no cold firebase/auth import on click).
+  useEffect(() => {
+    prewarmSignIn()
+  }, [prewarmSignIn])
+
+  const doSignIn = async () => {
+    if (!accepted || pending) return
+    setPending(true)
+    try {
+      await signIn()
+    } finally {
+      setPending(false)
+    }
+  }
 
   // Primary, popup-free sign-in: Google One Tap / FedCM. Only prompt ONCE the
   // policies are accepted (the "Continue as …" card signs the user in directly,
@@ -231,14 +252,17 @@ function SignInScreen({ graceExpired }: { graceExpired?: boolean }) {
           </div>
           <button
             className="auth-google-btn"
-            onClick={() => {
-              if (accepted) void signIn()
-            }}
-            disabled={!accepted}
+            onClick={() => void doSignIn()}
+            disabled={!accepted || pending}
+            aria-busy={pending}
             aria-label={t('auth.google', 'Sign in with Google')}
           >
             <GoogleG />
-            <span>{t('auth.google', 'Sign in with Google')}</span>
+            <span>
+              {pending
+                ? t('auth.signingIn', 'Signing in…')
+                : t('auth.google', 'Sign in with Google')}
+            </span>
           </button>
           {!accepted && (
             <p className="auth-consent-hint" role="status">

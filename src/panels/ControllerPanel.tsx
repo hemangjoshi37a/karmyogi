@@ -12,6 +12,7 @@ import { SegControl } from '../components/ui/SegControl'
 import { SliderField } from '../components/ui/SliderField'
 import {
   Gamepad2,
+  Disc3,
   Crosshair,
   Navigation,
   RefreshCw,
@@ -36,6 +37,7 @@ import {
 import { useTeachPoints, type TeachFrame, type TeachPoint } from '../store/teachPoints'
 import { useProgram } from '../store/program'
 import { GamepadModal } from '../components/GamepadModal'
+import { FluidDialModal } from '../components/FluidDialModal'
 import { useGamepad, type GamepadAction, type GamepadHandlers } from '../machine/useGamepad'
 import { useGamepadMap, padBindings, controlGlyph, tokenPressed, type GamepadActionId, type PadFamily } from '../store/gamepadMap'
 import { openTabs } from '../track/tabNav'
@@ -1163,6 +1165,11 @@ export function ControllerPanel() {
   }, [machineError, notifyBell, t])
   // O9 — live input-pin states (limit/probe/door) reported in GRBL `Pn:` status.
   const pins = useMachine((s) => s.pins)
+  // Live per-direction limit state (FluidNC `LS:`); subscribing here re-renders the
+  // jog pad whenever a switch trips so the matching direction greys out at once.
+  // Read only for that side-effect — the block decision lives in grbl.isJogBlocked.
+  const limitDirs = useMachine((s) => s.limitDirs)
+  void limitDirs
   // Machine-reported active WCS (from a `$G` parser-state poll). Authoritative
   // when known; falls back to the persisted local guess only when unknown.
   const machineWcs = useMachine((s) => s.activeWcs)
@@ -1226,6 +1233,8 @@ export function ControllerPanel() {
   const [gamepadHaptics, setGamepadHaptics] = usePersistentState('karmyogi.gamepad.haptics', true)
   const [gamepadHapticIntensity, setGamepadHapticIntensity] = usePersistentState('karmyogi.gamepad.hapticIntensity', 1)
   const [gamepadOpen, setGamepadOpen] = useState(false)
+  // FluidDial (FluidNC-native dial pendant) UART setup modal.
+  const [dialOpen, setDialOpen] = useState(false)
   // W-Q: when an ARMED gamepad is lost (e.g. battery dies / unplugged mid-jog),
   // surface a clear inline notice with how to recover. Presentation only — the
   // jog/disarm safety is handled by useGamepad; this just tells the operator.
@@ -2126,6 +2135,7 @@ export function ControllerPanel() {
             onJog={doJog}
             onJogHold={doJogHold}
             onCancel={cancelJog}
+            isBlocked={(d) => grbl.isJogBlocked(d)}
             zCenter={
               <button
                 type="button"
@@ -2416,7 +2426,36 @@ export function ControllerPanel() {
           )}
         </button>
       </section>
+
+      {/* FluidDial pendant — a FluidNC-native encoder+display dial wired to the
+          controller's UART (RX/TX). This launcher configures that UART channel in
+          the controller's config.yaml (FluidNC only). Sits directly under the
+          game-controller launcher as a second "physical control" option. */}
+      <section className="mc-section mc-gamepad-section">
+        <button
+          type="button"
+          className="mc-btn gp-launch"
+          onClick={() => setDialOpen(true)}
+          aria-haspopup="dialog"
+          disabled={!connected}
+          title={t('ctrl.fluiddial.title', 'FluidDial pendant — set up the FluidNC UART (RX/TX) the dial connects to')}
+        >
+          <Disc3 size={22} aria-hidden="true" />
+          <span className="gp-launch-text">
+            <span className="gp-launch-title">{t('ctrl.fluiddial', 'FluidDial pendant')}</span>
+            <span className="gp-launch-sub">
+              {!connected
+                ? t('ctrl.fluiddial.disconnected', 'Connect a FluidNC controller')
+                : grbl.isFluidNC
+                  ? t('ctrl.fluiddial.ready', 'Set up the RX/TX UART channel')
+                  : t('ctrl.fluiddial.notfluidnc', 'FluidNC controllers only')}
+            </span>
+          </span>
+        </button>
+      </section>
       </div>
+
+      <FluidDialModal open={dialOpen} onClose={() => setDialOpen(false)} />
 
       <GamepadModal
         open={gamepadOpen}

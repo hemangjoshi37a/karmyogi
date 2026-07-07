@@ -14,6 +14,8 @@ import { applyJobPlacement, isIdentityJob } from '../core/transform'
 import { grbl } from '../serial/controller'
 import { ProgramProgressBar } from '../components/ProgramProgressBar'
 import { FrameButton } from '../components/FrameButton'
+import { SdCardModal } from '../components/SdCardModal'
+import { useNotifications } from '../store/notifications'
 import { Icon } from '../components/Icons'
 import { ListChecks, AlertTriangle } from 'lucide-react'
 import { CamEmpty } from '../components/cam/CamUI'
@@ -161,6 +163,13 @@ export function ProgramPanel() {
   const [checkFindings, setCheckFindings] = useState<CheckFinding[] | null>(null)
 
   const [dragOver, setDragOver] = useState(false)
+  // SD-card browser modal (FluidNC `$SD/*`). The button only shows when connected
+  // to a controller that has SD-card file commands (FluidNC / grblHAL / Mock).
+  const [showSd, setShowSd] = useState(false)
+  const sdSupported = connected && grbl.supportsSdCard
+  // The section currently being SAVED to the SD card (XMODEM upload), or null.
+  const [savingSd, setSavingSd] = useState<string | null>(null)
+  const notify = useNotifications((s) => s.notify)
 
   // Start line to stream from (1-based, FULL-program index). Doubles as a live
   // "current line" readout while streaming. Default 1; clamped to 1..lines.length
@@ -410,6 +419,28 @@ export function ProgramPanel() {
   }
   function downloadSectionGcode(sec: { name: string; rawLines: string[] }) {
     downloadGcodeText(sec.name, sec.rawLines.join('\n'))
+  }
+  // Save a section's G-code onto the controller's SD card via XMODEM. The file is
+  // named from the section (sanitised, .nc ensured) so a pendant can run it later.
+  async function saveSectionToSd(sec: { id: string; name: string; rawLines: string[] }) {
+    const safe = sec.name.replace(/[^\w.\- ]+/g, '_').trim().replace(/\s+/g, '-')
+    const filename = /\.(nc|gcode|tap|cnc|ngc)$/i.test(safe)
+      ? safe
+      : (safe || 'program') + '.nc'
+    setSavingSd(sec.id)
+    try {
+      await grbl.saveToSd(filename, sec.rawLines.join('\n'))
+      notify('success', t('prog.sdSaved', 'Saved “{name}” to the SD card.', { name: filename }))
+    } catch (e) {
+      notify(
+        'error',
+        t('prog.sdSaveFailed', 'SD save failed: {err}', {
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      )
+    } finally {
+      setSavingSd(null)
+    }
   }
 
   // Per-section BAKED lines (placement applied) for the per-section Frame button,
@@ -842,6 +873,20 @@ export function ProgramPanel() {
               >
                 <Icon name="upload" size={16} />
               </button>
+              {/* Load G-code from the controller's SD card (FluidNC). Only shown
+                  when connected to a controller that supports SD file commands. */}
+              {sdSupported && (
+                <button
+                  type="button"
+                  className="pp-icon-btn"
+                  onClick={() => setShowSd(true)}
+                  disabled={streaming}
+                  title={t('prog.sdLoad', 'Load G-code from the controller’s SD card')}
+                  aria-label={t('prog.sdLoad', 'Load from SD card')}
+                >
+                  <Icon name="sd-card" size={16} />
+                </button>
+              )}
             </div>
           </div>
           {/* Prominent staged status + progress bar while a tab generates a
@@ -992,6 +1037,26 @@ export function ProgramPanel() {
                         </span>
                       )}
                     </button>
+                    {/* Save this section's G-code to the controller's SD card
+                        (FluidNC, via XMODEM). Left of the Frame button; only shown
+                        when connected to a controller with SD support. */}
+                    {sdSupported && (
+                      <button
+                        type="button"
+                        className={
+                          'pp-icon-btn pp-section-io' +
+                          (savingSd === sec.id ? ' is-busy' : '')
+                        }
+                        onClick={() => void saveSectionToSd(sec)}
+                        disabled={savingSd !== null}
+                        title={t('prog.sectionSdSave', 'Save this section’s G-code to the controller’s SD card')}
+                        aria-label={t('prog.sectionSdSaveAria', 'Save {name} to SD card', {
+                          name: sec.name,
+                        })}
+                      >
+                        <Icon name="sd-card" size={14} />
+                      </button>
+                    )}
                     <FrameButton
                       className="pp-frame pp-section-frame"
                       lines={sectionFrameLines.get(sec.id)}
@@ -1218,6 +1283,7 @@ export function ProgramPanel() {
             onChange={onFileChange}
           />
         </section>
+      <SdCardModal open={showSd} onClose={() => setShowSd(false)} />
     </div>
   )
 }

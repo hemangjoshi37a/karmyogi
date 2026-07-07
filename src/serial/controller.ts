@@ -14,7 +14,7 @@ import { UsbPort } from './usbPort'
 import { Streamer, type StreamMode } from './streamer'
 import { playCompletionChime } from './completionChime'
 import { RealtimeByte } from './realtime'
-import { isStatusReport, isParserStateLine } from './status'
+import { isStatusReport, isParserStateLine, isWcsOffsetLine } from './status'
 import {
   GRBL_DIALECT,
   resolveDialect,
@@ -28,6 +28,7 @@ import { parseSettingLine, writeSettingCommand, FLUIDNC_READONLY_NUMBERS } from 
 import { useMachine } from '../store/machine'
 import { useProgram } from '../store/program'
 import { useConsole } from '../store/console'
+import { useNotifications } from '../store/notifications'
 import { useGrblSettings } from '../store/grblSettings'
 import { useMachineProfile } from '../store/machineProfile'
 import { canLiveConnect, profileFor } from '../machine/controllers'
@@ -90,6 +91,11 @@ export interface JogParams {
 }
 
 const STATUS_POLL_MS = 200 // ~5 Hz (USB / Wi-Fi)
+// While a limit-guarded jog is in flight we poll `?` ~33 Hz so a limit trip is caught
+// and 0x85-cancelled within a frame — minimising the (otherwise latency-dominated)
+// software-stop overtravel. `?` is a free GRBL realtime byte (no RX cost, no `ok`),
+// so this is cheap, and it only applies on a fast link (not BLE) while a jog is live.
+const JOG_STATUS_POLL_MS = 30
 // Bluetooth LE is low-bandwidth + high-latency; polling status at 5 Hz floods the
 // single GATT writer and starves interactive jog. ~2.5 Hz keeps the DRO live while
 // leaving the link free for jog/realtime bytes.
@@ -209,6 +215,22 @@ const MAX_INFLIGHT_JOGS = 2
  */
 const JOG_RX_WINDOW = 96
 
+/** Progress event from measureWorkspace() (auto bed-size by touching both ends). */
+export interface WorkspaceMeasureProgress {
+  axis: 'X' | 'Y' | 'Z'
+  edge: '-' | '+'
+  /** seeking = driving to the switch; recorded = MPos captured at the trip; axisDone = travel computed. */
+  phase: 'seeking' | 'recorded' | 'axisDone'
+  /** For 'recorded' the MPos at the switch; for 'axisDone' the axis travel (mm). */
+  value?: number
+}
+/** Result of measureWorkspace(): per-axis min/max machine position + travel (mm). */
+export interface WorkspaceMeasureResult {
+  x?: { min: number; max: number; travel: number }
+  y?: { min: number; max: number; travel: number }
+  z?: { min: number; max: number; travel: number }
+}
+
 class GrblController {
   private conn: GrblConnection | null = null
   private streamer: Streamer | null = null
@@ -223,6 +245,20 @@ class GrblController {
   // `ok` that immediately follows is consumed SILENTLY (not echoed to the console
   // and not counted by the jog gate) — otherwise the slow poll spams the console.
   private suppressNextOk = false
+  // Set while OUR automatic `$#` work-offset poll is in flight, so its whole dump
+  // ([G54..G59]/[G28]/[G30]/[G92]/[TLO]/[PRB] + the trailing `ok`) is consumed
+  // SILENTLY — the G54–G59 lines still populate the store (for the visualizer
+  // origin markers), but nothing reaches the console. A MANUAL `$#` (Probe panel)
+  // leaves this false, so it both stores AND echoes as before.
+  private suppressWcsDump = false
+  // True once we've seen at least one bracket line of the in-flight `$#` dump, so
+  // the dump-ending `ok` is matched to THIS dump and not to an unrelated earlier
+  // `ok` (e.g. a concurrently-primed `$G` poll's ack).
+  private wcsDumpSeen = false
+  // Round-robin counter so the work-offset (`$#`) poll fires less often than the
+  // parser-state (`$G`) poll — offsets only change when the operator zeros/sets a
+  // WCS, so a slower refresh is plenty and keeps RX-buffer traffic low.
+  private wcsPollCount = 0
   // Marlin only: the automatic `M114` status poll is a buffered LINE command that
   // replies `X:.. Y:.. Z:..` then a bare `ok`. We poll it ~5 Hz, so that `ok` must
   // be swallowed SILENTLY (no console echo, not counted by the jog gate) exactly
@@ -264,6 +300,63 @@ class GrblController {
    */
   private jogAckSizes: number[] = []
   private jogUnackedBytes = 0
+  /** Sign of the last jog per axis (−1/0/+1) — to cancel a continuous jog if its
+   *  direction's limit trips mid-move (limit-aware jogging). */
+  private lastJogVec = { x: 0, y: 0, z: 0 }
+
+  /** Limit-aware jogging on? (Persisted; default on. No-op if no limits trip.) */
+  private get limitGuardOn(): boolean {
+    try {
+      return localStorage.getItem('karmyogi.jog.limitGuard') !== 'false'
+    } catch {
+      return true
+    }
+  }
+
+  /**
+   * True if jogging `axis` in `sign` (−/+) would drive INTO a currently-triggered
+   * limit. Uses the live per-direction `LS:` report (or per-axis `Pn` fallback)
+   * and honours the Probe panel's switch rebinding (`karmyogi.probe.limitBind`).
+   * Lets karmyogi block just that direction (no controller alarm) while the other
+   * five jog freely — when the board runs with hard_limits OFF.
+   */
+  private jogIntoLimit(axis: 'X' | 'Y' | 'Z', sign: number): boolean {
+    const m = useMachine.getState()
+    const limitDirs = m.limitDirs
+    const pins = m.pins
+    if (!limitDirs && (!pins || pins.length === 0)) return false
+    const tile = axis + (sign < 0 ? '-' : '+')
+    let source = tile
+    try {
+      const raw = localStorage.getItem('karmyogi.probe.limitBind')
+      if (raw) {
+        const map = JSON.parse(raw) as Record<string, string>
+        if (map && map[tile]) source = String(map[tile])
+      }
+    } catch {
+      /* malformed binding — fall back to identity */
+    }
+    if (limitDirs) return limitDirs.includes(source) || (pins?.includes(source) ?? false)
+    // Per-axis fallback (no LS field): the direction's axis pin (both ends share it).
+    return pins?.includes(source[0]) ?? false
+  }
+
+  /**
+   * Public, reactive-friendly: would jogging this delta drive INTO a held limit?
+   * Used by the jog pad to GREY OUT a direction whose switch is currently
+   * triggered (the level-based half of limit-aware jogging — the same rule the
+   * jog() guard applies, so UI and behaviour never disagree). Any non-zero
+   * component being blocked blocks the whole delta (covers the diagonal cells).
+   * Returns false when the guard is off, so buttons stay live.
+   */
+  isJogBlocked(delta: { x?: number; y?: number; z?: number }): boolean {
+    if (!this.limitGuardOn) return false
+    return (
+      (!!delta.x && this.jogIntoLimit('X', Math.sign(delta.x))) ||
+      (!!delta.y && this.jogIntoLimit('Y', Math.sign(delta.y))) ||
+      (!!delta.z && this.jogIntoLimit('Z', Math.sign(delta.z)))
+    )
+  }
   /**
    * Resolved protocol dialect for the active connection. Defaults to pure GRBL so
    * everything behaves exactly as before unless the selected firmware opts into
@@ -278,12 +371,57 @@ class GrblController {
    * `writeSetting` refuse those writes instead of emitting a command FluidNC errors.
    */
   private isFluidnc = false
+  /**
+   * Firmware AUTO-DETECTED from the controller's own output (banner / `[MSG:…]` /
+   * `$I` `[VER:…]`), independent of the user's selected profile. 'unknown' until a
+   * defining line is seen. Drives {@link supportsSd}.
+   */
+  private detectedFirmware: 'unknown' | 'grbl' | 'fluidnc' | 'grblhal' = 'unknown'
+  /** True when the active controller has SD-card file commands ($SD/*). */
+  private supportsSd = false
+  /**
+   * In-flight capture of a multi-line command reply (e.g. $SD/List, $SD/Show):
+   * collects every reply line until the terminating ok/error, then resolves.
+   * Only one runs at a time. While set, the slow $G/$# polls are paused so their
+   * acks can't interleave with the captured reply.
+   */
+  private capture: {
+    lines: string[]
+    resolve: (lines: string[]) => void
+    reject: (err: Error) => void
+    timer: ReturnType<typeof setTimeout>
+    // SETTLE mode (for $CD, which streams the config asynchronously so its `ok`
+    // is unreliable): instead of ending on `ok`, collect every line and resolve
+    // once the stream has been quiet for `settleMs`.
+    settleMs?: number
+    settleTimer?: ReturnType<typeof setTimeout>
+  } | null = null
+  private busyCapture = false
+  // True during an XMODEM file UPLOAD ($Xmodem/Receive). The whole stream is raw
+  // binary then — ALL polling (status `?`, `$G`, `$#`) must pause or a stray byte
+  // corrupts the transfer.
+  private busyXfer = false
   /** What the active connection is (for the farm store's appbar label). */
   private active: ActivePortInfo = { connected: false }
   private readonly activeListeners = new Set<(info: ActivePortInfo) => void>()
 
   get isConnected(): boolean {
     return this.conn?.isOpen ?? false
+  }
+
+  /** True when the active controller exposes SD-card file commands ($SD/*). */
+  get supportsSdCard(): boolean {
+    return this.supportsSd
+  }
+
+  /**
+   * True when the connected controller is FluidNC — detected from its banner /
+   * `$I`, or seeded from the selected profile. FluidNC-only features (config.yaml
+   * editing, and the FluidDial pendant UART setup) gate on this, since they rely on
+   * `$CD` + an XMODEM config.yaml write + `[ESP444]RESTART`.
+   */
+  get isFluidNC(): boolean {
+    return this.detectedFirmware === 'fluidnc' || this.isFluidnc
   }
 
   /** Current active-connection descriptor (machineId/label/kind + connected). */
@@ -356,7 +494,17 @@ class GrblController {
     this.dialect = isMock ? GRBL_DIALECT : resolveDialect(profile.dialect, profile.kind)
     // FluidNC keeps a GRBL-compatible wire protocol but a different settings model
     // (some numbered settings are read-only YAML proxies) — track it for writeSetting.
+    // This is just the INITIAL hint from the selected profile; the firmware is then
+    // AUTO-DETECTED from the controller's own banner (see detectFirmware), which is
+    // authoritative and works regardless of which profile the user picked.
     this.isFluidnc = profile.kind === 'fluidnc'
+    // SD-card support ($SD/*, $Xmodem/Receive) is AUTO-DETECTED from the firmware
+    // banner — FluidNC and grblHAL have SD cards; vanilla GRBL does NOT, so we never
+    // assume it. Seed `true` only when the user EXPLICITLY chose a FluidNC/grblHAL
+    // profile (so they don't wait for the banner); a generic "GRBL" profile starts
+    // false and is upgraded by detectFirmware() if the device announces FluidNC/grblHAL.
+    this.detectedFirmware = 'unknown'
+    this.supportsSd = profile.kind === 'fluidnc' || profile.kind === 'grblhal'
     // Baud the port is actually opened at: the user's override (if set) wins over
     // the profile default. The mock/WebSocket transports ignore baud, so this only
     // matters for real USB (Web Serial) — but it's harmless to pass through.
@@ -822,12 +970,25 @@ class GrblController {
     this.resetJogGate()
     this.pendingStatusAcks = 0
     this.suppressNextOk = false
+    this.suppressWcsDump = false
+    this.wcsDumpSeen = false
+    this.supportsSd = false
+    if (this.capture) {
+      clearTimeout(this.capture.timer)
+      if (this.capture.settleTimer) clearTimeout(this.capture.settleTimer)
+      this.capture.reject(new Error('Disconnected'))
+      this.capture = null
+    }
+    this.busyCapture = false
+    this.busyXfer = false
     this.streamer?.reset()
     this.streamer = null
     await this.conn?.close()
     this.conn = null
     this.dialect = GRBL_DIALECT
     this.isFluidnc = false
+    this.detectedFirmware = 'unknown'
+    this.configPanicSeen = false
     this.setActive({ connected: false, machineId: this.active.machineId })
     useMachine.getState().setConnection('disconnected')
     useMachine.getState().resetMachine()
@@ -835,17 +996,44 @@ class GrblController {
   }
 
   private handleLine(line: string): void {
+    // Auto-detect the real firmware from whatever the controller says (cheap, and
+    // a no-op once detected). Authoritative for SD support, profile-independent.
+    if (this.detectedFirmware === 'unknown') this.detectFirmware(line)
+    // Watch the boot log for FluidNC's config-panic state (config skipped after a
+    // previous crash) — motion/limits/SD are all down until a good config loads.
+    this.detectConfigProblem(line)
     // GRBL family: a `<...>` realtime report. Parse straight through (unchanged).
     if (this.dialect.status === 'grbl') {
       if (isStatusReport(line)) {
         useMachine.getState().ingestStatusLine(line)
+        const rep = parseStatusForDialect(this.dialect, line)
+        // LIMIT-AWARE JOG (cancel side): if the machine is ACTIVELY JOGGING — a tap
+        // OR a continuous press-hold — in a direction whose limit just tripped,
+        // flush it with 0x85 so it stops in that direction with NO controller alarm.
+        // Gated on the reported 'Jog' STATE, not the in-flight ack gate: a held jog
+        // is ONE big $J= move that GRBL acks immediately, so its in-flight byte count
+        // is already 0 while the machine is still physically moving. FluidNC pushes a
+        // status frame the instant a pin changes (with hard_limits OFF / $21=0), so
+        // this interrupts motion mid-hold within ~1 RTT of the edge — not only on the
+        // next keypress.
+        if (
+          this.limitGuardOn &&
+          rep?.state === 'Jog' &&
+          !this.streamer?.isRunning &&
+          ((this.lastJogVec.x && this.jogIntoLimit('X', this.lastJogVec.x)) ||
+            (this.lastJogVec.y && this.jogIntoLimit('Y', this.lastJogVec.y)) ||
+            (this.lastJogVec.z && this.jogIntoLimit('Z', this.lastJogVec.z)))
+        ) {
+          this.lastJogVec = { x: 0, y: 0, z: 0 }
+          void this.jogCancel()
+          return
+        }
         // SELF-CORRECTING jog gate: resync to ground truth on every status report.
         // If GRBL is Idle (nothing can be pending) or its RX buffer is reported
         // empty (Bf:<plan>,<rx> with rx≈128), there are no unacked jogs in reality
         // — clear any accounting drift so a missed/stray `ok` can NEVER permanently
         // wedge jogging (the old failure: gate stuck full → silent, needs a reset).
         if (this.jogAckSizes.length > 0 && !this.streamer?.isRunning) {
-          const rep = parseStatusForDialect(this.dialect, line)
           if (rep && (rep.state === 'Idle' || (rep.buffer && rep.buffer.rx >= 120))) {
             this.resetJogGate()
           }
@@ -895,6 +1083,91 @@ class GrblController {
       ) {
         this.pendingStatusAcks--
         return
+      }
+    }
+    // SD/file command capture ($SD/List, $SD/Show, $SD/Delete…): while a capture
+    // is in flight, collect every reply line until the terminating ok/error and
+    // resolve the awaiting promise. These lines are CONSUMED here (not echoed to
+    // the console) — the SD browser reads the data directly. The slow $G/$# polls
+    // are paused during a capture (busyCapture), so the ok/error seen here belongs
+    // to the captured command. Status `<…>` reports already returned above, so the
+    // live DRO keeps updating without polluting the capture.
+    if (this.capture) {
+      const cap = this.capture
+      const trimmed = line.trim()
+      const low = trimmed.toLowerCase()
+      // SETTLE mode ($CD): the config streams asynchronously, so `ok` is not a
+      // reliable terminator. Collect the data lines (skip the bare ok / [MSG:…])
+      // and resolve once the stream has been quiet for settleMs.
+      if (cap.settleMs != null) {
+        const isNoise = low === 'ok' || low.startsWith('error') || /^\[MSG/i.test(trimmed)
+        if (!isNoise) cap.lines.push(line)
+        if (cap.settleTimer) clearTimeout(cap.settleTimer)
+        cap.settleTimer = setTimeout(() => {
+          if (this.capture === cap) {
+            this.capture = null
+            this.busyCapture = false
+            clearTimeout(cap.timer)
+            cap.resolve(cap.lines)
+          }
+        }, cap.settleMs)
+        return
+      }
+      if (low === 'ok') {
+        this.capture = null
+        this.busyCapture = false
+        clearTimeout(cap.timer)
+        cap.resolve(cap.lines)
+        return
+      }
+      if (low.startsWith('error:') || low.startsWith('error ')) {
+        this.capture = null
+        this.busyCapture = false
+        clearTimeout(cap.timer)
+        cap.reject(new Error(trimmed))
+        return
+      }
+      // FluidNC reports failures (e.g. "Failed to mount device", invalid config)
+      // as a `[MSG:ERR: …]` line rather than `error:N` — treat it as a clear
+      // failure so the SD UI shows the real reason instead of a generic timeout.
+      if (/^\[MSG:ERR/i.test(trimmed)) {
+        this.capture = null
+        this.busyCapture = false
+        clearTimeout(cap.timer)
+        cap.reject(new Error(trimmed.replace(/^\[MSG:ERR:?\s*/i, '').replace(/\]\s*$/, '')))
+        return
+      }
+      cap.lines.push(line)
+      return
+    }
+    // `$#` work-coordinate-offset dump. We auto-poll it to place the G54–G59
+    // origin markers in the visualizer. Always ingest the G54–G59 lines into the
+    // machine store; when it's OUR silent auto-poll, swallow the WHOLE dump
+    // (every bracket report it emits + the trailing `ok`) so it never spams the
+    // console. A MANUAL `$#` (Probe panel) leaves suppressWcsDump false → the
+    // offsets are still stored, and every line falls through to the normal echo.
+    if (this.isGrblFamily) {
+      const t = line.trim()
+      if (this.suppressWcsDump) {
+        // Swallow each bracket line of the dump (storing the G54–G59 offsets).
+        // FluidNC also emits G59.1/.2/.3 in $# — match the optional .N suffix too.
+        if (/^\[(G5[4-9](\.\d)?|G28|G30|G92|TLO|PRB):/.test(t)) {
+          if (isWcsOffsetLine(line)) useMachine.getState().ingestWcsOffsetLine(line)
+          this.wcsDumpSeen = true
+          return
+        }
+        // Only the `ok` that follows the dump ENDS it. We must NOT grab an `ok`
+        // that arrives BEFORE any dump line (e.g. a concurrently-primed `$G`
+        // poll's `ok`) — guarding on wcsDumpSeen lets that one fall through to
+        // its own suppressNextOk handling instead of stranding this flag.
+        if (t.toLowerCase() === 'ok' && this.wcsDumpSeen) {
+          this.suppressWcsDump = false
+          this.wcsDumpSeen = false
+          return
+        }
+      } else if (isWcsOffsetLine(line)) {
+        // Manual `$#` (Probe panel): store the offset, then fall through to echo.
+        useMachine.getState().ingestWcsOffsetLine(line)
       }
     }
     // Capture `$N=val` setting lines (from a `$$` dump) into the settings store.
@@ -981,8 +1254,57 @@ class GrblController {
    * Request a status report. GRBL: the `?` realtime byte. Marlin/RepRap/Smoothie:
    * an `M114` query line (parsed back via the dialect). `none`: nothing to send.
    */
+  /**
+   * Generalised firmware auto-detection from the controller's own output (welcome
+   * banner like `Grbl 3.7 [FluidNC v3.7 …]`, `[MSG:INFO: FluidNC …]`, or a `$I`
+   * `[VER:…:grblHAL]`). FluidNC and grblHAL announce themselves by name; vanilla
+   * GRBL does not. This is the SOURCE OF TRUTH for SD support — it ignores the
+   * selected profile, so a real FluidNC board connected under the generic "GRBL"
+   * profile still gets its SD features, and a plain GRBL controller never does.
+   */
+  private detectFirmware(line: string): void {
+    if (this.detectedFirmware !== 'unknown') return
+    if (/fluidnc/i.test(line)) {
+      this.detectedFirmware = 'fluidnc'
+      this.isFluidnc = true
+      this.supportsSd = true
+    } else if (/grbl\s*hal/i.test(line)) {
+      this.detectedFirmware = 'grblhal'
+      this.supportsSd = true
+    } else if (/^\s*Grbl\s+\d/i.test(line)) {
+      // Plain GRBL welcome banner with no FluidNC/grblHAL marker → no SD card.
+      this.detectedFirmware = 'grbl'
+    }
+  }
+
+  /** Notify-once guard for the config-panic banner (reset on reconnect). */
+  private configPanicSeen = false
+
+  /**
+   * Detect FluidNC's config-skipped state. After a boot CRASHES, FluidNC prints
+   * "Skipping configuration file due to panic" on the next boot and runs on the
+   * default (empty) config — so motion, limits AND the SD card are unavailable
+   * until a valid config loads. We flag it in the machine store (so features like
+   * the SD browser can explain the real cause) and notify the operator ONCE with
+   * recovery steps, instead of letting it surface as a mysterious "can't read SD".
+   */
+  private detectConfigProblem(line: string): void {
+    if (!/Skipping configuration file due to panic/i.test(line)) return
+    const msg =
+      'The controller booted WITHOUT its config file: a previous boot CRASHED, so FluidNC skipped config.yaml and is running on the empty default. Motion, limits and the SD card are all unavailable until a valid config loads. This usually means the last config change had a bad setting (e.g. a UART/limit pin that conflicts or does not exist). Restore config.backup.yaml (auto-downloaded before your last change) or re-upload a known-good config, then restart.'
+    useMachine.getState().setConfigError(msg)
+    if (!this.configPanicSeen) {
+      this.configPanicSeen = true
+      useNotifications.getState().notify('error', msg)
+      useConsole.getState().push('error', msg)
+    }
+  }
+
   requestStatus = async (): Promise<void> => {
     if (!this.conn) return
+    // Don't inject a status byte mid XMODEM upload (corrupts the binary) or mid
+    // command capture (a `<…>` between $CD lines would disturb the quiet-settle).
+    if (this.busyXfer || this.capture) return
     if (this.dialect.status === 'grbl') {
       // GRBL's `?` is a free realtime byte (no RX-buffer cost, no `ok`), so it is
       // safe to poll continuously even mid-stream — behaviour is unchanged.
@@ -1033,6 +1355,195 @@ class GrblController {
     }
   }
 
+  /**
+   * Request the GRBL `$#` work-coordinate-offset report (`[G54:…]…[PRB:…]`). It
+   * carries the stored origins of every work coordinate system (G54–G59) in
+   * machine coordinates — the visualizer reads them to draw each origin marker.
+   * Auto-polled, so the whole dump is consumed SILENTLY (see {@link suppressWcsDump}).
+   * GRBL family only; errors are swallowed so the poll loop survives a transient
+   * write failure (the next tick retries).
+   */
+  requestWorkOffsets = async (): Promise<void> => {
+    if (!this.conn) return
+    if (!this.isGrblFamily) return
+    try {
+      this.suppressWcsDump = true
+      await this.conn.writeLine('$#')
+    } catch {
+      this.suppressWcsDump = false
+      /* transient write error — the next poll tick retries */
+    }
+  }
+
+  /**
+   * Request `$I` build info once on connect. FluidNC replies `[VER:… FluidNC …]`,
+   * grblHAL `[VER:…grblHAL…]`, vanilla GRBL just `[VER:1.1…]` — so detectFirmware()
+   * (run on every line) can identify the real firmware even when the board doesn't
+   * re-emit its boot banner on connect (we deassert DTR/RTS to avoid the reset).
+   * The `[VER:]`/`[OPT:]` lines echo to the console (informative); the trailing ok
+   * is swallowed so it doesn't spam.
+   */
+  requestBuildInfo = async (): Promise<void> => {
+    if (!this.conn || !this.isGrblFamily) return
+    try {
+      this.suppressNextOk = true
+      await this.conn.writeLine('$I')
+    } catch {
+      this.suppressNextOk = false
+      /* transient — banner detection (if any) still covers it */
+    }
+  }
+
+  /**
+   * Send a command and capture its multi-line reply up to the terminating
+   * `ok`/`error:` (used for SD/file commands like $SD/List and $SD/Show). Resolves
+   * with the collected reply lines (excluding the ok), or rejects on error/timeout.
+   * Only one capture runs at a time.
+   */
+  private captureReply(
+    command: string,
+    opts: { timeoutMs?: number; settleMs?: number } = {},
+  ): Promise<string[]> {
+    const timeoutMs = opts.timeoutMs ?? 10000
+    if (!this.conn || !this.isGrblFamily) {
+      return Promise.reject(new Error('Not connected to a GRBL/FluidNC controller'))
+    }
+    if (this.capture) {
+      return Promise.reject(new Error('Another command is already in progress'))
+    }
+    return new Promise<string[]>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.capture && this.capture.timer === timer) {
+          const cap = this.capture
+          this.capture = null
+          this.busyCapture = false
+          if (cap.settleTimer) clearTimeout(cap.settleTimer)
+          // In settle mode a timeout just means "stream finished" → resolve.
+          if (cap.settleMs != null && cap.lines.length) resolve(cap.lines)
+          else reject(new Error(`Timed out waiting for "${command}"`))
+        }
+      }, timeoutMs)
+      this.capture = { lines: [], resolve, reject, timer, settleMs: opts.settleMs }
+      this.busyCapture = true
+      void this.conn!.writeLine(command).catch((e) => {
+        if (this.capture && this.capture.timer === timer) {
+          clearTimeout(timer)
+          this.capture = null
+          this.busyCapture = false
+          reject(e instanceof Error ? e : new Error(String(e)))
+        }
+      })
+    })
+  }
+
+  /**
+   * List files on the controller's SD card (FluidNC `$SD/List`). Returns
+   * `{ name, size }` for each FILE line; directories + the volume summary are
+   * skipped. Throws if no SD card / the command isn't supported.
+   */
+  async listSdFiles(): Promise<{ name: string; size: number }[]> {
+    const lines = await this.captureReply('$SD/List')
+    const files: { name: string; size: number }[] = []
+    for (const l of lines) {
+      // FluidNC: "[FILE: <name>|SIZE:<bytes>]" (a closing ] isn't guaranteed).
+      // "[DIR:…]" and the trailing "[/sd/ Free:… ]" summary are ignored.
+      const m = /^\[FILE:\s*(.+?)\|SIZE:(\d+)\]?\s*$/.exec(l.trim())
+      if (m) files.push({ name: m[1].trim(), size: parseInt(m[2], 10) })
+    }
+    return files
+  }
+
+  /**
+   * Read a file's G-code from the SD card (FluidNC `$SD/Show`). The controller
+   * requires Idle/Alarm — it returns an error otherwise (surfaced to the caller).
+   */
+  async readSdFile(path: string): Promise<string> {
+    const lines = await this.captureReply(`$SD/Show=${path}`, { timeoutMs: 30000 })
+    return lines.join('\n')
+  }
+
+  /**
+   * Run a file DIRECTLY on the controller from its SD card (FluidNC `$SD/Run`).
+   * The controller streams it itself — no host involvement — which is exactly the
+   * offline-pendant workflow.
+   */
+  async runSdFile(path: string): Promise<void> {
+    await this.send(`$SD/Run=${path}`)
+  }
+
+  /** Delete a file on the SD card (FluidNC `$SD/Delete`). */
+  async deleteSdFile(path: string): Promise<void> {
+    await this.captureReply(`$SD/Delete=${path}`)
+  }
+
+  /**
+   * Save G-code to a file on the controller's SD card via XMODEM (FluidNC
+   * `$Xmodem/Receive`). The file is written under `/sd/<name>` so it lands on the
+   * SD card (the receive command defaults to flash otherwise). All polling is
+   * paused for the transfer so nothing corrupts the binary stream. `onProgress`
+   * is called with 0..1. Requires Idle/Alarm on the controller.
+   */
+  async saveToSd(
+    name: string,
+    gcode: string,
+    onProgress?: (frac: number) => void,
+  ): Promise<void> {
+    if (!this.supportsSd) throw new Error('This controller has no SD-card support')
+    // Normalise the path to the SD volume + ensure a trailing newline.
+    const clean = name.replace(/^\/?sd\//i, '').replace(/^\/+/, '')
+    const text = gcode.endsWith('\n') ? gcode : gcode + '\n'
+    await this.writeFileViaXmodem(`/sd/${clean}`, text, onProgress)
+  }
+
+  /**
+   * Write a text file to the controller's filesystem over XMODEM
+   * (`$Xmodem/Receive=<path>`). Path examples: `/sd/foo.nc` (SD card),
+   * `config.yaml` (LocalFS — where FluidNC re-reads its config). All polling is
+   * paused for the binary transfer. GRBL family only.
+   */
+  async writeFileViaXmodem(
+    path: string,
+    text: string,
+    onProgress?: (frac: number) => void,
+  ): Promise<void> {
+    if (!this.conn || !this.isGrblFamily) {
+      throw new Error('Not connected to a GRBL/FluidNC controller')
+    }
+    if (this.capture || this.busyXfer) throw new Error('Another transfer is in progress')
+    const data = new TextEncoder().encode(text)
+    this.busyXfer = true
+    this.busyCapture = true // also park the $G/$# polls
+    try {
+      await this.conn.xmodemSend(data, {
+        onProgress,
+        start: () => this.conn!.writeLine(`$Xmodem/Receive=${path}`),
+      })
+    } finally {
+      this.busyXfer = false
+      this.busyCapture = false
+    }
+  }
+
+  /**
+   * Read the controller's full running config as YAML via `$CD` (Config/Dump).
+   * FluidNC streams the YAML ASYNCHRONOUSLY (its `ok` can arrive before the dump
+   * finishes), so we use quiet-settle capture: collect lines, resolve ~1.2 s after
+   * the stream goes quiet. Returns the joined YAML text.
+   */
+  async readConfigDump(): Promise<string> {
+    const lines = await this.captureReply('$CD', { timeoutMs: 25000, settleMs: 1200 })
+    return lines.join('\n')
+  }
+
+  /**
+   * Restart the controller so it re-reads config.yaml (FluidNC `[ESP444]RESTART` —
+   * this fork has no `$Bye`). Comes back in ~5 s and re-emits its boot banner.
+   */
+  async restartController(): Promise<void> {
+    if (!this.conn) return
+    await this.conn.writeLine('[ESP444]RESTART')
+  }
+
   /** Feed hold. GRBL: `!` byte. Non-realtime firmwares have no equivalent → no-op. */
   feedHold = () => this.realtime(RealtimeByte.FeedHold)
   /** Resume. GRBL: `~` byte. Non-realtime firmwares have no equivalent → no-op. */
@@ -1063,6 +1574,13 @@ class GrblController {
   }
   /** Home all axes. GRBL family: `$H`. Marlin/Smoothie: `G28`. */
   home = () => this.send(this.isGrblFamily ? '$H' : 'G28')
+  /**
+   * Home a SINGLE axis. GRBL 1.1 / FluidNC / grblHAL accept `$HX` / `$HY` / `$HZ`
+   * to run just that axis' homing cycle — useful when one switch needs re-seating
+   * or you want to bring axes home one at a time. Marlin: `G28 X` etc.
+   */
+  homeAxis = (axis: 'X' | 'Y' | 'Z') =>
+    this.send(this.isGrblFamily ? `$H${axis}` : `G28 ${axis}`)
   /**
    * Clear an alarm / unlock. GRBL family: `$X`. Marlin/Smoothie have no soft-lock
    * alarm to clear, so this clears the firmware kill state via `M999`.
@@ -1130,6 +1648,17 @@ class GrblController {
       }
       return
     }
+    // LIMIT-AWARE JOG: don't drive INTO a triggered limit. Zero any component
+    // whose direction's limit is currently tripped — the other axes still jog, so
+    // a hit limit stops only that direction with NO controller alarm (works when
+    // the board runs hard_limits OFF). Honours the switch rebinding.
+    if (this.limitGuardOn) {
+      if (x && this.jogIntoLimit('X', Math.sign(x))) x = 0
+      if (y && this.jogIntoLimit('Y', Math.sign(y))) y = 0
+      if (z && this.jogIntoLimit('Z', Math.sign(z))) z = 0
+      if (!x && !y && !z) return // every requested direction sits at a limit
+    }
+    this.lastJogVec = { x: Math.sign(x || 0), y: Math.sign(y || 0), z: Math.sign(z || 0) }
     if (this.dialect.jogCommand === 'grbl-$J') {
       // GRBL rejects scientific-notation numbers (e.g. `X1e-7`) with `error:20`
       // ("invalid g-code"), which a near-axis-aligned analog stick can otherwise
@@ -1168,6 +1697,14 @@ class GrblController {
         this.jogUnackedBytes = Math.max(0, this.jogUnackedBytes - lineBytes)
         throw e
       }
+      // Engage the fast status cadence NOW (don't wait out the current slow tick) so
+      // a limit trip during a continuous hold is caught within ~a frame. Re-kicks the
+      // self-pacing loop immediately; pollOnce clears the prior timer so there's never
+      // a duplicate. Only worth it for the one big guarded press-hold move.
+      if (opts?.force && this.limitGuardOn && !this.slowLink && this.statusPolling) {
+        if (this.statusTimer) clearTimeout(this.statusTimer)
+        this.statusTimer = setTimeout(() => void this.pollOnce(), 0)
+      }
       return
     }
     for (const line of g91JogLines({ x, y, z, feed })) {
@@ -1182,6 +1719,7 @@ class GrblController {
    * there's nothing to cancel).
    */
   jogCancel = async (): Promise<void> => {
+    this.lastJogVec = { x: 0, y: 0, z: 0 } // no jog in flight → don't re-trigger the limit cancel
     this.resetJogGate()
     await this.realtime(0x85)
   }
@@ -1190,6 +1728,115 @@ class GrblController {
   private resetJogGate(): void {
     this.jogAckSizes.length = 0
     this.jogUnackedBytes = 0
+  }
+
+  /**
+   * AUTO BED-SIZE: measure each axis' true travel by touching BOTH limit switches.
+   * Per requested axis we seek to the − end (a continuous jog that the limit stops
+   * AT the switch), capture MPos, back off, then seek to the + end and capture MPos;
+   * travel = |max − min|. This MEASURES the physical envelope directly, unlike `$H`
+   * + `$130–$132` which trusts the configured travel. Order: X then Y then Z, − then +.
+   *
+   * Needs hard_limits OFF ($21=0) + LIVE PER-DIRECTION reporting (FluidNC `LS:`) so
+   * the two ends of an axis can be told apart — a plain per-axis `Pn:` can't, so we
+   * refuse without it. Self-cancels each seek the instant the target switch trips,
+   * independent of the interactive jog-guard toggle, and honours the switch rebinding.
+   * MOVES THE MACHINE — the caller MUST confirm first and keep an abort ready
+   * (opts.signal; jogCancel()/softReset() also stop it). The `finally` always halts.
+   */
+  async measureWorkspace(
+    opts: {
+      axes?: Array<'X' | 'Y' | 'Z'>
+      feed?: number
+      backoffMm?: number
+      seekMm?: number
+      signal?: AbortSignal
+      onProgress?: (p: WorkspaceMeasureProgress) => void
+    } = {},
+  ): Promise<WorkspaceMeasureResult> {
+    if (!this.isGrblFamily) throw new Error('Bed measurement needs a GRBL-family controller.')
+    const m = () => useMachine.getState()
+    if (m().limitDirs === null) {
+      throw new Error(
+        'Per-direction limit reporting (FluidNC LS:) not detected — needed to tell the two ends of each axis apart. Flash the LS: firmware build, or home single-ended instead.',
+      )
+    }
+    const axes = (opts.axes && opts.axes.length ? opts.axes : ['X', 'Y', 'Z']) as Array<'X' | 'Y' | 'Z'>
+    const feed = Math.max(1, Math.round(opts.feed ?? 400))
+    const backoff = Math.max(0.5, opts.backoffMm ?? 4)
+    const seek = Math.max(10, opts.seekMm ?? 100000) // far beyond any hobby bed
+    const prop = (a: 'X' | 'Y' | 'Z') => a.toLowerCase() as 'x' | 'y' | 'z'
+    const result: WorkspaceMeasureResult = {}
+
+    const checkAbort = () => {
+      if (opts.signal?.aborted) throw new Error('aborted')
+    }
+    // Poll the live store until pred() or timeout (status updates ≤30 ms during a
+    // guarded jog, so this is responsive). Returns true if pred() became true.
+    const waitUntil = async (pred: () => boolean, timeoutMs: number): Promise<boolean> => {
+      const start = Date.now()
+      while (Date.now() - start < timeoutMs) {
+        checkAbort()
+        if (pred()) return true
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      return false
+    }
+    const settleIdle = (ms = 8000) => waitUntil(() => m().state === 'Idle', ms)
+
+    // Step `axis` AWAY from the `sign` end (precise jogs that finish on their own)
+    // until that switch reads clear — a few tries in case its release point is past
+    // one backoff step.
+    const backOff = async (axis: 'X' | 'Y' | 'Z', sign: number) => {
+      for (let i = 0; i < 6 && this.jogIntoLimit(axis, sign); i++) {
+        checkAbort()
+        await this.jog({ [prop(axis)]: -sign * backoff, feed })
+        await waitUntil(() => m().state === 'Jog', 1200) // catch motion starting
+        if (!(await settleIdle(6000))) break
+      }
+    }
+
+    try {
+      for (const axis of axes) {
+        const pos: { min?: number; max?: number } = {}
+        for (const sign of [-1, 1] as const) {
+          const edge: '-' | '+' = sign < 0 ? '-' : '+'
+          checkAbort()
+          if (!(await settleIdle())) throw new Error(`Machine not Idle before ${axis}${edge}.`)
+          // Already on this end's switch? Step off first for a clean approach.
+          if (this.jogIntoLimit(axis, sign)) await backOff(axis, sign)
+          opts.onProgress?.({ axis, edge, phase: 'seeking' })
+          // Seek to the end; capture MPos on the FIRST frame that shows the switch
+          // tripped (≈ the switch position) — before deceleration carries us past it.
+          await this.jog({ [prop(axis)]: sign * seek, feed }, { force: true })
+          let reading: number | undefined
+          const tripped = await waitUntil(() => {
+            if (this.jogIntoLimit(axis, sign)) {
+              reading = m().mpos[prop(axis)]
+              return true
+            }
+            return false
+          }, 180000)
+          await this.jogCancel().catch(() => {})
+          await settleIdle()
+          if (!tripped || reading === undefined) {
+            throw new Error(`${axis}${edge} limit switch not found (timed out).`)
+          }
+          if (sign < 0) pos.min = reading
+          else pos.max = reading
+          opts.onProgress?.({ axis, edge, phase: 'recorded', value: reading })
+          await backOff(axis, sign) // clear the switch before the next move
+        }
+        if (pos.min !== undefined && pos.max !== undefined) {
+          const travel = Math.abs(pos.max - pos.min)
+          result[prop(axis)] = { min: pos.min, max: pos.max, travel }
+          opts.onProgress?.({ axis, edge: '+', phase: 'axisDone', value: travel })
+        }
+      }
+      return result
+    } finally {
+      await this.jogCancel().catch(() => {}) // always leave the machine stopped
+    }
   }
 
   /**
@@ -1219,41 +1866,57 @@ class GrblController {
     void this.softReset()
   }
 
+  /**
+   * One status poll, then self-schedule the next. AWAIT-then-schedule keeps `?`
+   * from piling up on a slow link (BLE). Adaptive cadence: while a limit-guarded jog
+   * is in flight we poll fast (~33 Hz) so a trip is caught + 0x85-cancelled within a
+   * frame; otherwise ~5 Hz (USB) / ~2.5 Hz (BLE). Gated on lastJogVec so it engages
+   * the instant a jog is sent (see jog()) and reverts as soon as it's cleared.
+   * Always clears the prior timer before scheduling, so it can be safely kicked
+   * from elsewhere without ever spawning a second poll loop.
+   */
+  private pollOnce = async (): Promise<void> => {
+    if (!this.statusPolling || !this.conn) return
+    // Marlin `M114` is a buffered LINE command — skip it while streaming (it would
+    // compete for the RX buffer and its `ok` would desync). GRBL `?` is free.
+    if (!(this.dialect.statusIsLineCommand && this.streamer?.isRunning)) {
+      try {
+        await this.requestStatus()
+      } catch {
+        /* transient write failure — keep the loop alive */
+      }
+    }
+    if (!this.statusPolling) return
+    const jogActive =
+      !this.slowLink &&
+      this.limitGuardOn &&
+      !this.streamer?.isRunning &&
+      (this.lastJogVec.x !== 0 || this.lastJogVec.y !== 0 || this.lastJogVec.z !== 0)
+    const base = this.slowLink ? BLE_STATUS_POLL_MS : STATUS_POLL_MS
+    if (this.statusTimer) clearTimeout(this.statusTimer)
+    this.statusTimer = setTimeout(() => void this.pollOnce(), jogActive ? JOG_STATUS_POLL_MS : base)
+  }
+
   private startStatusPolling(): void {
     this.stopStatusPolling()
     this.statusPolling = true
-    // Slower cadence on BLE so interactive jog/realtime keep the single GATT writer.
-    const pollMs = this.slowLink ? BLE_STATUS_POLL_MS : STATUS_POLL_MS
-    // SELF-PACING status poll: AWAIT each poll, THEN schedule the next one
-    // STATUS_POLL_MS later. On a fast transport (USB) this still polls at ~5 Hz;
-    // on a SLOW one (Bluetooth LE) each `?` write takes longer to drain through
-    // the single serial writer, so the next poll is naturally delayed and the
-    // realtime `?` bytes NEVER pile up. Previously the fixed 5 Hz fire-and-forget
-    // interval out-ran BLE's drain rate, growing a multi-second writer backlog
-    // that delayed JOG and realtime commands by tens of seconds.
-    const pollOnce = async (): Promise<void> => {
-      if (!this.statusPolling || !this.conn) return
-      // Marlin `M114` is a buffered LINE command — skip it while streaming (it
-      // would compete for the RX buffer and its `ok` would desync the stream).
-      // GRBL's `?` realtime byte is free, so it always polls.
-      if (!(this.dialect.statusIsLineCommand && this.streamer?.isRunning)) {
-        try {
-          await this.requestStatus()
-        } catch {
-          /* transient write failure — keep the loop alive */
-        }
-      }
-      if (!this.statusPolling) return
-      this.statusTimer = setTimeout(() => void pollOnce(), pollMs)
-    }
-    this.statusTimer = setTimeout(() => void pollOnce(), STATUS_POLL_MS)
+    // First poll soon; pollOnce() self-paces from there (and runs fast while jogging).
+    this.statusTimer = setTimeout(() => void this.pollOnce(), STATUS_POLL_MS)
     // Prime the active-WCS badge immediately, then poll `$G` slowly. The poll
     // only fires when a program is NOT streaming, so it never competes with a
     // job for the RX buffer (the WCS won't change mid-cut anyway).
     void this.requestParserState()
+    // Identify the firmware (FluidNC/grblHAL/GRBL) so SD support auto-enables.
+    void this.requestBuildInfo()
+    // Prime the G54–G59 origin offsets too (for the visualizer markers).
+    void this.requestWorkOffsets()
     this.parserStateTimer = setInterval(() => {
-      if (this.streamer?.isRunning) return
+      if (this.streamer?.isRunning || this.busyCapture) return
       void this.requestParserState()
+      // Refresh work offsets less often (every 3rd tick, ~6 s) — they only change
+      // when the operator zeros/sets a WCS, so the markers stay fresh without
+      // adding much RX-buffer traffic.
+      if (++this.wcsPollCount % 3 === 0) void this.requestWorkOffsets()
     }, PARSER_STATE_POLL_MS)
   }
 

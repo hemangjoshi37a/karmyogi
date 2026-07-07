@@ -1011,3 +1011,13 @@
     min-height: 44px;
   }
 }
+
+/* Per-section "Save to SD card" button while its XMODEM upload is in flight. */
+.pp-icon-btn.is-busy {
+  color: var(--accent);
+  animation: pp-sd-pulse 0.9s ease-in-out infinite;
+}
+@keyframes pp-sd-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

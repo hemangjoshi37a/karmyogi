@@ -1,0 +1,340 @@
+/* SD-card browser modal (Program tab → Sections → SD card). Token-driven to match
+   the rest of the app; self-contained sd-* classes so nothing else is affected. */
+
+.sd-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 10px);
+  min-height: 220px;
+}
+
+/* ── Toolbar: select-all + refresh ── */
+.sd-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sd-selall {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.sd-selall input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+/* ── File list ── */
+.sd-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 46vh;
+  overflow: auto;
+}
+.sd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.sd-row.is-sel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+}
+.sd-row-main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1 1 auto;
+  cursor: pointer;
+}
+.sd-row-main input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  flex: none;
+}
+.sd-row-ico {
+  color: var(--fg-muted);
+  flex: none;
+}
+.sd-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.sd-row-size {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.sd-row-actions {
+  display: flex;
+  gap: 3px;
+  flex: none;
+}
+
+/* ── Buttons ── */
+.sd-btn {
+  padding: 7px 12px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sd-btn--ghost {
+  background: transparent;
+  color: var(--fg-muted);
+}
+.sd-btn--ghost:hover:not(:disabled) {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.sd-btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg, #04201a);
+  font-weight: 700;
+}
+.sd-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.sd-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sd-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--bg-elev, var(--bg-card));
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.sd-icon-btn:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.sd-icon-btn.sd-del:hover:not(:disabled) {
+  color: var(--danger, #e0567a);
+  border-color: color-mix(in srgb, var(--danger, #e0567a) 60%, var(--border));
+}
+.sd-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── States (loading / empty / error) ── */
+.sd-state {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 22px 12px;
+  justify-content: center;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+}
+.sd-state--err {
+  justify-content: flex-start;
+  text-align: left;
+  color: var(--danger, #e0567a);
+}
+.sd-state-detail {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-top: 2px;
+  word-break: break-word;
+}
+/* Actionable recovery / cause hints under an SD error. */
+.sd-recover {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+  text-align: left;
+}
+.sd-recover li { word-break: break-word; }
+.sd-recover-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sd-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+/* ── Limit-pin config editor (LimitConfigModal) ── */
+.sd-pin-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sd-pin-head,
+.sd-pin-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 1fr 30px;
+  align-items: center;
+  gap: 8px;
+}
+.sd-pin-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 0 2px 2px;
+}
+.sd-pin-axis {
+  font: 700 14px ui-monospace, monospace;
+  color: var(--accent);
+  text-align: center;
+}
+.sd-pin-input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--bg-elev, var(--bg-card));
+  color: var(--fg);
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.sd-pin-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.sd-pin-input:disabled {
+  opacity: 0.55;
+}
+
+/* Inline are-you-sure before the (board-writing) apply. */
+.lc-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: var(--sp-2, 7px) var(--sp-3, 10px);
+  border: 1px solid var(--danger, #e0567a);
+  border-radius: var(--radius-sm, 4px);
+  background: color-mix(in srgb, var(--danger, #e0567a) 10%, transparent);
+}
+.lc-confirm-q {
+  flex: 1 1 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.lc-confirm-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* ── FluidDial pendant UART setup (FluidDialModal) ── */
+.fd-wire {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-elev, var(--bg-card));
+  padding: var(--sp-2, 7px) var(--sp-3, 10px);
+}
+.fd-wire-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.fd-wire-list {
+  margin: 5px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.fd-pinwarn {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 3px 0 0 96px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--danger, #e0567a);
+}
+.fd-pinwarn svg { flex: none; margin-top: 1px; }
+.sd-pin-input[data-warn='true'] {
+  border-color: var(--danger, #e0567a);
+}
+@media (max-width: 460px) {
+  .fd-pinwarn { margin-left: 0; }
+}
+.fd-nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.fd-num {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.fd-num-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+@media (max-width: 460px) {
+  .fd-nums { grid-template-columns: 1fr 1fr; }
+}

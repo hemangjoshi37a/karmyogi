@@ -644,6 +644,15 @@
   justify-content: center;
 }
 .jog-btn.cancel { color: var(--danger); }
+/* Direction whose limit switch is currently held: greyed + barred so it reads as
+   "blocked by a limit", not merely disabled. (Limit-aware jogging, level-based.) */
+.jog-btn.is-limit {
+  border-color: color-mix(in srgb, var(--danger, #e0567a) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger, #e0567a) 14%, transparent);
+  color: color-mix(in srgb, var(--danger, #e0567a) 70%, var(--fg-muted));
+  cursor: not-allowed;
+  opacity: 0.9;
+}
 .jog-spacer { visibility: hidden; }
 
 /* Go-to-zero button injected into the Z column's empty center cell — fills the

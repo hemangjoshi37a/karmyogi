@@ -718,6 +718,20 @@ textarea { min-height: auto; }
 @keyframes km-panel-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .km-panel-spinner { animation-duration: 1.8s; } }
 
+/* Deep-link highlight: briefly ring + pulse the control a shared ?el=… URL points
+   at, so the recipient sees exactly which button/field the link is about. */
+.km-deeplink-flash {
+  outline: 2px solid var(--accent, #0e7c66);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm, 4px);
+  animation: km-deeplink-flash 1.05s ease-in-out 2;
+}
+@keyframes km-deeplink-flash {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #0e7c66) 60%, transparent); }
+  40% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent, #0e7c66) 45%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { .km-deeplink-flash { animation: none; } }
+
 /* ── Subtle, consistent motion (§2.7) ───────────────────────────────────────
    A light hover/active feedback on interactive controls — color/border/shadow
    only (never layout/size), so it stays sleek and never shifts content. Rides

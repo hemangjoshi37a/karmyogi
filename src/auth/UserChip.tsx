@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useT } from '../i18n'
 import { useAuth } from './authStore'
 import { firebaseConfigured } from './firebase'
@@ -15,14 +16,26 @@ export function UserChip() {
   const user = useAuth((s) => s.user)
   const signOut = useAuth((s) => s.signOut)
   const signIn = useAuth((s) => s.signInWithGoogle)
+  const prewarmSignIn = useAuth((s) => s.prewarmSignIn)
   const notify = useNotifications((s) => s.notify)
+  // Google profile photos sometimes 403 (referrer) or otherwise fail to load;
+  // track that so the avatar falls back to the initial instead of a broken-image
+  // icon. Reset on a new photo URL (e.g. a different account signs in).
+  const [avatarFailed, setAvatarFailed] = useState(false)
+  useEffect(() => setAvatarFailed(false), [user?.photoURL])
+  // In flight while the Google popup/redirect runs — disables the button so a
+  // double-click can't cancel its own popup (auth/cancelled-popup-request).
+  const [pending, setPending] = useState(false)
+  // Warm the popup sign-in deps while the login button is showing, so the click
+  // opens the popup within the user gesture (no cold firebase/auth import on click).
+  useEffect(() => {
+    if (firebaseConfigured() && (status === 'signedOut' || status === 'loading')) prewarmSignIn()
+  }, [status, prewarmSignIn])
   // Sign-in click. When Firebase is configured, run the Google flow; when it's
   // NOT configured (status 'disabled'), the store's signIn is a no-op, so explain
   // how to enable it instead of leaving a dead button.
-  const onLogin = () => {
-    if (firebaseConfigured()) {
-      void signIn()
-    } else {
+  const onLogin = async () => {
+    if (!firebaseConfigured()) {
       notify(
         'info',
         t(
@@ -30,6 +43,14 @@ export function UserChip() {
           "Sign-in isn't set up yet. Add your Firebase keys to .env.local (copy .env.example) and restart the dev server.",
         ),
       )
+      return
+    }
+    if (pending) return
+    setPending(true)
+    try {
+      await signIn()
+    } finally {
+      setPending(false)
     }
   }
 
@@ -87,8 +108,18 @@ export function UserChip() {
   if (status !== 'signedIn' || !user) return null
 
   const name = user.displayName || user.email || t('auth.user', 'Account')
-  const avatar = user.photoURL ? (
-    <img className="km-userchip-avatar" src={user.photoURL} alt="" width={26} height={26} />
+  const avatar = user.photoURL && !avatarFailed ? (
+    <img
+      className="km-userchip-avatar"
+      src={user.photoURL}
+      alt=""
+      width={26}
+      height={26}
+      // Google (lh3.googleusercontent.com) profile photos 403 when a referrer is
+      // sent — drop it so they load; fall back to the initial if they still fail.
+      referrerPolicy="no-referrer"
+      onError={() => setAvatarFailed(true)}
+    />
   ) : (
     <span className="km-userchip-avatar km-userchip-fallback" aria-hidden="true">
       {(name[0] ?? '?').toUpperCase()}

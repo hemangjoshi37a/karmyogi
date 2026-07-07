@@ -500,6 +500,73 @@
   color: var(--fg-muted);
 }
 
+/* ---- Measure-bed (auto bed-size by touching both ends) ---- */
+.pr-measure-axes {
+  gap: 6px;
+}
+.pr-chip-toggle {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elev, var(--bg-card));
+  color: var(--fg-muted);
+  font: 700 14px ui-monospace, monospace;
+  cursor: pointer;
+}
+.pr-chip-toggle[data-on='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--fg);
+}
+.pr-chip-toggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pr-chip-sub {
+  margin-top: 1px;
+  font: 500 9px var(--font, system-ui);
+  letter-spacing: 0.2px;
+  color: var(--warn);
+  text-transform: none;
+}
+.pr-measure-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+.pr-measure-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-variant-numeric: tabular-nums;
+}
+.pr-measure-axis {
+  font: 700 13px ui-monospace, monospace;
+  color: var(--accent);
+}
+.pr-measure-travel {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  color: var(--fg);
+}
+.pr-measure-range {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  text-align: right;
+}
+
 /* ---- narrow column (≤360px): stack the $-setting toggle fields so label +
    button never collide, full-width inputs/toggles, ≥36px tap targets. Driven
    by the PANEL's own width (container query), so it fires when docked narrow on
@@ -571,4 +638,321 @@
     .pr-light { padding: var(--sp-3) var(--sp-1); }
     .pr-dot { width: 24px; height: 24px; }
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Compact / sleek pass. Goal: graphic + scannable, less scroll, fewer words —
+   per-field prose moves into the ⓘ tooltips (still fully explained on hover).
+   Later rules here win over the originals above. */
+
+/* MASONRY: CSS multi-column so cards flow by height and pack tight (no row-
+   alignment gaps a grid leaves). Full-width cards (hero limit display, advanced
+   settings) span all columns via `column-span: all`. Collapses to 1 column when
+   the panel is narrow. NOTE: this overrides the `display:grid` rule above. */
+.pr-cards {
+  display: block;
+  column-count: 2;
+  column-gap: var(--sp-2);
+}
+.pr-card {
+  break-inside: avoid;
+  margin-bottom: var(--sp-2);
+}
+.pr-card-wide {
+  column-span: all;
+  /* a spanning element must not also be break-avoided in some engines */
+  break-inside: auto;
+}
+@container probepanel (max-width: 640px) {
+  .pr-cards {
+    column-count: 1;
+  }
+}
+
+/* Denser cards with a subtle depth + gradient. */
+.pr-card {
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fg) 4%, var(--bg-panel)),
+    var(--bg-panel)
+  );
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.pr-card-head {
+  align-items: center;
+  padding-bottom: 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.pr-card-head > h4 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+/* Icon chip leading each card header — turns a wall of titles into scannable rows. */
+.pr-card-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  flex: 0 0 auto;
+}
+
+/* Redundant per-field prose lives in the ⓘ tooltip now → hide it (keep warnings). */
+.pr-fields .pr-sub:not(.warn) {
+  display: none;
+}
+.pr-fields {
+  gap: var(--sp-1) var(--sp-2);
+}
+
+/* Intro: small + dim so it doesn't dominate the top. */
+.pr-intro {
+  font-size: var(--fs-label);
+  line-height: 1.4;
+}
+
+/* Buttons: icon + label, centered, tight. */
+.pr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.pr-bico {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Sleeker indicator LEDs: glassy tiles, slightly bigger glow. */
+.pr-lights {
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  gap: var(--sp-1);
+}
+.pr-light {
+  padding: var(--sp-2) var(--sp-1);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fg) 5%, var(--bg));
+}
+.pr-dot {
+  width: 20px;
+  height: 20px;
+}
+.pr-light[data-on='true'] .pr-dot {
+  box-shadow: 0 0 12px 1px var(--ok);
+}
+.pr-light.door[data-on='true'] .pr-dot {
+  box-shadow: 0 0 12px 1px var(--danger);
+}
+
+/* Compact caution / safety notes — reference, not a paragraph block. */
+.pr-note.caution {
+  font-size: var(--fs-label);
+  line-height: 1.4;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+/* G-code preview: smaller + capped — it's a reference echo, not the focus. */
+.pr-code {
+  font-size: 10.5px;
+  line-height: 1.5;
+  max-height: 8.5em;
+}
+
+/* The slider param grids (wizard / heightmap / surfacing) now live in half-width
+   cards — stack them one-per-row so labels + units never collide. */
+.pr-wiz-grid {
+  grid-template-columns: 1fr;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Live limit switches — six directional tiles (X−/X+/Y−/Y+/Z−/Z+) + Probe/Door,
+   with glow + shimmer on trigger and a pulsing "armed" state in Identify mode. */
+
+.pr-switch-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pr-identify-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  cursor: pointer;
+}
+.pr-identify-btn:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.pr-identify-btn[data-on='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--fg);
+}
+
+/* Three axis rows, two columns of tiles each (− on the left, + on the right). */
+.pr-limgrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+}
+@container probepanel (max-width: 640px) {
+  .pr-limgrid {
+    grid-template-columns: 1fr;
+  }
+}
+.pr-limrow {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.pr-limaxis {
+  width: 14px;
+  font: 700 13px ui-monospace, monospace;
+  color: var(--fg-muted);
+  text-align: center;
+}
+.pr-auxrow {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.pr-lim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fg) 5%, var(--bg));
+  color: var(--fg-muted);
+  transition: border-color 100ms, color 100ms, background 120ms, box-shadow 120ms;
+}
+.pr-lim-ico {
+  opacity: 0.65;
+}
+.pr-lim-lbl {
+  font: 700 11px ui-monospace, monospace;
+  letter-spacing: 0.5px;
+}
+
+/* Triggered → green glow + shimmer. */
+.pr-lim.is-on {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, var(--bg));
+  animation: pr-lim-shimmer 1s ease-in-out infinite;
+}
+.pr-lim.is-on .pr-lim-ico {
+  opacity: 1;
+}
+@keyframes pr-lim-shimmer {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--ok),
+      0 0 9px 0 color-mix(in srgb, var(--ok) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--ok),
+      0 0 18px 3px color-mix(in srgb, var(--ok) 78%, transparent);
+  }
+}
+/* Door asserting is a stop condition → danger colour. */
+.pr-lim.door.is-on {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg));
+  animation: pr-lim-shimmer-d 1s ease-in-out infinite;
+}
+@keyframes pr-lim-shimmer-d {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--danger),
+      0 0 9px 0 color-mix(in srgb, var(--danger) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--danger),
+      0 0 18px 3px color-mix(in srgb, var(--danger) 78%, transparent);
+  }
+}
+
+/* Identify (armed) but not yet pressed → dashed pulsing "press me" invitation. */
+.pr-lim.is-arm:not(.is-on) {
+  border-style: dashed;
+  animation: pr-lim-arm 1.4s ease-in-out infinite;
+}
+@keyframes pr-lim-arm {
+  0%,
+  100% {
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  }
+  50% {
+    border-color: var(--accent);
+    color: var(--fg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pr-lim.is-on,
+  .pr-lim.door.is-on,
+  .pr-lim.is-arm {
+    animation: none;
+  }
+  .pr-lim.is-on {
+    box-shadow: 0 0 0 1px var(--ok), 0 0 12px 1px color-mix(in srgb, var(--ok) 60%, transparent);
+  }
+}
+
+/* Leading icon on input field labels (lucide). */
+.pr-fld-ico {
+  color: var(--accent);
+  opacity: 0.8;
+  margin-right: 2px;
+  vertical-align: -2px;
+}
+
+/* Rebind mode (gamepad-style): tiles become clickable; the armed tile pulses;
+   remapped tiles show their bound source. */
+.pr-lim.is-rebind {
+  cursor: pointer;
+}
+.pr-lim.is-rebind:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.pr-lim.is-arming {
+  border-color: var(--accent);
+  border-style: dashed;
+  color: var(--fg);
+  animation: pr-lim-arm 0.9s ease-in-out infinite;
+}
+.pr-lim.is-bound:not(.is-on) {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.pr-lim-bound {
+  font: 700 9px ui-monospace, monospace;
+  color: var(--accent);
+}
+.pr-lim-press {
+  font: 700 9px ui-monospace, monospace;
+  color: var(--accent);
+  animation: pr-lim-arm 0.8s ease-in-out infinite;
 }

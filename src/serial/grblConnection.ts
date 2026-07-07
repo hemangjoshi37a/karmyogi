@@ -9,6 +9,8 @@
 // in (the real `SerialPort` does, and so does `MockPort`), so the whole stack
 // is unit-testable without hardware.
 
+import { XM, XMODEM_BLOCK, crc16ccitt } from './xmodem'
+
 /**
  * The minimal subset of the Web Serial `SerialPort` we rely on. `MockPort`
  * implements the same shape so tests and the dev UI run with no device.
@@ -120,6 +122,10 @@ export class GrblConnection {
   private readLoopPromise: Promise<void> | null = null
   private closing = false
   private rxBuffer = ''
+  // When set (during an XMODEM upload), the read loop routes raw bytes here
+  // instead of the line parser, so the binary transfer isn't mangled by line
+  // framing. Null in normal operation — the line path is completely unchanged.
+  private xmodemSink: ((b: number) => void) | null = null
   private readonly decoder = new TextDecoder()
 
   readonly options: Required<Pick<GrblConnectionOptions, 'baudRate'>> &
@@ -221,7 +227,12 @@ export class GrblConnection {
           if (done) break
           if (value && value.length) {
             transientErrors = 0
-            this.ingest(value)
+            if (this.xmodemSink) {
+              // Raw mode (XMODEM upload): hand every byte to the transfer.
+              for (let i = 0; i < value.length; i++) this.xmodemSink(value[i])
+            } else {
+              this.ingest(value)
+            }
           }
         }
         reader.releaseLock()
@@ -355,6 +366,123 @@ export class GrblConnection {
   /** Write a line, appending `\n` if absent. */
   async writeLine(line: string): Promise<void> {
     await this.writeRaw(line.endsWith('\n') ? line : line + '\n')
+  }
+
+  /**
+   * Send `data` to the controller using the XMODEM-CRC protocol (we are the
+   * sender; the controller is the receiver, e.g. via `$Xmodem/Receive=/sd/foo.nc`).
+   * `opts.start` is invoked AFTER the raw-byte sink is installed — call it to fire
+   * the receive command so the controller's `'C'` handshake bytes are captured
+   * here rather than parsed as lines. Resolves with the byte count sent.
+   *
+   * The CALLER must pause all other traffic (status `?`, `$G`, `$#` polls,
+   * streaming) for the duration — any stray byte corrupts the binary stream.
+   */
+  async xmodemSend(
+    data: Uint8Array,
+    opts: { start: () => Promise<void>; onProgress?: (frac: number) => void },
+  ): Promise<number> {
+    if (!this.writer) throw new Error('Connection not open')
+    const writer = this.writer
+    const queue: number[] = []
+    let waiter: ((b: number) => void) | null = null
+    this.xmodemSink = (b) => {
+      if (waiter) {
+        const w = waiter
+        waiter = null
+        w(b)
+      } else {
+        queue.push(b)
+      }
+    }
+    // Read one byte from the controller, or null on timeout.
+    const readByte = (timeoutMs: number): Promise<number | null> =>
+      new Promise((resolve) => {
+        if (queue.length) {
+          resolve(queue.shift() ?? null)
+          return
+        }
+        const timer = setTimeout(() => {
+          if (waiter === w) {
+            waiter = null
+            resolve(null)
+          }
+        }, timeoutMs)
+        const w = (b: number) => {
+          clearTimeout(timer)
+          resolve(b)
+        }
+        waiter = w
+      })
+
+    try {
+      // Fire the receive command now that the sink captures the reply bytes.
+      await opts.start()
+
+      // 1. Wait for the receiver's mode request: 'C' (CRC) or NAK (checksum).
+      //    FluidNC delays ~1s, then sends 'C' repeatedly (≤16×, ~2s apart).
+      let crcMode = true
+      let started = false
+      for (let i = 0; i < 24 && !started; i++) {
+        const b = await readByte(2500)
+        if (b === XM.CRC) {
+          crcMode = true
+          started = true
+        } else if (b === XM.NAK) {
+          crcMode = false
+          started = true
+        } else if (b === XM.CAN) {
+          throw new Error('Upload refused by the controller (SD card missing or unwritable?)')
+        }
+        // null (timeout) or stray banner byte → keep waiting
+      }
+      if (!started) throw new Error('Controller did not start the XMODEM transfer')
+
+      // 2. Send the data as 128-byte SOH packets (≥1 packet, even if empty).
+      const nPackets = Math.max(1, Math.ceil(data.length / XMODEM_BLOCK))
+      for (let k = 0; k < nPackets; k++) {
+        const off = k * XMODEM_BLOCK
+        const pkt = new Uint8Array(3 + XMODEM_BLOCK + (crcMode ? 2 : 1))
+        pkt[0] = XM.SOH
+        pkt[1] = (k + 1) & 0xff
+        pkt[2] = ~(k + 1) & 0xff
+        pkt.fill(XM.CTRLZ, 3, 3 + XMODEM_BLOCK)
+        pkt.set(data.subarray(off, off + XMODEM_BLOCK), 3)
+        if (crcMode) {
+          const c = crc16ccitt(pkt, 3, 3 + XMODEM_BLOCK)
+          pkt[3 + XMODEM_BLOCK] = (c >> 8) & 0xff
+          pkt[3 + XMODEM_BLOCK + 1] = c & 0xff
+        } else {
+          let cks = 0
+          for (let m = 3; m < 3 + XMODEM_BLOCK; m++) cks = (cks + pkt[m]) & 0xff
+          pkt[3 + XMODEM_BLOCK] = cks
+        }
+        let acked = false
+        for (let retry = 0; retry < 10 && !acked; retry++) {
+          await writer.write(pkt)
+          const resp = await readByte(2500)
+          if (resp === XM.ACK) acked = true
+          else if (resp === XM.CAN) throw new Error('Upload canceled by the controller')
+          // NAK / null / other → resend the same packet
+        }
+        if (!acked) throw new Error(`No ACK for packet ${k + 1} after retries`)
+        opts.onProgress?.((k + 1) / nPackets)
+      }
+
+      // 3. End of transmission — send EOT, await the final ACK.
+      let done = false
+      for (let retry = 0; retry < 6 && !done; retry++) {
+        await this.writeByte(XM.EOT)
+        const resp = await readByte(2500)
+        if (resp === XM.ACK) done = true
+      }
+      if (!done) throw new Error('Controller did not acknowledge end-of-transfer')
+      opts.onProgress?.(1)
+      return data.length
+    } finally {
+      // Restore the line parser no matter how the transfer ended.
+      this.xmodemSink = null
+    }
   }
 
   /** Close the port and tear down reader/writer. Idempotent. */

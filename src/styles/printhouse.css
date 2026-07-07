@@ -1,0 +1,484 @@
+/* 3D Print House panel (construction / contour-crafting concrete printer).
+   Co-located styles; theme CSS variables only. Dense, card-based layout matching
+   the Welding / Stitching / 3D-Printing panels:
+   - a slim header (title + icon toolbar) and a live status strip,
+   - collapsible House-print settings whose bordered cards TILE into a grid,
+   - a compact wall list + an openings table that reflow on narrow panels.
+   Density is driven by the shared tokens in theme.css; narrow/mobile container
+   widths bump controls back to ≥36px touch targets. The panel is the only scroll
+   container — vertical only, never sideways. */
+
+.ph-panel {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  container-type: inline-size;
+  container-name: housepanel;
+}
+
+/* ───────────────────────── header ───────────────────────── */
+.ph-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  min-height: var(--ctl-h-lg);
+}
+.ph-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.ph-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ph-tools {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-left: auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+.ph-tools-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--sp-1) 2px;
+  background: var(--border);
+}
+.ph-file-input {
+  display: none;
+}
+
+/* square icon buttons */
+.ph-ico {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.ph-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ph-ico:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ph-ico.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
+}
+.ph-ico-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.ph-ico-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 85%, #fff);
+  color: var(--accent-fg);
+}
+.ph-ico-danger:not(:disabled) {
+  border-color: var(--border-danger);
+  color: var(--danger);
+}
+.ph-ico-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* ───────────────────────── warnings / caution ───────────────────────── */
+.ph-warn {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+.ph-caution {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--danger);
+  border: 1px solid var(--border-danger);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.ph-caution svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+/* ───────────────────────── cards ───────────────────────── */
+.ph-defaults-toggle {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.ph-defaults-toggle:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.ph-defaults-ico {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.ph-defaults-word {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.ph-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+.ph-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ph-card-wide {
+  grid-column: 1 / -1;
+}
+.ph-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.ph-card-head h4 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ph-card-head h4 .cam-card-ico {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
+}
+.ph-card-count {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 1px 6px;
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--fg-muted);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.ph-add-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--ctl-h);
+  padding: 0 9px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.ph-add-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ───────────────────────── field grids ─────────────────────────
+   Full-width slider rows (the shared SliderField renders .ui-sfield). */
+.ph-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+/* label + segmented control row */
+.ph-segrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.ph-segrow-lbl {
+  flex: 0 0 auto;
+  min-width: 86px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.ph-segrow .ui-seg {
+  flex: 1 1 0;
+  min-width: 34px;
+}
+
+/* footprint readout under the scale control */
+.ph-footprint {
+  padding: 4px 8px;
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* ───────────────────────── openings table ───────────────────────── */
+.ph-openings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+.ph-openings-empty {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+}
+.ph-open-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.ph-open-idx {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 18px;
+  text-align: center;
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+}
+
+/* mini coord field (openings + reused elsewhere) */
+.ph-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 64px;
+}
+.ph-mini > span {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ph-mini input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 5px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.ph-mini input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ───────────────────────── wall list ───────────────────────── */
+.ph-walls {
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+.ph-wall-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.ph-wcard {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  cursor: pointer;
+}
+.ph-wcard.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.ph-wcard-idx {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.ph-wcard-meta {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ph-wcard-badge {
+  padding: 1px 7px;
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.ph-wcard-badge.is-closed {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+}
+.ph-wcard-actions {
+  display: inline-flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+
+/* row action buttons (walls + openings) */
+.ph-row-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  padding: 0;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.ph-row-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ph-row-ico.ph-del:not(:disabled) {
+  border-color: var(--border-danger);
+  color: var(--danger);
+}
+.ph-row-ico.ph-del:not(:disabled):hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-input));
+}
+
+/* ───────── narrow PANEL: single-column, bump touch targets ───────── */
+@container housepanel (max-width: 460px) {
+  .ph-settings {
+    grid-template-columns: 1fr;
+  }
+  .ph-ico {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+  .ph-mini input,
+  .ph-row-ico,
+  .ph-add-btn {
+    height: var(--ctl-h-touch);
+  }
+  .ph-row-ico {
+    width: var(--ctl-h-touch);
+  }
+  .ph-wcard-actions {
+    margin-left: 0;
+  }
+}
+
+/* Fallback for engines without container-query support. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 768px) {
+    .ph-settings {
+      grid-template-columns: 1fr;
+    }
+    .ph-ico {
+      width: var(--ctl-h-touch);
+      height: var(--ctl-h-touch);
+    }
+    .ph-mini input,
+    .ph-row-ico,
+    .ph-add-btn {
+      height: var(--ctl-h-touch);
+    }
+  }
+}

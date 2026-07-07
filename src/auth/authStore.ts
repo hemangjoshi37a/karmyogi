@@ -40,6 +40,12 @@ interface AuthState {
   /** Start listening to auth changes. Idempotent; no-op when unconfigured. */
   init: () => void
   /**
+   * Eagerly load the popup sign-in dependencies (firebase/auth + Auth init) so a
+   * later button click can open the Google popup within the user gesture. Called
+   * when a sign-in affordance mounts. Idempotent; no-op when unconfigured.
+   */
+  prewarmSignIn: () => void
+  /**
    * Primary sign-in: a Google account-chooser POPUP, which authenticates in a
    * FIRST-PARTY context — so it works in incognito and without third-party
    * cookies (unlike redirect, which relies on a cross-site iframe on the
@@ -106,7 +112,42 @@ function describeAuthError(e: unknown): AuthError {
   }
 }
 
-export const useAuth = create<AuthState>((set) => ({
+/**
+ * Pre-resolved popup sign-in dependencies. We import `firebase/auth` + init the
+ * Auth instance AHEAD of the click so the button handler reaches signInWithPopup
+ * with only already-resolved (microtask) awaits — the browser then still sees a
+ * live user gesture and lets the popup open. A COLD import/init inside the click
+ * can eat the gesture (esp. on stricter engines), so the popup gets blocked and
+ * the flow silently degrades to the less-reliable redirect — the classic
+ * "sign-in button does nothing / bounces" failure. Cached after the first call.
+ */
+type SignInDeps = {
+  auth: import('firebase/auth').Auth
+  GoogleAuthProvider: typeof import('firebase/auth').GoogleAuthProvider
+  signInWithPopup: typeof import('firebase/auth').signInWithPopup
+  signInWithRedirect: typeof import('firebase/auth').signInWithRedirect
+  browserPopupRedirectResolver: typeof import('firebase/auth').browserPopupRedirectResolver
+}
+let signInDepsPromise: Promise<SignInDeps | null> | null = null
+function loadSignInDeps(): Promise<SignInDeps | null> {
+  if (!signInDepsPromise) {
+    signInDepsPromise = (async () => {
+      if (!firebaseConfigured()) return null
+      const [auth, mod] = await Promise.all([getFirebaseAuth(), import('firebase/auth')])
+      if (!auth) return null
+      return {
+        auth,
+        GoogleAuthProvider: mod.GoogleAuthProvider,
+        signInWithPopup: mod.signInWithPopup,
+        signInWithRedirect: mod.signInWithRedirect,
+        browserPopupRedirectResolver: mod.browserPopupRedirectResolver,
+      }
+    })()
+  }
+  return signInDepsPromise
+}
+
+export const useAuth = create<AuthState>((set, get) => ({
   status: firebaseConfigured() ? 'loading' : 'disabled',
   user: null,
   error: null,
@@ -122,9 +163,18 @@ export const useAuth = create<AuthState>((set) => ({
       set({ status: 'disabled' })
       return
     }
+    // Watchdog: NEVER strand the visitor on the loading splash. If auth hasn't
+    // resolved to signedIn/signedOut within 10 s — e.g. a wedged network call
+    // during init, or storage probing that hangs — fall back to 'signedOut' so the
+    // sign-in screen (or the open app, in grace/optional mode) appears instead of
+    // an eternal spinner. onAuthStateChanged still corrects this once it fires.
+    const watchdog = setTimeout(() => {
+      if (get().status === 'loading') set({ status: 'signedOut' })
+    }, 10_000)
     void (async () => {
       const auth = await getFirebaseAuth()
       if (!auth) {
+        clearTimeout(watchdog)
         set({ status: 'disabled' })
         return
       }
@@ -141,17 +191,12 @@ export const useAuth = create<AuthState>((set) => ({
       } catch {
         /* persistence unsupported (rare) — fall through; onAuthStateChanged still restores */
       }
-      // Complete a pending redirect sign-in (the fallback flow): when the user
-      // comes back from Google's full-page redirect, this resolves the result.
-      // onAuthStateChanged below flips status → 'signedIn'; we only need this to
-      // surface any redirect error and to drive the resolver. Best-effort.
-      try {
-        const { getRedirectResult } = await import('firebase/auth')
-        await getRedirectResult(auth)
-      } catch (e) {
-        set({ error: describeAuthError(e) })
-      }
+      // Register the auth listener FIRST so a cached session resolves the splash
+      // IMMEDIATELY. (Previously we awaited getRedirectResult() — a network call —
+      // before registering this, so a slow/wedged redirect resolution stranded the
+      // app on the loading spinner. The listener restores the session on its own.)
       onAuthStateChanged(auth, (fbUser) => {
+        clearTimeout(watchdog)
         if (fbUser) {
           set({
             status: 'signedIn',
@@ -173,21 +218,35 @@ export const useAuth = create<AuthState>((set) => ({
           set({ status: 'signedOut', user: null })
         }
       })
+      // Pre-warm the popup sign-in deps so the button click opens the popup within
+      // the user gesture (no cold firebase/auth import on click).
+      void loadSignInDeps()
+      // Now resolve any pending redirect sign-in (the fallback flow) in the
+      // BACKGROUND — surfaces a redirect error if there was one; the listener above
+      // has already flipped status on success. Best-effort; never blocks the UI.
+      try {
+        const { getRedirectResult } = await import('firebase/auth')
+        await getRedirectResult(auth)
+      } catch (e) {
+        set({ error: describeAuthError(e) })
+      }
     })()
+  },
+
+  prewarmSignIn: () => {
+    void loadSignInDeps()
   },
 
   signInWithGoogle: async () => {
     if (!firebaseConfigured()) return
     set({ error: null })
     try {
-      const auth = await getFirebaseAuth()
-      if (!auth) return
-      const {
-        GoogleAuthProvider,
-        signInWithPopup,
-        signInWithRedirect,
-        browserPopupRedirectResolver,
-      } = await import('firebase/auth')
+      // Pre-warmed (see loadSignInDeps): when this resolves from cache it's a
+      // microtask, so the user gesture survives and the popup is allowed to open.
+      const deps = await loadSignInDeps()
+      if (!deps) return
+      const { auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, browserPopupRedirectResolver } =
+        deps
       const provider = new GoogleAuthProvider()
       // Always prompt account selection so a logged-out user can pick/add an
       // account, instead of silently reusing a stale session.

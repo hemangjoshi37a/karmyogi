@@ -1,0 +1,580 @@
+/* Spot-welding panel (resistance spot welds). Co-located styles; uses theme CSS
+   variables only. Dense, card-based layout matching the Auto-soldering / Welding
+   panels:
+   - a slim header (title + icon toolbar) and a live status strip,
+   - a safety caution line (weld current + dwell are hazardous),
+   - collapsible Settings whose bordered cards TILE into a responsive grid
+     (weld schedule / electrode motion / pattern generator),
+   - a compact, fixed-layout weld-point table that reflows to stacked cards when
+     the PANEL is narrow.
+   Density is driven by the shared tokens in theme.css (--ctl-h, --icon-btn,
+   --fs-*, --sp-*, --card-min, --field-min); desktop is compact, narrow/mobile
+   container widths bump controls back to ≥36px touch targets. The whole panel
+   is the only scroll container — vertical only, never sideways. Slider rows use
+   the shared <SliderField> kit (.ui-sfield / .ui-slider, loaded globally). */
+
+.sw-panel {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  /* Reflow on PANEL width, not window width (usually a narrow docked column). */
+  container-type: inline-size;
+  container-name: spotweldpanel;
+}
+
+/* ───────────────────────── header ───────────────────────── */
+.sw-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  min-height: var(--ctl-h-lg);
+}
+.sw-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.sw-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sw-tools {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-left: auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+.sw-tools-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--sp-1) 2px;
+  background: var(--border);
+}
+
+/* square icon buttons */
+.sw-ico {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.sw-ico > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sw-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sw-ico:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.sw-ico.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-input));
+}
+.sw-ico-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-size: 17px;
+  font-weight: 600;
+}
+.sw-ico-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 85%, #fff);
+  color: var(--accent-fg);
+}
+/* Clear is destructive: persistent danger-tinted edge + filled-danger hover. */
+.sw-ico-danger:not(:disabled) {
+  border-color: var(--border-danger);
+  color: var(--danger);
+}
+.sw-ico-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* Status strip styling lives in the shared <CamStatus> kit (.cam-status); the
+   .sw-status div is just a bare wrapper. */
+
+/* ───────────────────────── notices ───────────────────────── */
+/* Safety caution — a persistent danger-tinted call-out (weld current is hazardous). */
+.sw-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  border-radius: var(--radius);
+}
+.sw-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.sw-caution {
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.sw-warn {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+/* ───────────────────── defaults disclosure trigger ───────────────────── */
+.sw-defaults-toggle {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.sw-defaults-toggle:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.sw-defaults-ico {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.sw-defaults-word {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+/* ───────────────────────── cards ───────────────────────── */
+.sw-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+.sw-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sw-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.sw-card-head h4 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-section);
+  font-weight: var(--fw-label);
+  line-height: var(--lh-tight);
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg));
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sw-card-head h4 .cam-card-ico {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
+}
+.sw-card-count {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 1px 6px;
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--fg-muted);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+/* ───────────────────── slider field rows ─────────────────────
+   Each param is one shared <SliderField> row [label · range · number · unit],
+   stacked one per line so the slider has room to drag. */
+.sw-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+/* ───────────────────────── pattern generator ───────────────────────── */
+.sw-gen-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+}
+.sw-gen-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: var(--sp-2);
+}
+.sw-gen-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sw-gen-field > span {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sw-gen-field input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h);
+  padding: 0 5px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.sw-gen-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.sw-gen-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  align-self: flex-start;
+  min-height: var(--ctl-h);
+  padding: 0 12px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.sw-gen-btn:hover {
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-input));
+  border-color: var(--accent);
+}
+
+/* ───────────────────────── point table ───────────────────────── */
+.sw-points {
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+.sw-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sw-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.sw-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: var(--fs-section);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  text-align: left;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sw-table td {
+  padding: 3px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.sw-table tbody tr {
+  cursor: pointer;
+}
+.sw-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.sw-table tr.sw-row-selected td {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.sw-idx {
+  width: 26px;
+  text-align: right;
+  color: var(--fg-muted);
+  font-size: var(--fs-label);
+}
+.sw-table td input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0 4px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.sw-table td input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* column header + inline info affordance */
+.sw-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+}
+.sw-th-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* row action buttons — compact square icon buttons */
+.sw-actions-col {
+  width: 92px;
+}
+.sw-actions {
+  display: flex;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+.sw-row-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ctl-h);
+  min-height: 0;
+  padding: 0;
+  font-size: var(--fs-ctl);
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.sw-row-ico:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sw-row-ico:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.sw-row-ico.sw-del:not(:disabled) {
+  border-color: var(--border-danger);
+  color: var(--danger);
+}
+.sw-row-ico.sw-del:not(:disabled):hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-input));
+}
+
+/* ───────────────────── narrow point cards ─────────────────────
+   Shown only by the narrow container query; the wide table is hidden then. */
+.sw-cards {
+  display: none;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+}
+.sw-pcard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+.sw-pcard.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.sw-pcard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.sw-pcard-idx {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--fg);
+}
+.sw-pcard-actions {
+  display: inline-flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.sw-pcard-actions .sw-row-ico {
+  flex: 0 0 auto;
+  width: var(--ctl-h-touch);
+  height: var(--ctl-h-touch);
+}
+.sw-pcard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: var(--sp-2);
+}
+.sw-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sw-mini > span {
+  font-size: var(--fs-label);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sw-mini input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h-touch);
+  padding: 0 5px;
+  box-sizing: border-box;
+  font-size: var(--fs-ctl);
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.sw-mini input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ───────── narrow PANEL: swap the table for the compact card list ─────────
+   Driven by the panel's own width (container query), not the window width, so
+   it fires in a narrow docked column on a wide monitor. */
+@container spotweldpanel (max-width: 430px) {
+  .sw-settings {
+    grid-template-columns: 1fr;
+  }
+  .sw-ico {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+  .sw-gen-field input {
+    height: var(--ctl-h-touch);
+  }
+  .sw-table-wrap {
+    display: none;
+  }
+  .sw-cards {
+    display: flex;
+  }
+}
+
+/* Fallback for engines without container-query support: keep the window-width
+   reflow so the table never overflows on phones. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 768px) {
+    .sw-settings {
+      grid-template-columns: 1fr;
+    }
+    .sw-ico {
+      width: var(--ctl-h-touch);
+      height: var(--ctl-h-touch);
+    }
+    .sw-gen-field input {
+      height: var(--ctl-h-touch);
+    }
+    .sw-table-wrap {
+      display: none;
+    }
+    .sw-cards {
+      display: flex;
+    }
+  }
+}

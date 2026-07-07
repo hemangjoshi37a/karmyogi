@@ -3,7 +3,7 @@ import { Grid, Line, Html } from '@react-three/drei'
 import { useSettings } from '../store'
 import { useBed } from '../store/bed'
 import { useGrblSettings } from '../store/grblSettings'
-import { useMachine } from '../store/machine'
+import { useMachine, type WorkCoordSystem } from '../store/machine'
 
 interface BedProps {
   /** Bed size in mm (X, Y, Z). */
@@ -23,6 +23,13 @@ interface BedProps {
    * Default true.
    */
   showSoftLimits?: boolean
+  /**
+   * Draw the work-coordinate-system origin markers for G55–G59 (the active system
+   * already has the bright RGB triad at the work origin). Each non-active system
+   * with a stored offset (from GRBL `$#`) gets a small violet cross + label,
+   * positioned at its machine offset minus the active WCO. Default true.
+   */
+  showWcsOrigins?: boolean
 }
 
 /**
@@ -38,10 +45,14 @@ export function Bed({
   height = 100,
   showLabels = true,
   showSoftLimits = true,
+  showWcsOrigins = true,
 }: BedProps) {
   const theme = useSettings((s) => s.theme)
   const minor = theme === 'dark' ? '#3a4250' : '#d4dae1'
   const major = theme === 'dark' ? '#515c6e' : '#aab4c0'
+  // The machine's REAL active work coordinate system (from `$G`), so the bright
+  // origin triad is labelled correctly (it may be G55–G59, not always G54).
+  const activeWcs = useMachine((s) => s.activeWcs)
 
   return (
     <group>
@@ -63,11 +74,90 @@ export function Bed({
       {showLabels && (
         <BedDimensions width={width} depth={depth} height={height} dark={theme === 'dark'} />
       )}
-      {/* G54 work origin: the bright RGB triad, now labelled to contrast it with
-          the machine (G53) origin drawn by SoftLimits. */}
-      <OriginGizmo />
-      {showLabels && <OriginLabel position={[0, 0, 0]} text="G54" dark={theme === 'dark'} />}
+      {/* Work coordinate origins (G54–G59) — ALL gated by the one "Work coordinate
+          origins" toggle so turning it off hides every WCS origin, including the
+          active one. The active system gets the bright RGB triad + label (the REAL
+          active WCS, contrasting with the machine (G53) origin drawn by SoftLimits);
+          the others get a small violet cross at their stored `$#` offset. */}
+      {showWcsOrigins && (
+        <>
+          <OriginGizmo />
+          {showLabels && (
+            <OriginLabel
+              position={[0, 0, 0]}
+              text={activeWcs ?? 'G54'}
+              dark={theme === 'dark'}
+            />
+          )}
+          <WcsOrigins dark={theme === 'dark'} showLabels={showLabels} activeWcs={activeWcs} />
+        </>
+      )}
       {showSoftLimits && <SoftLimits dark={theme === 'dark'} showLabels={showLabels} />}
+    </group>
+  )
+}
+
+/** The six work coordinate systems, in G-code order. */
+const ALL_WCS = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59'] as const
+
+/**
+ * Origin markers for every work coordinate system EXCEPT the active one (which is
+ * already the bright RGB triad at the work origin). For each system that GRBL has
+ * reported an offset for via `$#` (stored in the machine store as machine-coord
+ * origins), draw a small violet cross + label at its position relative to the
+ * active work origin: scene = machineOffset − activeWCO. Read-only.
+ */
+function WcsOrigins({
+  dark,
+  showLabels,
+  activeWcs,
+}: {
+  dark: boolean
+  showLabels: boolean
+  activeWcs: WorkCoordSystem | null
+}) {
+  const wco = useMachine((s) => s.wco)
+  const wcsOffsets = useMachine((s) => s.wcsOffsets)
+  const active = activeWcs ?? 'G54'
+
+  return (
+    <group>
+      {ALL_WCS.map((sys) => {
+        if (sys === active) return null // the active system is the main triad
+        const off = wcsOffsets[sys]
+        if (!off) return null // only once `$#` has reported this system
+        const pos: [number, number, number] = [
+          off.x - wco.x,
+          off.y - wco.y,
+          off.z - wco.z,
+        ]
+        return (
+          <group key={sys} position={pos}>
+            <WcsMarker dark={dark} />
+            {showLabels && (
+              <OriginLabel
+                position={[0, 0, 0]}
+                text={sys}
+                dark={dark}
+                accent={dark ? '#a78bfa' : '#7c3aed'}
+              />
+            )}
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
+/** Small violet crosshair marking a non-active work coordinate origin. */
+function WcsMarker({ dark }: { dark: boolean }) {
+  const color = dark ? '#a78bfa' : '#7c3aed'
+  const s = 6
+  return (
+    <group>
+      <Line points={[[-s, 0, 0], [s, 0, 0]]} color={color} lineWidth={1.3} />
+      <Line points={[[0, -s, 0], [0, s, 0]]} color={color} lineWidth={1.3} />
+      <Line points={[[0, 0, 0], [0, 0, s]]} color={color} lineWidth={1.3} transparent opacity={0.7} />
     </group>
   )
 }

@@ -34,7 +34,10 @@ import { useT } from '../i18n'
  * lazy(panel). Parallel agents must NOT edit this file.
  */
 
-type PanelModule = { [key: string]: ComponentType<IDockviewPanelProps> }
+// A panel module's shape as seen by `pick`. Panels may export helpers/types
+// alongside their component, so this is intentionally loose — `pick` grabs the
+// one named component export (asserting it exists) and casts it.
+type PanelModule = Record<string, unknown>
 
 /**
  * Lazily import a panel module and pick its named export. Each entry is a
@@ -106,13 +109,25 @@ const lazyPanels: Record<string, LazyExoticComponent<ComponentType<IDockviewPane
   tattoo: lazy(() =>
     import('../panels/TattooPanel').then((m) => ({ default: pick(m, 'TattooPanel') })),
   ),
+  spotweld: lazy(() =>
+    import('../panels/SpotWeldPanel').then((m) => ({ default: pick(m, 'SpotWeldPanel') })),
+  ),
+  embroidery: lazy(() =>
+    import('../panels/EmbroideryPanel').then((m) => ({ default: pick(m, 'EmbroideryPanel') })),
+  ),
+  stitching: lazy(() =>
+    import('../panels/StitchingPanel').then((m) => ({ default: pick(m, 'StitchingPanel') })),
+  ),
+  printhouse: lazy(() =>
+    import('../panels/PrintHousePanel').then((m) => ({ default: pick(m, 'PrintHousePanel') })),
+  ),
 }
 
 /** Pick a named export from a module, asserting it exists (dev safety). */
 function pick(mod: PanelModule, name: string): ComponentType<IDockviewPanelProps> {
   const c = mod[name]
   if (!c) throw new Error(`panelRegistry: missing export "${name}"`)
-  return c
+  return c as ComponentType<IDockviewPanelProps>
 }
 
 /**
@@ -148,8 +163,12 @@ const PANEL_SCOPE: Record<string, string> = {
   pnp: 'Pick & Place',
   signature: 'Signature',
   print: '3D Printing',
+  printhouse: '3D Print House',
   laser: 'Laser Cutting',
   welding: 'Welding',
+  spotweld: 'Spot Welding',
+  embroidery: 'Embroidery',
+  stitching: 'Clothes Stitching',
   camera: 'Camera',
   springcoiling: 'Spring Coiling',
   tattoo: 'Tattoo / Henna',
@@ -204,8 +223,12 @@ export const availablePanels: PanelSpec[] = [
   { id: 'pnp', component: 'pnp', title: 'Pick & Place' },
   { id: 'signature', component: 'signature', title: 'Signature' },
   { id: 'print', component: 'print', title: '3D Printing' },
+  { id: 'printhouse', component: 'printhouse', title: '3D Print House' },
   { id: 'laser', component: 'laser', title: 'Laser Cutting' },
   { id: 'welding', component: 'welding', title: 'Welding' },
+  { id: 'spotweld', component: 'spotweld', title: 'Spot Welding' },
+  { id: 'embroidery', component: 'embroidery', title: 'Embroidery' },
+  { id: 'stitching', component: 'stitching', title: 'Clothes Stitching' },
   { id: 'camera', component: 'camera', title: 'Camera' },
   { id: 'springcoiling', component: 'springcoiling', title: 'Spring Coiling' },
   { id: 'tattoo', component: 'tattoo', title: 'Tattoo / Henna' },
@@ -230,8 +253,12 @@ export const TAB_TITLES: ReadonlyArray<{ id: string; en: string }> = [
   { id: 'pnp', en: 'Pick & Place' },
   { id: 'signature', en: 'Signature' },
   { id: 'print', en: '3D Printing' },
+  { id: 'printhouse', en: '3D Print House' },
   { id: 'laser', en: 'Laser Cutting' },
   { id: 'welding', en: 'Welding' },
+  { id: 'spotweld', en: 'Spot Welding' },
+  { id: 'embroidery', en: 'Embroidery' },
+  { id: 'stitching', en: 'Clothes Stitching' },
   { id: 'camera', en: 'Camera' },
   { id: 'springcoiling', en: 'Spring Coiling' },
   { id: 'tattoo', en: 'Tattoo / Henna' },
@@ -264,8 +291,12 @@ export function TAB_TITLE_KEYS(t: Translate): string[] {
     t('tab.pnp', 'Pick & Place'),
     t('tab.signature', 'Signature'),
     t('tab.print', '3D Printing'),
+    t('tab.printhouse', '3D Print House'),
     t('tab.laser', 'Laser Cutting'),
     t('tab.welding', 'Welding'),
+    t('tab.spotweld', 'Spot Welding'),
+    t('tab.embroidery', 'Embroidery'),
+    t('tab.stitching', 'Clothes Stitching'),
     t('tab.camera', 'Camera'),
     t('tab.springcoiling', 'Spring Coiling'),
     t('tab.tattoo', 'Tattoo / Henna'),

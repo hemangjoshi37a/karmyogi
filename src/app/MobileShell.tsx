@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { IDockviewPanelProps } from 'dockview'
 import { panelComponents, availablePanels } from './panelRegistry'
 import { PanelIcon } from './panelIcons'
+import { readDeepLink, writeTab, setCurrentTab, installInteractionTracker, restoreControlWhenReady } from './deepLink'
 import { useT } from '../i18n'
 import { usePersistentState, useMachine, useSettings } from '../store'
 import '../styles/mobile.css'
@@ -141,7 +142,12 @@ function MachineHud() {
 
 export function MobileShell() {
   const t = useT()
-  const [activeId, setActiveId] = useState(availablePanels[0]?.id ?? '')
+  // Initial tab honours a `?tab=<id>` deep-link (shared URL) when it's a real tab,
+  // else the first panel. See deepLink.ts.
+  const [activeId, setActiveId] = useState(() => {
+    const dl = readDeepLink()
+    return dl.tab && availablePanels.some((p) => p.id === dl.tab) ? dl.tab : availablePanels[0]?.id ?? ''
+  })
   // Persisted set of HIDDEN tab ids. Stored as an array (JSON-friendly) and
   // looked up via a Set for cheap membership tests.
   const [hiddenTabs, setHiddenTabs] = usePersistentState<string[]>(
@@ -175,6 +181,20 @@ export function MobileShell() {
     visiblePanels[0] ??
     availablePanels[0]
   const Component = active ? panelComponents[active.component] : undefined
+
+  // URL DEEP-LINK (mobile): mirror the active tab to `?tab=`, record interacted
+  // controls into `?el=` (tab-scoped via the tracker's current tab, kept in sync by
+  // writeTab below), and reveal a linked control on load — the SAME shareable-URL
+  // behaviour as the desktop dock shell.
+  useEffect(() => {
+    setCurrentTab(active?.id) // seed before the tracker/restore run
+    installInteractionTracker()
+    restoreControlWhenReady(readDeepLink().el)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    writeTab(active?.id || undefined)
+  }, [active?.id])
 
   // Minimal props shim so panel components render outside dockview. Panels read
   // `props.params` and optionally `props.api?.title`.

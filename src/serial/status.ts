@@ -57,9 +57,18 @@ export interface StatusReport {
   buffer?: { plan: number; rx: number }
   /** Active input pins from Pn:..., e.g. ['X','Z','P']. */
   pins?: string[]
+  /**
+   * Per-direction limit-switch state from FluidNC's extended `LS:` field — a
+   * 6-char bitstring in fixed order X−,X+,Y−,Y+,Z−,Z+ (e.g. `LS:010000` = X+).
+   * Decoded to e.g. `['X+']`. Absent on plain GRBL / FluidNC without the report.
+   */
+  limitDirs?: string[]
   /** Line number being executed, from Ln:<n>. */
   line?: number
 }
+
+/** Tile order for the FluidNC `LS:` 6-bit per-direction limit field. */
+const LS_ORDER = ['X-', 'X+', 'Y-', 'Y+', 'Z-', 'Z+'] as const
 
 const STATE_NAMES: Record<string, GrblState> = {
   Idle: 'Idle',
@@ -144,6 +153,39 @@ export function parseParserState(raw: string): ParserState | undefined {
   return { wcs, words }
 }
 
+/** A parsed GRBL `$#` work-coordinate-offset line, e.g. `[G54:0.000,0.000,0.000]`. */
+export interface WcsOffset {
+  /** The work coordinate system this offset belongs to. */
+  system: WorkCoordSystem
+  /** Origin of that system in MACHINE coordinates (mm). */
+  offset: Vec3
+}
+
+/**
+ * True if the line is a GRBL `$#` offset report for a G54–G59 system
+ * (`[G54:0.000,0.000,0.000]`). `$#` also emits [G28]/[G30]/[G92]/[TLO]/[PRB],
+ * which this intentionally does NOT match.
+ */
+export function isWcsOffsetLine(line: string): boolean {
+  return /^\[G5[4-9]:-?\d/.test(line.trim())
+}
+
+/**
+ * Parse a GRBL `$#` work-coordinate-offset line (`[G54:0.000,0.000,0.000]`) into
+ * its system + MACHINE-coordinate origin. Returns undefined for any line that is
+ * not a G54–G59 offset report.
+ */
+export function parseWcsOffsetLine(raw: string): WcsOffset | undefined {
+  const m = /^\[(G5[4-9]):(-?\d+\.?\d*),(-?\d+\.?\d*),(-?\d+\.?\d*)\]$/.exec(
+    raw.trim(),
+  )
+  if (!m) return undefined
+  return {
+    system: m[1] as WorkCoordSystem,
+    offset: { x: parseFloat(m[2]), y: parseFloat(m[3]), z: parseFloat(m[4]) },
+  }
+}
+
 /**
  * Parse a single GRBL status report line. Returns undefined if the line is not
  * a `<...>` report. A caller-supplied previous WCO is used to fill the missing
@@ -224,6 +266,15 @@ export function parseStatusReport(
       case 'Pn':
         report.pins = val.split('').filter((c) => c.trim().length > 0)
         break
+      case 'LS': {
+        // FluidNC per-direction limits: 6-bit string X−,X+,Y−,Y+,Z−,Z+.
+        const dirs: string[] = []
+        for (let k = 0; k < LS_ORDER.length && k < val.length; k++) {
+          if (val[k] === '1') dirs.push(LS_ORDER[k])
+        }
+        report.limitDirs = dirs
+        break
+      }
       case 'Ln': {
         const n = parseInt(val, 10)
         if (!Number.isNaN(n)) report.line = n

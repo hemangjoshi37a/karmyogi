@@ -264,6 +264,43 @@
         inset: 0;
         background: radial-gradient(ellipse 90% 80% at 50% 28%, transparent 42%, rgba(22, 25, 29, 0.82) 100%);
       }
+      /* Self-drawing CNC toolpaths (spiral / star / relief / raster / lobe) trailed
+         by a travelling "cutter" dot — the same flavour as the in-app sign-in
+         backdrop. The SVG is INJECTED by a deferred script AFTER the main splash
+         text paints (see the ky-toolpath builder near </body>), so the SEO-critical
+         text + first paint are never delayed by building/animating it. CSS lives
+         here so the deferred inject only has to add markup. */
+      #app-splash .ky-toolpath {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0.5;
+        pointer-events: none;
+        animation: ky-tp-in 0.9s ease both; /* fade in once injected, no pop */
+      }
+      @keyframes ky-tp-in { from { opacity: 0; } to { opacity: 0.5; } }
+      #app-splash .ky-path {
+        fill: none;
+        stroke: rgba(45, 212, 191, 0.7);
+        stroke-width: 2;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+        stroke-dasharray: var(--len, 2600);
+        stroke-dashoffset: var(--len, 2600);
+        filter: drop-shadow(0 0 5px rgba(45, 212, 191, 0.4));
+        animation: ky-trace var(--dur, 14s) ease-in-out var(--delay, 0s) infinite;
+      }
+      @keyframes ky-trace {
+        0% { stroke-dashoffset: var(--len, 2600); }
+        50% { stroke-dashoffset: 0; }
+        82% { stroke-dashoffset: 0; }
+        100% { stroke-dashoffset: calc(var(--len, 2600) * -1); }
+      }
+      #app-splash .ky-cutter {
+        fill: #2dd4bf;
+        filter: drop-shadow(0 0 8px #2dd4bf);
+      }
 
       /* Content */
       #app-splash .ky-inner {
@@ -436,9 +473,17 @@
         #app-splash .ky-blob-2,
         #app-splash .ky-eyebrow .ky-dot,
         #app-splash .ky-inner,
+        #app-splash .ky-toolpath,
         #app-splash .spin {
           animation: none !important;
         }
+        /* Render the toolpaths fully drawn + static; hide the moving cutter dots. */
+        #app-splash .ky-path {
+          animation: none !important;
+          stroke-dasharray: none !important;
+          stroke-dashoffset: 0 !important;
+        }
+        #app-splash .ky-cutter { display: none !important; }
       }
     </style>
   </head>
@@ -585,6 +630,149 @@
         } catch (e) {
           /* never let splash localization block the app */
         }
+      })()
+    </script>
+    <!-- Progressive enhancement: draw the procedural CNC toolpaths into the splash
+         background AFTER the page has loaded + gone idle. The SEO text, the brand
+         lockup and the first paint all land WITHOUT this — it's added afterwards so
+         it never competes for the critical render path / LCP. Pure DOM (no bundle),
+         honours prefers-reduced-motion, and is a no-op once #root is React-mounted. -->
+    <script>
+      (function () {
+        function injectToolpaths() {
+          try {
+            var bg = document.querySelector('#app-splash .ky-bg')
+            if (!bg || bg.querySelector('.ky-toolpath')) return
+            var reduce =
+              window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            var W = 1200,
+              H = 700,
+              TAU = Math.PI * 2,
+              rng = Math.random
+            function poly(pts, close) {
+              if (!pts.length) return ''
+              var d = 'M' + pts[0][0].toFixed(1) + ' ' + pts[0][1].toFixed(1)
+              for (var i = 1; i < pts.length; i++) d += 'L' + pts[i][0].toFixed(1) + ' ' + pts[i][1].toFixed(1)
+              return d + (close ? 'Z' : '')
+            }
+            function spiral(cx, cy, r) {
+              var turns = 3 + ((rng() * 3) | 0), steps = turns * 36, pts = []
+              for (var i = 0; i <= steps; i++) {
+                var t = i / steps, a = t * turns * TAU, rad = r * t
+                pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad])
+              }
+              return poly(pts, false)
+            }
+            function star(cx, cy, r) {
+              var p = 5 + ((rng() * 4) | 0), inner = r * (0.38 + rng() * 0.2), rot = rng() * Math.PI, pts = []
+              for (var i = 0; i < p * 2; i++) {
+                var a = rot + (i / (p * 2)) * TAU, rad = i % 2 ? inner : r
+                pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad])
+              }
+              return poly(pts, true)
+            }
+            function relief(cx, cy, r) {
+              var rows = 5 + ((rng() * 3) | 0), amp = r * (0.12 + rng() * 0.1), ph = rng() * TAU, frq = 1.5 + rng() * 2, pts = []
+              for (var row = 0; row < rows; row++) {
+                var y = cy - r + (row / (rows - 1)) * r * 2, dir = row % 2 ? -1 : 1
+                for (var c = 0; c <= 40; c++) {
+                  var f = c / 40, fx = dir > 0 ? f : 1 - f
+                  pts.push([cx - r + fx * r * 2, y + Math.sin(ph + fx * frq * TAU + row) * amp])
+                }
+              }
+              return poly(pts, false)
+            }
+            function raster(cx, cy, r) {
+              var rows = 6 + ((rng() * 4) | 0), pts = []
+              for (var row = 0; row < rows; row++) {
+                var y = cy - r + (row / (rows - 1)) * r * 2, x0 = cx - r, x1 = cx + r
+                if (row % 2) pts.push([x1, y], [x0, y]); else pts.push([x0, y], [x1, y])
+              }
+              return poly(pts, false)
+            }
+            function lobes(cx, cy, r) {
+              var n = 4 + ((rng() * 4) | 0), wob = 0.18 + rng() * 0.22, ph = rng() * TAU, pts = []
+              for (var i = 0; i <= 80; i++) {
+                var a = (i / 80) * TAU, rad = r * (1 - wob + wob * Math.cos(a * n + ph))
+                pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad])
+              }
+              return poly(pts, true)
+            }
+            function plen(d) {
+              var nums = d.match(/-?\d+(?:\.\d+)?/g)
+              if (!nums) return 3000
+              var len = 0, px = 0, py = 0
+              for (var i = 0; i + 1 < nums.length; i += 2) {
+                var x = parseFloat(nums[i]), y = parseFloat(nums[i + 1])
+                if (i > 0) len += Math.hypot(x - px, y - py)
+                px = x; py = y
+              }
+              return Math.ceil(len * 1.05) + 200
+            }
+            function shuffle(a) {
+              for (var i = a.length - 1; i > 0; i--) {
+                var j = (rng() * (i + 1)) | 0, t = a[i]; a[i] = a[j]; a[j] = t
+              }
+              return a
+            }
+            var gens = shuffle([spiral, star, relief, raster, lobes])
+            var count = 3 + ((rng() * 2) | 0)
+            var regions = shuffle([[0.22, 0.34], [0.74, 0.28], [0.32, 0.74], [0.78, 0.72], [0.52, 0.5]])
+            var NS = 'http://www.w3.org/2000/svg'
+            var svg = document.createElementNS(NS, 'svg')
+            svg.setAttribute('class', 'ky-toolpath')
+            svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H)
+            svg.setAttribute('preserveAspectRatio', 'xMidYMid slice')
+            svg.setAttribute('aria-hidden', 'true')
+            svg.setAttribute('focusable', 'false')
+            for (var k = 0; k < count; k++) {
+              var reg = regions[k]
+              var cx = reg[0] * W + (rng() - 0.5) * 80
+              var cy = reg[1] * H + (rng() - 0.5) * 60
+              var r = 90 + rng() * 110
+              var d = gens[k](cx, cy, r)
+              var len = plen(d), dur = 12 + rng() * 8, delay = rng() * dur * 0.6
+              var op = 0.28 + rng() * 0.32, w = 1.4 + rng() * 1.4
+              var path = document.createElementNS(NS, 'path')
+              path.setAttribute('class', 'ky-path')
+              path.setAttribute('d', d)
+              path.style.setProperty('--len', String(len))
+              path.style.setProperty('--dur', dur + 's')
+              path.style.setProperty('--delay', delay + 's')
+              path.style.strokeWidth = String(w)
+              path.style.opacity = String(op)
+              svg.appendChild(path)
+              if (!reduce) {
+                var dot = document.createElementNS(NS, 'circle')
+                dot.setAttribute('class', 'ky-cutter')
+                dot.setAttribute('r', (3.5 + w).toFixed(1))
+                var am = document.createElementNS(NS, 'animateMotion')
+                am.setAttribute('dur', dur + 's')
+                am.setAttribute('begin', delay + 's')
+                am.setAttribute('repeatCount', 'indefinite')
+                am.setAttribute('keyPoints', '0;1')
+                am.setAttribute('keyTimes', '0;1')
+                am.setAttribute('calcMode', 'linear')
+                am.setAttribute('path', d)
+                dot.appendChild(am)
+                svg.appendChild(dot)
+              }
+            }
+            var vign = bg.querySelector('.ky-vignette')
+            if (vign) bg.insertBefore(svg, vign)
+            else bg.appendChild(svg)
+          } catch (e) {
+            /* decorative only — never let it affect the app */
+          }
+        }
+        // requestIdleCallback fires once the browser is idle AFTER the initial
+        // paint — the static splash text paints first (no JS needed), so this
+        // enhances the loading screen during the bundle-download wait WITHOUT ever
+        // delaying that text or the SEO/LCP-critical first paint. Idle-gated, so it
+        // also can't steal main-thread time from the booting app bundle; the
+        // timeout just guarantees it still runs if the thread stays busy.
+        if ('requestIdleCallback' in window) requestIdleCallback(injectToolpaths, { timeout: 1500 })
+        else setTimeout(injectToolpaths, 300)
       })()
     </script>
     <script type="module" src="/src/main.tsx"></script>

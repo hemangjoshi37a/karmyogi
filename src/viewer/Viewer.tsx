@@ -307,6 +307,11 @@ export interface ViewerProps {
    */
   showSoftLimits?: boolean
   /**
+   * Draw the G55–G59 work-coordinate-origin markers (the active system is already
+   * the RGB triad). Each is placed from GRBL's `$#` stored offsets. Default true.
+   */
+  showWcsOrigins?: boolean
+  /**
    * L10 — colour the cut toolpath by its S-value (laser power) instead of a flat
    * colour. Only applies to the static (non-reveal) path. Default false.
    */
@@ -384,6 +389,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     jogTo = false,
     onJogTo,
     showSoftLimits = true,
+    showWcsOrigins = true,
     colorByPower = false,
     powerRange = null,
     lineSegments,
@@ -800,6 +806,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
             height={height}
             showLabels={showBed}
             showSoftLimits={showSoftLimits}
+            showWcsOrigins={showWcsOrigins}
           />
         </group>
         <group visible={showShapes}>

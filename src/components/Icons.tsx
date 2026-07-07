@@ -49,6 +49,7 @@ export type IconName =
   | 'camera'
   | 'laser'
   | 'warning'
+  | 'sd-card'
 
 /**
  * Per-icon SVG body (the inner elements only — the wrapping <svg> with sizing,
@@ -221,6 +222,13 @@ const PATHS: Record<IconName, () => JSX.Element> = {
       <path d="M12 4l9 16H3z" />
       <path d="M12 10v4" />
       <path d="M12 17v.01" />
+    </>
+  ),
+  // SD / memory card: a card outline with a notched top-right corner and contact pins.
+  'sd-card': () => (
+    <>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M9 3v3M12 3v3M15 4v2" />
     </>
   ),
 }

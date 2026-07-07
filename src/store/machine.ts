@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   parseStatusReport,
   parseParserState,
+  parseWcsOffsetLine,
   type StatusReport,
   type ParserState,
   type GrblState,
@@ -36,6 +37,14 @@ interface MachineStore {
   connection: ConnectionStatus
   /** Last connection error message, if any. */
   error: string | null
+  /**
+   * Set when the controller booted WITHOUT its config file — FluidNC prints
+   * "Skipping configuration file due to panic" after a previous boot crashed, then
+   * runs on the default (empty) config. In that state motion, limits AND the SD
+   * card are all unavailable, so features surface this instead of a mysterious
+   * failure. Cleared on reconnect (resetMachine) or once a clean config loads.
+   */
+  configError: string | null
 
   // --- machine status ---
   state: MachineState
@@ -48,6 +57,12 @@ interface MachineStore {
   overrides: Overrides
   /** Active input pins (limit/probe/door), e.g. ['X','Z']. */
   pins: string[]
+  /**
+   * Per-direction limit-switch state from FluidNC's extended `LS:` status field,
+   * e.g. ['X+','Z-']. null when the controller doesn't report it (plain GRBL /
+   * FluidNC without the 6-pin report) — consumers fall back to per-axis `pins`.
+   */
+  limitDirs: string[] | null
   /** Planner / RX buffer availability, if reported. */
   buffer: { plan: number; rx: number } | null
   /** Timestamp (ms) of the last status report applied. */
@@ -62,10 +77,18 @@ interface MachineStore {
   parserState: ParserState | null
   /** Active work coordinate system (G54–G59) from `$G`, or null if unknown. */
   activeWcs: WorkCoordSystem | null
+  /**
+   * Stored work-coordinate-system origins (G54–G59) in MACHINE coordinates, from
+   * the GRBL `$#` report. Empty until a `$#` reply is seen. The visualizer reads
+   * these to place each G54–G59 origin marker (at offset − active WCO).
+   */
+  wcsOffsets: Partial<Record<WorkCoordSystem, Vec3>>
 
   // --- actions ---
   setConnection: (c: ConnectionStatus) => void
   setError: (e: string | null) => void
+  /** Flag/clear the "config skipped due to panic" state (null = config is fine). */
+  setConfigError: (e: string | null) => void
   setState: (s: MachineState) => void
   setPositions: (p: { mpos?: Vec3; wpos?: Vec3 }) => void
   /** Apply a parsed status report to the store. */
@@ -76,6 +99,10 @@ interface MachineStore {
   applyParserState: (ps: ParserState) => void
   /** Parse a raw `[GC:...]` line and apply it. Returns true if it was one. */
   ingestParserStateLine: (line: string) => boolean
+  /** Record one G54–G59 origin offset (machine coords) from a `$#` report. */
+  applyWcsOffset: (system: WorkCoordSystem, offset: Vec3) => void
+  /** Parse a raw `[G5x:...]` line and store it. Returns true if it was one. */
+  ingestWcsOffsetLine: (line: string) => boolean
   /** Reset machine status back to defaults (e.g. on disconnect). */
   resetMachine: () => void
 }
@@ -86,6 +113,7 @@ const FULL_OV: Overrides = { feed: 100, rapid: 100, spindle: 100 }
 export const useMachine = create<MachineStore>((set, get) => ({
   connection: 'disconnected',
   error: null,
+  configError: null,
 
   state: 'Unknown',
   subState: null,
@@ -96,17 +124,21 @@ export const useMachine = create<MachineStore>((set, get) => ({
   spindle: 0,
   overrides: { ...FULL_OV },
   pins: [],
+  limitDirs: null,
   buffer: null,
   lastStatusAt: null,
 
   parserState: null,
   activeWcs: null,
+  wcsOffsets: {},
 
   // Connecting clears any stale error so a retry starts clean; connected does
   // too. Going to 'disconnected' PRESERVES the current error so a mid-job /
   // unexpected disconnect message (set by the controller) survives the
   // connection-state flip and stays visible to the operator (the dangerous
   // CNC case — losing the link mid-cut).
+  setConfigError: (configError) => set({ configError }),
+
   setConnection: (connection) =>
     set({
       connection,
@@ -128,6 +160,7 @@ export const useMachine = create<MachineStore>((set, get) => ({
       spindle: report.spindle ?? s.spindle,
       overrides: report.overrides ?? s.overrides,
       pins: report.pins ?? [],
+      limitDirs: report.limitDirs ?? null,
       buffer: report.buffer ?? s.buffer,
       lastStatusAt: Date.now(),
     })),
@@ -149,10 +182,21 @@ export const useMachine = create<MachineStore>((set, get) => ({
     return true
   },
 
+  applyWcsOffset: (system, offset) =>
+    set((s) => ({ wcsOffsets: { ...s.wcsOffsets, [system]: offset } })),
+
+  ingestWcsOffsetLine: (line) => {
+    const parsed = parseWcsOffsetLine(line)
+    if (!parsed) return false
+    get().applyWcsOffset(parsed.system, parsed.offset)
+    return true
+  },
+
   resetMachine: () =>
     set({
       state: 'Unknown',
       subState: null,
+      configError: null,
       mpos: { ...ZERO },
       wpos: { ...ZERO },
       wco: { ...ZERO },
@@ -160,9 +204,11 @@ export const useMachine = create<MachineStore>((set, get) => ({
       spindle: 0,
       overrides: { ...FULL_OV },
       pins: [],
+      limitDirs: null,
       buffer: null,
       lastStatusAt: null,
       parserState: null,
       activeWcs: null,
+      wcsOffsets: {},
     }),
 }))

@@ -281,6 +281,15 @@ const IconSoftLimit = (
     <path d="M4 18l3-3" />
   </VIcon>
 )
+// Work coordinate origins (G54–G59): an axes origin with a small second cross,
+// hinting at multiple coordinate systems on the bed.
+const IconWcs = (
+  <VIcon>
+    <path d="M5 19V5M5 19h14" />
+    <path d="M5 5l-1.6 2.2M5 5l1.6 2.2M19 19l-2.2-1.6M19 19l-2.2 1.6" />
+    <path d="M14 7h4M16 5v4" />
+  </VIcon>
+)
 
 /**
  * Visualizer panel: hosts the 3D viewport and feeds it the loaded G-code program
@@ -374,19 +383,33 @@ export function VisualizerPanel() {
     return subscribeActiveTab(fitIfSpring)
   }, [])
 
-  const [showStock, setShowStock] = useState(true)
+  // All display toggles below are PERSISTED (usePersistentState) so the ⋯-menu /
+  // toolbar layout the operator sets survives a page refresh.
+  const [showStock, setShowStock] = usePersistentState(
+    'karmyogi.viewer.showStock',
+    true,
+  )
   // PCB board (FR-4 + copper) visibility for the soldering scene. Lives in the
   // solderViz store (the channel SolderScene reads), so the toggle here reaches
   // the scene without threading a prop through the Viewer. Default ON; the pads
-  // never hide — only the board slab does.
+  // never hide — only the board slab does. The store persists it across refresh.
   const showPcb = useSolderViz((s) => s.showPcb)
   const setShowPcb = useSolderViz((s) => s.setShowPcb)
   // Independent show/hide for the two spindle cones (actual machine vs simulation).
-  const [showActualTool, setShowActualTool] = useState(true)
-  const [showSimTool, setShowSimTool] = useState(true)
+  const [showActualTool, setShowActualTool] = usePersistentState(
+    'karmyogi.viewer.showActualTool',
+    true,
+  )
+  const [showSimTool, setShowSimTool] = usePersistentState(
+    'karmyogi.viewer.showSimTool',
+    true,
+  )
   // Material-removal simulation: progressively carve the stock surface as the
   // toolpath reveals. On by default so the operator sees stock → finished part.
-  const [carveSim, setCarveSim] = useState(true)
+  const [carveSim, setCarveSim] = usePersistentState(
+    'karmyogi.viewer.carveSim',
+    true,
+  )
   // Auto-stock: derive the carve block from the toolpath extents + a thickness
   // (so ANY loaded program can be simulated without a configured stock block).
   // Persisted so the operator's preference survives reloads. Opt-in (off by
@@ -616,6 +639,12 @@ export function VisualizerPanel() {
   // GRBL settings are synced). Persisted; on by default.
   const [showSoftLimits, setShowSoftLimits] = usePersistentState(
     'karmyogi.viewer.softLimits',
+    true,
+  )
+  // Work-coordinate origin markers (G55–G59) — each at its GRBL `$#` offset.
+  // Persisted; on by default so every DEFINED work origin is visible at a glance.
+  const [showWcsOrigins, setShowWcsOrigins] = usePersistentState(
+    'karmyogi.viewer.wcsOrigins',
     true,
   )
   // L10 — colour the toolpath by laser power (S-value). Persisted; on by default
@@ -1126,6 +1155,8 @@ export function VisualizerPanel() {
               setShowJobBoxes={setShowJobBoxes}
               showSoftLimits={showSoftLimits}
               setShowSoftLimits={setShowSoftLimits}
+              showWcsOrigins={showWcsOrigins}
+              setShowWcsOrigins={setShowWcsOrigins}
               camOverlay={camOverlay}
               toggleCamOverlay={toggleCamOverlay}
             />
@@ -1210,6 +1241,7 @@ export function VisualizerPanel() {
           jogTo={jogToMode && connected}
           onJogTo={onJogTo}
           showSoftLimits={showSoftLimits}
+          showWcsOrigins={showWcsOrigins}
           colorByPower={heatOn}
           powerRange={powerRange}
           lineSegments={lineSegments}
@@ -1310,6 +1342,8 @@ function OverflowMenu({
   setShowJobBoxes,
   showSoftLimits,
   setShowSoftLimits,
+  showWcsOrigins,
+  setShowWcsOrigins,
   camOverlay,
   toggleCamOverlay,
 }: {
@@ -1346,6 +1380,8 @@ function OverflowMenu({
   setShowJobBoxes: Toggle
   showSoftLimits: boolean
   setShowSoftLimits: Toggle
+  showWcsOrigins: boolean
+  setShowWcsOrigins: Toggle
   camOverlay: boolean
   toggleCamOverlay: () => void
 }) {
@@ -1518,6 +1554,12 @@ function OverflowMenu({
             t('vz.softLimits', 'Show soft-limit box + machine origin'),
             () => setShowSoftLimits((s) => !s),
             showSoftLimits,
+          )}
+          {item(
+            IconWcs,
+            t('vz.wcsOrigins', 'Show work coordinate origins (G54–G59)'),
+            () => setShowWcsOrigins((s) => !s),
+            showWcsOrigins,
           )}
           {item(
             IconStock,

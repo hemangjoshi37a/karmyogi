@@ -20,6 +20,7 @@ import { ConnectionControl } from '../components/ConnectionControl'
 import { UserChip } from '../auth/UserChip'
 import { StorageGuard } from '../components/StorageGuard'
 import { setActiveTab } from '../track/activity'
+import { readDeepLink, writeTab, setCurrentTab, installInteractionTracker, restoreControlWhenReady } from './deepLink'
 import { registerTabNav } from '../track/tabNav'
 import { AboutModal } from '../components/AboutModal'
 import { Icon } from '../components/Icons'
@@ -138,8 +139,12 @@ const LEFT_TABS = [
   { id: 'pnp', title: 'Pick & Place' },
   { id: 'signature', title: 'Signature' },
   { id: 'print', title: '3D Printing' },
+  { id: 'printhouse', title: '3D Print House' },
   { id: 'laser', title: 'Laser Cutting' },
   { id: 'welding', title: 'Welding' },
+  { id: 'spotweld', title: 'Spot Welding' },
+  { id: 'embroidery', title: 'Embroidery' },
+  { id: 'stitching', title: 'Clothes Stitching' },
   { id: 'camera', title: 'Camera' },
   { id: 'springcoiling', title: 'Spring Coiling' },
   { id: 'tattoo', title: 'Tattoo / Henna' },
@@ -207,7 +212,7 @@ const DEFAULT_LAYOUT: SerializedDockview = {
         {
           type: 'leaf',
           data: {
-            views: ['cadcam', 'writing', 'soldering', 'screwfitting', 'drilling', 'pcb', 'glue', 'pnp', 'signature', 'print', 'laser', 'welding', 'camera', 'springcoiling', 'tattoo'],
+            views: ['cadcam', 'writing', 'soldering', 'screwfitting', 'drilling', 'pcb', 'glue', 'pnp', 'signature', 'print', 'printhouse', 'laser', 'welding', 'spotweld', 'embroidery', 'stitching', 'camera', 'springcoiling', 'tattoo'],
             activeView: 'cadcam',
             id: '1',
           },
@@ -297,19 +302,38 @@ function buildDefaultLayout(api: DockviewApi) {
   base.api.setActive()
 }
 
-// Force the panel that is ACTIVE immediately after a layout is applied to mount
-// right away. dockview's default 'onlyWhenVisible' renderer mounts a panel on an
-// activation CHANGE — but the panel that is active straight after fromJSON()/build
-// (default: 2D/3D Carving) never received a change event, so it renders BLANK until
-// the user switches to another tab and back. Switching it to the 'always' renderer
-// mounts it unconditionally (same mechanism the camera panel uses), and as a bonus
-// preserves that tab's state across later tab switches. Best-effort: older dockview
-// without per-panel renderers simply keeps the old behavior.
+// Force the VISIBLE panel of EVERY group to mount right away after a layout is
+// applied. dockview's default 'onlyWhenVisible' renderer only mounts a panel on an
+// activation CHANGE — but a panel that is already active straight after
+// fromJSON()/build never receives that event, so it renders BLANK until the user
+// switches to another tab and back.
+//
+// The app docks tabs across SEVERAL groups (left CAM tabs, centre Visualizer,
+// right Controller…), each with its own visible tab. The old fix only covered
+// `api.activePanel` — the SINGLE globally-focused panel — so a group's visible tab
+// that wasn't the focused one (e.g. Soldering in the left group while focus sat on
+// the Visualizer) still sat blank until a manual tab switch. That's the
+// intermittent "panel didn't mount after reload" bug: whether it reproduced
+// depended on which group happened to hold focus.
+//
+// Forcing each group's active panel to the 'always' renderer mounts them all
+// unconditionally (same mechanism the camera panel uses) and, as a bonus,
+// preserves those tabs' state across later switches. Best-effort: per-panel
+// renderers / `groups` may be absent on an older dockview — then we keep the old
+// behaviour for whatever is available.
 function forceActivePanelMount(api: DockviewApi) {
   try {
+    for (const group of api.groups ?? []) {
+      try {
+        group.activePanel?.api.setRenderer?.('always')
+      } catch {
+        /* this panel's renderer can't be set — skip it, keep going */
+      }
+    }
+    // Belt-and-braces: also the globally-active panel (covers an empty groups list).
     api.activePanel?.api.setRenderer?.('always')
   } catch {
-    /* older dockview — no per-panel renderer */
+    /* older dockview — no per-panel renderer / no groups */
   }
 }
 
@@ -416,11 +440,29 @@ export function Shell() {
       // Mount the initially-active tab (default: 2D/3D Carving) so it isn't blank
       // until the user switches away and back. See forceActivePanelMount above.
       forceActivePanelMount(event.api)
+      // URL DEEP-LINK: a `?tab=<id>` in the shared URL wins over the saved/default
+      // active tab, so the link opens straight to that tab. Done BEFORE the
+      // active-change listener is attached, so it doesn't wipe the link's `?el=`.
+      const deepLink = readDeepLink()
+      if (deepLink.tab && event.api.getPanel(deepLink.tab)) {
+        event.api.getPanel(deepLink.tab)?.api.setActive()
+      }
       event.api.onDidLayoutChange(scheduleSave)
-      // Report the active tab to the activity tracker for per-tab dwell time.
-      // (No-ops unless tracking is live.)
+      // Report the active tab to the activity tracker for per-tab dwell time
+      // (no-ops unless tracking is live) AND mirror it to the URL as `?tab=` so the
+      // address bar always reflects — and can share — the current tab.
       setActiveTab(event.api.activePanel?.id)
-      event.api.onDidActivePanelChange((panel) => setActiveTab(panel?.id))
+      setCurrentTab(event.api.activePanel?.id) // seed the tracker's tab (no URL change)
+      if (!deepLink.tab) writeTab(event.api.activePanel?.id) // populate ?tab= on a fresh visit; keep a shared link's tab+el intact
+      event.api.onDidActivePanelChange((panel) => {
+        setActiveTab(panel?.id)
+        writeTab(panel?.id)
+      })
+      // Record the last interacted control into `?el=` (tab-scoped via the tracker's
+      // current tab) so the link can point at a specific button/field, and reveal
+      // that control on load once its lazy panel has mounted.
+      installInteractionTracker()
+      restoreControlWhenReady(deepLink.el)
       // Expose programmatic tab navigation (used by the gamepad's tab-switch
       // mode): focus a panel by id, and list the OPEN tabs in registry order so
       // cycling is stable regardless of the docked arrangement.
@@ -629,7 +671,13 @@ export function Shell() {
           <MotionPanel embedded />
         </div>
       </Modal>
-      <Modal open={showProbe} title="Probe & Limits" onClose={() => setShowProbe(false)}>
+      <Modal
+        open={showProbe}
+        title={t('probe.modal.title', 'Probe & Limits')}
+        eyebrow={t('probe.modal.eyebrow', 'Touch-off · switches · homing')}
+        onClose={() => setShowProbe(false)}
+        width={1060}
+      >
         <div className="km-modal-pane">
           <ProbePanel />
         </div>

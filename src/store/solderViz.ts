@@ -1,5 +1,25 @@
 import { create } from 'zustand'
 
+// `showPcb` is a DISPLAY preference (board slab on/off), so unlike the rest of
+// this live store it persists to localStorage — under the same key + JSON format
+// usePersistentState uses — so the operator's choice survives a page refresh.
+const SHOW_PCB_KEY = 'karmyogi.viewer.showPcb'
+function loadShowPcb(): boolean {
+  try {
+    const raw = localStorage.getItem(SHOW_PCB_KEY)
+    return raw != null ? (JSON.parse(raw) as boolean) : true
+  } catch {
+    return true
+  }
+}
+function saveShowPcb(v: boolean): void {
+  try {
+    localStorage.setItem(SHOW_PCB_KEY, JSON.stringify(v))
+  } catch {
+    /* private mode / quota — non-fatal, just don't persist */
+  }
+}
+
 /**
  * Soldering-visualization channel: the SolderingPanel writes to it and the 3D
  * Viewer's <SolderScene> reads it. Two jobs:
@@ -91,7 +111,7 @@ export const useSolderViz = create<SolderVizState>((set) => ({
   hovered: -1,
   activeIndex: -1,
   fromDrill: false,
-  showPcb: true,
+  showPcb: loadShowPcb(),
   detected: [],
   set: (points, fromDrill) => set({ active: true, points, fromDrill }),
   select: (index) => set({ selected: index }),
@@ -105,7 +125,12 @@ export const useSolderViz = create<SolderVizState>((set) => ({
   setDetected: (detected) => set({ detected }),
   // Board visibility is a display preference, not point data — keep it across a
   // panel unmount (clear() does not touch it).
-  setShowPcb: (updater) => set((s) => ({ showPcb: updater(s.showPcb) })),
+  setShowPcb: (updater) =>
+    set((s) => {
+      const showPcb = updater(s.showPcb)
+      saveShowPcb(showPcb)
+      return { showPcb }
+    }),
   clear: () =>
     set({ active: false, points: [], selected: -1, hovered: -1, activeIndex: -1, fromDrill: false, detected: [] }),
 }))

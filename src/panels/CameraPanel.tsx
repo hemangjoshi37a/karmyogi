@@ -495,7 +495,18 @@ export function CameraPanel() {
   ])
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [deviceIds, setDeviceIds] = useState<[string, string]>(['', ''])
-  const [secondaryEnabled, setSecondaryEnabled] = useState(false)
+  // Whether the 2nd camera slot is enabled — PERSISTED so it survives a reload.
+  const [secondaryEnabled, setSecondaryEnabled] = usePersistentState<boolean>(
+    'karmyogi.camera.secondaryEnabled',
+    false,
+  )
+  // Per-slot "the operator wants this camera ON" intent — PERSISTED so a reload
+  // re-opens the feed automatically (when the browser already has camera
+  // permission), instead of forcing a fresh "start camera" click each time.
+  const [liveWanted, setLiveWanted] = usePersistentState<[boolean, boolean]>(
+    'karmyogi.camera.liveWanted',
+    [false, false],
+  )
   const [clips, setClips] = useState<Clip[]>([])
 
   const [recording, setRecording] = useState(false)
@@ -504,8 +515,9 @@ export function CameraPanel() {
   const [recError, setRecError] = useState<string | null>(null)
 
   const [tlActive, setTlActive] = useState(false)
-  const [tlInterval, setTlInterval] = useState('5')
-  const [tlFps, setTlFps] = useState('10')
+  // Timelapse capture interval (s) + assembled-video FPS — PERSISTED settings.
+  const [tlInterval, setTlInterval] = usePersistentState('karmyogi.camera.tlInterval', '5')
+  const [tlFps, setTlFps] = usePersistentState('karmyogi.camera.tlFps', '10')
   const [tlCount, setTlCount] = useState(0)
 
   // ---- AUTO-record (record while a program streams) ----
@@ -530,11 +542,16 @@ export function CameraPanel() {
 
   // ---- calibration UI state ----
   const [calibSlot, setCalibSlot] = useState<SlotIdx>(0)
-  const [method, setMethod] = useState<CalibMethod>('auto')
+  // Chosen calibration METHOD + its params — PERSISTED so the operator's setup
+  // sticks across reloads (the calibration RESULT itself lives in the store).
+  const [method, setMethod] = usePersistentState<CalibMethod>(
+    'karmyogi.camera.calibMethod',
+    'auto',
+  )
 
   // ---- automatic calibration UI state ----
-  const [autoSpread, setAutoSpread] = useState('20')
-  const [autoPts, setAutoPts] = useState('3')
+  const [autoSpread, setAutoSpread] = usePersistentState('karmyogi.camera.autoSpread', '20')
+  const [autoPts, setAutoPts] = usePersistentState('karmyogi.camera.autoPts', '3')
   const [autoRun, setAutoRun] = useState<AutoRunState>({
     running: false,
     progress: null,
@@ -593,10 +610,10 @@ export function CameraPanel() {
     secondMachine: [number, number] | null
   }>('karmyogi.camera.sheetReg', { originMachine: null, secondMachine: null })
 
-  // Job manual inputs.
-  const [jobW, setJobW] = useState('100')
-  const [jobD, setJobD] = useState('100')
-  const [jobThk, setJobThk] = useState('12')
+  // Job manual inputs — PERSISTED so the operator's job size survives a reload.
+  const [jobW, setJobW] = usePersistentState('karmyogi.camera.jobW', '100')
+  const [jobD, setJobD] = usePersistentState('karmyogi.camera.jobD', '100')
+  const [jobThk, setJobThk] = usePersistentState('karmyogi.camera.jobThk', '12')
 
   // Empty-bed reference captured flags (mirror refGrayRef for re-render).
   const [refCaptured, setRefCaptured] = useState<[boolean, boolean]>([false, false])
@@ -1345,12 +1362,18 @@ export function CameraPanel() {
         }
         stopStream(s)
         setSlotStatus(s, { kind: 'idle' })
+        // Remember it's OFF so a reload won't re-open it.
+        setLiveWanted((prev) =>
+          s === 0 ? [false, prev[1]] : [prev[0], false],
+        )
       } else {
+        // Remember it's ON so a reload re-opens it automatically.
+        setLiveWanted((prev) => (s === 0 ? [true, prev[1]] : [prev[0], true]))
         startStream(s, deviceIds[s]).catch(() => {})
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [status, deviceIds, startStream, stopStream, stopRecording, stopTimelapse, setSlotStatus],
+    [status, deviceIds, startStream, stopStream, stopRecording, stopTimelapse, setSlotStatus, setLiveWanted],
   )
 
   const onSelectDevice = useCallback(
@@ -1396,15 +1419,14 @@ export function CameraPanel() {
     }
   }, [deviceIds, calib])
 
-  // DEV: auto-start the head camera on mount when permission is ALREADY granted,
-  // so the live feed (and the twin's bed image) survives reloads with NO fresh
-  // user gesture. getUserMedia needs a gesture only while permission is in the
-  // 'prompt' state; once 'granted' it may start programmatically. This makes the
-  // dev bridge self-sufficient: an agent can keep observing after a reload
-  // without the user re-clicking "start camera". The one-time grant still needs a
-  // click the very first time per browser profile.
+  // Auto-restore the live feed(s) on mount when the operator had them ON and the
+  // browser ALREADY has camera permission — so a reload re-opens the camera with
+  // NO fresh user gesture (getUserMedia needs a gesture only while permission is
+  // 'prompt'; once 'granted' it may start programmatically). In DEV slot 0 always
+  // restores (keeps the dev bridge self-sufficient after a reload). The one-time
+  // permission grant still needs a click the very first time per browser profile.
   useEffect(() => {
-    if (!import.meta.env.DEV || !supported) return
+    if (!supported) return
     let cancelled = false
     void (async () => {
       try {
@@ -1412,9 +1434,16 @@ export function CameraPanel() {
           name: 'camera' as PermissionName,
         })
         if (cancelled || !perm || perm.state !== 'granted') return
-        if (streamRefs.current[0]) return // already live
-        const id = useCameraCalib.getState().cameras[0]?.deviceId ?? ''
-        await startStream(0, id)
+        const wantSlot0 = liveWanted[0] || import.meta.env.DEV
+        const wantSlot1 = liveWanted[1] && secondaryEnabled
+        if (wantSlot0 && !streamRefs.current[0]) {
+          const id = useCameraCalib.getState().cameras[0]?.deviceId ?? ''
+          await startStream(0, id)
+        }
+        if (!cancelled && wantSlot1 && !streamRefs.current[1]) {
+          const id = useCameraCalib.getState().cameras[1]?.deviceId ?? ''
+          await startStream(1, id)
+        }
       } catch {
         /* permissions API unsupported / rejected — user starts the camera manually */
       }
@@ -1422,7 +1451,7 @@ export function CameraPanel() {
     return () => {
       cancelled = true
     }
-    // Mount-only: start once if already permitted.
+    // Mount-only: restore whatever was on, once, if already permitted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1448,8 +1477,10 @@ export function CameraPanel() {
       stopStream(1)
       setSlotStatus(1, { kind: 'idle' })
       setCalibSlot(0)
+      // A disabled slot must not auto-reopen on the next reload.
+      setLiveWanted((prev) => (prev[1] === false ? prev : [prev[0], false]))
     }
-  }, [secondaryEnabled, stopStream, setSlotStatus])
+  }, [secondaryEnabled, stopStream, setSlotStatus, setLiveWanted])
 
   // Keep the unmount cleanup's clip mirror current.
   useEffect(() => {

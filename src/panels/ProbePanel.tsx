@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { grbl } from '../serial/controller'
+import { grbl, type WorkspaceMeasureResult } from '../serial/controller'
 import { useConsole, useGrblSettings, useMachine, usePersistentState } from '../store'
 import { useBed } from '../store/bed'
 import { InfoTip } from '../components/InfoTip'
+import { Icon } from '../components/Icons'
+import { LimitConfigModal } from '../components/LimitConfigModal'
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  Crosshair,
+  DoorOpen,
+  ScanLine,
+  Gauge,
+  Ruler,
+  Layers,
+} from 'lucide-react'
 import { IconButton } from '../components/IconButton'
 import { SegControl } from '../components/ui/SegControl'
 import { SliderField } from '../components/ui/SliderField'
@@ -89,20 +103,14 @@ function readTravel(): { x?: number; y?: number; z?: number } {
  * Letters GRBL reports in `Pn:` and how we label them. `lk`/`sk` are translation
  * keys for the label / sub-label (resolved at render time with the fallbacks).
  */
-const PIN_DEFS: {
-  letter: string
-  label: string
-  lk: string
-  sub: string
-  sk: string
-  door?: boolean
-}[] = [
-  { letter: 'X', label: 'X', lk: 'probe.pin.x', sub: 'limit', sk: 'probe.pin.limit' },
-  { letter: 'Y', label: 'Y', lk: 'probe.pin.y', sub: 'limit', sk: 'probe.pin.limit' },
-  { letter: 'Z', label: 'Z', lk: 'probe.pin.z', sub: 'limit', sk: 'probe.pin.limit' },
-  { letter: 'P', label: 'Probe', lk: 'probe.pin.probe', sub: 'P', sk: 'probe.pin.probeSub' },
-  { letter: 'D', label: 'Door', lk: 'probe.pin.door', sub: 'D', sk: 'probe.pin.doorSub', door: true },
-]
+/** The three limit axes, each with a lucide arrow for its − and + end. The
+ *  display shows six directional tiles (X−/X+/Y−/Y+/Z−/Z+); the Probe + Door
+ *  inputs render as two aux tiles below. */
+const LIMIT_AXES = [
+  { axis: 'X', neg: ArrowLeft, pos: ArrowRight },
+  { axis: 'Y', neg: ArrowDown, pos: ArrowUp },
+  { axis: 'Z', neg: ArrowDown, pos: ArrowUp },
+] as const
 
 /** A 0/1 GRBL boolean setting wired to a labelled toggle. */
 function BoolSetting({
@@ -246,9 +254,12 @@ function WizardSection({
   }
 
   return (
-    <section className="pr-card pr-card-wide">
+    <section className="pr-card">
       <header className="pr-card-head">
-        <h4>{t('probe.wiz.title', 'Probing wizard')}</h4>
+        <h4>
+          <span className="pr-card-ico" aria-hidden="true"><Icon name="zero" size={13} /></span>
+          {t('probe.wiz.title', 'Probing wizard')}
+        </h4>
         <span className="pr-raw">{t('probe.wiz.tag', 'guided zero')}</span>
       </header>
       <p className="pr-hint">
@@ -364,6 +375,7 @@ function WizardSection({
           onClick={run}
           title={t('probe.wiz.runTip', 'Stream this guided routine to the machine')}
         >
+          <span className="pr-bico" aria-hidden="true"><Icon name="play" size={14} /></span>
           {t('probe.wiz.run', 'Run wizard')}
         </button>
       </div>
@@ -557,9 +569,12 @@ function HeightmapSection({
   const running = phase === 'running'
 
   return (
-    <section className="pr-card pr-card-wide">
+    <section className="pr-card">
       <header className="pr-card-head">
-        <h4>{t('probe.hm.title', 'Auto-level / heightmap probe')}</h4>
+        <h4>
+          <span className="pr-card-ico" aria-hidden="true"><Icon name="frame" size={13} /></span>
+          {t('probe.hm.title', 'Auto-level / heightmap probe')}
+        </h4>
         <span className="pr-raw">{t('probe.hm.tag', 'grid → surface')}</span>
       </header>
       <p className="pr-hint">
@@ -582,11 +597,13 @@ function HeightmapSection({
       <div className="pr-row">
         {!running ? (
           <button type="button" className="pr-btn primary pr-grow" disabled={!connected || machineBusy} onClick={start} title={t('probe.hm.runTip', 'Run the G38.2 probe grid')}>
-            {t('probe.hm.run', '⌗ Run probe grid')}
+            <span className="pr-bico" aria-hidden="true"><Icon name="play" size={14} /></span>
+            {t('probe.hm.run', 'Run probe grid')}
           </button>
         ) : (
           <button type="button" className="pr-btn danger pr-grow" onClick={abort}>
-            {t('probe.hm.stop', '■ Stop probing')}
+            <span className="pr-bico" aria-hidden="true"><Icon name="stop" size={14} /></span>
+            {t('probe.hm.stop', 'Stop probing')}
           </button>
         )}
         {map && !running && (
@@ -672,9 +689,12 @@ function SurfacingSection({
   }
 
   return (
-    <section className="pr-card pr-card-wide">
+    <section className="pr-card">
       <header className="pr-card-head">
-        <h4>{t('probe.surf.title', 'Surfacing / flatten')}</h4>
+        <h4>
+          <span className="pr-card-ico" aria-hidden="true"><Icon name="jog" size={13} /></span>
+          {t('probe.surf.title', 'Surfacing / flatten')}
+        </h4>
         <span className="pr-raw">{t('probe.surf.tag', 'face stock')}</span>
       </header>
       <p className="pr-hint">
@@ -735,11 +755,265 @@ function SurfacingSection({
   )
 }
 
+const MEASURE_AXES = [
+  { key: 'X', sel: 'karmyogi.probe.measure.x', dflt: true },
+  { key: 'Y', sel: 'karmyogi.probe.measure.y', dflt: true },
+  { key: 'Z', sel: 'karmyogi.probe.measure.z', dflt: false },
+] as const
+
+/** Round to 2 dp, dropping a `-0`. */
+const round2 = (n: number) => {
+  const r = Math.round(n * 100) / 100
+  return r === 0 ? 0 : r
+}
+
+/**
+ * AUTO BED-SIZE by touching both ends of each selected axis (X then Y then Z, − then
+ * +). Drives grbl.measureWorkspace(): each seek is a guarded jog the limit stops at
+ * the switch; we read MPos there and compute travel = |max − min|, then write it into
+ * the 3D bed size. Needs hard_limits OFF + FluidNC per-direction `LS:` reporting. The
+ * machine MOVES — gated behind an inline confirm with an always-available Abort.
+ */
+function MeasureBedSection({
+  t,
+  connected,
+  machineState,
+  limitsLive,
+}: {
+  t: T
+  connected: boolean
+  machineState: string
+  limitsLive: boolean
+}) {
+  const [selX, setSelX] = usePersistentState<boolean>(MEASURE_AXES[0].sel, MEASURE_AXES[0].dflt)
+  const [selY, setSelY] = usePersistentState<boolean>(MEASURE_AXES[1].sel, MEASURE_AXES[1].dflt)
+  const [selZ, setSelZ] = usePersistentState<boolean>(MEASURE_AXES[2].sel, MEASURE_AXES[2].dflt)
+  const [feed, setFeed] = usePersistentState<number>('karmyogi.probe.measure.feed', 400)
+  const [backoff, setBackoff] = usePersistentState<number>('karmyogi.probe.measure.backoff', 4)
+  const [confirming, setConfirming] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<WorkspaceMeasureResult | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const sel: Record<'X' | 'Y' | 'Z', boolean> = { X: selX, Y: selY, Z: selZ }
+  const setSel: Record<'X' | 'Y' | 'Z', (v: boolean) => void> = { X: setSelX, Y: setSelY, Z: setSelZ }
+  const axes = (['X', 'Y', 'Z'] as const).filter((a) => sel[a])
+
+  const idle = machineState === 'Idle' || machineState === 'Jog' || machineState === 'Unknown'
+  const canRun = connected && limitsLive && axes.length > 0 && idle && !running
+
+  const run = async () => {
+    setConfirming(false)
+    setError(null)
+    setResult(null)
+    setRunning(true)
+    setProgress(t('pr.measure.starting', 'Starting…'))
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    try {
+      const res = await grbl.measureWorkspace({
+        axes,
+        feed,
+        backoffMm: backoff,
+        signal: ctrl.signal,
+        onProgress: (p) => {
+          if (p.phase === 'seeking') {
+            setProgress(t('pr.measure.seeking', 'Seeking {axis}{edge} limit…', { axis: p.axis, edge: p.edge }))
+          } else if (p.phase === 'recorded') {
+            setProgress(
+              t('pr.measure.recorded', '{axis}{edge} found at {v} mm', {
+                axis: p.axis,
+                edge: p.edge,
+                v: round2(p.value ?? 0),
+              }),
+            )
+          } else if (p.phase === 'axisDone') {
+            setProgress(t('pr.measure.axisDone', '{axis} travel = {v} mm', { axis: p.axis, v: round2(p.value ?? 0) }))
+          }
+        },
+      })
+      setResult(res)
+      const size: { width?: number; depth?: number; height?: number } = {}
+      if (res.x) size.width = round2(res.x.travel)
+      if (res.y) size.depth = round2(res.y.travel)
+      if (res.z) size.height = round2(res.z.travel)
+      if (size.width !== undefined || size.depth !== undefined || size.height !== undefined) {
+        useBed.getState().setSize(size)
+      }
+      setProgress(null)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg === 'aborted' ? t('pr.measure.aborted', 'Aborted — machine stopped.') : msg)
+      setProgress(null)
+    } finally {
+      setRunning(false)
+      abortRef.current = null
+    }
+  }
+
+  const abort = () => {
+    abortRef.current?.abort()
+    grbl.jogCancel().catch(() => {})
+  }
+
+  return (
+    <section className="pr-card pr-card-wide">
+      <header className="pr-card-head">
+        <h4>
+          <span className="pr-card-ico" aria-hidden="true">
+            <Ruler size={13} />
+          </span>
+          {t('pr.measure.title', 'Measure bed (touch both ends)')}
+        </h4>
+        <span className="pr-raw">{t('pr.measure.tag', '6 switches → travel')}</span>
+      </header>
+      <p className="pr-hint">
+        {t(
+          'pr.measure.hint',
+          'Drives each selected axis to BOTH limit switches and measures the real travel between them — more accurate than reading the configured $130–$132. Order: X, then Y, then Z; − end then + end. The machine moves; keep Abort within reach.',
+        )}
+      </p>
+
+      {/* Axis pick + feeds */}
+      <div className="pr-row pr-measure-axes" role="group" aria-label={t('pr.measure.axesAria', 'Axes to measure')}>
+        {MEASURE_AXES.map(({ key }) => (
+          <button
+            key={key}
+            type="button"
+            className="pr-chip-toggle"
+            aria-pressed={sel[key]}
+            data-on={sel[key]}
+            disabled={running}
+            onClick={() => setSel[key](!sel[key])}
+            title={t('pr.measure.axisToggle', 'Include {axis} (touch both ends)', { axis: key })}
+          >
+            {key}
+            {key === 'Z' && (
+              <span className="pr-chip-sub">{t('pr.measure.zCaution', 'Z− goes down')}</span>
+            )}
+          </button>
+        ))}
+      </div>
+      <SliderField
+        label={t('pr.measure.feed', 'Seek feed')}
+        unit="mm/min"
+        min={50}
+        max={3000}
+        step={50}
+        value={feed}
+        onChange={setFeed}
+      />
+      <SliderField
+        label={t('pr.measure.backoff', 'Back-off')}
+        unit="mm"
+        min={1}
+        max={20}
+        step={1}
+        value={backoff}
+        onChange={setBackoff}
+      />
+
+      {/* Not-ready hints */}
+      {connected && !limitsLive && (
+        <p className="pr-note caution">
+          {t(
+            'pr.measure.noLs',
+            'Needs FluidNC per-direction limit reporting (the LS: status field) so the two ends of an axis can be told apart. Update the controller firmware, then reconnect.',
+          )}
+        </p>
+      )}
+
+      {/* Run / confirm / abort */}
+      {running ? (
+        <div className="pr-row">
+          <button type="button" className="pr-btn danger pr-grow" onClick={abort}>
+            {t('pr.measure.abort', '■ Abort — stop the machine')}
+          </button>
+        </div>
+      ) : confirming ? (
+        <div className="pr-row pr-confirm" role="alertdialog" aria-label={t('pr.measure.confirmAria', 'Confirm bed measurement')}>
+          <span className="pr-confirm-q">
+            {t('pr.measure.confirmQ', 'The machine will drive to {n} limit switches at {feed} mm/min. Area clear? hard_limits must be OFF.', {
+              n: axes.length * 2,
+              feed,
+            })}
+          </span>
+          <button type="button" className="pr-btn danger" onClick={() => void run()}>
+            {t('pr.measure.confirmYes', 'Measure now')}
+          </button>
+          <button type="button" className="pr-btn" onClick={() => setConfirming(false)}>
+            {t('common.cancel', 'Cancel')}
+          </button>
+        </div>
+      ) : (
+        <div className="pr-row">
+          <button
+            type="button"
+            className="pr-btn primary pr-grow"
+            disabled={!canRun}
+            onClick={() => {
+              setError(null)
+              setConfirming(true)
+            }}
+            title={
+              !connected
+                ? t('pr.detect.connectFirst', 'Connect first')
+                : !limitsLive
+                  ? t('pr.measure.noLsTip', 'Needs FluidNC per-direction LS: reporting')
+                  : axes.length === 0
+                    ? t('pr.measure.pickAxis', 'Select at least one axis')
+                    : t('pr.measure.runTip', 'Touch both ends of each selected axis and set the bed size')
+            }
+          >
+            <Ruler size={14} /> {t('pr.measure.run', 'Measure bed size')}
+          </button>
+        </div>
+      )}
+
+      {/* Live progress */}
+      {progress && (
+        <p className="pr-note" role="status" aria-live="polite">
+          ⟳ {progress}
+        </p>
+      )}
+      {error && (
+        <p className="pr-note caution" role="status" aria-live="polite">
+          {error}
+        </p>
+      )}
+
+      {/* Result table */}
+      {result && (
+        <div className="pr-measure-result" role="status" aria-live="polite">
+          {(['x', 'y', 'z'] as const).map((a) =>
+            result[a] ? (
+              <div className="pr-measure-row" key={a}>
+                <span className="pr-measure-axis">{a.toUpperCase()}</span>
+                <span className="pr-measure-travel">{round2(result[a]!.travel)} mm</span>
+                <span className="pr-measure-range">
+                  {round2(result[a]!.min)} → {round2(result[a]!.max)}
+                </span>
+              </div>
+            ) : null,
+          )}
+          <p className="pr-note pr-detect-result" style={{ margin: '4px 0 0' }}>
+            ✓ {t('pr.measure.done', 'Bed size updated from the measured travel.')}
+          </p>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function ProbePanel() {
   const t = useT()
   const connection = useMachine((s) => s.connection)
   const state = useMachine((s) => s.state)
   const pins = useMachine((s) => s.pins)
+  // Per-direction limit state from FluidNC's extended status (null on plain GRBL
+  // and FluidNC without the 6-pin report → the display falls back to per-axis).
+  const limitDirs = useMachine((s) => s.limitDirs)
   const values = useGrblSettings((s) => s.values)
   const loading = useGrblSettings((s) => s.loading)
   const bedW = useBed((s) => s.width)
@@ -1047,6 +1321,80 @@ export function ProbePanel() {
   useEffect(() => endHomingWatch, [])
 
   const pinSet = new Set(pins)
+  // "Identify" mode arms the tiles: press a physical switch and its tile lights so
+  // you can confirm the axis + wiring (the safe, no-config half of auto-rebind).
+  const [identify, setIdentify] = useState(false)
+  // ── Gamepad-style switch rebinding ──────────────────────────────────────────
+  // `limitBind[tile] = source` remaps which REPORTED limit lights a given DISPLAY
+  // tile (so a mis-wired switch can be corrected in software without touching the
+  // FluidNC config — empty map = identity). Persisted. `rebind` enters rebind mode;
+  // `arming` is the tile waiting for a press (exactly like the gamepad's capture).
+  const [limitBind, setLimitBind] = usePersistentState<Record<string, string>>(
+    'karmyogi.probe.limitBind',
+    {},
+  )
+  const [rebind, setRebind] = useState(false)
+  const [arming, setArming] = useState<string | null>(null)
+  // Controller-side limit-pin config editor (FluidNC config.yaml read/write).
+  const [showLimitConfig, setShowLimitConfig] = useState(false)
+  // Limit-aware jogging: karmyogi blocks jogging INTO a triggered limit (other 5
+  // directions still work, no controller alarm). Read by controller.jog via the
+  // same localStorage key. Default on.
+  const [jogGuard, setJogGuard] = usePersistentState<boolean>('karmyogi.jog.limitGuard', true)
+  // The RAW limit sources currently triggered, as tokens the rebind maps from:
+  //  • per-direction LS tokens (X-,X+,Y-,Y+,Z-,Z+) when the firmware reports them,
+  //  • PLUS the Pn limit AXIS letters (X,Y,Z,A,B,C). Many machines wire the six
+  //    switches as six separate AXES (each reported as X/Y/Z/A/B/C), so those must
+  //    be detectable + bindable too — not just the X/Y/Z neg/pos ends.
+  const rawActive = useMemo(() => {
+    const s = new Set<string>()
+    if (limitDirs) for (const d of limitDirs) s.add(d)
+    for (const p of pins) if ('XYZABC'.includes(p)) s.add(p)
+    return s
+  }, [limitDirs, pins])
+  // Is a (bound) source triggered? Direct hit on a reported token; a direction
+  // tile with NO LS still falls back to its own axis pin (both ends share it).
+  const rawOn = (source: string) => {
+    if (rawActive.has(source)) return true
+    if (!limitDirs && /[+-]$/.test(source)) return pinSet.has(source[0])
+    return false
+  }
+  // A display tile is on when its (possibly remapped) source is triggered.
+  const dirOn = (axis: string, dir: '-' | '+') => {
+    const tile = axis + dir
+    return rawOn(limitBind[tile] ?? tile)
+  }
+  const limTip = (axis: string, dir: '-' | '+', on: boolean) => {
+    const tile = axis + dir
+    const src = limitBind[tile]
+    const base = t('probe.switch.limTip', '{axis}{dir} limit — {state}', {
+      axis,
+      dir: dir === '-' ? '−' : '+',
+      state: on
+        ? t('probe.switch.triggered', 'TRIGGERED')
+        : t('probe.switch.open', 'open'),
+    })
+    return src && src !== tile
+      ? base + t('probe.switch.boundTo', ' (bound to {src})', { src })
+      : base
+  }
+  // Capture: while a tile is armed, the first newly-triggered raw source (rising
+  // edge — an LS end OR a Pn axis letter like A/B/C) binds to it. The gamepad
+  // arm-then-press flow, so any wiring (incl. 6-axis limit configs) can be mapped.
+  const prevRaw = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (arming) {
+      for (const tok of rawActive) {
+        if (!prevRaw.current.has(tok)) {
+          setLimitBind((m) => ({ ...m, [arming]: tok }))
+          setArming(null)
+          break
+        }
+      }
+    }
+    prevRaw.current = new Set(rawActive)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawActive, arming])
 
   return (
     <div className="pr-panel" aria-label={t('probe.aria.panel', 'Probe and limits')}>
@@ -1058,39 +1406,154 @@ export function ProbePanel() {
       </p>
 
       <div className="pr-cards">
-      {/* 1. Live switch detection — the hero. "Press a switch to see it light up." */}
-      <section className="pr-card pr-card-wide">
+      {/* 1. Live limit switches — the hero. Six directional tiles (X−/X+/Y−/Y+/
+          Z−/Z+) + Probe + Door that glow + shimmer when triggered, plus an
+          "Identify" mode to confirm wiring by pressing each switch. */}
+      <section className="pr-card pr-card-wide pr-switch-card">
         <header className="pr-card-head">
-          <h4>{t('probe.switch.title', 'Live switch detection')}</h4>
-          <span className="pr-raw">
-            Pn:&nbsp;<b>{pins.length ? pins.join('') : '—'}</b>
-          </span>
-        </header>
-        <p className="pr-hint">{t('probe.switch.hint', 'Press a switch by hand — it lights up here.')}</p>
-        <div className="pr-lights" role="group" aria-label={t('probe.switch.pinsAria', 'Input pin states')}>
-          {PIN_DEFS.map((p) => {
-            const on = pinSet.has(p.letter)
-            const label = t(p.lk, p.label)
-            const sub = t(p.sk, p.sub)
-            return (
-              <div
-                key={p.letter}
-                className={`pr-light${p.door ? ' door' : ''}`}
-                data-on={on}
-                title={t('probe.switch.lightTip', '{label} {sub} — {state} (Pn:{letter})', {
-                  label,
-                  sub,
-                  state: on ? t('probe.switch.triggered', 'TRIGGERED') : t('probe.switch.open', 'open'),
-                  letter: p.letter,
-                })}
+          <h4>
+            <span className="pr-card-ico" aria-hidden="true"><Icon name="probe" size={13} /></span>
+            {t('probe.switch.title', 'Live limit switches')}
+          </h4>
+          <div className="pr-switch-tools">
+            <button
+              type="button"
+              className="pr-identify-btn"
+              data-on={identify}
+              onClick={() => {
+                setIdentify((v) => !v)
+                setRebind(false)
+                setArming(null)
+              }}
+              title={t('probe.switch.identifyTip', 'Identify mode — press each physical switch by hand and watch its tile light up to confirm the axis + wiring.')}
+            >
+              <ScanLine size={14} />
+              {identify ? t('probe.switch.identifyOn', 'Identifying…') : t('probe.switch.identify', 'Identify')}
+            </button>
+            <button
+              type="button"
+              className="pr-identify-btn"
+              data-on={rebind}
+              onClick={() => {
+                setRebind((v) => !v)
+                setIdentify(false)
+                setArming(null)
+              }}
+              title={t('probe.switch.rebindTip', 'Rebind — like gamepad mapping: click a tile, then press its physical switch to assign it. Corrects mis-wired switches in software.')}
+            >
+              <Crosshair size={14} />
+              {rebind ? t('probe.switch.rebindOn', 'Rebinding…') : t('probe.switch.rebind', 'Rebind')}
+            </button>
+            {Object.keys(limitBind).length > 0 && (
+              <button
+                type="button"
+                className="pr-identify-btn"
+                onClick={() => {
+                  setLimitBind({})
+                  setArming(null)
+                }}
+                title={t('probe.switch.resetBindTip', 'Clear all switch rebindings (back to direct X−/X+ mapping)')}
               >
-                <span className="pr-dot" aria-hidden="true" />
-                <span className="pr-lbl">{label}</span>
-                <span className="pr-sub">{on ? t('probe.switch.on', 'on') : sub}</span>
+                {t('probe.switch.resetBind', 'Reset')}
+              </button>
+            )}
+            {connected && grbl.supportsSdCard && (
+              <button
+                type="button"
+                className="pr-identify-btn"
+                onClick={() => setShowLimitConfig(true)}
+                title={t('probe.switch.pinsTip', 'Edit the controller’s limit pins (config.yaml) — swap −↔+ or reassign a pin, then write + restart')}
+              >
+                <Icon name="settings" size={13} />
+                {t('probe.switch.pins', 'Pins')}
+              </button>
+            )}
+            <button
+              type="button"
+              className="pr-identify-btn"
+              data-on={jogGuard}
+              onClick={() => setJogGuard((v) => !v)}
+              title={t('probe.switch.jogGuardTip', 'Limit-aware jogging — stop jogging INTO a triggered limit (the other 5 directions keep working, no alarm). Needs hard_limits OFF on the controller.')}
+            >
+              <Icon name="warning" size={13} />
+              {jogGuard ? t('probe.switch.jogGuardOn', 'Jog-guard on') : t('probe.switch.jogGuardOff', 'Jog-guard off')}
+            </button>
+            <span className="pr-raw">
+              Pn:&nbsp;<b>{pins.length ? pins.join('') : '—'}</b>
+            </span>
+          </div>
+        </header>
+        <p className="pr-hint">
+          {rebind
+            ? arming
+              ? t('probe.switch.rebindArmed', 'Now press the physical {tile} switch — it will bind to this tile.', { tile: arming.replace('-', '−') })
+              : t('probe.switch.rebindHint', 'Click a tile, then press the physical switch you want it to map to (gamepad-style).')
+            : identify
+              ? t('probe.switch.identifyHint', 'Press each switch by hand — its tile lights so you can confirm the axis + wiring.')
+              : t('probe.switch.hint', 'Press a switch by hand — it lights up here.')}
+        </p>
+        <div className="pr-limgrid" role="group" aria-label={t('probe.switch.pinsAria', 'Input pin states')}>
+          {LIMIT_AXES.map(({ axis, neg: Neg, pos: Pos }) => {
+            const cell = (dir: '-' | '+', Ico: typeof Neg) => {
+              const tile = axis + dir
+              const on = dirOn(axis, dir)
+              const bound = limitBind[tile] && limitBind[tile] !== tile ? limitBind[tile] : null
+              return (
+                <div
+                  className={
+                    'pr-lim' +
+                    (on ? ' is-on' : '') +
+                    (identify && !rebind ? ' is-arm' : '') +
+                    (rebind ? ' is-rebind' : '') +
+                    (arming === tile ? ' is-arming' : '') +
+                    (bound ? ' is-bound' : '')
+                  }
+                  data-on={on}
+                  onClick={rebind ? () => setArming((a) => (a === tile ? null : tile)) : undefined}
+                  title={limTip(axis, dir, on)}
+                >
+                  <Ico size={17} className="pr-lim-ico" aria-hidden="true" />
+                  <span className="pr-lim-lbl">{axis}{dir === '-' ? '−' : '+'}</span>
+                  {arming === tile ? (
+                    <span className="pr-lim-press">{t('probe.switch.press', 'press…')}</span>
+                  ) : bound ? (
+                    <span className="pr-lim-bound">⇐ {bound.replace('-', '−')}</span>
+                  ) : null}
+                </div>
+              )
+            }
+            return (
+              <div className="pr-limrow" key={axis}>
+                <span className="pr-limaxis" aria-hidden="true">{axis}</span>
+                {cell('-', Neg)}
+                {cell('+', Pos)}
               </div>
             )
           })}
         </div>
+        <div className="pr-auxrow">
+          <div
+            className={`pr-lim pr-lim-aux${pinSet.has('P') ? ' is-on' : ''}${identify ? ' is-arm' : ''}`}
+            data-on={pinSet.has('P')}
+            title={t('probe.switch.probeTip', 'Probe input (P) — {state}', { state: pinSet.has('P') ? t('probe.switch.triggered', 'TRIGGERED') : t('probe.switch.open', 'open') })}
+          >
+            <Crosshair size={16} className="pr-lim-ico" aria-hidden="true" />
+            <span className="pr-lim-lbl">{t('probe.pin.probe', 'Probe')}</span>
+          </div>
+          <div
+            className={`pr-lim pr-lim-aux door${pinSet.has('D') ? ' is-on' : ''}${identify ? ' is-arm' : ''}`}
+            data-on={pinSet.has('D')}
+            title={t('probe.switch.doorTip', 'Safety door (D) — {state}', { state: pinSet.has('D') ? t('probe.switch.triggered', 'TRIGGERED') : t('probe.switch.open', 'open') })}
+          >
+            <DoorOpen size={16} className="pr-lim-ico" aria-hidden="true" />
+            <span className="pr-lim-lbl">{t('probe.pin.door', 'Door')}</span>
+          </div>
+        </div>
+        {limitDirs === null && connected && (
+          <p className="pr-note">
+            {t('probe.switch.fallbackNote', 'Limits report per-axis (e.g. X Y Z A B C). If a switch lights the wrong tile — or your six switches are wired as separate axes — use Rebind to map each physical switch to a tile. Flash the FluidNC LS build for automatic per-direction X−/X+.')}
+          </p>
+        )}
         {!connected && (
           <p className="pr-note">{t('probe.switch.connectNote', 'Connect to a GRBL device to see live pin states.')}</p>
         )}
@@ -1099,12 +1562,16 @@ export function ProbePanel() {
       {/* 2. Z-Probe — simple Probe Z + Set Z zero. */}
       <section className="pr-card">
         <header className="pr-card-head">
-          <h4>{t('probe.z.title', 'Z-Probe')}</h4>
+          <h4>
+            <span className="pr-card-ico" aria-hidden="true"><Icon name="probe" size={13} /></span>
+            {t('probe.z.title', 'Z-Probe')}
+          </h4>
           <span className="pr-raw">{t('probe.z.tag', 'touch off Z')}</span>
         </header>
         <div className="pr-fields">
           <label htmlFor="pr-feed">
             <span className="pr-field-name">
+              <Gauge size={13} className="pr-fld-ico" aria-hidden="true" />
               {t('probe.z.speed', 'Probe speed')}
               <InfoTip topic="probeFeed" />
               <span className="pr-units">mm/min</span>
@@ -1123,6 +1590,7 @@ export function ProbePanel() {
           </label>
           <label htmlFor="pr-dist">
             <span className="pr-field-name">
+              <Ruler size={13} className="pr-fld-ico" aria-hidden="true" />
               {t('probe.z.maxDist', 'Max distance')}
               <InfoTip topic="probeDistance" />
               <span className="pr-units">mm</span>
@@ -1141,6 +1609,7 @@ export function ProbePanel() {
           </label>
           <label htmlFor="pr-thick">
             <span className="pr-field-name">
+              <Layers size={13} className="pr-fld-ico" aria-hidden="true" />
               {t('probe.z.plate', 'Plate thickness')}
               <InfoTip topic="workZero" />
               <span className="pr-units">mm</span>
@@ -1171,6 +1640,7 @@ export function ProbePanel() {
             onClick={() => doProbe('2')}
             title={t('probe.z.probeTip', 'G38.2 Z- F — lower the tool until it touches the plate. Alarms if no contact within the max distance.')}
           >
+            <span className="pr-bico" aria-hidden="true"><Icon name="probe" size={14} /></span>
             {probing ? t('probe.z.probing', 'Probing…') : t('probe.z.probe', 'Probe Z')}
           </button>
           <button
@@ -1180,6 +1650,7 @@ export function ProbePanel() {
             onClick={setZeroWithPlate}
             title={t('probe.z.setZeroTip', 'G10 L20 P0 Z<thickness> — set work Z=0 at the plate surface. Run after a successful probe.')}
           >
+            <span className="pr-bico" aria-hidden="true"><Icon name="zero" size={14} /></span>
             {t('probe.z.setZero', 'Set Z zero')}
           </button>
         </div>
@@ -1257,10 +1728,17 @@ export function ProbePanel() {
       {/* O3 — surfacing / wasteboard flatten generator. */}
       <SurfacingSection t={t} connected={connected} machineBusy={machineBusy} bedW={bedW} bedD={bedD} />
 
+      {/* 2.4 Measure bed by touching both ends of each axis (the most accurate, and
+          the reason individual limit switches matter). */}
+      <MeasureBedSection t={t} connected={connected} machineState={state} limitsLive={limitDirs !== null} />
+
       {/* 2.5 Auto-detect workspace — home, then learn the work-area size. */}
       <section className="pr-card">
         <header className="pr-card-head">
-          <h4>{t('pr.detect.title', 'Auto-detect workspace')}</h4>
+          <h4>
+            <span className="pr-card-ico" aria-hidden="true"><Icon name="home" size={13} /></span>
+            {t('pr.detect.title', 'Auto-detect workspace')}
+          </h4>
           <span className="pr-raw">{t('pr.detect.tag', 'home → bed size')}</span>
         </header>
         <p className="pr-hint">
@@ -1473,6 +1951,18 @@ export function ProbePanel() {
               >
                 {t('probe.adv.home', 'Home ($H)')}
               </button>
+              {(['X', 'Y', 'Z'] as const).map((ax) => (
+                <button
+                  key={ax}
+                  type="button"
+                  className="pr-btn pr-btn-sm"
+                  disabled={!connected}
+                  onClick={() => grbl.homeAxis(ax).catch(() => {})}
+                  title={t('probe.adv.homeAxisTip', 'Home just the {axis} axis ($H{axis})', { axis: ax })}
+                >
+                  {t('probe.adv.homeAxis', 'Home {axis}', { axis: ax })}
+                </button>
+              ))}
               <IconButton
                 className="pr-icon-btn"
                 icon="⤓"
@@ -1503,6 +1993,7 @@ export function ProbePanel() {
         )}
       </section>
       </div>
+      <LimitConfigModal open={showLimitConfig} onClose={() => setShowLimitConfig(false)} />
     </div>
   )
 }

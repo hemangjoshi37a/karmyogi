@@ -49,6 +49,14 @@ interface JogPadProps {
   /** Cancel an in-progress jog (must send jogCancel / 0x85 to stop immediately). */
   onCancel?: () => void
   /**
+   * Optional: returns true if jogging the given delta would drive into a
+   * currently-triggered limit switch. Such a direction is greyed out + disabled
+   * (the level-based half of limit-aware jogging) while the opposite direction
+   * and the other axes stay live. Re-evaluated on every render, so wire it to a
+   * value that changes with the live limit state (e.g. the machine store).
+   */
+  isBlocked?: (delta: JogDelta) => boolean
+  /**
    * Optional content injected into the EMPTY CENTER cell of the Z column (between
    * Z+ and Z−). Used by the Controller to host a "Go to zero" button. When
    * absent the cell stays empty and the pad behaves exactly as before.
@@ -73,7 +81,7 @@ interface JogCell {
  * queued motion. Presentational (W4-owned); keyboard handling lives in the panel
  * via jogKeyToDelta so the panel can scope it to focus.
  */
-export function JogPad({ disabled, step, onJog, onJogHold, onCancel, zCenter }: JogPadProps) {
+export function JogPad({ disabled, step, onJog, onJogHold, onCancel, zCenter, isBlocked }: JogPadProps) {
   const t = useT()
   // Single one-shot timer: when it fires, the press has become a hold.
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -149,36 +157,42 @@ export function JogPad({ disabled, step, onJog, onJogHold, onCancel, zCenter }: 
   return (
     <div className="jogpad">
       <div className="jog-grid" role="group" aria-label={t('ctrl.jog.xy', 'XY jog')}>
-        {xy.map((c) => (
-          <button
-            key={c.area}
-            type="button"
-            className={`jog-btn${c.className ? ' ' + c.className : ''}`}
-            style={{ touchAction: 'none' }}
-            disabled={disabled}
-            title={c.tip ? t(c.tip.key, c.tip.en) : undefined}
-            aria-label={c.delta ? t('ctrl.jog.dir', 'Jog {dir}', { dir: c.label }) : t('ctrl.jog.cancel', 'Cancel jog')}
-            {...(c.delta ? holdHandlers(c.delta) : { onClick: () => onCancel?.() })}
-          >
-            {c.label}
-          </button>
-        ))}
+        {xy.map((c) => {
+          const blocked = !!c.delta && !!isBlocked?.(c.delta)
+          return (
+            <button
+              key={c.area}
+              type="button"
+              className={`jog-btn${c.className ? ' ' + c.className : ''}${blocked ? ' is-limit' : ''}`}
+              style={{ touchAction: 'none' }}
+              disabled={disabled || blocked}
+              title={blocked ? t('ctrl.jog.blocked', 'Limit triggered — {dir} blocked', { dir: c.label }) : c.tip ? t(c.tip.key, c.tip.en) : undefined}
+              aria-label={c.delta ? t('ctrl.jog.dir', 'Jog {dir}', { dir: c.label }) : t('ctrl.jog.cancel', 'Cancel jog')}
+              {...(c.delta ? holdHandlers(c.delta) : { onClick: () => onCancel?.() })}
+            >
+              {c.label}
+            </button>
+          )
+        })}
       </div>
       <div className="jog-z" role="group" aria-label={t('ctrl.jog.z', 'Z jog')}>
-        {z.map((c) => (
-          <button
-            key={c.area}
-            type="button"
-            className="jog-btn"
-            style={{ gridRow: c.area, touchAction: 'none' }}
-            disabled={disabled}
-            title={c.tip ? t(c.tip.key, c.tip.en) : undefined}
-            aria-label={t('ctrl.jog.dir', 'Jog {dir}', { dir: c.label })}
-            {...(c.delta ? holdHandlers(c.delta) : {})}
-          >
-            {c.label}
-          </button>
-        ))}
+        {z.map((c) => {
+          const blocked = !!c.delta && !!isBlocked?.(c.delta)
+          return (
+            <button
+              key={c.area}
+              type="button"
+              className={`jog-btn${blocked ? ' is-limit' : ''}`}
+              style={{ gridRow: c.area, touchAction: 'none' }}
+              disabled={disabled || blocked}
+              title={blocked ? t('ctrl.jog.blocked', 'Limit triggered — {dir} blocked', { dir: c.label }) : c.tip ? t(c.tip.key, c.tip.en) : undefined}
+              aria-label={t('ctrl.jog.dir', 'Jog {dir}', { dir: c.label })}
+              {...(c.delta ? holdHandlers(c.delta) : {})}
+            >
+              {c.label}
+            </button>
+          )
+        })}
         {/* Empty center cell (row 2) — optionally hosts a "Go to zero" button. */}
         {zCenter ? <div className="jog-z-center" style={{ gridRow: '2' }}>{zCenter}</div> : null}
       </div>
