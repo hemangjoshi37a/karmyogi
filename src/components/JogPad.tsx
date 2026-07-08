@@ -3,11 +3,13 @@ import type { Vec3 } from '../store'
 import { useT } from '../i18n'
 
 /**
- * How long a jog button must stay held (ms) before a tap becomes a continuous
+ * How long a jog button/key must stay held (ms) before a tap becomes a continuous
  * jog. Under this threshold = a single precise step; over it = continuous motion
- * that stops the instant the button is released.
+ * that stops the instant the control is released. Kept short so a hold feels LIVE
+ * (continuous engages almost immediately) — the release is fast + runaway-proof, so
+ * an over-eager escalation from a slightly-long tap barely moves and stops at once.
  */
-export const HOLD_DELAY_MS = 250
+export const HOLD_DELAY_MS = 120
 
 export interface JogDelta {
   x?: number

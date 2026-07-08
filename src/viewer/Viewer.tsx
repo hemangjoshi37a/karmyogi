@@ -414,20 +414,22 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // adaptive <Canvas frameloop> (see the Canvas) — idle+disconnected drops to
   // on-demand rendering and stops the ~30 fps of wasted idle GPU/CPU.
   //
-  // CPU: gate the "always" loop on the machine actually MOVING, not merely being
-  // connected. A connected machine sits Idle most of the time; rendering 60 fps
-  // for a stationary tool was burning CPU/GPU for nothing. When the tool DOES
-  // move (Run/Jog/Home/Hold-decel/Door), we track it live; the moment it settles
-  // to Idle we fall to "demand" — and a position/scene change still re-renders
-  // (ToolMarker is prop-driven, so any MPos update invalidates one frame).
+  // CPU: gate the "always" 60 fps loop on the machine actually MOVING, not merely
+  // connected. A connected machine sits Idle most of the time; rendering 60 fps for
+  // a stationary tool burned CPU/GPU for nothing.
+  //
+  // JOG is deliberately EXCLUDED here: while jogging, the operator is actively
+  // driving the machine and wants keypress/pointer responsiveness FIRST — a 60 fps
+  // 3D loop competes with the input/timer handling and makes jog feel sluggish.
+  // Live position still tracks in "demand" mode (ToolMarker is prop-driven, so each
+  // MPos status report re-renders → invalidates one frame → the tool follows at the
+  // status-report rate, ~20-30 fps during a jog), for a fraction of the main-thread
+  // cost. "Always" stays on for a running PROGRAM (Run/Home/Hold-decel/Door), where
+  // smooth toolpath tracking matters and no interactive input is competing.
   const machineMoving = useMachine(
     (s) =>
       s.connection === 'connected' &&
-      (s.state === 'Run' ||
-        s.state === 'Jog' ||
-        s.state === 'Home' ||
-        s.state === 'Hold' ||
-        s.state === 'Door'),
+      (s.state === 'Run' || s.state === 'Home' || s.state === 'Hold' || s.state === 'Door'),
   )
 
   // Spring-coiling preview channel: when the Spring panel owns the program (its
