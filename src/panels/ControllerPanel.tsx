@@ -1293,43 +1293,38 @@ export function ControllerPanel() {
     maxTravel > 0 ? maxTravel : CONTINUOUS_JOG_MAX_MM,
   )
 
-  // A single precise step (a tap). Refused while motion is locked out (O12).
+  // A single precise step (a tap). Refused while motion is locked out (O12). A tap
+  // is one deliberate user action, so it force-sends (bypasses the discrete-jog
+  // flood cap) from a freshly-cleared flow-gate — a wedged/ drifted gate can never
+  // swallow a press. Rapid tapping is human-paced, so this can't flood the board.
   const doJog = useCallback(
     (delta: JogDelta) => {
       if (!grbl.isConnected || locked) return
-      void grbl.jog(jogParamsFromDelta(delta, jogFeed))
+      grbl.beginJog()
+      void grbl.jog(jogParamsFromDelta(delta, jogFeed), { force: true })
     },
     [jogFeed, locked],
   )
 
-  // A continuous jog (a hold): jog a large distance in the DIRECTION of the
-  // delta. `delta` may be a non-axis-aligned vector (e.g. the gamepad stick);
-  // each component is scaled to the configured continuous distance so the move
-  // follows the vector ANGLE — true diagonals, not axis-clamped. `feed`
-  // defaults to the configured jog feed but the analog stick passes its own
-  // magnitude-scaled feed. Motion continues until cancelJog() (0x85) flushes it.
+  // A continuous jog (a hold): ONE long `$J=` move in the DIRECTION of the delta so
+  // the machine keeps moving for as long as the control is held — the FluidNC/GRBL-
+  // native method (fewest commands, gentle on the controller). `delta` may be a
+  // non-axis-aligned vector (e.g. the gamepad stick) — only its ANGLE matters, so
+  // diagonals stay true. `feed` defaults to the configured jog feed; the analog
+  // stick passes its own magnitude-scaled feed. Re-calling with the same heading is
+  // a no-op while the move runs (no command thrash); continuousJogMm bounds the move
+  // to the travel envelope. Motion continues until cancelJog() flushes it (0x85).
   const doJogHold = useCallback(
     (delta: JogDelta, feed: number = jogFeed) => {
       if (!grbl.isConnected || locked) return
-      const big: JogDelta = {}
-      // Preserve direction by scaling each component by the SAME factor (the
-      // largest component reaches continuousJogMm), so a diagonal stick vector
-      // produces a diagonal move rather than two clamped axis moves.
-      const maxComp = Math.max(Math.abs(delta.x ?? 0), Math.abs(delta.y ?? 0), Math.abs(delta.z ?? 0))
-      const scale = maxComp > 0 ? continuousJogMm / maxComp : 0
-      if (delta.x) big.x = delta.x * scale
-      if (delta.y) big.y = delta.y * scale
-      if (delta.z) big.z = delta.z * scale
-      // The continuous hold is a single intentional move that stops on release
-      // (0x85); force it past the discrete-jog flood cap.
-      void grbl.jog(jogParamsFromDelta(big, feed), { force: true })
+      grbl.startJog(delta, feed, continuousJogMm)
     },
     [jogFeed, continuousJogMm, locked],
   )
 
-  // Immediately stop / flush any in-progress jog (GRBL 0x85).
+  // End any continuous jog and immediately stop / flush in-progress motion (0x85).
   const cancelJog = useCallback(() => {
-    void grbl.jogCancel()
+    grbl.stopJog()
   }, [])
 
   // Tracks ALL currently-held jog keys (set of e.key) plus a single pending

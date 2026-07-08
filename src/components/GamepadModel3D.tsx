@@ -157,7 +157,7 @@ export function GamepadModel3D({ detectedType }: { detectedType?: string | null 
       </button>
 
       <div className="gp3d-stage" key={cur.id} data-dir={dir > 0 ? 'r' : 'l'}>
-        <Canvas camera={{ position: [0, 0.95, 2.1], fov: 42 }} dpr={[1, 2]}>
+        <Canvas frameloop="demand" camera={{ position: [0, 0.95, 2.1], fov: 42 }} dpr={[1, 2]}>
           <ambientLight intensity={0.8} />
           <directionalLight position={[3, 4, 5]} intensity={1.2} />
           <directionalLight position={[-3, 2, -4]} intensity={0.5} />

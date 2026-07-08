@@ -206,6 +206,9 @@ export function SurfaceViewer({
     <div className="fv-body sv-body" ref={bodyRef}>
       <div className="sv-canvas">
         <Canvas
+          // Static surface-preview mesh — render on demand (OrbitControls + scene
+          // changes still invalidate); avoids 60 fps idle while the view is open.
+          frameloop="demand"
           style={{ height: '100%', width: '100%' }}
           camera={{
             position: [center[0] + radius * 1.6, center[1] - radius * 1.6, center[2] + radius * 1.4],

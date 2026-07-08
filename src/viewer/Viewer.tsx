@@ -413,7 +413,22 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // smoothly. Combined with the other animation signals below, this drives the
   // adaptive <Canvas frameloop> (see the Canvas) — idle+disconnected drops to
   // on-demand rendering and stops the ~30 fps of wasted idle GPU/CPU.
-  const machineLive = useMachine((s) => s.connection === 'connected')
+  //
+  // CPU: gate the "always" loop on the machine actually MOVING, not merely being
+  // connected. A connected machine sits Idle most of the time; rendering 60 fps
+  // for a stationary tool was burning CPU/GPU for nothing. When the tool DOES
+  // move (Run/Jog/Home/Hold-decel/Door), we track it live; the moment it settles
+  // to Idle we fall to "demand" — and a position/scene change still re-renders
+  // (ToolMarker is prop-driven, so any MPos update invalidates one frame).
+  const machineMoving = useMachine(
+    (s) =>
+      s.connection === 'connected' &&
+      (s.state === 'Run' ||
+        s.state === 'Jog' ||
+        s.state === 'Home' ||
+        s.state === 'Hold' ||
+        s.state === 'Door'),
+  )
 
   // Spring-coiling preview channel: when the Spring panel owns the program (its
   // 3D-coil-preview output mode), it publishes the spring dimensions here. We then
@@ -711,7 +726,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         // theme, resize). This takes the idle viewport from ~30 fps of wasted
         // renders down to ~0. (Cosmetic-only tradeoff when idle+disconnected: the
         // preview pulse pauses and fit/iso snaps instead of easing.)
-        frameloop={machineLive || isPlaying || gizmo || glLost ? 'always' : 'demand'}
+        frameloop={machineMoving || isPlaying || gizmo || glLost ? 'always' : 'demand'}
         style={{ height: '100%', width: '100%', background: bg }}
         // Measure with offsetWidth/Height (layout px), NOT getBoundingClientRect.
         // The app's global UI zoom uses CSS `zoom` on <html>; getBoundingClientRect

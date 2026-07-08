@@ -269,11 +269,26 @@ export function SdCardModal({ open, onClose }: { open: boolean; onClose: () => v
             <div>
               <div>{t('sd.error', 'Could not read the SD card.')}</div>
               <div className="sd-state-detail">{error}</div>
-              <ul className="sd-recover">
-                <li>{t('sd.cause.card', 'Is an SD card actually inserted and seated in the controller?')}</li>
-                <li>{t('sd.cause.config', 'Is the SD card enabled in config.yaml (an `sdcard:` section with the right `cs_pin` + an `spi:` bus)?')}</li>
-                <li>{t('sd.cause.idle', 'The controller must be Idle (not running a job) to read the card.')}</li>
-              </ul>
+              {/^couldn.t mount|mount|0x1\d\d|memory/i.test(error) ? (
+                // A controller-side MOUNT/memory hiccup (e.g. 0x101 = out of memory) —
+                // the card is fine; it just failed to mount that instant. Retry-first.
+                <ul className="sd-recover">
+                  <li>{t('sd.mount.retry', 'This is a controller-side SD mount hiccup, not a missing card. Press Retry — it usually works on the next try.')}</li>
+                  <li>{t('sd.mount.pendant', 'Don’t browse the card on the FluidDial pendant at the same time — the pendant and this app compete for the controller’s memory.')}</li>
+                  <li>{t('sd.mount.reseat', 'If it keeps failing, re-seat the card or power-cycle the controller.')}</li>
+                </ul>
+              ) : (
+                <ul className="sd-recover">
+                  <li>{t('sd.cause.card', 'Is an SD card actually inserted and seated in the controller?')}</li>
+                  <li>{t('sd.cause.config', 'Is the SD card enabled in config.yaml (an `sdcard:` section with the right `cs_pin` + an `spi:` bus)?')}</li>
+                  <li>{t('sd.cause.idle', 'The controller must be Idle (not running a job) to read the card.')}</li>
+                </ul>
+              )}
+              <div className="sd-recover-actions">
+                <button type="button" className="sd-btn sd-btn--primary" disabled={loading} onClick={() => void refresh()}>
+                  <Icon name="frame" size={14} /> {t('sd.retry', 'Retry')}
+                </button>
+              </div>
             </div>
           </div>
         ) : files.length === 0 ? (

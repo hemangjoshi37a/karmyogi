@@ -69,6 +69,18 @@ export class MockPort implements PortLike {
   private mpos = { x: 0, y: 0, z: 0 }
   /** True while a simulated homing cycle is animating. */
   private homing = false
+  /**
+   * Jog animation: real GRBL executes a `$J=` as continuous motion (not a teleport)
+   * and acks it the instant it's accepted. To make press-and-hold jogging visible
+   * and verifiable in the browser, we interpolate mpos toward `jogTarget` at
+   * `jogFeed` mm/min while reporting the 'Jog' state, and stop dead on a 0x85
+   * (jog-cancel). Back-to-back streamed increments accumulate onto the target, so a
+   * held control produces smooth ongoing motion until release.
+   */
+  private jogTarget: { x: number; y: number; z: number } | null = null
+  private jogFeed = 0
+  private jogTimer: ReturnType<typeof setInterval> | null = null
+  private prevState = 'Idle'
   /** Live `$`-settings (number → value string); writes persist here. */
   private readonly settings = new Map<number, string>()
   // Canned SD-card filesystem so the SD browser is usable against the mock with no
@@ -154,6 +166,7 @@ export class MockPort implements PortLike {
 
   async close(): Promise<void> {
     this.opened = false
+    this.stopJogAnim()
     try {
       this.rxController?.close()
     } catch {
@@ -331,8 +344,15 @@ export class MockPort implements PortLike {
         break
       case RealtimeByte.SoftReset:
         this.writeBuffer = ''
+        this.stopJogAnim()
         this.state = this.opts.initialState
         this.emit('\r\n' + WELCOME + '\r\n')
+        break
+      case 0x85:
+        // Jog cancel — stop continuous jog motion dead where it is (real GRBL
+        // decelerates and flushes the queued jog). Freeze mpos, drop the target.
+        this.jogTarget = null
+        this.stopJogAnim()
         break
       default:
         // overrides / toggles: accept silently (reflected nowhere here)
@@ -510,6 +530,21 @@ export class MockPort implements PortLike {
     const x = grab('X')
     const y = grab('Y')
     const z = grab('Z')
+    // Jogs ANIMATE (continuous motion at feed) instead of teleporting, so
+    // press-and-hold streaming is visible and a 0x85 can stop it mid-move.
+    if (isJog) {
+      const f = grab('F')
+      if (f !== undefined && f > 0) this.jogFeed = f
+      // Accumulate onto any pending target so streamed increments queue up.
+      const base = this.jogTarget ?? { ...this.mpos }
+      this.jogTarget = {
+        x: base.x + (relative ? x ?? 0 : (x ?? base.x) - base.x),
+        y: base.y + (relative ? y ?? 0 : (y ?? base.y) - base.y),
+        z: base.z + (relative ? z ?? 0 : (z ?? base.z) - base.z),
+      }
+      this.startJogAnim()
+      return
+    }
     if (relative) {
       if (x !== undefined) this.mpos.x += x
       if (y !== undefined) this.mpos.y += y
@@ -519,6 +554,48 @@ export class MockPort implements PortLike {
       if (y !== undefined) this.mpos.y = y
       if (z !== undefined) this.mpos.z = z
     }
+  }
+
+  /** Interpolate mpos toward jogTarget at jogFeed while reporting 'Jog'. */
+  private startJogAnim(): void {
+    if (this.homing) return
+    if (this.state !== 'Jog') {
+      this.prevState = this.state
+      this.state = 'Jog'
+    }
+    if (this.jogTimer !== null) return
+    const stepMs = 30
+    const tick = () => {
+      const target = this.jogTarget
+      if (!target) {
+        this.stopJogAnim()
+        return
+      }
+      const dx = target.x - this.mpos.x
+      const dy = target.y - this.mpos.y
+      const dz = target.z - this.mpos.z
+      const dist = Math.hypot(dx, dy, dz)
+      const stepMm = Math.max(0.001, (this.jogFeed / 60) * (stepMs / 1000))
+      if (dist <= stepMm) {
+        this.mpos = { ...target }
+        this.jogTarget = null
+        this.stopJogAnim()
+        return
+      }
+      const a = stepMm / dist
+      this.mpos = { x: this.mpos.x + dx * a, y: this.mpos.y + dy * a, z: this.mpos.z + dz * a }
+    }
+    this.jogTimer = setInterval(tick, stepMs)
+  }
+
+  /** Stop the jog animation (target reached or 0x85). Returns to the prior state. */
+  private stopJogAnim(): void {
+    if (this.jogTimer !== null) {
+      clearInterval(this.jogTimer)
+      this.jogTimer = null
+    }
+    this.jogTarget = null
+    if (this.state === 'Jog') this.state = this.prevState === 'Jog' ? 'Idle' : this.prevState
   }
 
   /**

@@ -215,6 +215,20 @@ const MAX_INFLIGHT_JOGS = 2
  */
 const JOG_RX_WINDOW = 96
 
+/**
+ * Continuous ("press-and-hold") jog distance (mm) when the caller doesn't pass a
+ * travel-bounded cap. A hold is ONE long `$J=` move that 0x85 cancels on release
+ * (the FluidNC/GRBL-native method — see startJog); this is just how far that
+ * single move reaches if the machine is never told its envelope. The Controller
+ * always passes the largest configured axis travel instead, so this is only a
+ * fallback for an unconfigured bed.
+ */
+const JOG_HOLD_DEFAULT_MM = 1000
+/** Within this window (ms) of sending a hold move, a same-direction re-call is
+ *  treated as "the move is still starting" and skipped (covers status-report lag
+ *  before the machine flips to the Jog state). After it, the live state decides. */
+const JOG_REISSUE_MS = 250
+
 /** Progress event from measureWorkspace() (auto bed-size by touching both ends). */
 export interface WorkspaceMeasureProgress {
   axis: 'X' | 'Y' | 'Z'
@@ -303,6 +317,17 @@ class GrblController {
   /** Sign of the last jog per axis (−1/0/+1) — to cancel a continuous jog if its
    *  direction's limit trips mid-move (limit-aware jogging). */
   private lastJogVec = { x: 0, y: 0, z: 0 }
+  /**
+   * Continuous ("press-and-hold") jog: the UNIT direction of the single long `$J=`
+   * hold move currently in flight (null = no hold). startJog uses it to avoid
+   * re-issuing the move while the same direction stays held (one command per hold —
+   * gentle on the firmware); stopJog / a limit trip / disconnect clear it.
+   */
+  private jogHoldDir: { x: number; y: number; z: number } | null = null
+  /** millis() of the last hold-jog `$J=` sent — lets startJog tell "the move is
+   *  still running" from "stale hold direction" so a held control never fails to
+   *  re-register once the machine is Idle again. */
+  private lastJogSentAt = 0
 
   /** Limit-aware jogging on? (Persisted; default on. No-op if no limits trip.) */
   private get limitGuardOn(): boolean {
@@ -967,6 +992,7 @@ class GrblController {
 
   async disconnect(): Promise<void> {
     this.stopStatusPolling()
+    this.clearJogHold()
     this.resetJogGate()
     this.pendingStatusAcks = 0
     this.suppressNextOk = false
@@ -1025,7 +1051,9 @@ class GrblController {
             (this.lastJogVec.z && this.jogIntoLimit('Z', this.lastJogVec.z)))
         ) {
           this.lastJogVec = { x: 0, y: 0, z: 0 }
-          void this.jogCancel()
+          // End the whole continuous stream (not just flush) so it can't re-issue
+          // straight back into the limit on the next tick.
+          this.stopJog()
           return
         }
         // SELF-CORRECTING jog gate: resync to ground truth on every status report.
@@ -1437,12 +1465,18 @@ class GrblController {
   }
 
   /**
-   * List files on the controller's SD card (FluidNC `$SD/List`). Returns
-   * `{ name, size }` for each FILE line; directories + the volume summary are
-   * skipped. Throws if no SD card / the command isn't supported.
+   * SD errors that are USUALLY transient on FluidNC — a re-mount after a brief
+   * pause tends to succeed. Notably `mount_to_vfs failed code 0x101` is
+   * ESP_ERR_NO_MEM: the controller couldn't allocate the FAT filesystem right
+   * then (memory pressure — e.g. the FluidDial pendant browsing the same card, or
+   * WiFi/BT). The failed mount frees its own memory on cleanup, so the next try
+   * often works. We do NOT treat a genuinely-missing card as retryable.
    */
-  async listSdFiles(): Promise<{ name: string; size: number }[]> {
-    const lines = await this.captureReply('$SD/List')
+  private isRetryableSdError(msg: string): boolean {
+    return /mount|0x1\d\d|no[\s_]*mem|out of memory|busy|not ready|timed out|FR_/i.test(msg)
+  }
+
+  private parseSdListLines(lines: string[]): { name: string; size: number }[] {
     const files: { name: string; size: number }[] = []
     for (const l of lines) {
       // FluidNC: "[FILE: <name>|SIZE:<bytes>]" (a closing ] isn't guaranteed).
@@ -1451,6 +1485,33 @@ class GrblController {
       if (m) files.push({ name: m[1].trim(), size: parseInt(m[2], 10) })
     }
     return files
+  }
+
+  /**
+   * List files on the controller's SD card (FluidNC `$SD/List`). Returns
+   * `{ name, size }` for each FILE line; directories + the volume summary are
+   * skipped. RETRIES a transient mount/memory failure a few times (see
+   * isRetryableSdError) since FluidNC's SD mount is flaky under memory pressure,
+   * then surfaces a clear, actionable message. Throws on a genuine no-card error.
+   */
+  async listSdFiles(): Promise<{ name: string; size: number }[]> {
+    let lastErr: unknown
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 300 * attempt)) // 0, 300, 600, 900 ms
+      try {
+        return this.parseSdListLines(await this.captureReply('$SD/List'))
+      } catch (e) {
+        lastErr = e
+        if (!this.isRetryableSdError(e instanceof Error ? e.message : String(e))) throw e
+      }
+    }
+    const msg = (lastErr instanceof Error ? lastErr.message : String(lastErr)).trim()
+    if (/mount|0x1\d\d|no[\s_]*mem|out of memory/i.test(msg)) {
+      throw new Error(
+        `The controller couldn't mount the SD card (${msg}). This is a controller-side SD/memory hiccup — the card is fine (it read on your pendant). It usually clears if you retry. If it persists: don't browse the card on the FluidDial pendant at the same time (they compete for the controller's memory), re-seat the card, or power-cycle the controller.`,
+      )
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(msg)
   }
 
   /**
@@ -1555,6 +1616,7 @@ class GrblController {
    * local stream state. In every case the local streamer/program state is reset.
    */
   async softReset(): Promise<void> {
+    this.clearJogHold()
     this.resetJogGate()
     this.streamer?.reset()
     useProgram.getState().setStreaming?.(false)
@@ -1728,6 +1790,85 @@ class GrblController {
   private resetJogGate(): void {
     this.jogAckSizes.length = 0
     this.jogUnackedBytes = 0
+  }
+
+  /**
+   * Mark the START of a fresh interactive jog gesture (a key/button press). Clears
+   * any drifted flow-control accounting so the first command of the gesture can
+   * NEVER be swallowed by a wedged gate — the reliability the UART pendant
+   * (FluidDial) gets from its blocking send. Cheap + safe: interactive jogs are
+   * human-paced, so there's never a real in-flight jog to protect here.
+   */
+  beginJog(): void {
+    this.resetJogGate()
+  }
+
+  /**
+   * Begin — or re-aim — a CONTINUOUS ("press-and-hold") jog in `dir` at `feed`.
+   *
+   * Implemented the FluidNC/GRBL-native way (as UGS/cncjs do): ONE long `$J=`
+   * move in the held direction, cancelled with 0x85 on release. The firmware
+   * plans it as a single smooth accelerated motion, so it "keeps moving until
+   * you let go" with the fewest possible serial commands. That command economy is
+   * essential: streaming many short increments floods a memory-tight ESP32 and
+   * makes it throw `std::bad_alloc` / "Stalling due to too many failures" — the
+   * choppiness this replaces.
+   *
+   * `dir` need NOT be a unit vector — only its ANGLE matters (true diagonals are
+   * preserved). Calling again with the SAME heading while the move is live is a
+   * no-op (a held key/button or analog-stick jitter never re-issues), so it can't
+   * thrash the controller; a genuinely NEW heading cancels the old move and jogs
+   * the new one. `maxMm` (>0) bounds the single move to the travel envelope.
+   */
+  startJog(dir: { x?: number; y?: number; z?: number }, feed: number, maxMm = 0): void {
+    const mag = Math.hypot(dir.x ?? 0, dir.y ?? 0, dir.z ?? 0)
+    if (mag < 1e-6) {
+      this.stopJog()
+      return
+    }
+    const u = { x: (dir.x ?? 0) / mag, y: (dir.y ?? 0) / mag, z: (dir.z ?? 0) / mag }
+    const now = Date.now()
+    const st = useMachine.getState().state
+    if (this.jogHoldDir) {
+      const dot = u.x * this.jogHoldDir.x + u.y * this.jogHoldDir.y + u.z * this.jogHoldDir.z
+      if (dot > 0.985) {
+        // SAME heading. Skip the re-issue ONLY while the move is genuinely still
+        // running (machine reports Jog) or was JUST sent (status lag before it flips
+        // to Jog). Crucially, once the machine is Idle again a stale hold direction
+        // can NEVER suppress a fresh press — that was the intermittent "the hold
+        // doesn't register" bug. When a held control (gamepad stick) outlives one
+        // move, this re-issues so motion continues: one $J= per completed move.
+        if (st === 'Jog' || now - this.lastJogSentAt < JOG_REISSUE_MS) return
+      } else {
+        // A genuinely NEW heading (analog stick swung / opposite key): cancel the
+        // old move before jogging the new one.
+        void this.jogCancel()
+      }
+    }
+    // Every fresh hold starts from a CLEAN flow-control gate. The single hold move
+    // is force-sent (bypasses the discrete-jog flood cap), but clearing any drifted
+    // ack accounting here guarantees a held control ALWAYS produces motion — the
+    // never-wedge reliability FluidNC's own UART jogging (FluidDial) gets for free.
+    this.resetJogGate()
+    this.jogHoldDir = u
+    this.lastJogSentAt = now
+    const dist = maxMm > 0 ? maxMm : JOG_HOLD_DEFAULT_MM
+    // The limit guard inside jog() still applies per axis.
+    void this.jog({ x: u.x * dist, y: u.y * dist, z: u.z * dist, feed }, { force: true })
+  }
+
+  /** Forget the active hold direction WITHOUT touching the machine (used by
+   *  disconnect / softReset, where sending 0x85 over a dead/closing link is
+   *  wrong). Public stops go through stopJog. */
+  private clearJogHold(): void {
+    this.jogHoldDir = null
+  }
+
+  /** Stop a continuous jog: end the hold and flush the move (0x85). Safe with no
+   *  active hold (degrades to a plain jogCancel). */
+  stopJog = (): void => {
+    this.jogHoldDir = null
+    void this.jogCancel()
   }
 
   /**

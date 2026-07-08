@@ -1715,6 +1715,10 @@ function MeshPreview({
 
   return (
     <Canvas
+      // Static preview scene (bed + house mesh) — render on demand only. OrbitControls
+      // auto-invalidates while orbiting/damping and r3f re-renders on any scene change,
+      // so nothing is lost, but the idle tab stops burning 60 fps of CPU/GPU.
+      frameloop="demand"
       style={{ height: '100%', width: '100%' }}
       camera={{ position: [bedX / 2 + 180, -180, 180], up: [0, 0, 1], fov: 45, near: 0.1, far: 5000 }}
       onCreated={({ camera }) => camera.lookAt(...camTarget)}
@@ -1807,6 +1811,9 @@ function LayerPreview({
 
   return (
     <Canvas
+      // Static sliced-layer preview — render on demand only (see the model canvas
+      // above); OrbitControls/scene changes still invalidate, idle burns ~0 fps.
+      frameloop="demand"
       style={{ height: '100%', width: '100%' }}
       camera={{ position: [bedX / 2 + 180, -180, 180], up: [0, 0, 1], fov: 45, near: 0.1, far: 5000 }}
       onCreated={({ camera }) => camera.lookAt(...camTarget)}
