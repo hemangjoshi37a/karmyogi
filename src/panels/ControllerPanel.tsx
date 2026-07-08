@@ -53,6 +53,17 @@ import '../styles/teach.css'
 const STEP_SIZES = [0.1, 1, 10, 100]
 /** Largest continuous-jog distance (mm) we'll ever feed, regardless of travel. */
 const CONTINUOUS_JOG_MAX_MM = 2000
+/**
+ * Grace window (ms) that a jog key's `keyup` is held before it counts as a REAL
+ * release. On Linux/X11, keyboard auto-repeat is frequently delivered as
+ * `keyup`+`keydown` PAIRS (not `event.repeat`), and Chrome doesn't always coalesce
+ * them — each spurious `keyup` would otherwise cancel the hold and kill the
+ * tap→continuous escalation timer, so the hold "sometimes fails to register". If a
+ * matching `keydown` arrives within this window, the keyup was an auto-repeat
+ * artifact and is ignored; otherwise it's a genuine release. Kept short so a real
+ * release still stops the jog snappily (0x85 fires within this window).
+ */
+const KEY_RELEASE_GRACE_MS = 45
 /** Machine states in which destructive commands (Zero) must be confirmed / refused. */
 const BUSY_STATES = new Set(['Run', 'Hold', 'Jog', 'Home', 'Alarm', 'Door'])
 /** Default safe-Z retract height (mm, work coords) used before any XY return. */
@@ -1338,6 +1349,29 @@ export function ControllerPanel() {
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // True once a held key has escalated to continuous motion (needs a 0x85 stop).
   const keyContinuous = useRef(false)
+  // Per-key debounce timers for keyup: a keyup schedules a release here; a matching
+  // keydown within KEY_RELEASE_GRACE_MS cancels it (= an X11 auto-repeat pair, not a
+  // real release). This is what keeps the HELD condition from being torn down by
+  // spurious auto-repeat keyups.
+  const pendingRelease = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Timestamp (ms) of each held key's first real keydown — drives the TIMER-FREE
+  // backup escalation: any keydown for a key held ≥ HOLD_DELAY_MS engages continuous
+  // motion, so even if the one-shot hold timer is torn down (an OS auto-repeat
+  // storm, a focus quirk), the ongoing keydown stream still registers the hold.
+  const keyDownAt = useRef<Map<string, number>>(new Map())
+
+  const clearPendingRelease = useCallback((key: string) => {
+    const t = pendingRelease.current.get(key)
+    if (t) {
+      clearTimeout(t)
+      pendingRelease.current.delete(key)
+    }
+  }, [])
+
+  const clearAllPendingReleases = useCallback(() => {
+    pendingRelease.current.forEach((t) => clearTimeout(t))
+    pendingRelease.current.clear()
+  }, [])
 
   const clearKeyJogTimer = useCallback(() => {
     if (holdTimer.current) {
@@ -1351,11 +1385,13 @@ export function ControllerPanel() {
   // survive losing focus or the window.
   const resetKeyJog = useCallback(() => {
     clearKeyJogTimer()
+    clearAllPendingReleases()
     const wasMoving = keyContinuous.current || heldKeys.current.size > 0
     heldKeys.current.clear()
+    keyDownAt.current.clear()
     keyContinuous.current = false
     if (wasMoving) cancelJog()
-  }, [clearKeyJogTimer, cancelJog])
+  }, [clearKeyJogTimer, clearAllPendingReleases, cancelJog])
 
   // Zero all work axes (G10 L20 P0). Destructive — re-defining the work datum
   // mid-Run/Alarm is dangerous, so confirm when the machine isn't safely Idle.
@@ -1741,24 +1777,40 @@ export function ControllerPanel() {
       const delta = jogKeyToDelta(e.key, step)
       if (delta) {
         e.preventDefault()
-        // Ignore OS auto-repeat — otherwise every repeat queues another jog and
-        // the machine keeps moving after release. The hold timer drives
-        // continuous motion instead.
-        if (e.repeat) return
-        // Ignore a re-press of an already-held key (defensive).
-        if (heldKeys.current.has(e.key)) return
-        heldKeys.current.add(e.key)
-        // First (real) press: one precise nudge now…
-        doJog(delta)
-        // …then escalate to continuous if the key stays held. Recompute the
-        // delta at fire time so it reflects whatever key remains held.
-        clearKeyJogTimer()
-        holdTimer.current = setTimeout(() => {
-          holdTimer.current = null
-          if (heldKeys.current.size === 0) return
+        const now = Date.now()
+        if (pendingRelease.current.has(e.key)) {
+          // This keydown is the "down" half of an OS auto-repeat keyup+keydown pair
+          // (common on Linux/X11, where auto-repeat isn't delivered as event.repeat):
+          // the key was never really released, so cancel the pending release and keep
+          // the hold alive — do NOT re-tap.
+          clearPendingRelease(e.key)
+        } else if (!heldKeys.current.has(e.key)) {
+          // Genuine FIRST press of this key: one precise nudge now (the tap)…
+          heldKeys.current.add(e.key)
+          keyDownAt.current.set(e.key, now)
+          doJog(delta)
+          // …then escalate to continuous if it stays held (PRIMARY path: a one-shot
+          // timer). The BACKUP path below catches it too if this timer is torn down.
+          clearKeyJogTimer()
+          holdTimer.current = setTimeout(() => {
+            holdTimer.current = null
+            if (heldKeys.current.has(e.key)) {
+              keyContinuous.current = true
+              doJogHold(delta)
+            }
+          }, HOLD_DELAY_MS)
+        }
+        // BACKUP escalation — TIMER-INDEPENDENT. Any keydown (OS repeat OR an X11
+        // repeat pair) for a key that's now been held ≥ HOLD_DELAY_MS engages
+        // continuous motion. This is why the hold can no longer "fail to register":
+        // even if the one-shot timer above was cleared by a spurious keyup, the live
+        // keydown stream still turns the hold on. doJogHold no-ops while already
+        // jogging that heading, so calling it from both paths is safe.
+        const downAt = keyDownAt.current.get(e.key)
+        if (downAt != null && !keyContinuous.current && now - downAt >= HOLD_DELAY_MS) {
           keyContinuous.current = true
           doJogHold(delta)
-        }, HOLD_DELAY_MS)
+        }
         return
       }
 
@@ -1850,13 +1902,25 @@ export function ControllerPanel() {
     (e: KeyboardEvent) => {
       if (!heldKeys.current.has(e.key)) return
       e.preventDefault()
-      heldKeys.current.delete(e.key)
-      if (heldKeys.current.size === 0) {
-        clearKeyJogTimer()
-        keyContinuous.current = false
-        // Always cancel: even a quick tap may have queued a jog.
-        cancelJog()
-      }
+      // DON'T release immediately: on Linux/X11, keyboard auto-repeat is frequently
+      // delivered as keyup+keydown PAIRS, so an in-hold keyup is usually a repeat
+      // artifact, not a real release. Debounce — schedule the release and let a
+      // matching keydown within KEY_RELEASE_GRACE_MS cancel it. Only a keyup with NO
+      // following keydown is a genuine release (stops the jog). This is what keeps
+      // the held condition from being torn down mid-hold.
+      if (pendingRelease.current.has(e.key)) return
+      const t = setTimeout(() => {
+        pendingRelease.current.delete(e.key)
+        heldKeys.current.delete(e.key)
+        keyDownAt.current.delete(e.key)
+        if (heldKeys.current.size === 0) {
+          clearKeyJogTimer()
+          keyContinuous.current = false
+          // Always cancel: even a quick tap may have queued a jog.
+          cancelJog()
+        }
+      }, KEY_RELEASE_GRACE_MS)
+      pendingRelease.current.set(e.key, t)
     },
     [clearKeyJogTimer, cancelJog],
   )
@@ -1881,6 +1945,11 @@ export function ControllerPanel() {
     return () => {
       window.removeEventListener('keydown', kd)
       window.removeEventListener('keyup', ku)
+      // Unmount: drop any in-flight hold/debounce timers so they can't fire after
+      // the panel is gone (refs are stable, so this needs no effect deps).
+      if (holdTimer.current) clearTimeout(holdTimer.current)
+      pendingRelease.current.forEach((t) => clearTimeout(t))
+      pendingRelease.current.clear()
     }
   }, [onKeyDown, onKeyUp])
 
