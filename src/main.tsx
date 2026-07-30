@@ -24,6 +24,31 @@ import 'dockview/dist/styles/dockview.css'
   }
 }
 
+// PROD self-heal for a stale app shell.
+//
+// Panels are lazy-imported. After a deploy, a client still running the previous
+// shell asks for chunk URLs from that older build; if any of them cannot be
+// loaded as a module the panel dies with "Failed to fetch dynamically imported
+// module" and the tab is simply broken until the user clears the site data —
+// which no operator should have to know how to do. Vite fires `vite:preloadError`
+// for exactly this, so reload once to pick up the current shell (and its correct
+// chunk names). The sessionStorage guard makes it strictly one attempt, so a
+// genuinely missing chunk can never become a reload loop.
+if (!import.meta.env.DEV) {
+  const RELOAD_FLAG = 'km-chunk-reload'
+  window.addEventListener('vite:preloadError', (e) => {
+    if (sessionStorage.getItem(RELOAD_FLAG)) return // already tried — let it surface
+    e.preventDefault() // we are handling it: reload instead of an unhandled rejection
+    sessionStorage.setItem(RELOAD_FLAG, '1')
+    console.warn('[karmyogi] stale chunk after a deploy — reloading once to update')
+    window.location.reload()
+  })
+  // A clean load means the shell is current; allow one future attempt again.
+  window.addEventListener('load', () => {
+    setTimeout(() => sessionStorage.removeItem(RELOAD_FLAG), 5000)
+  })
+}
+
 // DEV: kill any stale service worker (e.g. left over from a previous built/preview
 // load) so the dev server's latest code is never shadowed by a cached app shell.
 if (import.meta.env.DEV && 'serviceWorker' in navigator) {

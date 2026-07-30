@@ -222,6 +222,14 @@ export default defineConfig({
         // pays 5MB for a page most users never open (install went 8.8 → 14.2MB).
         // It is runtime-cached on first visit instead — see runtimeCaching.
         globIgnores: ['guide/**'],
+        // The SW answers every *navigation* with the precached index.html (the
+        // SPA shell). /guide/ is a real static page, NOT an app route, so
+        // without this exclusion an installed client navigating to /guide gets
+        // the SPA, which has no such route and renders its 404 — the page 404s
+        // for returning users while working fine in a fresh browser. Excluding
+        // it lets those navigations reach the network (and the /guide/ runtime
+        // cache below), so the guide is served as the document it is.
+        navigateFallbackDenylist: [/^\/guide(\/|$)/],
         // Skip any single asset larger than this from the PRECACHE manifest; it
         // will instead be fetched + cached on demand by runtimeCaching.
         maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
@@ -230,12 +238,27 @@ export default defineConfig({
         // has been opened once — without front-loading megabytes on install.
         runtimeCaching: [
           {
+            // NetworkFirst, NOT StaleWhileRevalidate — and a new cacheName.
+            //
+            // The SPA fallback (`/* -> /index.html 200`) answers a request for a
+            // missing chunk with HTML at status 200. Under SWR that HTML got
+            // cached UNDER the .js URL, and cache-first then served HTML for a
+            // JS module on every later load — "Failed to fetch dynamically
+            // imported module: .../ControllerPanel-*.js" — permanently, even
+            // after the server was serving valid JS again. Renaming the cache
+            // abandons any already-poisoned entries; NetworkFirst means an
+            // online client can never be pinned to a bad cached response.
+            // Chunks are content-hashed and served immutable (see _headers), so
+            // the HTTP cache still does the heavy lifting; this cache exists for
+            // offline use, which the fallback below preserves.
             urlPattern: ({ request, url }) =>
               request.destination === 'script' || url.pathname.endsWith('.js'),
-            handler: 'StaleWhileRevalidate',
+            handler: 'NetworkFirst',
             options: {
-              cacheName: 'karmyogi-js',
+              cacheName: 'karmyogi-js-v2',
+              networkTimeoutSeconds: 10,
               expiration: { maxEntries: 80, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
