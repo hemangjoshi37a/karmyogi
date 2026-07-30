@@ -30,6 +30,17 @@ function GitHubGlyph() {
   )
 }
 
+/** Book glyph for the user guide. */
+function BookGlyph() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M9 7h7M9 11h7" />
+    </svg>
+  )
+}
+
 /** Bug glyph for "report an issue". */
 function BugGlyph() {
   return (
@@ -145,14 +156,20 @@ export function AboutModal({ open, onClose, repoUrl, issuesUrl }: AboutModalProp
             <span className="km-about2-chip">{t('about.chip.license', 'MIT')}</span>
           </div>
 
-          {/* Primary actions */}
+          {/* Primary actions.
+              The guide is a static document shipped with the app at /guide/ —
+              a plain href (not a router link) so it opens the real page and the
+              URL is directly shareable. */}
           <div className="km-about2-actions">
             <a
               className="km-about2-btn km-about2-btn-primary"
-              href={repoUrl}
+              href="/guide/"
               target="_blank"
-              rel="noopener noreferrer"
+              rel="noopener"
             >
+              <BookGlyph /> {t('about.guide', 'User guide')}
+            </a>
+            <a className="km-about2-btn" href={repoUrl} target="_blank" rel="noopener noreferrer">
               <GitHubGlyph /> {t('about.source.short', 'View source')}
             </a>
             <a className="km-about2-btn" href={issuesUrl} target="_blank" rel="noopener noreferrer">

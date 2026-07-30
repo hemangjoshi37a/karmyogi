@@ -216,6 +216,12 @@ export default defineConfig({
       workbox: {
         // Precache the lightweight shell only (no wasm).
         globPatterns: ['**/*.{css,html,svg,woff2,ico,png,webmanifest}'],
+        // The user guide at /guide/ is a standalone static document carrying
+        // ~5MB of annotated screenshots. It matches the html/png patterns
+        // above, so without this it lands in the precache and every install
+        // pays 5MB for a page most users never open (install went 8.8 → 14.2MB).
+        // It is runtime-cached on first visit instead — see runtimeCaching.
+        globIgnores: ['guide/**'],
         // Skip any single asset larger than this from the PRECACHE manifest; it
         // will instead be fetched + cached on demand by runtimeCaching.
         maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
@@ -239,6 +245,18 @@ export default defineConfig({
               cacheName: 'karmyogi-wasm',
               expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 30 },
               rangeRequests: true,
+            },
+          },
+          {
+            // The user guide — excluded from the precache (see globIgnores).
+            // StaleWhileRevalidate rather than CacheFirst so a reader who opens
+            // it again picks up a redeployed edition instead of being pinned to
+            // a stale copy, while still rendering instantly from cache offline.
+            urlPattern: ({ url }) => url.pathname.startsWith('/guide/'),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'karmyogi-guide',
+              expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 90 },
             },
           },
           {

@@ -1,1 +1,8 @@
+# The user guide is a real static page at /guide/. Cloudflare Pages matches
+# static assets before these rules, so /guide/index.html and its images resolve
+# on their own. This line only covers the no-trailing-slash form, so a shared
+# link like karmyogi.hjlabs.in/guide can never fall through to the SPA shell.
+/guide    /guide/index.html    200
+
+# SPA fallback — every other unmatched path renders the app.
 /*    /index.html   200

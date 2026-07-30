@@ -1,0 +1,2003 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>karmyogi — Official User Guide</title>
+<meta name="description" content="Official user guide for karmyogi.hjlabs.in — the browser-based GRBL/FluidNC CNC controller and CAD/CAM workbench. Annotated screenshots of every tab and control." />
+
+<!-- Fully self-contained: fonts are self-hosted and there is no CDN script, so
+     the guide works offline, prints identically, and needs no CSP exceptions on
+     karmyogi.hjlabs.in. (The Tailwind CDN this used to load was doing nothing —
+     exactly one utility class, `font-sans`, was ever used.) -->
+<link rel="preload" href="fonts/Inter.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="fonts/fonts.css" />
+
+<style>
+  /* ═══════════════════════════════════════════════════════════════════
+     karmyogi USER GUIDE — print-first A4 document.
+     Same sheet architecture as the hjLabs.in engineering proposals:
+     @page margin 0 so each .sheet's own padding IS the page margin, which
+     makes screen and print byte-identical (no reflow when you export PDF).
+     Brand accent is karmyogi teal (#2dd4bf family) instead of the proposal
+     indigo; the wordmark is the monochrome black logo so it reads on paper.
+     ═══════════════════════════════════════════════════════════════════ */
+  @page { size: A4; margin: 0; }
+
+  /* ── Minimal reset ───────────────────────────────────────────────────
+     This document used to pull in the Tailwind CDN purely for its Preflight
+     reset (only ONE utility class was ever used). The CDN is gone, so the
+     handful of Preflight rules the layout actually depends on live here:
+     border-box sizing, zeroed default margins, and unstyled lists. Without
+     these, browser defaults reintroduce 1em paragraph margins and 40px list
+     indents and every sheet overflows A4. */
+  *, *::before, *::after { box-sizing: border-box; }
+  body, h1, h2, h3, h4, h5, h6, p, ol, ul, li, figure, figcaption, blockquote, dl, dd {
+    margin: 0; padding: 0;
+  }
+  ol, ul { list-style: none; }
+  h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; }
+  table { border-collapse: collapse; }
+  img, svg, video, canvas { display: block; max-width: 100%; }
+  button, input, select, textarea { font: inherit; color: inherit; margin: 0; }
+  button { background: none; border: 0; }
+  a { color: inherit; }
+
+  html, body {
+    background: #eef2f5;
+    color: #0f172a;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sheet {
+    width: 210mm; min-height: 297mm;
+    margin: 8mm auto; padding: 11mm 12mm 14mm;
+    background: #fff;
+    box-shadow: 0 18px 60px -22px rgba(15,23,42,.18), 0 4px 16px -4px rgba(15,23,42,.05);
+    box-sizing: border-box; position: relative; overflow: hidden;
+  }
+  .sheet + .sheet { page-break-before: always; break-before: page; }
+  #cover.sheet { padding-top: 0; }
+
+  /* ── running head / foot ─────────────────────────────────────────── */
+  .brand-strip {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding-bottom: 6px; margin-bottom: 8px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .brand-strip img { height: 15px; width: auto; }
+  .doc-meta { font-size: 8.5px; color: #64748b; letter-spacing: .04em; }
+  .doc-meta strong { color: #0f172a; }
+  .teal-rule { height: 3px; border-radius: 2px;
+    background: linear-gradient(90deg,#0d9488 0%,#2dd4bf 45%,#99f6e4 100%); }
+  .sheet-foot {
+    position: absolute; left: 12mm; right: 12mm; bottom: 6mm;
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 8px; color: #94a3b8;
+    border-top: 1px solid #eef2f6; padding-top: 4px;
+  }
+
+  /* ── section furniture ───────────────────────────────────────────── */
+  .pill {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+    background: #ccfbf1; color: #115e59;
+  }
+  .pill-dark { background: #0f766e; color: #fff; }
+  h2.sec { margin: 8px 0 2px; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+  h3.sub { margin: 12px 0 5px; font-size: 13px; font-weight: 800; color: #0f172a; }
+  .lede { font-size: 11px; color: #475569; line-height: 1.5; max-width: 62ch; }
+  .tiny { font-size: 8.5px; color: #64748b; line-height: 1.45; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  kbd {
+    font-family: 'JetBrains Mono', monospace; font-size: 8.5px;
+    background: #f1f5f9; border: 1px solid #cbd5e1; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 4px; color: #0f172a; white-space: nowrap;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     ENGINEERING-DRAWING FIGURE
+     A real screenshot + numbered balloons pinned in PERCENT coordinates,
+     with SVG leader lines drawn at runtime from each balloon to its entry
+     in the key. Percent coords mean the annotation survives any change of
+     screenshot resolution. Hovering a balloon or a key row highlights the
+     pair; clicking the figure opens the zoom overlay.
+     ════════════════════════════════════════════════════════════════════ */
+  .fig { margin: 8px 0 0; position: relative; }
+  /* The leader SVG is lifted out of .fig-stage at runtime and stretched over the
+     WHOLE figure, so a leader can travel from a balloon down to its key row even
+     when the key is a legend block below the picture (the stage's overflow:hidden
+     would otherwise clip it). */
+  svg.fig-leads.over-fig { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+  /* When the key sits below, resting leaders would criss-cross the screenshot, so
+     they stay invisible until you hover a balloon or a key row. */
+  svg.fig-leads.hover-only line { opacity: 0; }
+  /* Must out-specify the rule above, or the hovered connector stays invisible. */
+  svg.fig-leads.hover-only line.hot { opacity: 1; }
+  .fig-grid { display: grid; gap: 9px; align-items: start; }
+  .fig-grid.side { grid-template-columns: 1.35fr 1fr; }
+  .fig-grid.wide { grid-template-columns: 1fr; }
+
+  .fig-stage {
+    position: relative; border: 1px solid #cbd5e1; border-radius: 7px;
+    overflow: hidden; background: #1a1d21; cursor: zoom-in;
+  }
+  .fig-stage img { display: block; width: 100%; height: auto; }
+  /* A very tall screenshot (a full side panel) would push past the A4 page edge.
+     Cap the height and let the stage shrink to the image's resulting width, so the
+     balloons' percentage coordinates stay valid relative to the picture. */
+  .fig-stage.tall { max-height: 205mm; width: fit-content; margin-inline: auto; }
+  .fig-stage.tall img { height: 205mm; width: auto; }
+  /* Same idea, gentler cap — for a near-square figure that would otherwise push the
+     supporting text off the page. Click-to-zoom gives back the full detail. */
+  .fig-stage.capped { max-height: 122mm; width: fit-content; margin-inline: auto; }
+  .fig-stage.capped img { height: 122mm; width: auto; }
+  /* Show only a chosen band of a tall screenshot (set --crop-h / --crop-y). */
+  .fig-stage.band { height: var(--crop-h, 150px); }
+  .fig-stage.band img {
+    position: absolute; left: 0; top: 0; width: 100%;
+    transform: translateY(var(--crop-y, 0));
+  }
+  .fig-leads { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  /* Drafting leaders: faint by default so they never fight the screenshot, and
+     they light up when the balloon or its key row is hovered. */
+  .fig-leads line { stroke: #5eead4; stroke-width: .75; opacity: .3; }
+  .fig-leads line.hot { stroke: #f59e0b; stroke-width: 1.75; opacity: 1; }
+
+  .cal {
+    position: absolute; transform: translate(-50%,-50%);
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #0d9488; color: #fff;
+    font-size: 9px; font-weight: 800; line-height: 15px; text-align: center;
+    box-shadow: 0 0 0 1.5px #fff, 0 1px 3px rgba(0,0,0,.5);
+    cursor: help; z-index: 3;
+  }
+  .cal.hot { background: #f59e0b; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(245,158,11,.35); }
+
+  ol.fig-key { list-style: none; margin: 0; padding: 0; counter-reset: k; }
+  ol.fig-key li {
+    display: grid; grid-template-columns: 15px 1fr; gap: 6px;
+    padding: 2.5px 0; border-bottom: 1px dotted #e2e8f0;
+    font-size: 8.8px; line-height: 1.4; color: #475569; cursor: help;
+  }
+  ol.fig-key li:last-child { border-bottom: 0; }
+  ol.fig-key li b { color: #0f172a; }
+  ol.fig-key li .n {
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #115e59; color: #fff; font-size: 9px; font-weight: 800;
+    text-align: center; line-height: 15px;
+  }
+  ol.fig-key li.hot { background: #fffbeb; }
+  ol.fig-key li.hot .n { background: #f59e0b; }
+  .fig-cap { margin-top: 4px; font-size: 8px; color: #94a3b8; }
+  .fig-cap b { color: #475569; }
+
+  /* ── zoom overlay (click any figure) ─────────────────────────────── */
+  #zoom {
+    position: fixed; inset: 0; z-index: 99; display: none;
+    background: rgba(2,6,23,.92); padding: 3vh 3vw; cursor: zoom-out;
+  }
+  #zoom.on { display: flex; align-items: center; justify-content: center; }
+  #zoom img { max-width: 100%; max-height: 94vh; border-radius: 8px;
+    box-shadow: 0 30px 90px -20px rgba(0,0,0,.8); }
+  #zoom .hint { position: fixed; bottom: 10px; left: 0; right: 0; text-align: center;
+    color: #94a3b8; font-size: 11px; }
+  @media print { #zoom { display: none !important; } }
+
+  /* ── compact info blocks ─────────────────────────────────────────── */
+  .cards { display: grid; gap: 7px; }
+  .cards.c2 { grid-template-columns: 1fr 1fr; }
+  .cards.c3 { grid-template-columns: repeat(3,1fr); }
+  .cards.c4 { grid-template-columns: repeat(4,1fr); }
+  .card {
+    border: 1px solid #e2e8f0; border-radius: 7px; padding: 7px 9px; background: #fbfdfe;
+  }
+  .card h4 { margin: 0 0 2px; font-size: 10px; font-weight: 800; color: #0f172a; }
+  .card p { margin: 0; font-size: 8.4px; color: #64748b; line-height: 1.42; }
+  .card.accent { border-color: #99f6e4; background: #f0fdfa; }
+
+  .note {
+    border-left: 3px solid #14b8a6; background: #f0fdfa;
+    padding: 6px 9px; border-radius: 0 6px 6px 0; font-size: 8.8px; color: #115e59;
+  }
+  .warn {
+    border-left: 3px solid #f59e0b; background: #fffbeb;
+    padding: 6px 9px; border-radius: 0 6px 6px 0; font-size: 8.8px; color: #78350f;
+  }
+  .warn b, .note b { font-weight: 800; }
+
+  table.t { width: 100%; border-collapse: collapse; font-size: 8.5px; }
+  table.t th {
+    text-align: left; font-size: 8px; text-transform: uppercase; letter-spacing: .07em;
+    color: #64748b; border-bottom: 1.5px solid #cbd5e1; padding: 3px 5px; background: #f8fafc;
+  }
+  table.t td { padding: 3px 5px; border-bottom: 1px solid #eef2f6; color: #475569; vertical-align: top; }
+  table.t td b { color: #0f172a; }
+  table.t tr:nth-child(even) td { background: #fcfdfe; }
+  table.t.tight td { padding: 2px 5px; line-height: 1.35; }
+
+  /* ── Illustration bands ─────────────────────────────────────────────────────
+     Artist's impressions, NOT UI references — always labelled as such, so the
+     "every figure is a real screenshot" promise stays true for the figures. */
+  .art {
+    margin: 9px 0 0; border-radius: 8px; overflow: hidden; position: relative;
+    background: #04121a; border: 1px solid #0f766e33;
+  }
+  /* hard height cap: a band must never be able to push a sheet past A4 */
+  .art img {
+    display: block; width: 100%; height: auto;
+    max-height: 186px; object-fit: cover; object-position: center 45%;
+  }
+  .art figcaption {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 5px 9px;
+    font-size: 7.6px; color: #cbfaf1; letter-spacing: .01em; line-height: 1.4;
+    background: linear-gradient(to top, #04121aee 40%, #04121a00);
+  }
+  .art figcaption b { color: #7de8d5; }
+  .art .tagline {
+    position: absolute; top: 0; left: 0; padding: 7px 10px;
+    font-size: 8px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase;
+    color: #5eead4;
+  }
+  /* Closing end-plate: the source is pre-cropped to ~5.4:1 so it renders whole.
+     No object-fit crop here — cropping would cut into the wordmark. */
+  .art.slim img { max-height: none; object-fit: contain; }
+  .art.slim figcaption { background: linear-gradient(to top, #04121aee 55%, #04121a00); }
+
+  /* ── Clickable contents ─────────────────────────────────────────────────────
+     Whole-row hit area (display:block) so it's easy to hit on a touch screen.
+     The chevron is CSS-only so it never shows up as a stray glyph in the PDF. */
+  html { scroll-behavior: smooth; }
+  table.t.toc td { padding: 0; }
+  table.t.toc td:first-child { padding: 4px 5px; }
+  table.t.toc a {
+    display: block; padding: 4px 16px 4px 5px; color: #475569; text-decoration: none;
+    position: relative; border-radius: 4px;
+  }
+  table.t.toc a b { color: #0f172a; }
+  table.t.toc a::after {
+    content: "›"; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    color: #94a3b8; font-weight: 700;
+  }
+  table.t.toc a:hover { background: #f0fdfa; color: #0f766e; }
+  table.t.toc a:hover b, table.t.toc a:hover::after { color: #0f766e; }
+
+  /* inline "<a class="xref" href="#s04">§04</a>"-style cross-references */
+  a.xref {
+    color: #0f766e; text-decoration: none; font-weight: 700;
+    border-bottom: 1px dotted #5eead4; white-space: nowrap;
+  }
+  a.xref:hover { background: #f0fdfa; border-bottom-color: #0f766e; }
+
+  /* landing highlight so a jump makes it obvious which sheet you arrived on */
+  .sheet:target { box-shadow: 0 0 0 2.5px #14b8a6; }
+  @media print {
+    html { scroll-behavior: auto; }
+    table.t.toc a::after { content: none; }
+    .sheet:target { box-shadow: none; }
+  }
+
+  /* tab gallery: thumbnail + text, tuned so a whole page of tabs fits */
+  .gal { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .gal figure { margin: 0; border: 1px solid #e2e8f0; border-radius: 7px; overflow: hidden; background:#fff; }
+  /* Taller than strictly needed — it uses the page's spare height and makes each
+     panel actually readable rather than a dark smudge. */
+  .gal .shot { height: 108px; overflow: hidden; background: #1a1d21; cursor: zoom-in; }
+  .gal .shot img { width: 100%; display: block; }
+  .gal figcaption { padding: 5px 7px 6px; }
+  .gal h4 { margin: 0; font-size: 10px; font-weight: 800; color: #0f172a; }
+  .gal p { margin: 1px 0 0; font-size: 7.9px; color: #64748b; line-height: 1.38; }
+  @media print { .gal .shot, .fig-stage { cursor: default; } }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     FLOATING SCREEN FURNITURE — left nav rail + right control rail.
+     Same information architecture as the hjLabs.in proposals, in teal.
+     Everything here is .no-print and vanishes when you export the PDF.
+     ═══════════════════════════════════════════════════════════════════ */
+  #sidebar-nav {
+    position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
+    width: 186px; max-height: 90vh; overflow-y: auto;
+    transition: left .24s ease, box-shadow .2s ease;
+    background: rgba(255,255,255,.97);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid #e2e8f0; border-radius: 14px; padding: 11px 9px;
+    box-shadow: 0 18px 40px -12px rgba(15,23,42,.20), 0 4px 14px -2px rgba(15,23,42,.06);
+    z-index: 200; font-size: 11px;
+  }
+  #sidebar-nav::-webkit-scrollbar { width: 4px; }
+  #sidebar-nav::-webkit-scrollbar-thumb { background: #99f6e4; border-radius: 2px; }
+  #sidebar-nav .nav-brand {
+    display: flex; align-items: center; gap: 8px;
+    padding: 2px 6px 9px; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0;
+  }
+  #sidebar-nav .nav-brand img { height: 14px; width: auto; }
+  #sidebar-nav .nav-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1px; }
+  #sidebar-nav .nav-list a {
+    display: flex; align-items: center; gap: 8px; padding: 5px 7px; border-radius: 6px;
+    color: #475569; text-decoration: none; font-weight: 500; line-height: 1.2;
+    transition: background .15s, color .15s;
+  }
+  #sidebar-nav .nav-list a:hover { background: #f0fdfa; color: #115e59; }
+  #sidebar-nav .nav-list a.active {
+    background: linear-gradient(90deg,#0f766e 0%,#14b8a6 100%); color: #fff; font-weight: 700;
+    box-shadow: 0 2px 8px -2px rgba(13,148,136,.45);
+  }
+  #sidebar-nav .nav-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 18px; flex-shrink: 0; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 800;
+    background: #f1f5f9; color: #475569; letter-spacing: 0;
+  }
+  #sidebar-nav .nav-list a.active .nav-num { background: rgba(255,255,255,.22); color: #fff; }
+  #sidebar-nav .nav-foot {
+    margin-top: 9px; padding-top: 7px; border-top: 1px solid #e2e8f0; text-align: center;
+    font-size: 8.5px; color: #94a3b8; letter-spacing: .04em; text-transform: uppercase; font-weight: 700;
+  }
+
+  #fab-stack {
+    position: fixed; bottom: 18px; right: 18px;
+    display: flex; flex-direction: column; gap: 8px; z-index: 300;
+  }
+  .fab {
+    width: 42px; height: 42px; border-radius: 50%; padding: 0; cursor: pointer;
+    background: #fff; color: #0f766e; border: 1px solid #ccfbf1;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;
+    box-shadow: 0 6px 16px -4px rgba(15,23,42,.18), 0 2px 4px -1px rgba(15,23,42,.08);
+    transition: transform .15s ease, box-shadow .18s ease, background .15s, color .15s;
+  }
+  .fab svg { width: 18px; height: 18px; }
+  .fab:hover {
+    transform: translateY(-2px) scale(1.06); background: #f0fdfa;
+    box-shadow: 0 10px 22px -6px rgba(13,148,136,.30), 0 4px 8px -2px rgba(15,23,42,.10);
+  }
+  .fab:active { transform: translateY(0) scale(.97); }
+  .fab-zoom-reset { font-size: 9px; }
+
+  /* ── balloon-visibility toggle ───────────────────────────────────────
+     A balloon sits ON the control it names, so it can cover the very pixel
+     you want to look at. This hides all of them with opacity (NOT display)
+     so the leader-line geometry stays exactly where it was — hover a key
+     row and its line still lights up amber, just with no number on top. */
+  body.hide-cal .cal { opacity: 0; pointer-events: none; }
+  .num-ico {
+    width: 16px; height: 16px; border-radius: 50%; border: 1.8px solid currentColor;
+    display: flex; align-items: center; justify-content: center; position: relative;
+    font-size: 9px; font-weight: 800; line-height: 1;
+  }
+  #fab-nums.off { background: #0f766e; color: #fff; border-color: #0f766e; }
+  #fab-nums.off:hover { background: #115e59; }
+  #fab-nums.off .num-ico::after {
+    content: ''; position: absolute; left: -4px; right: -4px; top: 50%;
+    height: 1.8px; border-radius: 2px; background: currentColor;
+    transform: translateY(-50%) rotate(-45deg);
+  }
+  /* The printed key refers to the numbers, so a PDF without them would be
+     unusable — always restore them for print, whatever the screen state. */
+  @media print { body.hide-cal .cal { opacity: 1 !important; } }
+  .fab-print {
+    width: 46px; height: 46px; border: none; color: #fff;
+    background: linear-gradient(135deg,#0f766e 0%,#14b8a6 100%);
+    box-shadow: 0 8px 24px -6px rgba(13,148,136,.55), 0 2px 8px -2px rgba(15,23,42,.20);
+  }
+  .fab-print:hover { filter: brightness(1.08); background: linear-gradient(135deg,#115e59 0%,#2dd4bf 100%); }
+
+  /* ── The index is ALWAYS on screen — never hidden, never click-to-open ──
+     The sheet is 210mm (~794px) and centred, so from ~1240px up the rail
+     already has clear margin beside it. Below that we do NOT hide it (the
+     first version did, and anyone on a 1280px laptop saw no index at all)
+     and we do not tuck it behind a handle either — instead the body gains
+     left padding so the sheet is pushed clear of the rail. On very narrow
+     screens the rail becomes a numbers-only strip that widens on hover, so
+     it still costs almost nothing but is always right there. */
+  @media (max-width: 1240px) {
+    body { padding-left: 214px; }
+  }
+  @media (max-width: 820px) {
+    body { padding-left: 56px; }
+    #sidebar-nav { width: 42px; padding: 8px 5px; }
+    #sidebar-nav .nav-brand, #sidebar-nav .nav-foot { display: none; }
+    #sidebar-nav .nav-list a { justify-content: center; padding: 5px 1px; }
+    #sidebar-nav .nav-lbl { display: none; }
+    /* hover (or focus, for keyboards) reveals the full labels */
+    #sidebar-nav:hover, #sidebar-nav:focus-within { width: 186px; padding: 11px 9px; }
+    #sidebar-nav:hover .nav-brand, #sidebar-nav:focus-within .nav-brand { display: flex; }
+    #sidebar-nav:hover .nav-foot,  #sidebar-nav:focus-within .nav-foot  { display: block; }
+    #sidebar-nav:hover .nav-list a, #sidebar-nav:focus-within .nav-list a { justify-content: flex-start; padding: 5px 7px; }
+    #sidebar-nav:hover .nav-lbl, #sidebar-nav:focus-within .nav-lbl { display: inline; }
+  }
+  @media (max-width: 620px) {
+    #fab-stack { bottom: 10px; right: 10px; }
+    #sidebar-nav { max-height: 84vh; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     PRINT — the fix for stray blank pages.
+     On screen each .sheet has an 8mm outer margin so the pages look like
+     separate cards. In print that margin ADDS to the 297mm height, making
+     every sheet 313mm on a 297mm page — so each one spilled a few mm onto
+     a second, otherwise-empty page. Zero the margin, pin the height to
+     exactly one page, and keep ONE break mechanism (break-before on
+     .sheet + .sheet) — adding break-after as well double-breaks and
+     re-introduces the blank pages.
+     ═══════════════════════════════════════════════════════════════════ */
+  @media print {
+    html, body { background: #fff !important; }
+    .no-print { display: none !important; }
+    /* the rail's room-making padding must not offset the printed page */
+    body { padding-left: 0 !important; }
+    .sheet {
+      margin: 0 auto !important;
+      height: 297mm; min-height: 297mm; max-height: 297mm;
+      box-shadow: none !important;
+      break-inside: avoid; page-break-inside: avoid;
+      break-after: auto; page-break-after: auto;
+    }
+    /* nothing after the last sheet may generate a page */
+    .sheet:last-of-type { break-after: avoid; page-break-after: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- COVER                                                             -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section id="cover" class="sheet">
+  <div class="teal-rule" style="margin:0 -12mm 0;"></div>
+  <div style="padding-top:11mm">
+    <img src="logo-black.png" alt="hjLabs.in" style="height:26px;width:auto" />
+    <p class="tiny" style="margin-top:3px;letter-spacing:.22em;text-transform:uppercase;font-weight:700;color:#0f766e">
+      Industrial Automation
+    </p>
+
+    <div style="margin-top:15mm">
+      <p class="pill pill-dark">Official User Guide &nbsp;·&nbsp; v1.0</p>
+      <!-- Title plate. The wordmark artwork carries the title, so the <h1>
+           stays for document structure and its text lives in the alt. -->
+      <h1 style="margin:11px 0 0;font-size:0;line-height:0">
+        <a href="https://karmyogi.hjlabs.in"
+           style="display:block;border-radius:10px;overflow:hidden;
+                  border:1px solid rgba(15,118,110,.25);
+                  box-shadow:0 12px 34px -16px rgba(15,23,42,.45)">
+          <img src="art/cta.jpg" alt="karmyogi.hjLabs.in"
+               style="display:block;width:100%;height:auto" />
+        </a>
+      </h1>
+      <p style="margin:6mm 0 0;font-size:17px;font-weight:600;color:#334155;max-width:52ch;line-height:1.35">
+        The browser-based CNC controller &amp; CAD/CAM workbench
+      </p>
+
+      <!-- ── WHY THIS SOFTWARE EXISTS — the product's stated objective ───── -->
+      <div style="margin-top:9mm;border-left:4px solid #0d9488;padding:9px 0 9px 14px;background:linear-gradient(90deg,#f0fdfa 0%,#ffffff 88%)">
+        <div class="tiny" style="text-transform:uppercase;letter-spacing:.2em;font-weight:800;color:#0f766e">
+          Why karmyogi exists
+        </div>
+        <p style="margin:6px 0 0;font-size:14.5px;font-weight:650;color:#0f172a;line-height:1.45;max-width:70ch">
+          To close the gap between <span style="color:#0d9488">what a CNC machine can do</span>
+          and <span style="color:#0d9488">what an ordinary person can actually operate</span> —
+          and to put every job a 3-axis machine can do into <span style="color:#0d9488">one
+          application you never have to leave</span>.
+        </p>
+        <p class="lede" style="margin-top:7px;max-width:74ch">
+          Running a CNC machine has traditionally meant stitching together a pile of
+          tools: one program to draw, another to generate toolpaths, a third to send
+          G-code, a driver package to install, and a manual to decode before any of it
+          moves. karmyogi collapses that whole chain into a single browser tab, and
+          deliberately designs for the <b>most layman operator</b> — plain-language
+          labels, safe defaults, a visible 3D preview of exactly what will happen, and
+          a motion lock-out so nothing moves until you say so. Ease of use is not a
+          trade against capability here: the same app carries carving, engraving, laser,
+          PCB isolation routing, soldering, plotting, 3D printing, embroidery and more,
+          so you stop hopping between applications and start finishing work.
+        </p>
+      </div>
+
+      <div class="cards c4" style="margin-top:8mm">
+        <div class="card accent"><h4>One app, every job</h4><p>23 work modes for 3-axis machines. Never leave the app to change task.</p></div>
+        <div class="card accent"><h4>Nothing to install</h4><p>No drivers, no server, no account. A browser tab and a USB cable.</p></div>
+        <div class="card accent"><h4>Built for beginners</h4><p>Plain language, safe defaults, motion lock-out, and a 3D preview before every cut.</p></div>
+        <div class="card accent"><h4>Any 3-axis controller</h4><p>GRBL · FluidNC · grblHAL · Marlin, over USB, Bluetooth or Wi-Fi.</p></div>
+      </div>
+
+      <!-- ── DOCUMENT CONTROL — so a reader can tell which app build this matches ── -->
+      <div style="margin-top:7mm;border:1px solid #e2e8f0;border-radius:7px;overflow:hidden">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr)">
+          <div style="padding:6px 9px;border-right:1px solid #eef2f6">
+            <div class="tiny" style="text-transform:uppercase;letter-spacing:.13em;font-weight:800;color:#0f766e">Guide edition</div>
+            <div style="font-size:11.5px;font-weight:800;margin-top:1px">v1.0</div>
+            <div class="tiny">30 July 2026</div>
+          </div>
+          <div style="padding:6px 9px;border-right:1px solid #eef2f6">
+            <div class="tiny" style="text-transform:uppercase;letter-spacing:.13em;font-weight:800;color:#0f766e">Documents app build</div>
+            <div style="font-size:11.5px;font-weight:800;margin-top:1px" class="mono">mrc6q0w1</div>
+            <div class="tiny">published 8 Jul 2026, 14:40&nbsp;UTC</div>
+          </div>
+          <div style="padding:6px 9px;border-right:1px solid #eef2f6">
+            <div class="tiny" style="text-transform:uppercase;letter-spacing:.13em;font-weight:800;color:#0f766e">Check your build</div>
+            <div class="tiny" style="margin-top:2px">Click the <b>karmyogi</b> wordmark in the app → <b>About</b>. It shows the build id and date.</div>
+          </div>
+          <div style="padding:6px 9px">
+            <div class="tiny" style="text-transform:uppercase;letter-spacing:.13em;font-weight:800;color:#0f766e">Versioning</div>
+            <div class="tiny" style="margin-top:2px">Builds are continuous, not numbered releases. A higher build id is newer.</div>
+          </div>
+        </div>
+      </div>
+      <p class="tiny" style="margin-top:4px">
+        karmyogi updates continuously, so a screenshot may differ slightly from your
+        build. Where this guide describes something newer than the published app, it is
+        marked in the text.
+        A full <b>no-warranty / no-liability notice</b> appears on page 2 — please read
+        it before you run the machine.
+      </p>
+    </div>
+  </div>
+
+  <footer style="position:absolute;left:12mm;right:12mm;bottom:12mm">
+    <div class="teal-rule" style="margin-bottom:7px"></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px">
+      <div>
+        <div class="tiny" style="text-transform:uppercase;letter-spacing:.16em;font-weight:700">Application</div>
+        <div style="font-size:15px;font-weight:800;margin-top:2px">karmyogi.hjlabs.in</div>
+        <div class="tiny mono" style="margin-top:2px">github.com/hemangjoshi37a/karmyogi &nbsp;·&nbsp; MIT licensed</div>
+      </div>
+      <div style="text-align:right">
+        <div class="tiny" style="text-transform:uppercase;letter-spacing:.16em;font-weight:700">Published by</div>
+        <div style="font-size:12px;font-weight:800;margin-top:2px">Hemang Joshi · hjLabs.in</div>
+        <div class="tiny">GIDC Gandhinagar (GEZIA), Gujarat — India · MSME registered</div>
+        <div class="tiny mono">GSTIN 24BCYPJ1575J1Z2</div>
+      </div>
+    </div>
+  </footer>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 00 — CONTENTS + HOW TO READ                                       -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s00">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">00 · Contents</p>
+  <h2 class="sec">How to read this guide</h2>
+
+  <div class="fig-grid side" style="margin-top:8px">
+    <div>
+      <h3 class="sub" style="margin-top:0">Every figure is a real screenshot</h3>
+      <p class="lede">
+        Every <b>Figure</b> is a screenshot of karmyogi actually running — never a
+        mock-up — captured at 2× so it stays sharp when you zoom or print. Numbered
+        <b>balloons</b> sit on the exact control described, and a <b>leader line</b> ties
+        each one to its entry in the key, the same convention as an engineering drawing.
+        A few wide photographic bands open sections; those are labelled
+        <b>Illustration</b> and are artistic, not a guide to the interface.
+      </p>
+      <div class="note" style="margin-top:8px">
+        <b>Interactive, on screen:</b> hover a balloon — or its key row — to highlight the
+        pair in amber. Click any figure to open it full-screen. If a balloon covers
+        something you want to see, the <b>①</b> button on the right-hand rail hides every
+        balloon while leaving the leader lines live, so you can still trace a key row to
+        its exact spot. The printed PDF always keeps the balloons and the key.
+      </div>
+      <div class="warn" style="margin-top:7px">
+        <b>Safety first.</b> karmyogi drives real machinery. Every generated program
+        retracts to a safe Z before travelling, but you remain responsible for the setup
+        — see the notice at the foot of this page, and
+        <a class="xref" href="#s10">§10</a> for safe working practice.
+      </div>
+
+      <h3 class="sub">Conventions used throughout</h3>
+      <table class="t tight">
+        <tbody>
+          <tr><td style="width:74px"><b>Bold</b></td><td>A control you click, or a value you type — <b>Stream</b>, <b>Zero</b>.</td></tr>
+          <tr><td><span class="mono">mono</span></td><td>Literal machine text: G-code, a GRBL setting such as <span class="mono">$110</span>, or a console reply.</td></tr>
+          <tr><td><b>①②③</b></td><td>A balloon on a figure. The same number appears in the key beside or below it.</td></tr>
+          <tr><td><a class="xref" href="#s04">§04</a></td><td>A cross-reference. Click it on screen to jump to that section.</td></tr>
+          <tr><td><b>Blue box</b></td><td>Useful to know — a tip, a shortcut, or an explanation.</td></tr>
+          <tr><td><b>Amber box</b></td><td>Read it. Something here can damage a tool, a workpiece or the machine.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <table class="t toc">
+        <thead><tr><th style="width:22px">§</th><th>Section — click to jump</th></tr></thead>
+        <tbody>
+          <tr><td><b>01</b></td><td><a href="#s01"><b>Quick start</b> — from browser to first cut</a></td></tr>
+          <tr><td><b>02</b></td><td><a href="#s02"><b>The workbench</b> — full-screen anatomy</a></td></tr>
+          <tr><td><b>03</b></td><td><a href="#s03"><b>Top bar</b> — connection &amp; global controls</a></td></tr>
+          <tr><td><b>04</b></td><td><a href="#s04"><b>Controller</b> — DRO, jog, overrides, coolant</a></td></tr>
+          <tr><td><b>05</b></td><td><a href="#s05"><b>Visualizer</b> — live 3D toolpath</a></td></tr>
+          <tr><td><b>06</b></td><td><a href="#s06"><b>Program &amp; Console</b> — streaming, MDI</a></td></tr>
+          <tr><td><b>07</b></td><td><a href="#s07"><b>Work modes</b> — all 23 tabs</a></td></tr>
+          <tr><td><b>07b</b></td><td><a href="#s07b"><b>Tab reference</b> — inputs &amp; outputs</a></td></tr>
+          <tr><td><b>08</b></td><td><a href="#s08"><b>Machine settings</b> — GRBL $-parameters</a></td></tr>
+          <tr><td><b>09</b></td><td><a href="#s09"><b>Shortcuts, gamepad &amp; mobile</b></a></td></tr>
+          <tr><td><b>10</b></td><td><a href="#s10"><b>Troubleshooting &amp; support</b></a></td></tr>
+        </tbody>
+      </table>
+      <h3 class="sub">Requirements</h3>
+      <div class="card">
+        <p>
+          <b>Chromium browser</b> — Chrome, Edge, Brave or Opera. Web Serial is not
+          available in Firefox or Safari.<br/>
+          <b>HTTPS or localhost</b> — karmyogi.hjlabs.in is already served over HTTPS.<br/>
+          <b>A USB cable</b> to your controller. Bluetooth and Wi-Fi also work.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">The five surfaces you will use constantly</h3>
+  <div class="cards c3">
+    <div class="card"><h4>① Work-mode tabs (left)</h4><p>One tab per job — carving, PCB, laser, embroidery… Each turns a design into G-code.</p></div>
+    <div class="card"><h4>② Visualizer (centre)</h4><p>The bed, your toolpath and the live tool position in 3D.</p></div>
+    <div class="card"><h4>③ Program (centre-bottom)</h4><p>The combined G-code, section list, and the Stream / pause / stop controls.</p></div>
+    <div class="card"><h4>④ Console (centre-bottom)</h4><p>Raw GRBL traffic, plus an MDI box for typing commands directly.</p></div>
+    <div class="card"><h4>⑤ Controller (right)</h4><p>DRO, jog pad, homing, overrides, coolant, work-coordinate systems.</p></div>
+    <div class="card accent"><h4>Everything is dockable</h4><p>Drag any tab to re-arrange, float or stack it. The layout is remembered.</p></div>
+  </div>
+
+  <h3 class="sub">The words you need — a plain-English glossary</h3>
+  <p class="tiny" style="margin:-2px 0 5px">
+    If you are new to CNC, these twelve terms cover almost everything in this guide.
+  </p>
+  <div class="fig-grid side" style="gap:12px">
+    <table class="t tight">
+      <tbody>
+        <tr><td style="width:78px"><b>G-code</b></td><td>The plain-text list of instructions a machine runs. karmyogi writes it for you; you rarely need to read it.</td></tr>
+        <tr><td><b>Toolpath</b></td><td>The route the cutter takes. What you see drawn in the 3D view.</td></tr>
+        <tr><td><b>Work zero</b></td><td>The corner of <i>your</i> material that you call X0 Y0 Z0. Everything is cut relative to it.</td></tr>
+        <tr><td><b>Machine zero</b></td><td>A fixed reference the machine finds by homing. Not usually where you cut from.</td></tr>
+        <tr><td><b>Homing</b></td><td>The machine drives to its limit switches to learn exactly where it is.</td></tr>
+        <tr><td><b>Jog</b></td><td>Moving the machine by hand, from the on-screen pad, keyboard or gamepad.</td></tr>
+      </tbody>
+    </table>
+    <table class="t tight">
+      <tbody>
+        <tr><td style="width:78px"><b>Safe Z</b></td><td>A height the tool lifts to before travelling, so it clears clamps and the workpiece.</td></tr>
+        <tr><td><b>Feed rate</b></td><td>How fast the tool moves while cutting, in mm/min. Too fast breaks bits.</td></tr>
+        <tr><td><b>Stepover</b></td><td>How far sideways each pass moves. Smaller = smoother finish, longer job.</td></tr>
+        <tr><td><b>WCS</b></td><td>Work Coordinate System — six saved datums (W1–W6 / G54–G59) so you can keep several setups.</td></tr>
+        <tr><td><b>Alarm</b></td><td>The controller has stopped for safety (a limit hit, or a reset). Unlock, then home.</td></tr>
+        <tr><td><b>Override</b></td><td>Trimming feed or spindle speed live, mid-cut, without stopping the program.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── NO-WARRANTY / NO-LIABILITY NOTICE (software AND this guide) ───────── -->
+  <div style="margin-top:7px;border:1.5px solid #d97706;border-radius:7px;
+              background:#fffbeb;padding:7px 10px">
+    <div style="font-size:9.5px;font-weight:900;letter-spacing:.13em;
+                text-transform:uppercase;color:#b45309">
+      ⚠ Important — no warranty &amp; no liability · read before you run a machine
+    </div>
+    <p style="margin:4px 0 0;font-size:8.3px;line-height:1.46;color:#78350f">
+      <b>karmyogi is provided “as is”, without warranty of any kind</b>, express or
+      implied, including but not limited to merchantability, fitness for a particular
+      purpose and non-infringement. The software is <b>experimental and under active
+      development</b>: it may contain defects, may behave unexpectedly, and
+      <b>may cause a machine to move in ways you did not intend</b>.
+      <b>You operate your machine entirely at your own risk.</b> You alone are
+      responsible for checking every generated program before you run it, for your
+      setup, workholding, tooling and workspace safety, and for supervising the machine
+      at all times — keep a hand on the E-stop.
+      <b>This guide is likewise provided “as is.”</b> It describes intended behaviour at
+      the time of writing; the app changes continuously, so a feature may look different,
+      behave differently, or not work as described here. Nothing in this document is a
+      guarantee, specification or warranty of any kind.
+      To the maximum extent permitted by law, neither <b>hjLabs.in</b>, its proprietor,
+      nor any contributor accepts <b>any responsibility or liability whatsoever</b> for
+      damage to machines, tools, workpieces or property, for injury to persons, or for
+      any loss of data, time, production or profit arising from use of — or inability to
+      use — this software or this guide, whether caused by a software defect, incorrect
+      output, an error or omission in this documentation, a discrepancy between this
+      guide and the app, or operator action. If you do not accept these terms, do not use
+      the software. Licensed under the MIT Licence; the licence text governs and prevails.
+    </p>
+  </div>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>hjLabs.in</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 01 — QUICK START                                                  -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s01">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">01 · Quick start</p>
+  <h2 class="sec">From a browser tab to a finished part</h2>
+  <p class="lede">Six steps. No installation at any point.</p>
+
+  <div class="cards c3" style="margin-top:9px">
+    <div class="card accent">
+      <h4>1 · Open the app</h4>
+      <p>Go to <b class="mono">karmyogi.hjlabs.in</b> in Chrome, Edge, Brave or Opera. Nothing to download. You can also install it as an app and work offline.</p>
+    </div>
+    <div class="card accent">
+      <h4>2 · Connect the machine</h4>
+      <p>Press <b>Connect</b> in the top bar and pick your USB port. Choose the firmware (GRBL / FluidNC / grblHAL / Marlin) in the selector to its left.</p>
+    </div>
+    <div class="card accent">
+      <h4>3 · Home &amp; set work zero</h4>
+      <p>In <b>Controller</b>, press <b>Home</b> if your machine has limit switches. Jog to the corner of your stock, then press <b>Zero</b> to make that point X0 Y0 Z0.</p>
+    </div>
+    <div class="card">
+      <h4>4 · Make a toolpath</h4>
+      <p>Pick a work-mode tab (<a class="xref" href="#s07">§07</a>). Load your file — DXF, STL, STEP, OBJ, SVG or Gerber — set the tool and depths, then press <b>Generate</b>.</p>
+    </div>
+    <div class="card">
+      <h4>5 · Check it in 3D</h4>
+      <p>The <b>Visualizer</b> draws the path over the bed. Use <b>Frame</b> to trace the outline with the tool up, and confirm the job fits your stock.</p>
+    </div>
+    <div class="card">
+      <h4>6 · Run it</h4>
+      <p>Arm motion, then press <b>Stream</b> in the Program panel. Pause, resume and feed-override are live while it runs.</p>
+    </div>
+  </div>
+
+  <h3 class="sub">Before the very first cut — a two-minute checklist</h3>
+  <div class="fig-grid side">
+    <div>
+      <table class="t">
+        <tbody>
+          <tr><td style="width:16px">☐</td><td><b>Motion is armed</b> — karmyogi blocks jog and run until you explicitly arm it, so an accidental keypress cannot move the machine.</td></tr>
+          <tr><td>☐</td><td><b>Work zero is where you think it is</b> — read the WORK column of the DRO, not the MACHINE column.</td></tr>
+          <tr><td>☐</td><td><b>The right work-coordinate system is active</b> — W1…W6 (G54–G59) in the Controller.</td></tr>
+          <tr><td>☐</td><td><b>Tool fitted matches the toolpath</b> — the operation card names the bit it was calculated for.</td></tr>
+          <tr><td>☐</td><td><b>Safe-Z clears every clamp</b> — every program retracts before travelling; make sure that height is above your hold-downs.</td></tr>
+          <tr><td>☐</td><td><b>Framed the job</b> — trace the outline with the spindle off first.</td></tr>
+          <tr><td>☐</td><td><b>E-stop within reach.</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <div class="warn">
+        <b>Web Serial is Chromium-only.</b> In Firefox or Safari the CAD/CAM half of
+        karmyogi still works — you can generate and export G-code — but the app cannot
+        talk to a controller. Use Chrome, Edge, Brave or Opera to drive a machine.
+      </div>
+      <div class="note" style="margin-top:7px">
+        <b>No machine yet?</b> Open the Connect menu and choose <b>Mock device</b> — an
+        in-browser GRBL simulator. Every panel, the DRO, the jog pad and streaming all
+        behave normally, so you can learn the whole app with no hardware attached.
+        Every screenshot in this guide was taken against it.
+      </div>
+      <h3 class="sub">Units &amp; conventions</h3>
+      <div class="card"><p>
+        karmyogi works in <b>millimetres</b> and emits <b class="mono">G21 G90 G94 G17</b>
+        at the top of every program (metric, absolute, feed-per-minute, XY plane).
+        Feeds are mm/min. Z is positive <b>up</b>: cutting depths are negative.
+      </p></div>
+    </div>
+  </div>
+
+  <h3 class="sub">Worked example — engrave your name in wood</h3>
+  <p class="tiny" style="margin:-2px 0 6px">
+    The shortest complete job in the app. If you can do this, the rest of the guide is
+    just variations on it. Allow ten minutes.
+  </p>
+  <div class="fig-grid side" style="gap:12px">
+    <table class="t tight">
+      <tbody>
+        <tr><td style="width:16px"><b>1</b></td><td>Clamp a flat offcut of softwood to the bed. Fit a <b>V-bit</b> or a small engraving bit.</td></tr>
+        <tr><td><b>2</b></td><td>Connect the machine, then <b>Home</b> it if it has limit switches.</td></tr>
+        <tr><td><b>3</b></td><td>Jog to the bottom-left corner of where the text should sit. Lower Z until the tip just touches the wood — use the <b>0.1 mm</b> step for the last bit.</td></tr>
+        <tr><td><b>4</b></td><td>Press <b>Zero</b>. That corner is now X0 Y0 Z0.</td></tr>
+        <tr><td><b>5</b></td><td>Open the <b>Writing</b> tab. Type your name. Set height ≈ 12 mm and depth ≈ <b>−0.4 mm</b>.</td></tr>
+        <tr><td><b>6</b></td><td>Press <b>Generate</b>. The path appears in the Visualizer over the bed.</td></tr>
+        <tr><td><b>7</b></td><td>Press <b>Frame</b> — the machine traces the outline with the tool up. Confirm it lands on the wood.</td></tr>
+        <tr><td><b>8</b></td><td><b>Arm motion</b>, start the spindle, then press <b>Stream</b> in the Program panel.</td></tr>
+        <tr><td><b>9</b></td><td>Watch the first plunge. If it is too deep or too shallow, press <b>Hold</b>, adjust, and re-run.</td></tr>
+      </tbody>
+    </table>
+    <div>
+      <div class="note">
+        <b>Why V-bit and 0.4 mm?</b> A V-shaped cutter engraves a clean line at a very
+        shallow depth, so a mistake costs you a scratch rather than a broken bit. It is
+        the most forgiving first cut there is.
+      </div>
+      <div class="card" style="margin-top:7px"><p>
+        <b>If the letters look wrong:</b> too shallow means Z zero was set slightly high
+        — re-zero and add 0.1 mm. Ragged edges usually mean the feed is too fast for the
+        wood; drop the feed override to 70 % mid-cut and see if it cleans up.
+      </p></div>
+      <div class="warn" style="margin-top:7px">
+        <b>Do not skip step 7.</b> Framing is the only step that proves the job will
+        actually land on your material before a cutter touches it.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Stuck in the first five minutes? Start here</h3>
+  <p class="tiny" style="margin:-2px 0 5px">
+    These five account for almost every failed first attempt. Fuller diagnosis in
+    <a class="xref" href="#s10">§10</a>.
+  </p>
+  <table class="t tight">
+    <thead><tr><th style="width:210px">What you see</th><th style="width:220px">Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>The Connect button does nothing</b>, or the browser shows no port list</td>
+        <td>Web Serial is missing. Firefox and Safari do not have it.</td>
+        <td>Use Chrome, Edge, Brave or Opera. Connecting must also start from your click — it cannot happen automatically.</td>
+      </tr>
+      <tr>
+        <td><b>The port picker is empty</b></td>
+        <td>The board is not enumerating: cable, driver, or the port is held by another program.</td>
+        <td>Close any other sender or serial monitor, try a different USB cable, then re-plug. On Linux add yourself to <span class="mono">dialout</span>.</td>
+      </tr>
+      <tr>
+        <td><b>Connected, but nothing moves</b></td>
+        <td>Motion is locked out — this is deliberate, so a stray keypress cannot drive the machine.</td>
+        <td>Press <b>Arm motion</b> in the Controller. The badge turns green and reads <i>Motion armed</i>.</td>
+      </tr>
+      <tr>
+        <td><b>Every command is refused</b>, and the state reads <span class="mono">Alarm</span></td>
+        <td>The controller stopped for safety — a limit switch, or a reset while it did not know its position.</td>
+        <td><b>Unlock</b>, then <b>Home</b>. Do not jog before homing: the machine does not yet know where it is.</td>
+      </tr>
+      <tr>
+        <td><b>An axis runs the wrong way</b>, or hits a limit immediately</td>
+        <td>Direction-inversion or travel limits are wrong for your machine.</td>
+        <td>Fix it once in <b>Motion settings</b> — <span class="mono">$3</span> direction, <span class="mono">$130–$132</span> travel. See <a class="xref" href="#s08">§08</a>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§01 Quick start</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 02 — THE WORKBENCH (hero callout figure)                           -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s02">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">02 · The workbench</p>
+  <h2 class="sec">Anatomy of the screen</h2>
+  <p class="lede">
+    The whole application is one screen of dockable panels. This is the default
+    arrangement, with a machine connected and motion armed.
+  </p>
+
+  <figure class="fig" data-fig>
+    <div class="fig-stage" data-zoom-src="shots/00-workbench-master.png">
+      <img src="shots/00-workbench-master.png" alt="karmyogi workbench with a connected machine" />
+      <b class="cal" data-n="1"  style="left:4.5%;  top:2.4%">1</b>
+      <b class="cal" data-n="2"  style="left:33%;   top:2.4%">2</b>
+      <b class="cal" data-n="3"  style="left:52.5%; top:2.4%">3</b>
+      <b class="cal" data-n="4"  style="left:74%;   top:2.4%">4</b>
+      <b class="cal" data-n="5"  style="left:88%;   top:2.4%">5</b>
+      <b class="cal" data-n="6"  style="left:14%;   top:6.7%">6</b>
+      <b class="cal" data-n="7"  style="left:16%;   top:11%">7</b>
+      <b class="cal" data-n="8"  style="left:53%;   top:11%">8</b>
+      <b class="cal" data-n="9"  style="left:44%;   top:29%">9</b>
+      <b class="cal" data-n="10" style="left:71%;   top:46%">10</b>
+      <b class="cal" data-n="11" style="left:50%;   top:59.5%">11</b>
+      <b class="cal" data-n="12" style="left:41%;   top:71%">12</b>
+      <b class="cal" data-n="13" style="left:66%;   top:63%">13</b>
+      <b class="cal" data-n="14" style="left:64.5%; top:97%">14</b>
+      <b class="cal" data-n="15" style="left:78.5%; top:11.5%">15</b>
+      <b class="cal" data-n="16" style="left:86%;   top:27%">16</b>
+      <b class="cal" data-n="17" style="left:83%;   top:62%">17</b>
+      <b class="cal" data-n="18" style="left:2.2%;  top:57%">18</b>
+      <svg class="fig-leads"></svg>
+    </div>
+    <ol class="fig-key" style="columns:2;column-gap:12px;margin-top:7px">
+      <li data-n="1"><span class="n">1</span><span><b>Brand / About</b> — version, changelog, licence, report a bug.</span></li>
+      <li data-n="2"><span class="n">2</span><span><b>Connection cluster</b> — firmware, baud, state, Connect / Disconnect. <a class="xref" href="#s03">§03</a></span></li>
+      <li data-n="3"><span class="n">3</span><span><b>Machines</b> — save several machines and switch between them.</span></li>
+      <li data-n="4"><span class="n">4</span><span><b>Layout &amp; zoom</b> — reset the dock layout, global UI scale.</span></li>
+      <li data-n="5"><span class="n">5</span><span><b>Language, theme, alerts, account</b> — 53 languages; light/dark.</span></li>
+      <li data-n="6"><span class="n">6</span><span><b>Work-mode tab strip</b> — 23 tabs; the ⌄ chip reveals the overflow.</span></li>
+      <li data-n="7"><span class="n">7</span><span><b>Active work-mode panel</b> — here 2D/3D Carving. <a class="xref" href="#s07">§07</a></span></li>
+      <li data-n="8"><span class="n">8</span><span><b>Visualizer toolbar</b> — views, fit, measure, screenshot, gizmos.</span></li>
+      <li data-n="9"><span class="n">9</span><span><b>3D bed &amp; toolpath</b> — machine envelope, WCS origins, live tool. <a class="xref" href="#s05">§05</a></span></li>
+      <li data-n="10"><span class="n">10</span><span><b>Machine / Simulation legend</b> — show the live tool, the simulated one, or both.</span></li>
+      <li data-n="11"><span class="n">11</span><span><b>Program panel</b> — Check, Stream, pause, stop, progress. <a class="xref" href="#s06">§06</a></span></li>
+      <li data-n="12"><span class="n">12</span><span><b>Sections list</b> — every generated operation, reorderable and individually runnable.</span></li>
+      <li data-n="13"><span class="n">13</span><span><b>Console</b> — raw GRBL traffic, searchable. <a class="xref" href="#s06">§06</a></span></li>
+      <li data-n="14"><span class="n">14</span><span><b>MDI box</b> — type any G-code or <span class="mono">$</span> command; quick-buttons for the common ones.</span></li>
+      <li data-n="15"><span class="n">15</span><span><b>DRO</b> — work and machine position, live. <a class="xref" href="#s04">§04</a></span></li>
+      <li data-n="16"><span class="n">16</span><span><b>Motion lock-out</b> — jog and run stay disabled until you arm it.</span></li>
+      <li data-n="17"><span class="n">17</span><span><b>Jog pad</b> — tap to step, hold for continuous. <a class="xref" href="#s04">§04</a></span></li>
+      <li data-n="18"><span class="n">18</span><span><b>Presets rail</b> — save and recall the whole set of parameters for a panel.</span></li>
+    </ol>
+    <p class="fig-cap"><b>Figure 02.1</b> — Default workbench, 1600 × 1000 logical px. Screenshot taken against the built-in Mock device.</p>
+  </figure>
+
+  <h3 class="sub">What lives where</h3>
+  <p class="tiny" style="margin:-2px 0 5px">
+    The key above names the parts of the screen. This names the <b>panels</b>, and where
+    each one is documented — click a section to jump.
+  </p>
+  <div class="fig-grid side" style="gap:12px">
+    <table class="t tight">
+      <tbody>
+        <tr><td style="width:96px"><b>Top bar</b></td><td>Connect, machine profile, language, theme, zoom, About. <a class="xref" href="#s03">§03</a></td></tr>
+        <tr><td><b>Work-mode tabs</b></td><td>Turn a design into G-code — one tab per kind of job. <a class="xref" href="#s07">§07</a></td></tr>
+        <tr><td><b>Bit &amp; Material</b></td><td>The tool and the stock the active work mode calculates against. <a class="xref" href="#s07">§07</a></td></tr>
+        <tr><td><b>Visualizer</b></td><td>Bed, toolpath, live tool position, cut simulation. <a class="xref" href="#s05">§05</a></td></tr>
+      </tbody>
+    </table>
+    <table class="t tight">
+      <tbody>
+        <tr><td style="width:96px"><b>Program</b></td><td>The combined G-code, its sections, and streaming control. <a class="xref" href="#s06">§06</a></td></tr>
+        <tr><td><b>Console + MDI</b></td><td>Raw controller traffic, and a box to type commands. <a class="xref" href="#s06">§06</a></td></tr>
+        <tr><td><b>Controller</b></td><td>DRO, jog, homing, overrides, work offsets, coolant. <a class="xref" href="#s04">§04</a></td></tr>
+        <tr><td><b>Motion settings</b></td><td>Every GRBL <span class="mono">$</span>-parameter, explained. <a class="xref" href="#s08">§08</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§02 The workbench</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 03 — TOP BAR                                                      -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s03">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">03 · Top bar</p>
+  <h2 class="sec">Connecting to the machine</h2>
+  <p class="lede">
+    Everything about the link to your controller lives in one strip across the top.
+    The coloured dot is the machine state at a glance.
+  </p>
+
+  <figure class="fig" data-fig>
+    <div class="fig-stage" data-zoom-src="shots/crop-topbar.png">
+      <img src="shots/crop-topbar.png" alt="karmyogi top bar" />
+      <b class="cal" data-n="1" style="left:3%;  top:50%">1</b>
+      <b class="cal" data-n="2" style="left:22%; top:50%">2</b>
+      <b class="cal" data-n="3" style="left:29%; top:50%">3</b>
+      <b class="cal" data-n="4" style="left:33.5%;top:50%">4</b>
+      <b class="cal" data-n="5" style="left:37%; top:50%">5</b>
+      <b class="cal" data-n="6" style="left:41.5%;top:50%">6</b>
+      <b class="cal" data-n="7" style="left:47%; top:50%">7</b>
+      <b class="cal" data-n="8" style="left:52%; top:50%">8</b>
+      <b class="cal" data-n="9" style="left:55.5%;top:50%">9</b>
+      <b class="cal" data-n="10" style="left:66%; top:50%">10</b>
+      <b class="cal" data-n="11" style="left:78%; top:50%">11</b>
+      <b class="cal" data-n="12" style="left:92%; top:50%">12</b>
+      <svg class="fig-leads"></svg>
+    </div>
+    <ol class="fig-key" style="columns:2;column-gap:12px;margin-top:7px">
+      <li data-n="1"><span class="n">1</span><span><b>karmyogi / About</b> — build version, what's new, MIT licence, source link.</span></li>
+      <li data-n="2"><span class="n">2</span><span><b>Firmware</b> — GRBL, FluidNC, grblHAL, Marlin, Smoothieware, Masso. Sets the dialect used for every command.</span></li>
+      <li data-n="3"><span class="n">3</span><span><b>Import controller config</b> — read settings from a file.</span></li>
+      <li data-n="4"><span class="n">4</span><span><b>Baud rate</b> — 115200 suits GRBL and FluidNC.</span></li>
+      <li data-n="5"><span class="n">5</span><span><b>State dot</b> — grey offline · green Idle · teal moving · amber Hold/Door · red Alarm.</span></li>
+      <li data-n="6"><span class="n">6</span><span><b>State text</b> — CONNECTED / DISCONNECTED and the GRBL state.</span></li>
+      <li data-n="7"><span class="n">7</span><span><b>Connect / Disconnect</b> — the menu offers USB, Bluetooth, Wi-Fi and the Mock device.</span></li>
+      <li data-n="8"><span class="n">8</span><span><b>Machines</b> — remember several machines; switch without re-picking a port.</span></li>
+      <li data-n="9"><span class="n">9</span><span><b>Probe</b> — Z-probe, corner finding and auto bed-size measurement.</span></li>
+      <li data-n="10"><span class="n">10</span><span><b>Motion settings</b> — the full GRBL <span class="mono">$</span>-parameter editor. <a class="xref" href="#s08">§08</a></span></li>
+      <li data-n="11"><span class="n">11</span><span><b>Layout · reload · UI zoom</b> — reset docking; scale the whole interface.</span></li>
+      <li data-n="12"><span class="n">12</span><span><b>Language · theme · notifications · account</b>.</span></li>
+    </ol>
+    <p class="fig-cap"><b>Figure 03.1</b> — Top bar, full width. A crop of Figure 02.1.</p>
+  </figure>
+
+  <h3 class="sub">Four ways to reach a controller</h3>
+  <div class="cards c4">
+    <div class="card accent"><h4>USB cable</h4><p>Web Serial. The standard, lowest-latency choice. Chromium only.</p></div>
+    <div class="card"><h4>Bluetooth</h4><p>Web Bluetooth for BLE-equipped boards. Needs a Chromium flag on some systems.</p></div>
+    <div class="card"><h4>Wi-Fi</h4><p>For FluidNC/ESP32 boards on your network — scan and connect by address.</p></div>
+    <div class="card"><h4>Mock device</h4><p>A GRBL simulator inside the browser. Ideal for learning and for testing programs.</p></div>
+  </div>
+
+  <div class="warn" style="margin-top:8px">
+    <b>If the port list is empty:</b> the board is claimed by another program (close
+    any other sender or serial monitor), the cable is charge-only, or a driver is
+    missing (CH340 / CP210x on Windows). karmyogi cannot see a port that the operating
+    system has not enumerated.
+  </div>
+
+  <h3 class="sub">Reading the state dot at a glance</h3>
+  <p class="tiny" style="margin:-2px 0 5px">
+    The single most useful indicator in the app. Learn these six colours and you always
+    know what the machine is doing without reading anything.
+  </p>
+  <div class="cards c3">
+    <div class="card"><h4><span style="color:#94a3b8">●</span> Grey — offline</h4><p>Not connected. Nothing can move. CAD/CAM still works.</p></div>
+    <div class="card"><h4><span style="color:#34d399">●</span> Green — Idle</h4><p>Connected and ready. Safe to jog, home or start a job.</p></div>
+    <div class="card"><h4><span style="color:#2dd4bf">●</span> Teal — moving</h4><p>Run, Jog or Home. The machine is in motion right now.</p></div>
+    <div class="card"><h4><span style="color:#fbbf24">●</span> Amber — Hold / Door</h4><p>Paused. Press Resume to continue from exactly where it stopped.</p></div>
+    <div class="card"><h4><span style="color:#f87171">●</span> Red — Alarm</h4><p>Stopped for safety. Unlock, clear the cause, then home.</p></div>
+    <div class="card accent"><h4>Connecting</h4><p>Amber while the handshake runs. If it never turns green, check baud rate.</p></div>
+  </div>
+
+  <h3 class="sub">The tab strip</h3>
+  <figure class="fig" data-fig style="margin-top:4px">
+    <div class="fig-stage" data-zoom-src="shots/crop-tabstrip.png">
+      <img src="shots/crop-tabstrip.png" alt="karmyogi work-mode tab strip" />
+      <b class="cal" data-n="1" style="left:8%;  top:52%">1</b>
+      <b class="cal" data-n="2" style="left:30%; top:52%">2</b>
+      <b class="cal" data-n="3" style="left:75%; top:52%">3</b>
+      <b class="cal" data-n="4" style="left:91%; top:52%">4</b>
+      <svg class="fig-leads"></svg>
+    </div>
+    <ol class="fig-key" style="columns:2;column-gap:12px;margin-top:6px">
+      <li data-n="1"><span class="n">1</span><span><b>Active tab</b> — underlined; its panel fills the dock below.</span></li>
+      <li data-n="2"><span class="n">2</span><span><b>Other open tabs</b> — click to switch, drag to re-arrange or float.</span></li>
+      <li data-n="3"><span class="n">3</span><span><b>Close (✕)</b> — hide a tab you do not use. Reopen it any time from the layout menu.</span></li>
+      <li data-n="4"><span class="n">4</span><span><b>Overflow chip</b> — the count of tabs that do not fit; click to pick from the full list.</span></li>
+    </ol>
+    <p class="fig-cap"><b>Figure 03.2</b> — Work-mode tab strip. A crop of Figure 02.1.</p>
+  </figure>
+
+  <figure class="art">
+    <img src="art/connect.jpg" alt="A laptop and a phone driving a desktop CNC machine" />
+    <span class="tagline">One browser tab · any 3-axis machine</span>
+    <figcaption>
+      <b>Illustration</b> — the whole chain is a browser and a USB cable: karmyogi runs in
+      the tab, speaks GRBL over Web Serial, and the same interface works from a laptop or
+      a phone. No driver, no server, no account. <i>Artist's impression, not a screenshot.</i>
+    </figcaption>
+  </figure>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§03 Top bar</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 04 — CONTROLLER                                                   -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s04">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">04 · Controller</p>
+  <h2 class="sec">Driving the machine by hand</h2>
+  <p class="lede">
+    The panel you will live in. Position, jogging, homing, work offsets, coolant and
+    tool changes — all in one column.
+  </p>
+
+  <figure class="fig" data-fig>
+    <div class="fig-grid side">
+      <!-- Balloon coordinates below were MEASURED from the running app's DOM
+           (each control's bounding box mapped into this crop's frame), not eyeballed. -->
+      <div class="fig-stage tall" data-zoom-src="shots/crop-controller.png">
+        <img src="shots/crop-controller.png" alt="karmyogi Controller panel" />
+        <b class="cal" data-n="1"  style="left:34.2%; top:5.2%">1</b>
+        <b class="cal" data-n="2"  style="left:8.9%;  top:9.7%">2</b>
+        <b class="cal" data-n="3"  style="left:75.4%; top:9.7%">3</b>
+        <b class="cal" data-n="4"  style="left:50.1%; top:22.7%">4</b>
+        <b class="cal" data-n="5"  style="left:11.1%; top:31.1%">5</b>
+        <b class="cal" data-n="6"  style="left:42.3%; top:31.1%">6</b>
+        <b class="cal" data-n="7"  style="left:89.1%; top:31.1%">7</b>
+        <b class="cal" data-n="8"  style="left:30.0%; top:40.5%">8</b>
+        <b class="cal" data-n="9"  style="left:44.2%; top:44.8%">9</b>
+        <b class="cal" data-n="10" style="left:11.1%; top:48.9%">10</b>
+        <b class="cal" data-n="11" style="left:45.8%; top:59.3%">11</b>
+        <b class="cal" data-n="12" style="left:33.7%; top:59.3%">12</b>
+        <b class="cal" data-n="13" style="left:58.4%; top:53.8%">13</b>
+        <b class="cal" data-n="14" style="left:84.3%; top:69.5%">14</b>
+        <b class="cal" data-n="15" style="left:74.8%; top:55.2%">15</b>
+        <b class="cal" data-n="16" style="left:50.1%; top:75.5%">16</b>
+        <b class="cal" data-n="17" style="left:18.7%; top:85.4%">17</b>
+        <b class="cal" data-n="18" style="left:50.1%; top:97.6%">18</b>
+        <svg class="fig-leads"></svg>
+      </div>
+      <ol class="fig-key">
+        <li data-n="1"><span class="n">1</span><span><b>WORK vs MACHINE</b> — work position is relative to your zero; machine position is absolute from home. Cut using WORK.</span></li>
+        <li data-n="2"><span class="n">2</span><span><b>Axis labels</b> — X, Y, Z (A/B added when the firmware reports them).</span></li>
+        <li data-n="3"><span class="n">3</span><span><b>Live coordinates</b> — updated continuously from the controller's status report.</span></li>
+        <li data-n="4"><span class="n">4</span><span><b>Motion lock-out</b> — the safety gate. While locked, jog and run are refused. Click to arm.</span></li>
+        <li data-n="5"><span class="n">5</span><span><b>Home</b> (<span class="mono">$H</span>) — runs the homing cycle. Needs limit switches.</span></li>
+        <li data-n="6"><span class="n">6</span><span><b>Unlock · Reset · Hold · Resume</b> — clear an alarm (<span class="mono">$X</span>), soft-reset, feed-hold, cycle-start.</span></li>
+        <li data-n="7"><span class="n">7</span><span><b>Zero</b> (<span class="mono">G10 L20 P0</span>) — make the current position X0 Y0 Z0 of the active WCS.</span></li>
+        <li data-n="8"><span class="n">8</span><span><b>Jog step</b> — 0.1 / 1 / 10 / 100 mm. Keys <kbd>1</kbd>–<kbd>4</kbd> select these.</span></li>
+        <li data-n="9"><span class="n">9</span><span><b>Jog feed</b> — how fast a jog runs, mm/min.</span></li>
+        <li data-n="10"><span class="n">10</span><span><b>W1–W6</b> — the six work-coordinate systems (G54–G59). The highlighted one is active.</span></li>
+        <li data-n="11"><span class="n">11</span><span><b>Jog pad</b> — X/Y plus diagonals. <b>Tap</b> = one exact step; <b>hold</b> = continuous until you let go.</span></li>
+        <li data-n="12"><span class="n">12</span><span><b>Stop jog</b> — the red ✕ cancels motion immediately.</span></li>
+        <li data-n="13"><span class="n">13</span><span><b>Z jog &amp; go-to-zero</b> — Z± column; the ⟳ button returns to work zero, retracting Z first.</span></li>
+        <li data-n="14"><span class="n">14</span><span><b>Shortcuts</b> — the full keyboard map. <a class="xref" href="#s09">§09</a></span></li>
+        <li data-n="15"><span class="n">15</span><span><b>Zero X / Y / Z</b> — zero one axis only, leaving the others.</span></li>
+        <li data-n="16"><span class="n">16</span><span><b>Teach points</b> — store named positions and return to them.</span></li>
+        <li data-n="17"><span class="n">17</span><span><b>Coolant &amp; Park</b> — flood (M8), mist (M7), off (M9); park at a chosen XY.</span></li>
+        <li data-n="18"><span class="n">18</span><span><b>Tool change</b> — guided change with a length-offset re-probe.</span></li>
+      </ol>
+    </div>
+    <p class="fig-cap"><b>Figure 04.1</b> — Controller panel, machine connected and armed. A crop of Figure 02.1.</p>
+  </figure>
+
+  <div class="cards c2" style="margin-top:8px">
+    <div class="card accent"><h4>Jogging with the keyboard</h4><p>
+      <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move X/Y; <kbd>PgUp</kbd>/<kbd>PgDn</kbd> move Z.
+      A tap steps once; holding a key runs continuously and stops the moment you
+      release. <kbd>Esc</kbd> cancels. The panel only needs to be visible — not focused.
+    </p></div>
+    <div class="card accent"><h4>Overrides while cutting</h4><p>
+      <kbd>[</kbd> and <kbd>]</kbd> trim feed by 10 %, <kbd>\</kbd> returns to 100 %.
+      These are GRBL real-time overrides: they take effect immediately, mid-move,
+      without stopping the program.
+    </p></div>
+  </div>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§04 Controller</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 05 — VISUALIZER                                                   -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s05">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">05 · Visualizer</p>
+  <h2 class="sec">Seeing the job before you cut it</h2>
+  <p class="lede">
+    A real 3D view of the machine envelope, your toolpath and the live tool position.
+    This is the cheapest way to catch a mistake.
+  </p>
+
+  <figure class="fig" data-fig>
+    <div class="fig-stage" data-zoom-src="shots/crop-visualizer.png">
+      <img src="shots/crop-visualizer.png" alt="karmyogi 3D visualizer" />
+      <b class="cal" data-n="1" style="left:9%;  top:8%">1</b>
+      <b class="cal" data-n="2" style="left:32%; top:8%">2</b>
+      <b class="cal" data-n="3" style="left:56%; top:8%">3</b>
+      <b class="cal" data-n="4" style="left:80%; top:8%">4</b>
+      <b class="cal" data-n="5" style="left:12%; top:26%">5</b>
+      <b class="cal" data-n="6" style="left:37%; top:33%">6</b>
+      <b class="cal" data-n="7" style="left:57%; top:44%">7</b>
+      <b class="cal" data-n="8" style="left:29%; top:60%">8</b>
+      <b class="cal" data-n="9" style="left:88%; top:24%">9</b>
+      <b class="cal" data-n="10" style="left:85%; top:78%">10</b>
+      <svg class="fig-leads"></svg>
+    </div>
+    <ol class="fig-key" style="columns:2;column-gap:12px;margin-top:7px">
+      <li data-n="1"><span class="n">1</span><span><b>Layers</b> — show/hide bed, grid, stock, origins, dimensions, the carved preview.</span></li>
+      <li data-n="2"><span class="n">2</span><span><b>Standard views</b> — fit, top, front, side, isometric.</span></li>
+      <li data-n="3"><span class="n">3</span><span><b>Placement gizmo</b> — move, rotate, mirror and array the job on the bed.</span></li>
+      <li data-n="4"><span class="n">4</span><span><b>Measure &amp; capture</b> — dimension tool and a PNG snapshot of the view.</span></li>
+      <li data-n="5"><span class="n">5</span><span><b>Axis triad</b> — X red, Y green, Z blue. karmyogi is Z-up.</span></li>
+      <li data-n="6"><span class="n">6</span><span><b>Machine envelope</b> — your configured travel, labelled X/Y/Z. A job outside this cannot run.</span></li>
+      <li data-n="7"><span class="n">7</span><span><b>WCS origins</b> — G54…G59 markers, so you can see which datum you are cutting from.</span></li>
+      <li data-n="8"><span class="n">8</span><span><b>Live tool</b> — the spindle follows the real machine position as it moves.</span></li>
+      <li data-n="9"><span class="n">9</span><span><b>View cube</b> — drag to orbit, click a face to snap to that view.</span></li>
+      <li data-n="10"><span class="n">10</span><span><b>Machine / Simulation</b> — the live tool, the simulated preview tool, or both.</span></li>
+    </ol>
+    <p class="fig-cap"><b>Figure 05.1</b> — Visualizer with an empty program. A crop of Figure 02.1.</p>
+  </figure>
+
+  <div class="cards c3" style="margin-top:9px">
+    <div class="card"><h4>Orbit · pan · zoom</h4><p>Drag to orbit, middle-drag or two-finger drag to pan, wheel or pinch to zoom.</p></div>
+    <div class="card"><h4>Simulate the cut</h4><p>Scrub the playback timeline to watch the tool follow the path, with the carved-stock preview updating.</p></div>
+    <div class="card"><h4>Read the colours</h4><p>Rapids and cutting moves are drawn differently, and each operation section gets its own colour.</p></div>
+  </div>
+
+  <div class="note" style="margin-top:8px">
+    <b>Frame before you cut.</b> The Frame action traces the XY bounding box of the
+    current program with the tool raised. It is the fastest way to confirm the job
+    lands on your stock and clears the clamps.
+  </div>
+
+  <figure class="art">
+    <img src="art/hero.jpg" alt="A toolpath previewed in 3D above a CNC machine cutting the same part" />
+    <span class="tagline">See it before you cut it</span>
+    <figcaption>
+      <b>Illustration</b> — the point of the Visualizer: the path on screen and the path in
+      the material are the same path. <i>Artist's impression, not a screenshot.</i>
+    </figcaption>
+  </figure>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§05 Visualizer</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 06 — PROGRAM & CONSOLE                                            -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s06">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">06 · Program &amp; Console</p>
+  <h2 class="sec">Running the job, and talking to the board</h2>
+
+  <div class="fig-grid side">
+    <figure class="fig" data-fig style="margin:0">
+      <h3 class="sub" style="margin-top:0">Program</h3>
+      <div class="fig-stage" data-zoom-src="shots/crop-program.png">
+        <img src="shots/crop-program.png" alt="karmyogi Program panel" />
+        <b class="cal" data-n="1" style="left:11%; top:8%">1</b>
+        <b class="cal" data-n="2" style="left:26%; top:8%">2</b>
+        <b class="cal" data-n="3" style="left:47%; top:8%">3</b>
+        <b class="cal" data-n="4" style="left:76%; top:8%">4</b>
+        <b class="cal" data-n="5" style="left:11%; top:16.5%">5</b>
+        <b class="cal" data-n="6" style="left:26%; top:16.5%">6</b>
+        <b class="cal" data-n="7" style="left:50%; top:24%">7</b>
+        <b class="cal" data-n="8" style="left:22%; top:33%">8</b>
+        <b class="cal" data-n="9" style="left:78%; top:33%">9</b>
+        <b class="cal" data-n="10" style="left:50%; top:63%">10</b>
+        <svg class="fig-leads"></svg>
+      </div>
+      <ol class="fig-key" style="margin-top:6px">
+        <li data-n="1"><span class="n">1</span><span><b>Restart</b> — rewind to the first line.</span></li>
+        <li data-n="2"><span class="n">2</span><span><b>Start line</b> — begin from a chosen line (recovery after a stop).</span></li>
+        <li data-n="3"><span class="n">3</span><span><b>Check mode</b> — GRBL parses the whole file without moving. Catches syntax errors.</span></li>
+        <li data-n="4"><span class="n">4</span><span><b>Stream</b> — send the program to the machine. This starts cutting.</span></li>
+        <li data-n="5"><span class="n">5</span><span><b>Pause</b> — feed-hold; the spindle keeps turning.</span></li>
+        <li data-n="6"><span class="n">6</span><span><b>Stop</b> — abort and flush the queue.</span></li>
+        <li data-n="7"><span class="n">7</span><span><b>Progress</b> — lines sent, percent, elapsed / estimated time.</span></li>
+        <li data-n="8"><span class="n">8</span><span><b>Sections</b> — one row per generated operation; reorder, hide, or run individually.</span></li>
+        <li data-n="9"><span class="n">9</span><span><b>Export / copy</b> — save the combined G-code to a <span class="mono">.nc</span> file.</span></li>
+        <li data-n="10"><span class="n">10</span><span><b>Upload G-code</b> — run a file made elsewhere; karmyogi is a plain sender too.</span></li>
+      </ol>
+    </figure>
+
+    <figure class="fig" data-fig style="margin:0">
+      <h3 class="sub" style="margin-top:0">Console</h3>
+      <div class="fig-stage" data-zoom-src="shots/crop-console.png">
+        <img src="shots/crop-console.png" alt="karmyogi Console panel" />
+        <b class="cal" data-n="1" style="left:30%; top:7.5%">1</b>
+        <b class="cal" data-n="2" style="left:80%; top:7.5%">2</b>
+        <b class="cal" data-n="3" style="left:92%; top:7.5%">3</b>
+        <b class="cal" data-n="4" style="left:55%; top:22%">4</b>
+        <b class="cal" data-n="5" style="left:20%; top:58%">5</b>
+        <b class="cal" data-n="6" style="left:35%; top:83%">6</b>
+        <b class="cal" data-n="7" style="left:55%; top:92%">7</b>
+        <b class="cal" data-n="8" style="left:93%; top:92%">8</b>
+        <svg class="fig-leads"></svg>
+      </div>
+      <ol class="fig-key" style="margin-top:6px">
+        <li data-n="1"><span class="n">1</span><span><b>Search</b> — filter the log; useful for finding an <span class="mono">error:</span> or <span class="mono">ALARM</span>.</span></li>
+        <li data-n="2"><span class="n">2</span><span><b>Auto-scroll</b> — follow new lines, or freeze to read back.</span></li>
+        <li data-n="3"><span class="n">3</span><span><b>Clear</b> — empty the log.</span></li>
+        <li data-n="4"><span class="n">4</span><span><b>Sent commands</b> — what karmyogi sent, e.g. a <span class="mono">$J=</span> jog.</span></li>
+        <li data-n="5"><span class="n">5</span><span><b>Replies</b> — <span class="mono">ok</span>, <span class="mono">error:n</span>, alarms and controller messages, timestamped.</span></li>
+        <li data-n="6"><span class="n">6</span><span><b>Quick commands</b> — <span class="mono">$$ $H $X $G G0 X0 Y0 ?</span> one-tap.</span></li>
+        <li data-n="7"><span class="n">7</span><span><b>MDI</b> — type any G-code or <span class="mono">$</span> command and press enter.</span></li>
+        <li data-n="8"><span class="n">8</span><span><b>Send</b>.</span></li>
+      </ol>
+    </figure>
+  </div>
+
+  <div class="warn" style="margin-top:9px">
+    <b>The MDI box moves the machine immediately.</b> There is no preview and no undo —
+    a mistyped <span class="mono">G0 Z-50</span> will be obeyed. Check the axis letter
+    and the sign before pressing enter.
+  </div>
+
+  <h3 class="sub">What the common replies mean</h3>
+  <table class="t">
+    <thead><tr><th style="width:88px">Reply</th><th>Meaning &amp; what to do</th></tr></thead>
+    <tbody>
+      <tr><td class="mono"><b>ok</b></td><td>Command accepted. Normal.</td></tr>
+      <tr><td class="mono"><b>error:9</b></td><td>G-code locked out — the machine is in Alarm. Press <b>Unlock</b>, or home it.</td></tr>
+      <tr><td class="mono"><b>error:20 / 24</b></td><td>Unsupported or conflicting command — usually a hand-typed line.</td></tr>
+      <tr><td class="mono"><b>ALARM:1</b></td><td>A hard limit was hit. Unlock, jog off the switch, re-home.</td></tr>
+      <tr><td class="mono"><b>ALARM:2</b></td><td>The move exceeded the soft-travel limit. Check work zero and job placement.</td></tr>
+      <tr><td class="mono"><b>[MSG:…]</b></td><td>An informational message from FluidNC/grblHAL — read it, it is usually explicit.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§06 Program &amp; Console</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 07 — WORK MODES (gallery A)                                       -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s07">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">07 · Work modes</p>
+  <h2 class="sec">One tab per job</h2>
+  <p class="lede">
+    Every tab takes a design, asks for the few numbers that matter, and writes safe
+    G-code into the shared Program panel. They all share the same rhythm:
+    <b>load → set tool &amp; depths → Generate → check in 3D → run</b>.
+  </p>
+
+  <div class="gal" style="margin-top:9px">
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-cadcam.png"><img src="shots/panel-cadcam.png" alt="2D/3D Carving panel"/></div>
+      <figcaption><h4>2D/3D Carving</h4><p>The general-purpose CAM tab. DXF/SVG for 2D profiles and pockets; STL/STEP/OBJ for 3D relief carving. Bit &amp; material presets set feeds for you.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-writing.png"><img src="shots/panel-writing.png" alt="Writing panel"/></div>
+      <figcaption><h4>Writing</h4><p>Single-stroke engraving and pen-plotting text. Built-in Hershey font, or load a custom handwriting font made from your own writing.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-pcb.png"><img src="shots/panel-pcb.png" alt="PCB panel"/></div>
+      <figcaption><h4>PCB</h4><p>Gerber + Excellon → isolation routing, drilling and board cut-out, via a guided wizard. <b>In active development</b> — not yet documented.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-soldering.png"><img src="shots/panel-soldering.png" alt="Soldering panel"/></div>
+      <figcaption><h4>Soldering</h4><p>Automatic selective soldering. Per-point travel and touch-down heights, feeder pulses and dwell times in an editable table.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-laser.png"><img src="shots/panel-laser.png" alt="Laser Cutting panel"/></div>
+      <figcaption><h4>Laser Cutting</h4><p>Vector cut/engrave with power and pass control, plus raster from an image. Uses M3/M4 spindle-as-laser mode.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-print.png"><img src="shots/panel-print.png" alt="3D Printing panel"/></div>
+      <figcaption><h4>3D Printing</h4><p>Slice an STL to layers with a live layer preview: temperatures, retraction, infill, perimeters and supports.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-printhouse.png"><img src="shots/panel-printhouse.png" alt="3D Print House panel"/></div>
+      <figcaption><h4>3D Print House</h4><p>Construction-scale printing. Import a civil floor plan (SVG/DXF), set wall width and layer height, and it prints walls course by course with openings.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-pnp.png"><img src="shots/panel-pnp.png" alt="Pick and Place panel"/></div>
+      <figcaption><h4>Pick &amp; Place</h4><p>Component placement from a centroid file, with feeder positions, nozzle actions and optional camera-assisted alignment.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-springcoiling.png"><img src="shots/panel-springcoiling.png" alt="Spring Coiling panel"/></div>
+      <figcaption><h4>Spring Coiling</h4><p>Wire diameter, coil pitch and turns become a two-axis feed/rotate program, with a 3D coil preview.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-embroidery.png"><img src="shots/panel-embroidery.png" alt="Embroidery panel"/></div>
+      <figcaption><h4>Embroidery</h4><p>Stitch paths from vector art. <b>XY only</b> — the needle is driven by the machine itself, so no Z is emitted.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="shot" data-zoom-src="shots/panel-camera.png"><img src="shots/panel-camera.png" alt="Camera panel"/></div>
+      <figcaption><h4>Camera</h4><p>A live overhead view of the bed with calibration, so you can align work optically and record a job.</p></figcaption>
+    </figure>
+    <figure style="display:flex;align-items:center;justify-content:center;background:#f0fdfa;border-color:#99f6e4">
+      <figcaption style="padding:9px">
+        <h4>…and 12 more</h4>
+        <p>Screw Fitting · Bore/Drill/Hole · Glue Dispense · Signature · Welding ·
+        Spot Welding · Clothes Stitching · Tattoo/Henna · Visualizer · Program ·
+        Console · Controller. Full list overleaf.</p>
+      </figcaption>
+    </figure>
+  </div>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§07 Work modes</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 07b — ALL TABS TABLE                                              -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s07b">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">07b · Reference</p>
+  <h2 class="sec">Every tab, what it takes, what it makes</h2>
+
+  <table class="t" style="margin-top:8px">
+    <thead><tr><th style="width:96px">Tab</th><th style="width:120px">Input</th><th>What it produces</th></tr></thead>
+    <tbody>
+      <tr><td><b>Controller</b></td><td>—</td><td>Manual control: DRO, jog, homing, work offsets, coolant, teach points, tool change.</td></tr>
+      <tr><td><b>Console</b></td><td>Typed commands</td><td>Raw GRBL log + MDI. The place to diagnose anything.</td></tr>
+      <tr><td><b>Program</b></td><td>G-code / sections</td><td>Streaming with Check mode, start-from-line, progress and export.</td></tr>
+      <tr><td><b>Visualizer</b></td><td>Current program</td><td>3D bed, toolpath, live tool, placement gizmo, simulation.</td></tr>
+      <tr><td><b>2D/3D Carving</b></td><td>DXF · SVG · STL · STEP · OBJ</td><td>Engrave, profile (on/in/out), pocket, and 3D relief roughing + finishing.</td></tr>
+      <tr><td><b>Writing</b></td><td>Text · custom font JSON</td><td>Single-stroke engraving or pen-plotting, with pen-up/down Z handling.</td></tr>
+      <tr><td><b>Soldering</b></td><td>Point list · Gerber pads</td><td>Selective soldering: per-point free-Z, touch-Z, feeder pulse and dwell.</td></tr>
+      <tr><td><b>Screw Fitting</b></td><td>Hole list</td><td>Driver sequences with approach, torque dwell and retract per screw.</td></tr>
+      <tr><td><b>Bore / Drill / Hole</b></td><td>Hole list · DXF</td><td>Peck drilling, boring and circular interpolation with chip-clearing.</td></tr>
+      <tr><td><b>PCB</b></td><td>Gerber ZIP · Excellon</td><td>Isolation routing, drilling, board cut-out. One- and two-sided. <b>In active development</b> — behaviour may change; not documented in this edition.</td></tr>
+      <tr><td><b>Glue Dispense</b></td><td>Path / points</td><td>Bead paths with on/off lead-in and lead-out to stop stringing.</td></tr>
+      <tr><td><b>Pick &amp; Place</b></td><td>Centroid CSV</td><td>Pick-from-feeder, place-at-XY-with-rotation sequences.</td></tr>
+      <tr><td><b>Signature</b></td><td>Drawn / imported stroke</td><td>Reproduces a signature as a pen path at any scale.</td></tr>
+      <tr><td><b>3D Printing</b></td><td>STL</td><td>Sliced layers, temperatures, retraction, infill, supports; layer preview.</td></tr>
+      <tr><td><b>3D Print House</b></td><td>Floor plan SVG/DXF</td><td>Construction-scale wall courses with door/window openings and pump control.</td></tr>
+      <tr><td><b>Laser Cutting</b></td><td>SVG · DXF · image</td><td>Vector cut/engrave with passes and power; raster engraving.</td></tr>
+      <tr><td><b>Welding</b></td><td>Seam path</td><td>Seam tracking with weave, travel speed and arc on/off timing.</td></tr>
+      <tr><td><b>Spot Welding</b></td><td>Point list</td><td>Electrode approach, squeeze/weld/hold timing per spot.</td></tr>
+      <tr><td><b>Embroidery</b></td><td>SVG · DXF</td><td>Stitch paths, <b>XY only</b> — the machine drives the needle.</td></tr>
+      <tr><td><b>Clothes Stitching</b></td><td>SVG · DXF</td><td>Seam paths, <b>XY only</b>, with optional presser-foot and trim signals.</td></tr>
+      <tr><td><b>Spring Coiling</b></td><td>Wire &amp; coil spec</td><td>Feed + rotation program with a 3D coil preview.</td></tr>
+      <tr><td><b>Tattoo / Henna</b></td><td>Vector art</td><td>Fine-line paths with needle/nozzle depth and speed limits.</td></tr>
+      <tr><td><b>Camera</b></td><td>Webcam</td><td>Calibrated overhead view, bed mosaic, optical alignment, job recording.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note" style="margin-top:8px">
+    <b>Sections stack.</b> Generating from several tabs adds several sections to the
+    one Program. You can carve a pocket, engrave a label and drill holes in a single
+    run — reorder the sections and stream them together.
+  </div>
+
+  <h3 class="sub">Which tab do I need?</h3>
+  <div class="fig-grid side" style="gap:12px">
+    <table class="t tight">
+      <thead><tr><th style="width:190px">I want to…</th><th>Use</th></tr></thead>
+      <tbody>
+        <tr><td>Cut a shape out of wood or acrylic</td><td><b>2D/3D Carving</b> → profile</td></tr>
+        <tr><td>Hollow out a recess</td><td><b>2D/3D Carving</b> → pocket</td></tr>
+        <tr><td>Carve a 3D model or relief</td><td><b>2D/3D Carving</b> → 3D from STL/STEP</td></tr>
+        <tr><td>Engrave text or a logo</td><td><b>Writing</b> (or Carving → engrave)</td></tr>
+        <tr><td>Draw with a pen instead of cutting</td><td><b>Writing</b>, pen Z mode</td></tr>
+        <tr><td>Make a circuit board</td><td><b>PCB</b></td></tr>
+        <tr><td>Drill a row of holes</td><td><b>Bore / Drill / Hole</b></td></tr>
+        <tr><td>Cut or engrave with a laser</td><td><b>Laser Cutting</b></td></tr>
+        <tr><td>Solder a populated board</td><td><b>Soldering</b></td></tr>
+        <tr><td>Run a file someone else made</td><td><b>Program</b> → Upload G-code</td></tr>
+        <tr><td>Just move the machine by hand</td><td><b>Controller</b></td></tr>
+        <tr><td>Find out why something failed</td><td><b>Console</b></td></tr>
+      </tbody>
+    </table>
+    <div>
+      <div class="card accent"><h4>The pattern behind all of them</h4><p>
+        Every work-mode tab is the same three questions in different clothing:
+        <b>what shape?</b> (your file), <b>what tool?</b> (diameter and type), and
+        <b>how deep and how fast?</b> Learn it once in Carving and every other tab
+        will already make sense.
+      </p></div>
+      <div class="card" style="margin-top:7px"><h4>Tabs you can close</h4><p>
+        You will realistically use three or four. Close the rest with their ✕ to
+        de-clutter the strip — they are one click away in the layout menu when you
+        need them, and closing changes nothing about what the app can do.
+      </p></div>
+      <div class="note" style="margin-top:7px">
+        <b>Not sure a tab applies to your machine?</b> Open it and read the panel — each
+        one states what hardware it expects (a spindle, a laser, a dispenser, a needle).
+        Generating a toolpath never moves anything, so exploring is free.
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§07b Reference</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 08 — MACHINE SETTINGS                                             -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s08">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">08 · Machine settings</p>
+  <h2 class="sec">Every GRBL parameter, explained</h2>
+  <p class="lede">
+    The ⚙ button in the top bar opens the full <span class="mono">$</span>-settings
+    editor. Each parameter is grouped, named in plain language, and shows its valid
+    range and factory default — so you are never editing a bare number.
+  </p>
+
+  <figure class="fig" data-fig style="margin-top:8px">
+    <div class="fig-stage capped" data-zoom-src="shots/crop-grbl-settings.png">
+      <img src="shots/crop-grbl-settings.png" alt="Motion settings — GRBL parameter editor" />
+      <b class="cal" data-n="1" style="left:12%; top:5%">1</b>
+      <b class="cal" data-n="2" style="left:8%;  top:12%">2</b>
+      <b class="cal" data-n="3" style="left:24%; top:12%">3</b>
+      <b class="cal" data-n="4" style="left:41%; top:12%">4</b>
+      <b class="cal" data-n="5" style="left:57%; top:12%">5</b>
+      <b class="cal" data-n="6" style="left:88%; top:12%">6</b>
+      <b class="cal" data-n="7" style="left:35%; top:19%">7</b>
+      <b class="cal" data-n="8" style="left:86%; top:19%">8</b>
+      <b class="cal" data-n="9" style="left:12%; top:25%">9</b>
+      <b class="cal" data-n="10" style="left:6%; top:31%">10</b>
+      <b class="cal" data-n="11" style="left:30%; top:36%">11</b>
+      <b class="cal" data-n="12" style="left:79%; top:31%">12</b>
+      <b class="cal" data-n="13" style="left:92%; top:31%">13</b>
+      <svg class="fig-leads"></svg>
+    </div>
+    <ol class="fig-key" style="columns:2;column-gap:12px;margin-top:7px">
+      <li data-n="1"><span class="n">1</span><span><b>Title</b> — the dialog is scrollable and searchable; nothing is hidden behind tabs.</span></li>
+      <li data-n="2"><span class="n">2</span><span><b>Sync</b> — re-read every value from the controller.</span></li>
+      <li data-n="3"><span class="n">3</span><span><b>Save changes</b> — write the edited values back. Nothing is written until you press this.</span></li>
+      <li data-n="4"><span class="n">4</span><span><b>Copy $$</b> — the whole settings dump to the clipboard, for a backup or a forum post.</span></li>
+      <li data-n="5"><span class="n">5</span><span><b>Import config</b> — restore from a saved file.</span></li>
+      <li data-n="6"><span class="n">6</span><span><b>Count &amp; sync time</b> — how many parameters the board reported, and when.</span></li>
+      <li data-n="7"><span class="n">7</span><span><b>Search</b> — by <span class="mono">$</span>-number or by name.</span></li>
+      <li data-n="8"><span class="n">8</span><span><b>Only flagged / changed</b> — hide everything at its default.</span></li>
+      <li data-n="9"><span class="n">9</span><span><b>Group heading</b> — Stepper &amp; ports, homing, limits, spindle, travel…</span></li>
+      <li data-n="10"><span class="n">10</span><span><b>Parameter number</b> — the raw <span class="mono">$n</span> you would type by hand.</span></li>
+      <li data-n="11"><span class="n">11</span><span><b>Name, description, range, default</b> — what it does and what it may legally be.</span></li>
+      <li data-n="12"><span class="n">12</span><span><b>Value field</b> — validated as you type; out-of-range input is refused.</span></li>
+      <li data-n="13"><span class="n">13</span><span><b>Reset to default</b> — restore just this parameter.</span></li>
+    </ol>
+    <p class="fig-cap"><b>Figure 09.1</b> — Motion settings dialog, showing the Stepper &amp; ports group.</p>
+  </figure>
+
+  <div class="cards c3" style="margin-top:8px">
+    <div class="card"><h4>The ones that matter most</h4><p>
+      <span class="mono">$100–$102</span> steps/mm — calibration.<br/>
+      <span class="mono">$110–$112</span> max rate.<br/>
+      <span class="mono">$120–$122</span> acceleration.<br/>
+      <span class="mono">$130–$132</span> max travel — soft limits and the bed drawn in 3D.
+    </p></div>
+    <div class="card"><h4>Homing &amp; limits</h4><p>
+      <span class="mono">$21</span> hard limits, <span class="mono">$22</span> homing enable,
+      <span class="mono">$23</span> direction mask, <span class="mono">$27</span> pull-off.
+      Get direction right before enabling hard limits.
+    </p></div>
+    <div class="card accent"><h4>Before you change anything</h4><p>
+      Press <b>Copy $$</b> and paste it somewhere safe. It is the only backup of a
+      working machine configuration, and it takes two seconds.
+    </p></div>
+  </div>
+
+  <div class="warn" style="margin-top:7px">
+    <b>FluidNC is different.</b> On FluidNC many values live in <span class="mono">config.yaml</span>
+    rather than <span class="mono">$</span>-numbers. karmyogi marks those read-only here
+    and offers config download/upload over the SD card instead of letting you write a
+    value the firmware would reject.
+  </div>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§08 Machine settings</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 09 — SHORTCUTS / GAMEPAD / MOBILE                                 -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s09">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">09 · Controls</p>
+  <h2 class="sec">Keyboard, gamepad and phone</h2>
+
+  <div class="fig-grid side">
+    <div>
+      <h3 class="sub" style="margin-top:0">Keyboard</h3>
+      <p class="tiny" style="margin-bottom:5px">
+        Active whenever the Controller panel is visible — it does not need focus. Keys
+        are ignored while you are typing in a field or a dialog is open.
+      </p>
+      <table class="t">
+        <thead><tr><th style="width:104px">Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>Jog X / Y — tap to step, hold for continuous</td></tr>
+          <tr><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td><td>Jog Z up / down</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Cancel jog immediately</td></tr>
+          <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></td><td>Step size 0.1 / 1 / 10 / 100 mm</td></tr>
+          <tr><td><kbd>H</kbd></td><td>Home (<span class="mono">$H</span>)</td></tr>
+          <tr><td><kbd>U</kbd></td><td>Unlock (<span class="mono">$X</span>)</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Soft reset</td></tr>
+          <tr><td><kbd>!</kbd> / <kbd>~</kbd></td><td>Feed hold / resume</td></tr>
+          <tr><td><kbd>S</kbd></td><td>Spindle on / off</td></tr>
+          <tr><td><kbd>Z</kbd></td><td>Zero all work axes</td></tr>
+          <tr><td><kbd>[</kbd> <kbd>]</kbd> <kbd>\</kbd></td><td>Feed override −10 % / +10 % / 100 %</td></tr>
+        </tbody>
+      </table>
+      <div class="note" style="margin-top:6px">
+        Holding an arrow key runs a single long continuous move that is cancelled the
+        instant you release — the same mechanism a hardware pendant uses, so it stays
+        smooth and stops predictably.
+      </div>
+    </div>
+    <div>
+      <h3 class="sub" style="margin-top:0">Game controller</h3>
+      <p class="tiny" style="margin-bottom:5px">
+        Plug in any USB/Bluetooth gamepad. Sticks jog proportionally — push further to
+        go faster — and every button is re-bindable by pressing it.
+      </p>
+      <div class="cards" style="grid-template-columns:1fr">
+        <div class="card"><p>
+          <b>Left stick</b> jogs X/Y · <b>Right stick</b> jogs Z<br/>
+          <b>LB / RB</b> cycle the step size<br/>
+          <b>Face buttons</b> home, unlock, zero, spindle — all remappable<br/>
+          <b>Rumble</b> confirms connection and warns on an alarm
+        </p></div>
+      </div>
+
+      <h3 class="sub">Hardware pendant</h3>
+      <div class="card"><p>
+        FluidNC's <b>FluidDial</b> pendant wires to the controller's spare UART. The
+        Controller tab has a setup panel that writes the required
+        <span class="mono">uart</span> section into <span class="mono">config.yaml</span>
+        for you, and refuses pins that would collide with the USB console or SPI flash.
+      </p></div>
+
+      <h3 class="sub">Phone &amp; tablet</h3>
+      <div class="card accent"><p>
+        The same app, re-arranged: the dock becomes a single-column tab switcher, and
+        touch targets grow. Nothing is removed — you can jog, stream and watch the 3D
+        view from a phone at the machine. Install it from the browser menu to run it
+        full-screen and offline.
+      </p></div>
+
+      <div class="warn" style="margin-top:7px">
+        <b>Do not walk away mid-job.</b> If the browser tab is closed, the device sleeps
+        or the cable is disturbed, streaming stops where it is. karmyogi will tell you a
+        job was interrupted, but the machine has already stopped cutting.
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Making the workspace yours</h3>
+  <p class="tiny" style="margin:-2px 0 5px">
+    Every one of these is remembered between sessions, per device.
+  </p>
+  <div class="cards c4">
+    <div class="card"><h4>Re-arrange panels</h4><p>Drag a tab by its title to split, stack or float it. Drop it on an edge to dock, or outside to float a window.</p></div>
+    <div class="card"><h4>Close &amp; reopen tabs</h4><p>Close what you do not use with its ✕. Reopen any tab from the layout menu — nothing is lost.</p></div>
+    <div class="card"><h4>Scale the interface</h4><p>The ± zoom in the top bar scales the whole app. Useful on a shop-floor screen you read from a distance.</p></div>
+    <div class="card"><h4>Reset the layout</h4><p>One button restores the default arrangement if you dock yourself into a corner.</p></div>
+    <div class="card"><h4>Light or dark</h4><p>Dark suits a workshop; light suits a bright room or a projector. Both are fully supported.</p></div>
+    <div class="card"><h4>53 languages</h4><p>Pick yours in the top bar. The whole interface — including safety wording — is translated.</p></div>
+    <div class="card"><h4>Presets</h4><p>The rail down the left of each work-mode panel saves a whole parameter set: bit, depths, feeds. Recall it in one click.</p></div>
+    <div class="card accent"><h4>Install as an app</h4><p>Install from the browser menu to get a full-screen window, an icon, and full offline use.</p></div>
+  </div>
+
+  <h3 class="sub">Safe working practice</h3>
+  <div class="fig-grid side" style="gap:12px">
+    <table class="t tight">
+      <tbody>
+        <tr><td style="width:16px">1</td><td><b>Keep the E-stop reachable</b> — software is never a substitute for cutting power. Know where it is before you press Stream.</td></tr>
+        <tr><td>2</td><td><b>Eye protection, always</b> — even a small end mill throws chips; a snapping 1 mm bit throws them fast.</td></tr>
+        <tr><td>3</td><td><b>Clamp the work, twice</b> — a part that lifts mid-cut is the most common way jobs and bits are destroyed.</td></tr>
+        <tr><td>4</td><td><b>Dry-run above the stock</b> — raise work Z by a few mm and run the program in the air first.</td></tr>
+        <tr><td>5</td><td><b>Never reach in while it is armed</b> — lock motion before you change a tool or clear chips.</td></tr>
+        <tr><td>6</td><td><b>Extract dust</b> — MDF, carbon fibre and PCB glass dust are all harmful; PCB dust is conductive too.</td></tr>
+      </tbody>
+    </table>
+    <div>
+      <div class="warn">
+        <b>Laser work needs its own precautions.</b> Correctly rated goggles for your
+        laser's wavelength, an enclosure or shielding, active extraction for the fumes,
+        and never leave a running laser unattended — ignition is a real risk.
+      </div>
+      <div class="note" style="margin-top:7px">
+        <b>The motion lock-out is there for a reason.</b> It exists so that clicking
+        around the interface, or a stray keypress while you read this guide, cannot move
+        a machine. Leave motion locked whenever you are not actively driving it.
+      </div>
+      <div class="card" style="margin-top:7px"><p>
+        <b>Before every job, in order:</b> home → set work zero → generate → check in 3D
+        → frame with the tool up → arm motion → stream. Skipping the frame step is what
+        turns a small mistake into a broken bit.
+      </p></div>
+    </div>
+  </div>
+
+  <div class="sheet-foot"><span>karmyogi · Official User Guide v1.0</span><span>§09 Controls</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- 10 — TROUBLESHOOTING + SUPPORT                                    -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<section class="sheet" id="s10">
+  <div class="brand-strip">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <div class="doc-meta"><strong>karmyogi</strong> · Official User Guide · v1.0</div>
+  </div>
+  <p class="pill">10 · Troubleshooting</p>
+  <h2 class="sec">When something is wrong</h2>
+
+  <table class="t" style="margin-top:8px">
+    <thead><tr><th style="width:150px">Symptom</th><th>Likely cause and fix</th></tr></thead>
+    <tbody>
+      <tr><td><b>No serial ports offered</b></td><td>Another program holds the board — close other senders and serial monitors. Otherwise a charge-only cable, or a missing CH340/CP210x driver. Also check you are on Chrome/Edge/Brave/Opera, over HTTPS.</td></tr>
+      <tr><td><b>Connects, then goes quiet</b></td><td>Wrong baud rate, or the board reset on connect. Re-select 115200 and reconnect; watch the Console for the welcome banner.</td></tr>
+      <tr><td><b>Jog does nothing</b></td><td><b>Motion is locked</b> — arm it in the Controller. Or the machine is in <b>Alarm</b>: press Unlock, then home.</td></tr>
+      <tr><td><b>Everything returns <span class="mono">error:9</span></b></td><td>GRBL is locked after a reset or alarm. Press Unlock (<span class="mono">$X</span>), or home the machine.</td></tr>
+      <tr><td><b><span class="mono">ALARM:1</span> on a limit</b></td><td>A limit switch triggered. Unlock, jog off the switch, re-home. If it fires with nothing near it, check <span class="mono">$5</span> limit-pin inversion and your wiring.</td></tr>
+      <tr><td><b>Moves are the wrong size</b></td><td>Steps/mm is wrong. Command a 100 mm move, measure the travel, and correct <span class="mono">$100–$102</span> proportionally.</td></tr>
+      <tr><td><b>An axis runs backwards</b></td><td>Flip that axis' bit in the direction mask <span class="mono">$3</span>.</td></tr>
+      <tr><td><b>Job is offset from the stock</b></td><td>Work zero, or the active WCS. Read the WORK column, confirm W1–W6, and Frame the job before cutting.</td></tr>
+      <tr><td><b>Cuts too deep on one side</b></td><td>The stock or the bed is not level. Use auto-levelling (height-map probing) — essential for PCB isolation.</td></tr>
+      <tr><td><b>Stream stutters or stalls</b></td><td>USB power management, a long/unshielded cable, or a controller low on memory. Try another port and a shorter cable; watch the Console for <span class="mono">[MSG:ERR…]</span>.</td></tr>
+      <tr><td><b>Nothing appears in 3D</b></td><td>No program yet — Generate from a work-mode tab first. If a program exists, press Fit in the Visualizer toolbar.</td></tr>
+      <tr><td><b>Wrong language / layout</b></td><td>Language is in the top bar (53 available). Use the layout-reset button to restore the default docking.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub">Getting help</h3>
+  <div class="cards c3">
+    <div class="card accent"><h4>The Console first</h4><p>Copy the last ~20 lines. It almost always contains the actual cause, and it is the first thing anyone helping will ask for.</p></div>
+    <div class="card"><h4>Report a bug</h4><p>The About dialog (click the karmyogi wordmark) links straight to the issue tracker and shows your exact build version.</p></div>
+    <div class="card"><h4>Source</h4><p><span class="mono">github.com/hemangjoshi37a/karmyogi</span> — MIT licensed. Issues and pull requests welcome.</p></div>
+  </div>
+
+  <div class="note" style="margin-top:8px">
+    <b>Your data stays in your browser.</b> Designs, G-code and machine settings live
+    on your own device. karmyogi needs no account to control a machine, and works fully
+    offline once installed.
+  </div>
+
+  <h3 class="sub">What every generated program does for you</h3>
+  <p class="tiny" style="margin:-2px 0 5px">
+    These are built into the G-code writer, so they hold for every work mode — you do not
+    switch them on. They reduce risk; they do not remove it. Read the notice on page 2.
+  </p>
+  <div class="fig-grid side" style="gap:12px">
+    <table class="t tight">
+      <tbody>
+        <tr><td style="width:120px"><b>A known starting state</b></td><td>Every file opens with <span class="mono">G21 G90 G94 G17</span> — millimetres, absolute, feed-per-minute, XY plane. Nothing is inherited from the last job you ran.</td></tr>
+        <tr><td><b>Safe-Z before travel</b></td><td>The tool retracts to the safe height before <i>any</i> XY move, so it cannot drag across the work or into a clamp.</td></tr>
+        <tr><td><b>A clean finish</b></td><td>Programs end retracted, with the spindle or laser off — not parked in the material.</td></tr>
+      </tbody>
+    </table>
+    <table class="t tight">
+      <tbody>
+        <tr><td style="width:120px"><b>Correct Z semantics</b></td><td>Z means different things to a spindle, a pen and a solder feeder. The mode is explicit, so pen work cannot be emitted with cutting depths.</td></tr>
+        <tr><td><b>No ambiguous numbers</b></td><td>No <span class="mono">-0.000</span>, and modal axis and feed words, so what the controller reads is what you asked for.</td></tr>
+        <tr><td><b>Conservative defaults</b></td><td>Feeds and depths start cautious. You raise them deliberately once a test cut looks right.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note" style="margin-top:8px;text-align:center">
+    <b>karmyogi.hjlabs.in</b> — free, open source, nothing to install.
+  </div>
+
+  <footer style="position:absolute;left:12mm;right:12mm;bottom:14mm">
+    <div class="teal-rule" style="margin-bottom:7px"></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px">
+      <div>
+        <img src="logo-black.png" alt="hjLabs.in" style="height:17px;width:auto" />
+        <div class="tiny" style="margin-top:3px">
+          <b>Hemang Joshi</b> · Founder · hjLabs.in — Industrial Automation<br/>
+          GIDC Gandhinagar (GEZIA), Gujarat — India · MSME registered<br/>
+          <span class="mono">GSTIN 24BCYPJ1575J1Z2 · HSN 85151900</span>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:13px;font-weight:800">karmyogi.hjlabs.in</div>
+        <div class="tiny mono">github.com/hemangjoshi37a/karmyogi</div>
+        <div class="tiny">Official User Guide · v1.0</div>
+      </div>
+    </div>
+  </footer>
+  <div class="sheet-foot" style="bottom:6mm"><span>karmyogi · Official User Guide v1.0</span><span>§10 Troubleshooting</span></div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- FLOATING LEFT RAIL — document navigation (screen only)            -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<nav id="sidebar-nav" class="no-print" aria-label="Guide navigation">
+  <div class="nav-brand">
+    <img src="logo-black.png" alt="hjLabs.in" />
+    <span style="font-size:9px;font-weight:800;letter-spacing:.04em;color:#0f766e">USER GUIDE</span>
+  </div>
+  <ol class="nav-list">
+    <li><a href="#cover" data-sheet><span class="nav-num">i</span><span class="nav-lbl">Cover</span></a></li>
+    <li><a href="#s00"  data-sheet><span class="nav-num">00</span><span class="nav-lbl">How to read</span></a></li>
+    <li><a href="#s01"  data-sheet><span class="nav-num">01</span><span class="nav-lbl">Quick start</span></a></li>
+    <li><a href="#s02"  data-sheet><span class="nav-num">02</span><span class="nav-lbl">The workbench</span></a></li>
+    <li><a href="#s03"  data-sheet><span class="nav-num">03</span><span class="nav-lbl">Top bar</span></a></li>
+    <li><a href="#s04"  data-sheet><span class="nav-num">04</span><span class="nav-lbl">Controller</span></a></li>
+    <li><a href="#s05"  data-sheet><span class="nav-num">05</span><span class="nav-lbl">Visualizer</span></a></li>
+    <li><a href="#s06"  data-sheet><span class="nav-num">06</span><span class="nav-lbl">Program · Console</span></a></li>
+    <li><a href="#s07"  data-sheet><span class="nav-num">07</span><span class="nav-lbl">Work modes</span></a></li>
+    <li><a href="#s07b" data-sheet><span class="nav-num">07b</span><span class="nav-lbl">Tab reference</span></a></li>
+    <li><a href="#s08"  data-sheet><span class="nav-num">08</span><span class="nav-lbl">Machine settings</span></a></li>
+    <li><a href="#s09"  data-sheet><span class="nav-num">09</span><span class="nav-lbl">Controls</span></a></li>
+    <li><a href="#s10"  data-sheet><span class="nav-num">10</span><span class="nav-lbl">Troubleshooting</span></a></li>
+  </ol>
+  <div class="nav-foot">13 pages · A4</div>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- FLOATING RIGHT RAIL — zoom, print, top (screen only)              -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div id="fab-stack" class="no-print" aria-label="Document controls">
+  <button class="fab" id="fab-top" type="button" title="Back to the cover" aria-label="Back to top">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+  </button>
+  <button class="fab" id="fab-nums" type="button" aria-pressed="false"
+          title="Hide the numbered balloons">
+    <span class="num-ico">1</span>
+  </button>
+  <button class="fab" id="fab-zoom-in" type="button" title="Zoom in" aria-label="Zoom in">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+  </button>
+  <button class="fab fab-zoom-reset" id="fab-zoom-reset" type="button" title="Reset zoom to 100%" aria-label="Reset zoom"><span id="zoom-label">100%</span></button>
+  <button class="fab" id="fab-zoom-out" type="button" title="Zoom out" aria-label="Zoom out">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+  </button>
+  <button class="fab fab-print" id="fab-print" type="button" title="Print / Save as PDF · A4" aria-label="Print to PDF">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+  </button>
+</div>
+
+<!-- zoom overlay -->
+<div id="zoom" aria-hidden="true">
+  <img alt="" />
+  <div class="hint">Click anywhere, or press Esc, to close</div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   Figure runtime: leader lines, hover pairing, click-to-zoom.
+   Lines are drawn AFTER layout (and re-drawn on resize / image load) from
+   each balloon's centre to the left edge of its matching key row, so the
+   annotation behaves like an engineering drawing's leader.
+   ══════════════════════════════════════════════════════════════════════ */
+(function () {
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  function drawFigure(fig) {
+    const stage = fig.querySelector('.fig-stage');
+    const svg = fig.querySelector('.fig-leads');
+    const key = fig.querySelector('.fig-key');
+    if (!stage || !svg || !key) return;
+
+    // Lift the SVG out of the stage once, so leaders are not clipped by the
+    // stage's overflow:hidden and can reach a key placed below the picture.
+    if (svg.parentElement !== fig) {
+      fig.appendChild(svg);
+      svg.classList.add('over-fig');
+    }
+
+    const fr = fig.getBoundingClientRect();
+    const sr = stage.getBoundingClientRect();
+    const kr = key.getBoundingClientRect();
+    svg.setAttribute('viewBox', `0 0 ${fr.width} ${fr.height}`);
+    svg.setAttribute('width', fr.width);
+    svg.setAttribute('height', fr.height);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    // BESIDE the picture → resting leaders read as a proper engineering drawing.
+    // BELOW the picture → resting leaders would criss-cross the screenshot, so they
+    // are drawn but kept invisible until hovered (the yellow hover connector).
+    const keyIsBeside = kr.top < sr.bottom - 8;
+    svg.classList.toggle('hover-only', !keyIsBeside);
+
+    fig.querySelectorAll('.cal').forEach((cal) => {
+      const n = cal.dataset.n;
+      const li = key.querySelector(`li[data-n="${n}"]`);
+      if (!li) return;
+      const cr = cal.getBoundingClientRect();
+      const lr = li.getBoundingClientRect();
+      const x1 = cr.left + cr.width / 2 - fr.left;
+      const y1 = cr.top + cr.height / 2 - fr.top;
+      let x2, y2;
+      if (keyIsBeside) {
+        // Land on the key row's leading edge, at its own height.
+        x2 = lr.left - fr.left;
+        y2 = lr.top + lr.height / 2 - fr.top;
+      } else {
+        // Key is below: land on the row's number bullet, so the connector clearly
+        // ties the balloon to that specific line of the legend.
+        const bullet = li.querySelector('.n') || li;
+        const br = bullet.getBoundingClientRect();
+        x2 = br.left + br.width / 2 - fr.left;
+        y2 = br.top + br.height / 2 - fr.top;
+      }
+      const line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+      line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+      line.dataset.n = n;
+      svg.appendChild(line);
+    });
+  }
+
+  function wireHover(fig) {
+    const pair = (n, on) => {
+      fig.querySelectorAll(`.cal[data-n="${n}"]`).forEach((e) => e.classList.toggle('hot', on));
+      fig.querySelectorAll(`.fig-key li[data-n="${n}"]`).forEach((e) => e.classList.toggle('hot', on));
+      fig.querySelectorAll(`.fig-leads line[data-n="${n}"]`).forEach((e) => e.classList.toggle('hot', on));
+    };
+    fig.querySelectorAll('.cal, .fig-key li').forEach((el) => {
+      const n = el.dataset.n;
+      if (!n) return;
+      el.addEventListener('mouseenter', () => pair(n, true));
+      el.addEventListener('mouseleave', () => pair(n, false));
+      // Balloons get the key text as a native tooltip — hover-to-explain.
+      if (el.classList.contains('cal')) {
+        const li = fig.querySelector(`.fig-key li[data-n="${n}"]`);
+        if (li) el.title = li.textContent.replace(/\s+/g, ' ').trim();
+      }
+    });
+  }
+
+  const figs = [...document.querySelectorAll('[data-fig]')];
+  figs.forEach(wireHover);
+
+  function drawAll() { figs.forEach(drawFigure); }
+  // Draw once fonts/images have settled, then on every resize.
+  window.addEventListener('load', drawAll);
+  window.addEventListener('resize', drawAll);
+  document.querySelectorAll('.fig-stage img').forEach((img) => {
+    if (img.complete) return;
+    img.addEventListener('load', drawAll);
+  });
+  setTimeout(drawAll, 60);
+  setTimeout(drawAll, 400);
+
+  /* ── click-to-zoom on any figure or gallery thumbnail ─────────────── */
+  const zoom = document.getElementById('zoom');
+  const zoomImg = zoom.querySelector('img');
+  document.querySelectorAll('[data-zoom-src]').forEach((el) => {
+    el.addEventListener('click', () => {
+      zoomImg.src = el.dataset.zoomSrc;
+      zoom.classList.add('on');
+      zoom.setAttribute('aria-hidden', 'false');
+    });
+  });
+  const close = () => { zoom.classList.remove('on'); zoom.setAttribute('aria-hidden', 'true'); };
+  zoom.addEventListener('click', close);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+})();
+</script>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     Floating rails: scroll-spy for the left nav, zoom / print / top for
+     the right stack.
+     ════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  /* ── left rail: highlight the sheet you are actually looking at ───── */
+  const links = Array.from(document.querySelectorAll('#sidebar-nav a[data-sheet]'));
+  const sheets = Array.from(document.querySelectorAll('section.sheet'));
+  if (links.length && sheets.length && 'IntersectionObserver' in window) {
+    const setActive = (id) => links.forEach(a =>
+      a.classList.toggle('active', a.getAttribute('href') === '#' + id));
+    const obs = new IntersectionObserver((entries) => {
+      const vis = entries.filter(e => e.isIntersecting)
+                         .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+      if (vis.length) setActive(vis[0].target.id);
+    }, { threshold: [0.2, 0.5, 0.75], rootMargin: '-8% 0px -40% 0px' });
+    sheets.forEach(s => obs.observe(s));
+    setActive(sheets[0].id);
+    /* clicking a rail entry should win immediately, not wait for the observer */
+    links.forEach(a => a.addEventListener('click', () => setActive(a.getAttribute('href').slice(1))));
+  }
+
+  /* The index rail is permanently visible at every width — no toggle, no
+     handle. Narrow windows are handled purely in CSS (body padding makes
+     room; a numbers-only strip below 820px). Nothing to wire up here. */
+
+  /* ── right rail: zoom, remembered between visits ─────────────────── */
+  const MIN = 0.5, MAX = 2.0, STEP = 0.1, KEY = 'karmyogi-guide-zoom';
+  const label = document.getElementById('zoom-label');
+  let zoomLevel = parseFloat(localStorage.getItem(KEY)) || 1.0;
+  const applyZoom = () => {
+    document.body.style.zoom = zoomLevel === 1 ? '' : zoomLevel;
+    label.textContent = Math.round(zoomLevel * 100) + '%';
+    localStorage.setItem(KEY, zoomLevel);
+  };
+  applyZoom();
+  document.getElementById('fab-zoom-in').onclick =
+    () => { zoomLevel = Math.min(MAX, +(zoomLevel + STEP).toFixed(2)); applyZoom(); };
+  document.getElementById('fab-zoom-out').onclick =
+    () => { zoomLevel = Math.max(MIN, +(zoomLevel - STEP).toFixed(2)); applyZoom(); };
+  document.getElementById('fab-zoom-reset').onclick =
+    () => { zoomLevel = 1.0; applyZoom(); };
+
+  /* ── balloon toggle: get the numbers out of the way of the screenshot ── */
+  const CAL_KEY = 'karmyogi-guide-hide-balloons';
+  const numsBtn = document.getElementById('fab-nums');
+  let hideCal = localStorage.getItem(CAL_KEY) === '1';
+  const applyCal = () => {
+    document.body.classList.toggle('hide-cal', hideCal);
+    numsBtn.classList.toggle('off', hideCal);
+    numsBtn.setAttribute('aria-pressed', String(hideCal));
+    numsBtn.title = hideCal
+      ? 'Show the numbered balloons — hover a key row to trace its leader line'
+      : 'Hide the numbered balloons (leader lines stay)';
+  };
+  applyCal();
+  numsBtn.onclick = () => {
+    hideCal = !hideCal;
+    localStorage.setItem(CAL_KEY, hideCal ? '1' : '0');
+    applyCal();
+  };
+
+  document.getElementById('fab-print').onclick = () => window.print();
+  document.getElementById('fab-top').onclick =
+    () => window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  /* A left-over screen zoom would scale the printed sheets off the page,
+     so drop to 100% for the print itself and restore it afterwards. */
+  const printed = { z: 1 };
+  window.addEventListener('beforeprint', () => {
+    printed.z = zoomLevel;
+    document.body.style.zoom = '';
+  });
+  window.addEventListener('afterprint', () => {
+    zoomLevel = printed.z; applyZoom();
+  });
+})();
+</script>
+</body>
+</html>
